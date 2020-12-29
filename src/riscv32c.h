@@ -6,6 +6,7 @@
 #define RISCV32C_VERSION 20 // 2.0
 #define RISCV32C_OPCODE_MASK 0x3
 #define RISCV32C_GET_OPCODE(x) (x & RISCV32C_OPCODE_MASK)
+#define RISCV32C_GET_FUNCID(x) ((x >> 13) | x & RISCV32C_OPCODE_MASK)
 
 /*
 * Definitions for instructions, consisting of 5 bits each.
