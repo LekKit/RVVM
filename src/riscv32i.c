@@ -305,7 +305,7 @@ void riscv32i_emulate_0x1B(risc32_vm_state_t *vm, uint32_t instruction)
 }
 
 // We already check instruction for correct code
-void risv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
+void riscv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
 {
     uint32_t opcode = ((instruction >> 2) & 0x1f);
 

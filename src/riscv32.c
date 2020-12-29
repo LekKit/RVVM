@@ -25,45 +25,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32i.h"
 #include "riscv32c.h"
 
-uint16_t riscv32_fetch_code(risc32_vm_state_t *vm)
+static inline uint32_t riscv32_fetch_insn32(risc32_vm_state_t *vm)
 {
-    // TODO: check for overflow here
-    return vm->code[vm->code_pointer++];
+    // Read 32-bit width instruction
+    return ((uint32_t)vm->code[vm->code_pointer]) << 16 | vm->code[vm->code_pointer+1];
 }
 
 void riscv32_exec_instuction(risc32_vm_state_t *vm)
 {
-    uint16_t chunk = riscv32_fetch_code(vm);
-    uint32_t chunk2 = 0;
-    uint32_t instruction = 0;
+    uint32_t instruction = riscv32_fetch_insn32(vm);
 
-    if(chunk == 0xFFFF || chunk == 0x0000)
-    {
-        //printf("Illegal instruction\n");
-        return; // TODO: fatal error here
-    }
-
-    // check for RISCV32_HAVE_ or any extension were 16 bit opcodes
-    if((chunk & RISCV32I_OPCODE_MASK) != 0x3)
-    {
-        uint16_t encoding = (chunk & RISCV32C_OPCODE_MASK);
-
-        // RISC32C opcode check
-        if(encoding == 0x00 || encoding == 0x1 || encoding == 0x2)
-        {
-            riscv32c_emulate(vm, chunk);
-        } else {
-            printf("0x%x not a riscv32c instruction\n", chunk);
-            return; // TODO: fatal error here
-        }
+    // FYI: Any jump instruction implementation should take care of PC increment
+    // TODO: proper error handling (maybe not here)
+    if ((instruction & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
+        // 16-bit opcode
+        riscv32c_emulate(vm, vm->code[vm->code_pointer]);
+        vm->code_pointer++;
     } else {
-        chunk2 = riscv32_fetch_code(vm);
-        instruction = ((uint32_t)(chunk2 << 16) | chunk);
-
-        if( instruction == RISCV32I_ILLEGAL_OPCODE1 || instruction == RISCV32I_ILLEGAL_OPCODE2 )
-            return; // TODO: fatal error here
-
-        risv32i_emulate(vm, instruction);
+        riscv32i_emulate(vm, instruction);
+        vm->code_pointer += 2;
     }
 }
 
