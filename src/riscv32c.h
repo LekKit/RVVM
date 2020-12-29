@@ -4,7 +4,8 @@
 #include "riscv32.h"
 
 #define RISCV32C_VERSION 20 // 2.0
-#define RISCV32C_OPCODE_MASK 0x2
+#define RISCV32C_OPCODE_MASK 0x3
+#define RISCV32C_GET_OPCODE(x) (x & RISCV32C_OPCODE_MASK)
 
 /*
 For many RVC instructions, zero-valued immediates are disallowed and x0 is not a valid 5-bit register specifier.
