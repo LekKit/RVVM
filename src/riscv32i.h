@@ -1,6 +1,7 @@
 #pragma once
 
 #include "riscv32.h"
+#include "riscv32i_registers.h"
 
 #define RISCV32I_VERSION 21 // 2.1
 

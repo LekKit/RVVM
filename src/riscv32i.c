@@ -21,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
-#include "riscv32i_registers.h"
 
 // translate register number into abi name
 const char *riscv32i_translate_register(uint32_t reg)

@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
-#include "riscv32i_registers.h"
 #include "riscv32c.h"
 #include "mem_ops.h"
 
