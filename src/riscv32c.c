@@ -18,11 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32i.h"
 #include "riscv32c.h"
 
 // translate compressed register encoding into normal
 static inline uint32_t riscv32c_translate_reg(uint32_t reg)
 {
+    //NOTE: register index is hard limited to 8, since encoding is 3 bits
     assert(reg < 8);
     return REGISTER_X8 + reg;
 }
@@ -39,12 +41,45 @@ static void riscv32c_addi4spn(risc32_vm_state_t *vm, uint16_t instruction)
 
 static void riscv32c_addi_nop(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: ADDI_NOP instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = (instruction >> 7) & 0x1f;
+
+    if( rds != REGISTER_ZERO )
+    {
+        int32_t nzimm = (instruction >> 2) & 0x1f;
+
+        //TODO: error here
+        if(nzimm == 0)
+            return;
+
+        // extend 6 bit signed value to 32 bit signed value
+        if(instruction & (1 << 12))
+            nzimm |= 0xFFFFFFF0;
+
+        int32_t reg = riscv32i_read_register_s(vm, rds);
+        riscv32i_write_register_u(vm, rds, reg + nzimm);
+        printf("c.addi %u,%i\n", rds, nzimm);
+    }
+    // Do nothing because noop
 }
 
 static void riscv32c_slli(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: SLLI instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = (instruction >> 7) & 0x1f;
+    uint32_t shamt = (instruction >> 2) & 0x1f;
+
+    if( rds != REGISTER_ZERO && shamt )
+    {
+        //TODO: error here
+        if(instruction & (1 << 12))
+            return;
+
+        uint32_t reg = riscv32i_read_register_s(vm, rds);
+        uint32_t result = (reg << shamt);
+        riscv32i_write_register_u(vm, rds, result);
+        printf("c.slli %u,%u,%i\n", rds, rds, shamt);
+    } else {
+        //NOTE: hint here
+    }
 }
 
 static void riscv32c_fld(risc32_vm_state_t *vm, uint16_t instruction)
@@ -69,7 +104,14 @@ static void riscv32c_lw(risc32_vm_state_t *vm, uint16_t instruction)
 
 static void riscv32c_li(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: LI instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = (instruction >> 7) & 0x1f;
+    uint32_t imm = (instruction >> 2) & 0x1f;
+
+    // extend 6 bit signed value to 32 bit signed value
+    if(instruction & (1 << 12))
+        imm |= 0xFFFFFFF0;
+
+    riscv32i_write_register_u(vm, rds, imm);
 }
 
 static void riscv32c_lwsp(risc32_vm_state_t *vm, uint16_t instruction)
@@ -84,7 +126,27 @@ static void riscv32c_flw(risc32_vm_state_t *vm, uint16_t instruction)
 
 static void riscv32c_addi16sp_lui(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: ADDI16SP_LUI instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rsds = (instruction >> 7) & 0x1f;
+
+    if(rsds != REGISTER_X2 && rsds != REGISTER_ZERO)
+    {
+        uint32_t imm = ((instruction >> 2) & 0x1f) << 4;
+
+        //TODO: error here
+        if( imm == 0 )
+            return;
+
+        // extend 6 bit signed value to 32 bit signed value
+        if(instruction & (1 << 12))
+            imm |= (0xfffc0000);
+
+        riscv32i_write_register_u(vm, rsds, imm);
+        printf("c.lui %u,%i\n", rsds, (imm >> 12));
+    } else if( rsds == REGISTER_X2 ) {
+        //TODO: make addi16sp
+    } /*else if( rsds == REGISTER_ZERO ) {
+        //NOTE: hint here
+    }*/
 }
 
 static void riscv32c_flwsp(risc32_vm_state_t *vm, uint16_t instruction)
@@ -99,7 +161,28 @@ static void riscv32c_alops1(risc32_vm_state_t *vm, uint16_t instruction)
 
 static void riscv32c_alops2(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: ALOPS2 (glue for CR) instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t funct4 = (instruction >> 12) & 0x0F;
+    uint32_t rsd = (instruction >> 7) & 0x1F;
+    uint32_t rs2 = (instruction >> 2) & 0x1F;
+
+    if(funct4 == 0x8 && rsd != 0 && rs2 == 0) {
+        //TODO: c.jr here
+    } else if(funct4 == 0x8 && rsd && rs2) {
+        //NOTE: hint if rsd == 0
+        uint32_t copy = riscv32i_read_register_u(vm, rs2);
+        riscv32i_write_register_u(vm, rsd, copy);
+        printf("c.mv %u,%u", rs2, rsd);
+    } else if(funct4 == 0x09 && rsd && !rs2) {
+        //TODO: c.jalr
+    } else if(funct4 == 0x09 && rsd && rs2) {
+        int32_t rss1 = riscv32i_read_register_s(vm, rsd);
+        int32_t rss2 = riscv32i_read_register_s(vm, rs2);
+        riscv32i_write_register_s(vm, rsd, rss1 + rss2);
+        printf("c.add %u,%u\n", rsd, rs2);
+    } else if(funct4 == 0x09 && !rsd && !rs2) {
+        //TODO: c.ebreak
+        printf("c.ebreak\n");
+    }
 }
 
 static void riscv32c_fsd(risc32_vm_state_t *vm, uint16_t instruction)
