@@ -55,9 +55,10 @@ struct risc32_vm_state_s
     uint32_t cpu_instruction_flags;
     uint32_t cpu_flags;
     jmp_buf jump_buff;
+    bool error;
+    char error_string[4096];
     uint8_t *code;
     uint32_t code_len;
-    uint32_t code_pointer;
     uint32_t registers[REGISTERS_MAX];
     memory_map_t *memory_map;
 };
@@ -99,5 +100,7 @@ void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, uint3
 risc32_vm_state_t *riscv32_create_vm();
 void riscv32_run(risc32_vm_state_t *vm);
 void riscv32_destroy_vm(risc32_vm_state_t *vm);
+void riscv32_dump_registers(risc32_vm_state_t *vm);
+void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
 void riscv32c_init();
 void riscv32i_init();

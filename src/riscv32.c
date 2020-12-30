@@ -16,10 +16,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <stdarg.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <err.h>
 
 #include "riscv.h"
 #include "riscv32.h"
@@ -31,7 +33,7 @@ void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, uint32_t instruction);
 
 void riscv32c_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_error(vm, "RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, uint32_t))
@@ -62,19 +64,8 @@ void riscv32_destroy_vm(risc32_vm_state_t *vm)
     free(vm);
 }
 
-void riscv32_exec_instruction(risc32_vm_state_t *vm)
+void riscv32_dump_registers(risc32_vm_state_t *vm)
 {
-    // FYI: Any jump instruction implementation should take care of PC increment
-    // TODO: proper error handling (maybe not here)
-    if ((vm->code[vm->code_pointer] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
-        // 16-bit opcode
-        riscv32c_emulate(vm, read_uint16_le(vm->code+vm->code_pointer));
-        vm->code_pointer += 2;
-    } else {
-        riscv32i_emulate(vm, read_uint32_le(vm->code+vm->code_pointer));
-        vm->code_pointer += 4;
-    }
-
     int i = 0;
     int k = 0;
 
@@ -88,6 +79,44 @@ void riscv32_exec_instruction(risc32_vm_state_t *vm)
     }
 }
 
+void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...)
+{
+    assert(vm);
+    assert(fmt);
+
+    vm->error = true;
+
+    va_list va;
+    va_start(va, fmt);
+    int len = vsnprintf(vm->error_string, sizeof (vm->error_string), fmt, va);
+    va_end(va);
+
+    if (len < 0)
+    {
+        err(EXIT_FAILURE, "vsnprintf");
+    }
+
+    riscv32_dump_registers(vm);
+
+    longjmp(vm->jump_buff, 1);
+}
+
+void riscv32_exec_instruction(risc32_vm_state_t *vm)
+{
+    // FYI: Any jump instruction implementation should take care of PC increment
+    // TODO: proper error handling (maybe not here)
+    if ((vm->code[vm->registers[REGISTER_PC]] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
+        // 16-bit opcode
+        riscv32c_emulate(vm, read_uint16_le(vm->code+vm->registers[REGISTER_PC]));
+        vm->registers[REGISTER_PC] += 2;
+    } else {
+        riscv32i_emulate(vm, read_uint32_le(vm->code+vm->registers[REGISTER_PC]));
+        vm->registers[REGISTER_PC] += 4;
+    }
+
+    riscv32_dump_registers(vm);
+}
+
 void riscv32_run(risc32_vm_state_t *vm)
 {
     assert(vm);
@@ -96,9 +125,11 @@ void riscv32_run(risc32_vm_state_t *vm)
     switch(setjmp(vm->jump_buff))
     {
     case 0: break;
+    case 1: printf("vm error: %s\n", vm->error_string);
+    default: return;
     }
 
-    while (vm->code_pointer != vm->code_len)
+    while (vm->registers[REGISTER_PC] != vm->code_len)
     {
         riscv32_exec_instruction(vm);
     }

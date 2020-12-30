@@ -31,7 +31,7 @@ static inline uint32_t riscv32c_translate_reg(uint32_t reg)
 
 static void riscv32c_illegal_insn(risc32_vm_state_t *vm, uint16_t instruction)
 {
-    printf("RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_error(vm, "RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32c_addi4spn(risc32_vm_state_t *vm, uint16_t instruction)
@@ -132,9 +132,8 @@ static void riscv32c_addi16sp_lui(risc32_vm_state_t *vm, uint16_t instruction)
     {
         uint32_t imm = ((instruction >> 2) & 0x1f) << 4;
 
-        //TODO: error here
         if( imm == 0 )
-            return;
+            riscv32_error(vm, "Illegal instruction: 0x%x\n", instruction);
 
         // extend 6 bit signed value to 32 bit signed value
         if(instruction & (1 << 12))
