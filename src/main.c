@@ -26,57 +26,53 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 int main(int argc, char **argv)
 {
-    if( argc < 2 )
-    {
+    if (argc < 2) {
         printf( "ERROR: No file provided.\n" );
         return 0;
     }
 
     FILE *fp;
 
-    if( (fp=fopen(argv[1], "rb")) == NULL ) {
+    if ((fp=fopen(argv[1], "rb")) == NULL) {
         printf( "ERROR: Cannot open file %s.\n", argv[1] );
         return 0;
     }
 
-    fseek( fp, 0, SEEK_END );
-    size_t file_size = ftell( fp );
-    fseek( fp, 0, SEEK_SET );
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
 
-    if(file_size & 0x3)
-    {
-        printf("Unalign file\n");
-        fclose( fp );
+    if (file_size & 0x1) {
+        printf("Misaligned file\n");
+        fclose(fp);
         return 0;
     }
 
-    if(file_size < sizeof (uint16_t))
-    {
-        printf("Unalign file\n");
-        fclose( fp );
+    if (file_size < sizeof (uint16_t)) {
+        printf("File too small\n");
+        fclose(fp);
         return 0;
     }
 
-    uint16_t *bytecode = malloc(file_size);
+    uint8_t *bytecode = malloc(file_size);
 
-    fread( bytecode, 1, file_size, fp );
+    fread(bytecode, 1, file_size, fp);
 
-    fclose( fp );
+    fclose(fp);
 
-    risc32_vm_state_t *vm = malloc(sizeof (risc32_vm_state_t));
+    risc32_vm_state_t *vm = riscv32_create_vm();
 
-    if( !vm )
-    {
-        printf( "ERROR: VM creation failed.\n" );
+    if (!vm) {
+        printf("ERROR: VM creation failed.\n");
         return 1;
     }
 
     vm->code = bytecode;
-    vm->code_len = file_size / 2;
+    vm->code_len = file_size;
 
     riscv32_run(vm);
 
-    free(vm);
+    riscv32_destroy_vm(vm);
     free(bytecode);
     return 0;
 }

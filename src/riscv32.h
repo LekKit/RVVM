@@ -55,7 +55,7 @@ struct risc32_vm_state_s
     uint32_t cpu_instruction_flags;
     uint32_t cpu_flags;
     jmp_buf jump_buff;
-    uint16_t *code;
+    uint8_t *code;
     uint32_t code_len;
     uint32_t code_pointer;
     uint32_t registers[REGISTERS_MAX];
@@ -85,3 +85,8 @@ enum
 #define RISCV32_HAVE_C (1u << 2) // base compressed extension
 
 #define RISCV32_UNPRIVILAGED_REG_COUNT 32 // x0 - x31 + pc
+
+risc32_vm_state_t *riscv32_create_vm();
+void riscv32_run(risc32_vm_state_t *vm);
+void riscv32_destroy_vm(risc32_vm_state_t *vm);
+void riscv32c_init();
