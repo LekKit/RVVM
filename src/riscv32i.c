@@ -20,12 +20,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32i.h"
 #include "riscv32i_registers.h"
 
 // translate register number into abi name
 const char *riscv32i_translate_register_interger(uint32_t reg)
 {
-    assert( reg < REGISTERS_MAX );
+    assert(reg < REGISTERS_MAX);
     switch (reg) {
     case REGISTER_ZERO: return "zero";
     case REGISTER_X1: return "ra";
@@ -304,10 +305,17 @@ void riscv32i_emulate_0x1B(risc32_vm_state_t *vm, uint32_t instruction)
     printf("riscv32i 0x1b opcode\n");
 }
 
+void riscv32i_init()
+{
+
+}
+
 // We already check instruction for correct code
 void riscv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t opcode = ((instruction >> 2) & 0x1f);
+    uint32_t funcid = RISCV32_GET_FUNCID(instruction);
+    riscv32_opcodes[funcid](vm, instruction);
+    /*uint32_t opcode = ((instruction >> 2) & 0x1f);
 
     switch (opcode) {
     case 0x00:
@@ -373,6 +381,5 @@ void riscv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
         }
         printf("%s: (0x%X %i)\n", riscv32i_translate_register_interger(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
     }
-
-    vm->registers[REGISTER_PC]++;
+    */
 }
