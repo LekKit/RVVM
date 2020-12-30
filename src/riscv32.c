@@ -27,10 +27,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32c.h"
 #include "mem_ops.h"
 
+void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, uint32_t instruction);
+
+void riscv32c_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction)
+{
+    printf("RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
+}
+
+void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, uint32_t))
+{
+    for (uint32_t f3=0; f3<8; ++f3)
+        riscv32_opcodes[(f3 << 7) | opcode] = func;
+}
+
 risc32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
     if (!global_init) {
+        for (uint32_t i=0; i<1024; ++i) riscv32_opcodes[i] = riscv32c_illegal_insn;
+        riscv32i_init();
         riscv32c_init();
         global_init = true;
     }

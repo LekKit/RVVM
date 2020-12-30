@@ -84,9 +84,20 @@ enum
 #define RISCV32I (1u << 1) // base and minimal
 #define RISCV32_HAVE_C (1u << 2) // base compressed extension
 
-#define RISCV32_UNPRIVILAGED_REG_COUNT 32 // x0 - x31 + pc
+/*
+* Concatenate func3[14:12] and opcode[6:0] into 10-bit id to simplify decoding.
+* This won't work for U-type and J-type instructions since there's no func3,
+* so we will simply smudge function pointers for those all over the jumptable.
+*/
+#define RISCV32_GET_FUNCID(x) (((x >> 5) & 0x380) | (x & 0x7F))
+
+extern void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, uint32_t instruction);
+
+// This is the trick mentioned earlier, to decode U/J-type operations properly
+void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, uint32_t));
 
 risc32_vm_state_t *riscv32_create_vm();
 void riscv32_run(risc32_vm_state_t *vm);
 void riscv32_destroy_vm(risc32_vm_state_t *vm);
 void riscv32c_init();
+void riscv32i_init();
