@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32i_registers.h"
 
 // translate register number into abi name
-const char *riscv32i_translate_register_interger(uint32_t reg)
+const char *riscv32i_translate_register(uint32_t reg)
 {
     assert(reg < REGISTERS_MAX);
     switch (reg) {
@@ -368,18 +368,6 @@ void riscv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
         riscv32i_emulate_0x1B(vm, instruction);
         break;
     }
-    }
-
-    int i = 0;
-    int k = 0;
-
-    for( i = 0; i < REGISTERS_MAX; i++ )
-    {
-        for(k = 0; k < 2; i++,k++)
-        {
-            printf("%s: (0x%X %i) ", riscv32i_translate_register_interger(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
-        }
-        printf("%s: (0x%X %i)\n", riscv32i_translate_register_interger(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
     }
     */
 }

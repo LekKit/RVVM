@@ -46,4 +46,4 @@ inline void riscv32i_write_register_s(risc32_vm_state_t *vm, uint32_t reg, int32
     vm->registers[reg] = data;
 }
 
-
+const char *riscv32i_translate_register(uint32_t reg);

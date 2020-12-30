@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
+#include "riscv32i_registers.h"
 #include "riscv32c.h"
 #include "mem_ops.h"
 
@@ -73,6 +74,18 @@ void riscv32_exec_instruction(risc32_vm_state_t *vm)
     } else {
         riscv32i_emulate(vm, read_uint32_le(vm->code+vm->code_pointer));
         vm->code_pointer += 4;
+    }
+
+    int i = 0;
+    int k = 0;
+
+    for( i = 0; i < REGISTERS_MAX; i++ )
+    {
+        for(k = 0; k < 2; i++,k++)
+        {
+            printf("%s: (0x%X %i) ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
+        }
+        printf("%s: (0x%X %i)\n", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
     }
 }
 
