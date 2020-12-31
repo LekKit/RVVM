@@ -64,222 +64,7 @@ const char *riscv32i_translate_register(uint32_t reg)
     }
 }
 
-void riscv32i_emulate_0x00(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t imm = (instruction >> 20);
-
-    printf("riscv32i 0x00 opcode\n");
-}
-
-void riscv32i_emulate_0x03(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    printf("riscv32i 0x03 opcode\n");
-}
-
-void riscv32i_emulate_0x04(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = 0;
-
-    if( ((instruction >> 20) & 0x800) )
-    {
-        imm = (0xFFFFF000) | (instruction >> 20);
-    } else {
-        imm = (instruction >> 20);
-    }
-
-    switch (func3)
-    {
-    case 0x00:
-    {
-        printf("addi %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x01:
-    {
-        if( imm == 0 )
-            printf("slli %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x02:
-    {
-        printf("slti %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x03:
-    {
-        printf("sltiu %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x04:
-    {
-        printf("xori %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x05:
-    {
-        if( imm == 0 ) {
-            printf("srli %u,%u,%i\n", rds, rs1, imm);
-        } else if( imm == 16 )
-        {
-            printf("srai %u,%u,%i\n", rds, rs1, imm);
-        }
-        break;
-    }
-    case 0x06:
-    {
-        printf("ori %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-    case 0x07:
-    {
-        printf("andi %u,%u,%i\n", rds, rs1, imm);
-        break;
-    }
-
-    }
-}
-
-void riscv32i_emulate_0x05(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t imm = (instruction >> 12);
-    printf("auipc %u,%i\n", rds, imm);
-}
-
-void riscv32i_emulate_0x08(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    printf("riscv32i 0x08 opcode\n");
-}
-
-
-void riscv32i_emulate_0x0C(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
-
-    switch (func3) {
-    case 0:
-    {
-        if(func7 == 0x20)
-        {
-            int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-            int32_t result = (reg1 - reg2);
-            riscv32i_write_register_s(vm, rds, result);
-            //printf("sub %u,%u,%u\n", rds, rs1, rs2);
-        }
-        else
-        {
-            int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-            int32_t result = (reg1 + reg2);
-            riscv32i_write_register_s(vm, rds, result);
-            //printf("add %u,%u,%u\n", rds, rs1, rs2);
-        }
-        break;
-    }
-    case 1:
-    {
-        //NOTE: check for ub here?
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-        uint32_t result = (reg1 << reg2);
-
-        riscv32i_write_register_u(vm, rds, result);
-        //printf("sll %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    case 2:
-    {
-        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-        int32_t result = 0;
-        if( reg1 < reg2 )
-            result = 1;
-
-        riscv32i_write_register_s(vm, rds, result);
-        //printf("slt %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    case 3:
-    {
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-        uint32_t result = 0;
-        if( reg1 < reg2 )
-            result = 1;
-
-        riscv32i_write_register_u(vm, rds, result);
-
-        //printf("sltu %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    case 4:
-    {
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-        uint32_t result = (reg1 ^ reg2);
-
-        riscv32i_write_register_u(vm, rds, result);
-        printf("xor %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    case 5:
-    {
-        if(func7 == 0x20)
-        {
-            //NOTE: check for ub here?
-            int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-            int32_t result = (reg1 >> reg2);
-
-            riscv32i_write_register_s(vm, rds, result);
-            //printf("sra %u,%u,%u\n", rds, rs1, rs2);
-        } else
-        {
-            //NOTE: check for ub here?
-            uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-            uint32_t result = (reg1 >> reg2);
-
-            riscv32i_write_register_u(vm, rds, result);
-            //printf("srl %u,%u,%u\n", rds, rs1, rs2);
-        }
-        break;
-    }
-    case 6:
-    {
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-        uint32_t result = (reg1 | reg2);
-
-        riscv32i_write_register_u(vm, rds, result);
-        //printf("or %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    case 7:
-    {
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-        uint32_t result = (reg1 & reg2);
-
-        riscv32i_write_register_u(vm, rds, result);
-        //printf("and %u,%u,%u\n", rds, rs1, rs2);
-        break;
-    }
-    }
-}
-
-void riscv32i_emulate_0x0D(risc32_vm_state_t *vm, uint32_t instruction)
+static void riscv32i_lui(risc32_vm_state_t *vm, uint32_t instruction)
 {
     uint32_t rds = ((instruction >> 7) & 0x1f);
     uint32_t imm = (instruction & 0xFFFFF000);
@@ -287,30 +72,18 @@ void riscv32i_emulate_0x0D(risc32_vm_state_t *vm, uint32_t instruction)
     riscv32i_write_register_u(vm, rds, imm);
 
     printf("lui %u,%u\n", rds, imm);
-}
-
-void riscv32i_emulate_0x18(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    printf("riscv32i 0x18 opcode\n");
-}
-
-void riscv32i_emulate_0x19(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    uint32_t imm = 0;
-}
-
-void riscv32i_emulate_0x1B(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    printf("riscv32i 0x1b opcode\n");
-}
-
-static void riscv32i_lui(risc32_vm_state_t *vm, uint32_t instruction)
-{
     printf("RV32I: LUI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_auipc(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t imm = (instruction & 0xFFFFF000);
+    uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+
+    riscv32i_write_register_u(vm, rds, pc + imm);
+
+    printf("auipc %u,%u\n", rds, imm);
     printf("RV32I: AUIPC instruction 0x%x in VM %p\n", instruction, vm);
 }
 
@@ -321,12 +94,49 @@ static void riscv32i_jal(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_srli_srai(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t shamt = (instruction >> 20) & 0x1F;
+
+    if( instruction & (1u << 30) )
+    {
+        int32_t reg1 = riscv32i_read_register_s(vm, rs1);
+        riscv32i_write_register_s(vm, rds, (reg1 >> shamt));
+        printf("srai %u,%u,%i\n", rds, rs1, shamt);
+    } else {
+        uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
+        riscv32i_write_register_s(vm, rds, (reg1 >> shamt));
+        printf("srli %u,%u,%i\n", rds, rs1, shamt);
+    }
+
     printf("RV32I: SRLI/SRAI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_add_sub(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: ADD/SUB instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+
+    if(func7 == 0x20)
+    {
+        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
+
+        int32_t result = (reg1 - reg2);
+        riscv32i_write_register_s(vm, rds, result);
+        //printf("sub %u,%u,%u\n", rds, rs1, rs2);
+    }
+    else
+    {
+        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
+
+        int32_t result = (reg1 + reg2);
+        riscv32i_write_register_s(vm, rds, result);
+        //printf("add %u,%u,%u\n", rds, rs1, rs2);
+    }
+    //printf("RV32I: ADD/SUB instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_ecall_ebreak(risc32_vm_state_t *vm, uint32_t instruction)
@@ -336,11 +146,38 @@ static void riscv32i_ecall_ebreak(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_srl_sra(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+
+    if(func7 == 0x20)
+    {
+        //NOTE: check for ub here?
+        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
+        int32_t result = (reg1 >> reg2);
+        riscv32i_write_register_s(vm, rds, result);
+        //printf("sra %u,%u,%u\n", rds, rs1, rs2);
+    } else {
+        //NOTE: check for ub here?
+        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+        uint32_t result = (reg1 >> reg2);
+        riscv32i_write_register_u(vm, rds, result);
+        //printf("srl %u,%u,%u\n", rds, rs1, rs2);
+    }
+
     printf("RV32I: SRL/SRA instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_jalr(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+
     printf("RV32I: JALR instruction 0x%x in VM %p\n", instruction, vm);
 }
 
@@ -416,67 +253,219 @@ static void riscv32i_sw(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_addi(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    int32_t imm = (instruction >> 20);
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
+    int32_t result = riscv32i_read_register_s(vm, rs1) + imm;
+    riscv32i_write_register_s(vm, rds, result);
+    printf("addi %u,%u,%i\n", rds, rs1, imm);
     printf("RV32I: ADDI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_slti(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    int32_t imm = (instruction >> 20);
+    int32_t reg1 = riscv32i_read_register_s(vm, rs1);
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
+    if( reg1 > imm )
+        riscv32i_write_register_s(vm, rds, 1);
+    else
+        riscv32i_write_register_s(vm, rds, 0);
+
     printf("RV32I: SLTI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_sltiu(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t imm = (instruction >> 20);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
+    if( reg1 > imm )
+        riscv32i_write_register_s(vm, rds, 1);
+    else
+        riscv32i_write_register_s(vm, rds, 0);
+
     printf("RV32I: SLTIU instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_xori(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    int32_t imm = 0;
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
     printf("RV32I: XORI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_ori(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    int32_t imm = 0;
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
     printf("RV32I: ORI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_andi(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    int32_t imm = 0;
+
+    // extend 12 bit signed imm into 32 bit
+    if( imm & (1 << 11) )
+        imm |= 0xFFFFF000;
+
     printf("RV32I: ANDI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_slli(risc32_vm_state_t *vm, uint32_t instruction)
 {
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t shamt = (instruction >> 20) & 0x1F;
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+
+    uint32_t result = (shamt << reg1);
+
+    riscv32i_write_register_u(vm, rds, result);
+    printf("slli %u,%u,%u\n", rds, rs1, shamt);
     printf("RV32I: SLLI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_sll(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: SLL instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+    //NOTE: check for ub here?
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+
+    uint32_t result = (reg1 << reg2);
+
+    riscv32i_write_register_u(vm, rds, result);
+    //printf("sll %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: SLL instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_slt(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: SLT instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+    int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
+
+    int32_t result = 0;
+    if( reg1 < reg2 )
+        result = 1;
+
+    riscv32i_write_register_s(vm, rds, result);
+    //printf("slt %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: SLT instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_sltu(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: SLTU instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+
+    uint32_t result = 0;
+    if( reg1 < reg2 )
+        result = 1;
+
+    riscv32i_write_register_u(vm, rds, result);
+    //printf("sltu %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: SLTU instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_xor(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: XOR instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+
+    uint32_t result = (reg1 ^ reg2);
+
+    riscv32i_write_register_u(vm, rds, result);
+    //printf("xor %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: XOR instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_or(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: OR instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+
+    uint32_t result = (reg1 | reg2);
+
+    riscv32i_write_register_u(vm, rds, result);
+    //printf("or %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: OR instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_and(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: AND instruction 0x%x in VM %p\n", instruction, vm);
+    uint32_t rds = ((instruction >> 7) & 0x1f);
+    uint32_t func3 = ((instruction >> 12) & 0x3);
+    uint32_t rs1 = ((instruction >> 15) & 0x1f);
+    uint32_t rs2 = ((instruction >> 20) & 0x1f);
+    uint32_t func7 = (instruction >> 25);
+
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+
+    uint32_t result = (reg1 & reg2);
+
+    riscv32i_write_register_u(vm, rds, result);
+    //printf("and %u,%u,%u\n", rds, rs1, rs2);
+    //printf("RV32I: AND instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_fence(risc32_vm_state_t *vm, uint32_t instruction)
@@ -536,59 +525,4 @@ void riscv32i_emulate(risc32_vm_state_t *vm, uint32_t instruction)
 {
     uint32_t funcid = RISCV32_GET_FUNCID(instruction);
     riscv32_opcodes[funcid](vm, instruction);
-    /*uint32_t opcode = ((instruction >> 2) & 0x1f);
-
-    switch (opcode) {
-    case 0x00:
-    {
-        riscv32i_emulate_0x00(vm, instruction);
-        break;
-    }
-    case 0x03:
-    {
-        riscv32i_emulate_0x03(vm, instruction);
-        break;
-    }
-    case 0x04:
-    {
-        riscv32i_emulate_0x04(vm, instruction);
-        break;
-    }
-    case 0x05:
-    {
-        riscv32i_emulate_0x05(vm, instruction);
-        break;
-    }
-    case 0x08:
-    {
-        riscv32i_emulate_0x08(vm, instruction);
-        break;
-    }
-    case 0x0C:
-    {
-        riscv32i_emulate_0x0C(vm, instruction);
-        break;
-    }
-    case 0x0D:
-    {
-        riscv32i_emulate_0x0D(vm, instruction);
-        break;
-    }
-    case 0x18:
-    {
-        riscv32i_emulate_0x18(vm, instruction);
-        break;
-    }
-    case 0x19:
-    {
-        riscv32i_emulate_0x19(vm, instruction);
-        break;
-    }
-    case 0x1B:
-    {
-        riscv32i_emulate_0x1B(vm, instruction);
-        break;
-    }
-    }
-    */
 }
