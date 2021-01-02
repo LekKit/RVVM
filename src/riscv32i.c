@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
+#include "bit_ops.h"
 
 // translate register number into abi name
 const char *riscv32i_translate_register(uint32_t reg)
@@ -66,77 +67,78 @@ const char *riscv32i_translate_register(uint32_t reg)
 
 static void riscv32i_lui(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
+    // Place upper imm into register rds (lower 12 bits are zero)
+    uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t imm = (instruction & 0xFFFFF000);
 
     riscv32i_write_register_u(vm, rds, imm);
 
-    printf("lui %u,%u\n", rds, imm);
-    printf("RV32I: LUI instruction 0x%x in VM %p\n", instruction, vm);
+    printf("RV32I: lui %s, 0x%x in VM %p\n", riscv32i_translate_register(rds), imm, vm);
 }
 
 static void riscv32i_auipc(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
+    // Add upper imm to PC, place the result to register rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t imm = (instruction & 0xFFFFF000);
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
 
     riscv32i_write_register_u(vm, rds, pc + imm);
 
-    printf("auipc %u,%u\n", rds, imm);
-    printf("RV32I: AUIPC instruction 0x%x in VM %p\n", instruction, vm);
+    printf("RV32I: auipc %s, 0x%x in VM %p\n", riscv32i_translate_register(rds), imm, vm);
 }
 
 static void riscv32i_jal(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: JAL instruction 0x%x in VM %p\n", instruction, vm);
+    // Store PC+4 to rds, jump to PC+offset; remember further PC increment!
+    // offset is signed imm * 2, left shift one more bit for *2
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t imm = cut_bits(instruction, 31, 1) << 20 |
+                   cut_bits(instruction, 12, 8) << 12 |
+                   cut_bits(instruction, 20, 1) << 11 |
+                   cut_bits(instruction, 21, 10) << 1;
+    int32_t offset = sign_extend(imm, 21);
+    uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+
+    riscv32i_write_register_u(vm, rds, pc + 4);
+    riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+
+    printf("RV32I: jal %d in VM %p\n", offset, vm);
 }
 
 static void riscv32i_srli_srai(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t shamt = (instruction >> 20) & 0x1F;
+    // Perform right arithmetical/logical bitshift on rs1 by imm, store into rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t shamt = cut_bits(instruction, 20, 5);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    if( instruction & (1u << 30) )
-    {
-        int32_t reg1 = riscv32i_read_register_s(vm, rs1);
-        riscv32i_write_register_s(vm, rds, (reg1 >> shamt));
-        printf("srai %u,%u,%i\n", rds, rs1, shamt);
+    if (cut_bits(instruction, 25, 7)) {
+        riscv32i_write_register_s(vm, rds, ((int32_t)src_reg) >> shamt);
+        printf("RV32I: srai %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
     } else {
-        uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
-        riscv32i_write_register_s(vm, rds, (reg1 >> shamt));
-        printf("srli %u,%u,%i\n", rds, rs1, shamt);
+        riscv32i_write_register_s(vm, rds, src_reg >> shamt);
+        printf("RV32I: srli %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
     }
-
-    printf("RV32I: SRLI/SRAI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_add_sub(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
+    // Add/sub rs2 and rs1, place into rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
 
-    if(func7 == 0x20)
-    {
-        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-        int32_t result = (reg1 - reg2);
-        riscv32i_write_register_s(vm, rds, result);
-        //printf("sub %u,%u,%u\n", rds, rs1, rs2);
+    if (cut_bits(instruction, 25, 7)) {
+        riscv32i_write_register_s(vm, rds, reg1 - reg2);
+        printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    } else {
+        riscv32i_write_register_s(vm, rds, reg1 + reg2);
+        printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     }
-    else
-    {
-        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-
-        int32_t result = (reg1 + reg2);
-        riscv32i_write_register_s(vm, rds, result);
-        //printf("add %u,%u,%u\n", rds, rs1, rs2);
-    }
-    //printf("RV32I: ADD/SUB instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_ecall_ebreak(risc32_vm_state_t *vm, uint32_t instruction)
@@ -146,69 +148,173 @@ static void riscv32i_ecall_ebreak(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_srl_sra(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
+    // Perform right arithmetical/logical bitshift on rs1 by rs2, store into rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
 
-    if(func7 == 0x20)
-    {
-        //NOTE: check for ub here?
-        int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
-        int32_t result = (reg1 >> reg2);
-        riscv32i_write_register_s(vm, rds, result);
-        //printf("sra %u,%u,%u\n", rds, rs1, rs2);
+    if (cut_bits(instruction, 25, 7)) {
+        riscv32i_write_register_s(vm, rds, ((int32_t)reg1) >> (reg2 & gen_mask(5)));
+        printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     } else {
-        //NOTE: check for ub here?
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-        uint32_t result = (reg1 >> reg2);
-        riscv32i_write_register_u(vm, rds, result);
-        //printf("srl %u,%u,%u\n", rds, rs1, rs2);
+        riscv32i_write_register_s(vm, rds, reg1 >> (reg2 & gen_mask(5)));
+        printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     }
-
-    printf("RV32I: SRL/SRA instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_jalr(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
+    // Save PC+4 to rds, jump to PC+rs1 (signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t imm = cut_bits(instruction, 20, 12);
+    int32_t offset = sign_extend(imm, 20);
+    uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
 
-    printf("RV32I: JALR instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, pc + 4);
+    riscv32i_write_register_u(vm, REGISTER_PC, (((int32_t)pc) + offset)&(~0x1) - 4);
+
+    printf("RV32I: jalr %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_beq(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BEQ instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 == rs2
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (riscv32i_read_register_s(vm, rs1) == riscv32i_read_register_s(vm, rs2)) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: beq %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_bne(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BNE instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 != rs2
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (riscv32i_read_register_s(vm, rs1) != riscv32i_read_register_s(vm, rs2)) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: bne %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_blt(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BLT instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 < rs2 (signed)
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (((int32_t)riscv32i_read_register_s(vm, rs1)) < ((int32_t)riscv32i_read_register_s(vm, rs2))) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: blt %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_bge(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BGE instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 >= rs2 (signed)
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (((int32_t)riscv32i_read_register_s(vm, rs1)) >= ((int32_t)riscv32i_read_register_s(vm, rs2))) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: bge %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_bltu(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BLTU instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 > rs2
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (riscv32i_read_register_s(vm, rs1) > riscv32i_read_register_s(vm, rs2)) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: bltu %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_bgeu(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    printf("RV32I: BGEU instruction 0x%x in VM %p\n", instruction, vm);
+    // Conditional jump when rs1 >= rs2
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t imm;
+    uint32_t pc;
+    int32_t offset = 0;
+
+    if (riscv32i_read_register_s(vm, rs1) >= riscv32i_read_register_s(vm, rs2)) {
+        imm = cut_bits(instruction, 31, 1) << 11 |
+              cut_bits(instruction, 7, 1)  << 10 |
+              cut_bits(instruction, 25, 6) << 4  |
+              cut_bits(instruction, 8, 4);
+        offset = sign_extend(imm, 12);
+
+        pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    }
+
+    printf("RV32I: bgeu %s, %s, %d in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32i_lb(risc32_vm_state_t *vm, uint32_t instruction)
