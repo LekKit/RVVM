@@ -29,18 +29,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 /*
 * Sign-extend bits in the lower part of uint32_t into signed int32_t
 * usage:
-*     int32_t ext;
-*     sign_extend(val, ext, 20);
+*     int32_t ext = sign_extend(val, 20);
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-#define sign_extend(val, dest, bits) { struct {int32_t v:bits;} __FILE____LINE__; __FILE____LINE__.v = val; dest = __FILE____LINE__.v; }
+//#define sign_extend(val, dest, bits) { struct {int32_t v:bits;} __FILE____LINE__; __FILE____LINE__.v = val; dest = __FILE____LINE__.v; }
 
-/*
-* Alternate implementation, but this is in fact undefined behaviour
-* (just leave it here so Mr0maks is happy)
-*/
-inline int32_t sign_extend_ub(uint32_t val, uint32_t bits)
+inline int32_t sign_extend(uint32_t val, uint32_t bits)
 {
     return ((int32_t)(val << (32 - bits))) >> (32 - bits);
 }
