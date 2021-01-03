@@ -93,10 +93,10 @@ static void riscv32i_jal(risc32_vm_state_t *vm, uint32_t instruction)
     // Store PC+4 to rds, jump to PC+offset; remember further PC increment!
     // offset is signed imm * 2, left shift one more bit for *2
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t imm = cut_bits(instruction, 31, 1) << 20 |
-                   cut_bits(instruction, 12, 8) << 12 |
-                   cut_bits(instruction, 20, 1) << 11 |
-                   cut_bits(instruction, 21, 10) << 1;
+    uint32_t imm = (cut_bits(instruction, 31, 1) << 20) |
+                   (cut_bits(instruction, 12, 8) << 12) |
+                   (cut_bits(instruction, 20, 1) << 11) |
+                   (cut_bits(instruction, 21, 10) << 1);
     int32_t offset = sign_extend(imm, 21);
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
 
@@ -118,7 +118,7 @@ static void riscv32i_srli_srai(risc32_vm_state_t *vm, uint32_t instruction)
         riscv32i_write_register_s(vm, rds, ((int32_t)src_reg) >> shamt);
         printf("RV32I: srai %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
     } else {
-        riscv32i_write_register_s(vm, rds, src_reg >> shamt);
+        riscv32i_write_register_u(vm, rds, src_reg >> shamt);
         printf("RV32I: srli %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
     }
 }
@@ -129,14 +129,14 @@ static void riscv32i_add_sub(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
     if (cut_bits(instruction, 25, 7)) {
-        riscv32i_write_register_s(vm, rds, reg1 - reg2);
+        riscv32i_write_register_u(vm, rds, reg1 - reg2);
         printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     } else {
-        riscv32i_write_register_s(vm, rds, reg1 + reg2);
+        riscv32i_write_register_u(vm, rds, reg1 + reg2);
         printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     }
 }
@@ -152,14 +152,14 @@ static void riscv32i_srl_sra(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
     if (cut_bits(instruction, 25, 7)) {
         riscv32i_write_register_s(vm, rds, ((int32_t)reg1) >> (reg2 & gen_mask(5)));
         printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     } else {
-        riscv32i_write_register_s(vm, rds, reg1 >> (reg2 & gen_mask(5)));
+        riscv32i_write_register_u(vm, rds, reg1 >> (reg2 & gen_mask(5)));
         printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     }
 }
@@ -188,11 +188,11 @@ static void riscv32i_beq(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (riscv32i_read_register_s(vm, rs1) == riscv32i_read_register_s(vm, rs2)) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_u(vm, rs1) == riscv32i_read_register_u(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -211,11 +211,11 @@ static void riscv32i_bne(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (riscv32i_read_register_s(vm, rs1) != riscv32i_read_register_s(vm, rs2)) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_u(vm, rs1) != riscv32i_read_register_u(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -234,11 +234,11 @@ static void riscv32i_blt(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (((int32_t)riscv32i_read_register_s(vm, rs1)) < ((int32_t)riscv32i_read_register_s(vm, rs2))) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_s(vm, rs1) < riscv32i_read_register_s(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -257,11 +257,11 @@ static void riscv32i_bge(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (((int32_t)riscv32i_read_register_s(vm, rs1)) >= ((int32_t)riscv32i_read_register_s(vm, rs2))) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_s(vm, rs1) >= riscv32i_read_register_s(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -280,11 +280,11 @@ static void riscv32i_bltu(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (riscv32i_read_register_s(vm, rs1) > riscv32i_read_register_s(vm, rs2)) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_u(vm, rs1) > riscv32i_read_register_u(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -303,11 +303,11 @@ static void riscv32i_bgeu(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc;
     int32_t offset = 0;
 
-    if (riscv32i_read_register_s(vm, rs1) >= riscv32i_read_register_s(vm, rs2)) {
-        imm = cut_bits(instruction, 31, 1) << 11 |
-              cut_bits(instruction, 7, 1)  << 10 |
-              cut_bits(instruction, 25, 6) << 4  |
-              cut_bits(instruction, 8, 4);
+    if (riscv32i_read_register_u(vm, rs1) >= riscv32i_read_register_u(vm, rs2)) {
+        imm = (cut_bits(instruction, 31, 1) << 11) |
+              (cut_bits(instruction, 7, 1)  << 10) |
+              (cut_bits(instruction, 25, 6) << 4)  |
+              (cut_bits(instruction, 8, 4));
         offset = sign_extend(imm, 12);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -363,9 +363,9 @@ static void riscv32i_addi(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, src_reg + imm);
+    riscv32i_write_register_u(vm, rds, src_reg + imm);
     printf("RV32I: addi %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -377,7 +377,7 @@ static void riscv32i_slti(risc32_vm_state_t *vm, uint32_t instruction)
     int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
     int32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, (src_reg < imm) ? 1 : 0);
+    riscv32i_write_register_u(vm, rds, (src_reg < imm) ? 1 : 0);
     printf("RV32I: sltiu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -387,9 +387,9 @@ static void riscv32i_sltiu(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t imm = cut_bits(instruction, 20, 12);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, (src_reg < imm) ? 1 : 0);
+    riscv32i_write_register_u(vm, rds, (src_reg < imm) ? 1 : 0);
     printf("RV32I: sltiu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -399,9 +399,9 @@ static void riscv32i_xori(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, src_reg ^ imm);
+    riscv32i_write_register_u(vm, rds, src_reg ^ imm);
     printf("RV32I: xori %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -411,9 +411,9 @@ static void riscv32i_ori(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, src_reg | imm);
+    riscv32i_write_register_u(vm, rds, src_reg | imm);
     printf("RV32I: ori %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -423,9 +423,9 @@ static void riscv32i_andi(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, src_reg & imm);
+    riscv32i_write_register_u(vm, rds, src_reg & imm);
     printf("RV32I: andi %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
@@ -435,9 +435,9 @@ static void riscv32i_slli(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t shamt = cut_bits(instruction, 20, 5);
-    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
+    uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
-    riscv32i_write_register_s(vm, rds, src_reg << shamt);
+    riscv32i_write_register_u(vm, rds, src_reg << shamt);
     printf("RV32I: slli %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
 }
 
@@ -447,10 +447,10 @@ static void riscv32i_sll(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    riscv32i_write_register_s(vm, rds, reg1 << (reg2 & gen_mask(5)));
+    riscv32i_write_register_u(vm, rds, reg1 << (reg2 & gen_mask(5)));
     printf("RV32I: sll %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
