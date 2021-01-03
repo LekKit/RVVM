@@ -31,7 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, uint32_t instruction);
 
-void riscv32c_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction)
+void riscv32_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction)
 {
     riscv32_error(vm, "RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
 }
@@ -46,7 +46,7 @@ risc32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
     if (!global_init) {
-        for (uint32_t i=0; i<1024; ++i) riscv32_opcodes[i] = riscv32c_illegal_insn;
+        for (uint32_t i=0; i<1024; ++i) riscv32_opcodes[i] = riscv32_illegal_insn;
         riscv32i_init();
         riscv32c_init();
         global_init = true;
@@ -66,16 +66,12 @@ void riscv32_destroy_vm(risc32_vm_state_t *vm)
 
 void riscv32_dump_registers(risc32_vm_state_t *vm)
 {
-    int i = 0;
-    int k = 0;
-
-    for( i = 0; i < REGISTERS_MAX; i++ )
+    for( int i = 0; i < REGISTERS_MAX - 1; i++ )
     {
-        for(k = 0; k < 2; i++,k++)
-        {
-            printf("%s: (0x%X %i) ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
-        }
-        printf("%s: (0x%X %i)\n", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i), riscv32i_read_register_s(vm, i));
+        printf("%-5s: 0x%08X  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
+
+        if(((i + 1) % 4) == 0)
+            printf("\n");
     }
 }
 
