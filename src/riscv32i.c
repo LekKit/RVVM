@@ -174,7 +174,7 @@ static void riscv32i_jalr(risc32_vm_state_t *vm, uint32_t instruction)
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
 
     riscv32i_write_register_u(vm, rds, pc + 4);
-    riscv32i_write_register_u(vm, REGISTER_PC, (((int32_t)pc) + offset)&(~0x1) - 4);
+    riscv32i_write_register_u(vm, REGISTER_PC, ((((int32_t)pc) + offset)&(~0x1)) - 4);
 
     printf("RV32I: jalr %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
@@ -359,229 +359,169 @@ static void riscv32i_sw(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_addi(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = (instruction >> 20);
+    // Add signed immediate to rs1, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    int32_t result = riscv32i_read_register_s(vm, rs1) + imm;
-    riscv32i_write_register_s(vm, rds, result);
-    printf("addi %u,%u,%i\n", rds, rs1, imm);
-    printf("RV32I: ADDI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, src_reg + imm);
+    printf("RV32I: addi %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_slti(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = (instruction >> 20);
-    int32_t reg1 = riscv32i_read_register_s(vm, rs1);
+    // Set rds to 1 if rs1 < imm (signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
+    int32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    if( reg1 > imm )
-        riscv32i_write_register_s(vm, rds, 1);
-    else
-        riscv32i_write_register_s(vm, rds, 0);
-
-    printf("RV32I: SLTI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, (src_reg < imm) ? 1 : 0);
+    printf("RV32I: sltiu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_sltiu(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t imm = (instruction >> 20);
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    // Set rds to 1 if rs1 < imm
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t imm = cut_bits(instruction, 20, 12);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    if( reg1 > imm )
-        riscv32i_write_register_s(vm, rds, 1);
-    else
-        riscv32i_write_register_s(vm, rds, 0);
-
-    printf("RV32I: SLTIU instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, (src_reg < imm) ? 1 : 0);
+    printf("RV32I: sltiu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_xori(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = 0;
+    // XOR rs1 with sign-extended imm, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    printf("RV32I: XORI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, src_reg ^ imm);
+    printf("RV32I: xori %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_ori(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = 0;
+    // OR rs1 with sign-extended imm, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    printf("RV32I: ORI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, src_reg | imm);
+    printf("RV32I: ori %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_andi(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    int32_t imm = 0;
+    // AND rs1 with sign-extended imm, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    // extend 12 bit signed imm into 32 bit
-    if( imm & (1 << 11) )
-        imm |= 0xFFFFF000;
-
-    printf("RV32I: ANDI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, src_reg & imm);
+    printf("RV32I: andi %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), imm, vm);
 }
 
 static void riscv32i_slli(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t shamt = (instruction >> 20) & 0x1F;
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    // Left-shift rs1 by immediate, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t shamt = cut_bits(instruction, 20, 5);
+    uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    uint32_t result = (shamt << reg1);
-
-    riscv32i_write_register_u(vm, rds, result);
-    printf("slli %u,%u,%u\n", rds, rs1, shamt);
-    printf("RV32I: SLLI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, src_reg << shamt);
+    printf("RV32I: slli %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
 }
 
 static void riscv32i_sll(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
-    //NOTE: check for ub here?
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+    // Left-shift rs1 by rs2, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_s(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_s(vm, rs2);
 
-    uint32_t result = (reg1 << reg2);
-
-    riscv32i_write_register_u(vm, rds, result);
-    //printf("sll %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: SLL instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_s(vm, rds, reg1 << (reg2 & gen_mask(5)));
+    printf("RV32I: sll %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_slt(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
-    int32_t reg1 = riscv32i_read_register_s(vm, rs1), reg2 = riscv32i_read_register_s(vm, rs2);
+    // Set rds to 1 if rs1 < rs2 (signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    int32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    int32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    int32_t result = 0;
-    if( reg1 < reg2 )
-        result = 1;
-
-    riscv32i_write_register_s(vm, rds, result);
-    //printf("slt %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: SLT instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, (reg1 < reg2) ? 1 : 0);
+    printf("RV32I: slt %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_sltu(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+    // Set rds to 1 if rs1 < rs2
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    uint32_t result = 0;
-    if( reg1 < reg2 )
-        result = 1;
-
-    riscv32i_write_register_u(vm, rds, result);
-    //printf("sltu %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: SLTU instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, (reg1 < reg2) ? 1 : 0);
+    printf("RV32I: sltu %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_xor(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
+    // XOR rs1 with rs2, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    uint32_t result = (reg1 ^ reg2);
-
-    riscv32i_write_register_u(vm, rds, result);
-    //printf("xor %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: XOR instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, reg1 ^ reg2);
+    printf("RV32I: xor %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_or(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
+    // OR rs1 with rs2, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-    uint32_t result = (reg1 | reg2);
-
-    riscv32i_write_register_u(vm, rds, result);
-    //printf("or %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: OR instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, reg1 | reg2);
+    printf("RV32I: or %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_and(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    uint32_t rds = ((instruction >> 7) & 0x1f);
-    uint32_t func3 = ((instruction >> 12) & 0x3);
-    uint32_t rs1 = ((instruction >> 15) & 0x1f);
-    uint32_t rs2 = ((instruction >> 20) & 0x1f);
-    uint32_t func7 = (instruction >> 25);
+    // AND rs1 with rs2, store to rds
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1), reg2 = riscv32i_read_register_u(vm, rs2);
-
-    uint32_t result = (reg1 & reg2);
-
-    riscv32i_write_register_u(vm, rds, result);
-    //printf("and %u,%u,%u\n", rds, rs1, rs2);
-    //printf("RV32I: AND instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32i_write_register_u(vm, rds, reg1 & reg2);
+    printf("RV32I: and %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
 static void riscv32i_fence(risc32_vm_state_t *vm, uint32_t instruction)
 {
     printf("RV32I: FENCE instruction 0x%x in VM %p\n", instruction, vm);
-}
-
-static void riscv32i_(risc32_vm_state_t *vm, uint32_t instruction)
-{
-    printf("RV32I: AAA instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 void riscv32i_init()
