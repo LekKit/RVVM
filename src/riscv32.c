@@ -73,6 +73,7 @@ void riscv32_dump_registers(risc32_vm_state_t *vm)
         if(((i + 1) % 4) == 0)
             printf("\n");
     }
+    printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
 void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...)
