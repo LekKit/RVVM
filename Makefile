@@ -16,7 +16,7 @@ endif
 
 SRCDIR=src
 
-NAME=riscvemu
+NAME=rvvm
 
 CC?=gcc
 CXX?=g++
