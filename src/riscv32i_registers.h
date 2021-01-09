@@ -13,7 +13,7 @@ inline void riscv32i_write_register_u(risc32_vm_state_t *vm, uint32_t reg, uint3
     assert(reg < REGISTERS_MAX);
 
     // always ignore for x0
-    if(reg == REGISTER_X0)
+    if (reg == REGISTER_X0)
         return;
 
     vm->registers[reg] = data;
@@ -30,7 +30,7 @@ inline void riscv32i_write_register_s(risc32_vm_state_t *vm, uint32_t reg, int32
     assert(reg < REGISTERS_MAX);
 
     // always ignore for x0
-    if(reg == REGISTER_X0)
+    if (reg == REGISTER_X0)
         return;
 
     vm->registers[reg] = data;

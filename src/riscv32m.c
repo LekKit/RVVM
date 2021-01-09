@@ -90,10 +90,10 @@ void riscv32m_div(risc32_vm_state_t *vm, const uint32_t instruction)
     int64_t result = -1;
 
     // overflow
-    if(reg1 == -2147483648 && reg2 == -1) {
+    if (reg1 == -2147483648 && reg2 == -1) {
         result = -2147483648;
     // division by zero check (we already setup result var for error)
-    } else if(reg2 != 0) {
+    } else if (reg2 != 0) {
         result = reg1 / reg2;
     }
 
@@ -112,7 +112,7 @@ void riscv32m_divu(risc32_vm_state_t *vm, const uint32_t instruction)
     uint64_t result = 4294967295;
 
     // division by zero check (we already setup result var for error)
-    if(reg2 != 0) {
+    if (reg2 != 0) {
         result = reg1 / reg2;
     }
 
@@ -131,10 +131,10 @@ void riscv32m_rem(risc32_vm_state_t *vm, const uint32_t instruction)
     int64_t result = reg1;
 
     // overflow
-    if(reg1 == -2147483648 && reg2 == -1) {
+    if (reg1 == -2147483648 && reg2 == -1) {
         result = 0;
     // division by zero check (we already setup result var for error)
-    } else if(reg2 != 0) {
+    } else if (reg2 != 0) {
         result = reg1 / reg2;
         result >>= 32;
     }
@@ -154,7 +154,7 @@ void riscv32m_remu(risc32_vm_state_t *vm, const uint32_t instruction)
     uint64_t result = reg1;
 
     // division by zero check (we already setup result var for error)
-    if(reg2 != 0) {
+    if (reg2 != 0) {
         result = reg1 / reg2;
         result >>= 32;
     }

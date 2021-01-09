@@ -128,7 +128,7 @@ static void riscv32i_add_sub(risc32_vm_state_t *vm, const uint32_t instruction)
 {
     uint32_t funct7 = cut_bits(instruction, 25, 7);
 
-    if( funct7 == 0x00 || funct7 == 0x20 )
+    if (funct7 == 0x00 || funct7 == 0x20)
     {
         // Add/sub rs2 and rs1, place into rds
         uint32_t rds = cut_bits(instruction, 7, 5);
@@ -137,7 +137,7 @@ static void riscv32i_add_sub(risc32_vm_state_t *vm, const uint32_t instruction)
         uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
         uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-        if(funct7) {
+        if (funct7) {
             riscv32i_write_register_u(vm, rds, reg1 - reg2);
             printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
         } else {

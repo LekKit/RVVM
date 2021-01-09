@@ -67,11 +67,10 @@ void riscv32_destroy_vm(risc32_vm_state_t *vm)
 
 void riscv32_dump_registers(risc32_vm_state_t *vm)
 {
-    for( int i = 0; i < REGISTERS_MAX - 1; i++ )
-    {
+    for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
         printf("%-5s: 0x%08X  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
 
-        if(((i + 1) % 4) == 0)
+        if (((i + 1) % 4) == 0)
             printf("\n");
     }
     printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
@@ -120,15 +119,13 @@ void riscv32_run(risc32_vm_state_t *vm)
     assert(vm);
     assert(vm->code);
 
-    switch(setjmp(vm->jump_buff))
-    {
+    switch (setjmp(vm->jump_buff)) {
     case 0: break;
     case 1: printf("vm error: %s\n", vm->error_string);
     default: return;
     }
 
-    while (vm->registers[REGISTER_PC] != vm->code_len)
-    {
+    while (vm->registers[REGISTER_PC] != vm->code_len) {
         riscv32_exec_instruction(vm);
     }
 }
