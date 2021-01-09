@@ -29,12 +29,12 @@ static inline uint32_t riscv32c_reg(uint32_t reg)
     return REGISTER_X8 + reg;
 }
 
-static void riscv32c_illegal_insn(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_illegal_insn(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     riscv32_error(vm, "RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_addi4spn(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_addi4spn(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add imm*4 to stack pointer (X2), store into rds
     uint32_t rds = cut_bits(instruction, 2, 3);
@@ -47,7 +47,7 @@ static void riscv32c_addi4spn(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.addi4spn %s, %d in VM %p\n", riscv32i_translate_register(riscv32c_reg(rds)), imm, vm);
 }
 
-static void riscv32c_addi_nop(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_addi_nop(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add 6-bit signed immediate to rds (this also serves as NOP for X0 reg)
     uint32_t rds = cut_bits(instruction, 7, 5);
@@ -59,7 +59,7 @@ static void riscv32c_addi_nop(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.addi %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
 }
 
-static void riscv32c_slli(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_slli(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Left shift rds by imm, store into rds
     uint32_t rds = cut_bits(instruction, 7, 5);
@@ -70,12 +70,12 @@ static void riscv32c_slli(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.slli %s, %d in VM %p\n", riscv32i_translate_register(rds), shamt, vm);
 }
 
-static void riscv32c_fld(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fld(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FLD instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_jal(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_jal(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Save PC+2 into X1 (return addr), jump to PC+offset
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -95,17 +95,17 @@ static void riscv32c_jal(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.jal %d in VM %p\n", offset, vm);
 }
 
-static void riscv32c_fldsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fldsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FLDSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_lw(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_lw(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: LW instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_li(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_li(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
     int32_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
@@ -115,17 +115,17 @@ static void riscv32c_li(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.li %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
 }
 
-static void riscv32c_lwsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_lwsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: LWSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_flw(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_flw(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FLW instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_addi16sp_lui(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_addi16sp_lui(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t imm;
@@ -149,12 +149,12 @@ static void riscv32c_addi16sp_lui(risc32_vm_state_t *vm, uint16_t instruction)
     }
 }
 
-static void riscv32c_flwsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_flwsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FLWSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_alops1(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_alops1(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // goddamn glue opcode
     uint32_t rds = cut_bits(instruction, 7, 3);
@@ -201,7 +201,7 @@ static void riscv32c_alops1(risc32_vm_state_t *vm, uint16_t instruction)
     }
 }
 
-static void riscv32c_alops2(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_alops2(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs2 = cut_bits(instruction, 2, 5);
@@ -241,12 +241,12 @@ static void riscv32c_alops2(risc32_vm_state_t *vm, uint16_t instruction)
     }
 }
 
-static void riscv32c_fsd(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fsd(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FSD instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_j(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_j(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Jump to PC+offset
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
@@ -265,17 +265,17 @@ static void riscv32c_j(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.j %d in VM %p\n", offset, vm);
 }
 
-static void riscv32c_fsdsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fsdsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FSDSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_sw(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_sw(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: SW instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_beqz(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_beqz(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 3);
     uint32_t reg1 = riscv32i_read_register_u(vm, riscv32c_reg(rds));
@@ -293,17 +293,17 @@ static void riscv32c_beqz(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.beqz %s in VM %p\n", riscv32i_translate_register(riscv32c_reg(rds)), vm);
 }
 
-static void riscv32c_swsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_swsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: SWSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_fsw(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fsw(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FSW instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32c_bnez(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_bnez(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 3);
     uint32_t reg1 = riscv32i_read_register_u(vm, riscv32c_reg(rds));
@@ -321,12 +321,12 @@ static void riscv32c_bnez(risc32_vm_state_t *vm, uint16_t instruction)
     printf("RVC: c.bnez %s in VM %p\n", riscv32i_translate_register(riscv32c_reg(rds)), vm);
 }
 
-static void riscv32c_fswsp(risc32_vm_state_t *vm, uint16_t instruction)
+static void riscv32c_fswsp(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     printf("RVC: FSWSP instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void (*opcodes[32])(risc32_vm_state_t *vm, uint16_t instruction);
+static void (*opcodes[32])(risc32_vm_state_t *vm, const uint16_t instruction);
 
 void riscv32c_init()
 {
@@ -361,7 +361,7 @@ void riscv32c_init()
     opcodes[RVC_FSWSP] = riscv32c_fswsp;
 }
 
-void riscv32c_emulate(risc32_vm_state_t *vm, uint16_t instruction)
+void riscv32c_emulate(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     uint16_t funcid = RISCV32C_GET_FUNCID(instruction);
     opcodes[funcid](vm, instruction);

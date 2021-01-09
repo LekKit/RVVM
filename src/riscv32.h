@@ -84,17 +84,17 @@ struct risc32_vm_state_s
 */
 #define RISCV32_GET_FUNCID(x) (((x >> 5) & 0x380) | (x & 0x7F))
 
-extern void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, uint32_t instruction);
+extern void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, const uint32_t instruction);
 
 // This is the trick mentioned earlier, to decode U/J-type operations properly
-void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, uint32_t));
+void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
 
 risc32_vm_state_t *riscv32_create_vm();
 void riscv32_run(risc32_vm_state_t *vm);
 void riscv32_destroy_vm(risc32_vm_state_t *vm);
 void riscv32_dump_registers(risc32_vm_state_t *vm);
 void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
-void riscv32_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction);
+void riscv32_illegal_insn(risc32_vm_state_t *vm, const uint32_t instruction);
 void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();
