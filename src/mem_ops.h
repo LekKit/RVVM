@@ -1,6 +1,6 @@
 /*
-riscv32.c - Very stupid and slow RISC-V emulator code
-Copyright (C) 2020  Mr0maks <mr.maks0443@gmail.com>
+mem_ops.h - memory operations functions
+Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
                     LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify

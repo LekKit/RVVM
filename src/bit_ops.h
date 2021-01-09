@@ -1,5 +1,5 @@
 /*
-riscv32.c - Very stupid and slow RISC-V emulator code
+bit_ops.h - bit operations functions
 Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
                     LekKit <github.com/LekKit>
 
@@ -17,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_MATH_OPS_H
-#define RISCV_MATH_OPS_H
+#ifndef RISCV_BIT_OPS_H
+#define RISCV_BIT_OPS_H
 
 #include <stdint.h>
 #include <stdbool.h>
