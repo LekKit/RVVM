@@ -48,6 +48,7 @@ risc32_vm_state_t *riscv32_create_vm()
     if (!global_init) {
         for (uint32_t i=0; i<1024; ++i) riscv32_opcodes[i] = riscv32_illegal_insn;
         riscv32i_init();
+        riscv32m_init();
         riscv32c_init();
         global_init = true;
     }

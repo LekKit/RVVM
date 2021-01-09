@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
+#include "riscv32m.h"
 #include "bit_ops.h"
 
 // translate register number into abi name
@@ -125,19 +126,29 @@ static void riscv32i_srli_srai(risc32_vm_state_t *vm, uint32_t instruction)
 
 static void riscv32i_add_sub(risc32_vm_state_t *vm, uint32_t instruction)
 {
-    // Add/sub rs2 and rs1, place into rds
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+    uint32_t funct7 = cut_bits(instruction, 25, 7);
 
-    if (cut_bits(instruction, 25, 7)) {
-        riscv32i_write_register_u(vm, rds, reg1 - reg2);
-        printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    if( funct7 == 0x00 || funct7 == 0x20 )
+    {
+        // Add/sub rs2 and rs1, place into rds
+        uint32_t rds = cut_bits(instruction, 7, 5);
+        uint32_t rs1 = cut_bits(instruction, 15, 5);
+        uint32_t rs2 = cut_bits(instruction, 20, 5);
+        uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+        uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+
+        if(funct7) {
+            riscv32i_write_register_u(vm, rds, reg1 - reg2);
+            printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+        } else {
+            riscv32i_write_register_u(vm, rds, reg1 + reg2);
+            printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+        }
+    } else if (funct7 == 0x01) {
+        // M extension opcodes
+        riscv32m_emulate(vm, instruction);
     } else {
-        riscv32i_write_register_u(vm, rds, reg1 + reg2);
-        printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+        riscv32_illegal_insn(vm, instruction);
     }
 }
 

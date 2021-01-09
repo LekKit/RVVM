@@ -65,25 +65,17 @@ struct risc32_vm_state_s
 
 #define RISCV32I_OPCODE_MASK 0x3
 
-#define RISCV_HAVE_16BIT_OPCODES (1u << 0) // allow execute riscv16 instructions?
 #define RISCV_ALIGN_32 4 // 4 byte align
 #define RISCV_ALIGN_16 2 // 2 byte align
 #define RISCV_ILEN 4 // 4 byte opcode len
 
-#define RISCV32_BIG_ENDIAN (1u << 0)
-#define RISCV32_LITTLE_ENDIAN (1u << 1)
+#define RISCV32_LITTLE_ENDIAN (1u << 0)
+#define RISCV32_IIS_I (1u << 1) // base and minimal ISA with 32 registers
+#define RISCV32_IIS_E (1u << 2) // base and minimal ISA with 16 registers
 
-enum
-{
-    RISCV32_TRAP_CONTAINED, // The trap is visible to, and handled by, software running inside the executionenvironment.
-    RISCV32_TRAP_REQUESTED, // The trap is a synchronous exception that is an explicit call to the executionenvironment requesting an action on behalf of software inside the execution environment.
-    RISCV32_TRAP_INVISIBLE, // The trap is handled transparently by the execution environment and executionresumes normally after the trap is handled.
-    RISCV32_TRAP_FATAL // The trap represents a fatal failure and causes the execution environment to terminateexecution.
-};
-
-#define RISCV32_HAVE_NONSTANDART_EXT (1u << 0) // mark cpu with custom opcodes to enable hacks
-#define RISCV32I (1u << 1) // base and minimal
-#define RISCV32_HAVE_C (1u << 2) // base compressed extension
+#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 0) // mark cpu with custom opcodes to enable hacks
+#define RISCV32_HAVE_M_EXTENSION (1u << 1) // multiplication and division for intergers
+#define RISCV32_HAVE_C_EXTENSION (1u << 2) // compressed instructions extension
 
 /*
 * Concatenate func3[14:12] and opcode[6:0] into 10-bit id to simplify decoding.
@@ -102,5 +94,7 @@ void riscv32_run(risc32_vm_state_t *vm);
 void riscv32_destroy_vm(risc32_vm_state_t *vm);
 void riscv32_dump_registers(risc32_vm_state_t *vm);
 void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
+void riscv32_illegal_insn(risc32_vm_state_t *vm, uint32_t instruction);
+void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();
