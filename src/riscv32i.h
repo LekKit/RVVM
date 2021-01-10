@@ -33,48 +33,45 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV32_OPCODE_I_FUNCT7_LEN 7 // 7 bits for funct7
 #define RISCV32_OPCODE_FUNCT3_LEN 3 // 3 bits for funct3
 
-/* no func3, need to be smudged */
-#define RV32I_LUI          0x37
-#define RV32I_AUIPC        0x17
-#define RV32I_JAL          0x6F
-/*
-* These have func7 and need additional decoding
-* Also, RV32I_ADD_SUB overlaps MUL by func3+opcode mask, need to figure that out soon
-*/
-#define RV32I_SRLI_SRAI    0x293
-#define RV32I_ADD_SUB      0x33
-#define RV32I_ECALL_EBREAK 0x73
-#define RV32I_SRL_SRA      0x2B3
-/* normal */
-#define RV32I_JALR         0x67
-#define RV32I_BEQ          0x63
-#define RV32I_BNE          0xE3
-#define RV32I_BLT          0x263
-#define RV32I_BGE          0x2E3
-#define RV32I_BLTU         0x363
-#define RV32I_BGEU         0x3E3
-#define RV32I_LB           0x3
-#define RV32I_LH           0x83
-#define RV32I_LW           0x103
-#define RV32I_LBU          0x203
-#define RV32I_LHU          0x283
-#define RV32I_SB           0x23
-#define RV32I_SH           0xA3
-#define RV32I_SW           0x123
-#define RV32I_ADDI         0x13
-#define RV32I_SLTI         0x113
-#define RV32I_SLTIU        0x193
-#define RV32I_XORI         0x213
-#define RV32I_ORI          0x313
-#define RV32I_ANDI         0x393
-#define RV32I_SLLI         0x93
-#define RV32I_SLL          0xB3
-#define RV32I_SLT          0x133
-#define RV32I_SLTU         0x1B3
-#define RV32I_XOR          0x233
-#define RV32I_OR           0x333
-#define RV32I_AND          0x3B3
-#define RV32I_FENCE        0xF
+// U/J type instructions
+#define RV32I_LUI          0xD
+#define RV32I_AUIPC        0x5
+#define RV32I_JAL          0x1B
+#define RV32I_SYSTEM       0x1C // let it just be here
+// R-type instructions
+#define RV32I_SLLI         0x24
+#define RV32I_SRLI_SRAI    0xA4
+#define RV32I_ADD_SUB      0xC
+#define RV32I_SLL          0x2C
+#define RV32I_SLT          0x4C
+#define RV32I_SLTU         0x6C
+#define RV32I_XOR          0x8C
+#define RV32I_SRL_SRA      0xAC
+#define RV32I_OR           0xCC
+#define RV32I_AND          0xEC
+// I/S/B type instructions
+#define RV32I_JALR         0x19
+#define RV32I_BEQ          0x18
+#define RV32I_BNE          0x38
+#define RV32I_BLT          0x98
+#define RV32I_BGE          0xB8
+#define RV32I_BLTU         0xD8
+#define RV32I_BGEU         0xF8
+#define RV32I_LB           0x0
+#define RV32I_LH           0x20
+#define RV32I_LW           0x40
+#define RV32I_LBU          0x80
+#define RV32I_LHU          0xA0
+#define RV32I_SB           0x8
+#define RV32I_SH           0x28
+#define RV32I_SW           0x48
+#define RV32I_ADDI         0x4
+#define RV32I_SLTI         0x44
+#define RV32I_SLTIU        0x64
+#define RV32I_XORI         0x84
+#define RV32I_ORI          0xC4
+#define RV32I_ANDI         0xE4
+#define RV32I_FENCE        0x3
 
 /*
 opcode

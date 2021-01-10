@@ -97,16 +97,23 @@ struct risc32_vm_state_s
 #define RISCV32_HAVE_C_EXTENSION (1u << 2) // compressed instructions extension
 
 /*
-* Concatenate func3[14:12] and opcode[6:0] into 10-bit id to simplify decoding.
-* This won't work for U-type and J-type instructions since there's no func3,
+* Concatenate func7[25] func3[14:12] and opcode[6:2] into 9-bit id for decoding.
+* This is tricky for non-R type instructions since there's no func3/func7,
 * so we will simply smudge function pointers for those all over the jumptable.
+* Theoreticaly, this could be optimized more.
 */
-#define RISCV32_GET_FUNCID(x) (((x >> 5) & 0x380) | (x & 0x7F))
+#define RISCV32_GET_FUNCID(x) (((x >> 17) & 0x100) | ((x >> 7) & 0xE0) | ((x >> 2) & 0x1F))
 
-extern void (*riscv32_opcodes[1024])(risc32_vm_state_t *vm, const uint32_t instruction);
+extern void (*riscv32_opcodes[512])(risc32_vm_state_t *vm, const uint32_t instruction);
 
-// This is the trick mentioned earlier, to decode U/J-type operations properly
-void smudge_opcode_func3(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
+/*
+* The trick mentioned earlier, to decode non-R type instructions properly.
+* smudge_opcode_UJ for U/J types (no func3 or func7)
+* smudge_opcode_ISB for I/S/B types (no func7, but has func3)
+* R-type instructions (both func3 and func7 present) are simply put into table
+*/
+void smudge_opcode_UJ(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
+void smudge_opcode_ISB(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
 
 risc32_vm_state_t *riscv32_create_vm();
 void riscv32_run(risc32_vm_state_t *vm);

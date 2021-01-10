@@ -127,35 +127,28 @@ static void riscv32i_srli_srai(risc32_vm_state_t *vm, const uint32_t instruction
 
 static void riscv32i_add_sub(risc32_vm_state_t *vm, const uint32_t instruction)
 {
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+
     uint32_t funct7 = cut_bits(instruction, 25, 7);
 
-    if (funct7 == 0x00 || funct7 == 0x20)
-    {
-        // Add/sub rs2 and rs1, place into rds
-        uint32_t rds = cut_bits(instruction, 7, 5);
-        uint32_t rs1 = cut_bits(instruction, 15, 5);
-        uint32_t rs2 = cut_bits(instruction, 20, 5);
-        uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
-        uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-
-        if (funct7) {
-            riscv32i_write_register_u(vm, rds, reg1 - reg2);
-            printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
-        } else {
-            riscv32i_write_register_u(vm, rds, reg1 + reg2);
-            printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
-        }
-    } else if (funct7 == 0x01) {
-        // M extension opcodes
-        riscv32m_emulate(vm, instruction);
+    if (funct7 == 0x20) {
+        riscv32i_write_register_u(vm, rds, reg1 - reg2);
+        printf("RV32I: sub %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    } else if (funct7 == 0x0) {
+        riscv32i_write_register_u(vm, rds, reg1 + reg2);
+        printf("RV32I: add %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
     } else {
         riscv32_illegal_insn(vm, instruction);
     }
 }
 
-static void riscv32i_ecall_ebreak(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32i_system(risc32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: ECALL/EBREAK instruction 0x%x in VM %p\n", instruction, vm);
+    printf("RV32I: SYSTEM instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_srl_sra(risc32_vm_state_t *vm, const uint32_t instruction)
@@ -518,44 +511,44 @@ static void riscv32i_fence(risc32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32i_init()
 {
-    smudge_opcode_func3(RV32I_LUI, riscv32i_lui);
-    smudge_opcode_func3(RV32I_AUIPC, riscv32i_auipc);
-    smudge_opcode_func3(RV32I_JAL, riscv32i_jal);
+    smudge_opcode_UJ(RV32I_LUI, riscv32i_lui);
+    smudge_opcode_UJ(RV32I_AUIPC, riscv32i_auipc);
+    smudge_opcode_UJ(RV32I_JAL, riscv32i_jal);
+    smudge_opcode_UJ(RV32I_SYSTEM, riscv32i_system);
 
+    riscv32_opcodes[RV32I_SLLI] = riscv32i_slli;
     riscv32_opcodes[RV32I_SRLI_SRAI] = riscv32i_srli_srai;
     riscv32_opcodes[RV32I_ADD_SUB] = riscv32i_add_sub;
-    riscv32_opcodes[RV32I_ECALL_EBREAK] = riscv32i_ecall_ebreak;
     riscv32_opcodes[RV32I_SRL_SRA] = riscv32i_srl_sra;
-
-    riscv32_opcodes[RV32I_JALR] = riscv32i_jalr;
-    riscv32_opcodes[RV32I_BEQ] = riscv32i_beq;
-    riscv32_opcodes[RV32I_BNE] = riscv32i_bne;
-    riscv32_opcodes[RV32I_BLT] = riscv32i_blt;
-    riscv32_opcodes[RV32I_BGE] = riscv32i_bge;
-    riscv32_opcodes[RV32I_BLTU] = riscv32i_bltu;
-    riscv32_opcodes[RV32I_BGEU] = riscv32i_bgeu;
-    riscv32_opcodes[RV32I_LB] = riscv32i_lb;
-    riscv32_opcodes[RV32I_LH] = riscv32i_lh;
-    riscv32_opcodes[RV32I_LW] = riscv32i_lw;
-    riscv32_opcodes[RV32I_LBU] = riscv32i_lbu;
-    riscv32_opcodes[RV32I_LHU] = riscv32i_lhu;
-    riscv32_opcodes[RV32I_SB] = riscv32i_sb;
-    riscv32_opcodes[RV32I_SH] = riscv32i_sh;
-    riscv32_opcodes[RV32I_SW] = riscv32i_sw;
-    riscv32_opcodes[RV32I_ADDI] = riscv32i_addi;
-    riscv32_opcodes[RV32I_SLTI] = riscv32i_slti;
-    riscv32_opcodes[RV32I_SLTIU] = riscv32i_sltiu;
-    riscv32_opcodes[RV32I_XORI] = riscv32i_xori;
-    riscv32_opcodes[RV32I_ORI] = riscv32i_ori;
-    riscv32_opcodes[RV32I_ANDI] = riscv32i_andi;
-    riscv32_opcodes[RV32I_SLLI] = riscv32i_slli;
     riscv32_opcodes[RV32I_SLL] = riscv32i_sll;
     riscv32_opcodes[RV32I_SLT] = riscv32i_slt;
     riscv32_opcodes[RV32I_SLTU] = riscv32i_sltu;
     riscv32_opcodes[RV32I_XOR] = riscv32i_xor;
     riscv32_opcodes[RV32I_OR] = riscv32i_or;
     riscv32_opcodes[RV32I_AND] = riscv32i_and;
-    riscv32_opcodes[RV32I_FENCE] = riscv32i_fence;
+
+    smudge_opcode_ISB(RV32I_JALR, riscv32i_jalr);
+    smudge_opcode_ISB(RV32I_BEQ, riscv32i_beq);
+    smudge_opcode_ISB(RV32I_BNE, riscv32i_bne);
+    smudge_opcode_ISB(RV32I_BLT, riscv32i_blt);
+    smudge_opcode_ISB(RV32I_BGE, riscv32i_bge);
+    smudge_opcode_ISB(RV32I_BLTU, riscv32i_bltu);
+    smudge_opcode_ISB(RV32I_BGEU, riscv32i_bgeu);
+    smudge_opcode_ISB(RV32I_LB, riscv32i_lb);
+    smudge_opcode_ISB(RV32I_LH, riscv32i_lh);
+    smudge_opcode_ISB(RV32I_LW, riscv32i_lw);
+    smudge_opcode_ISB(RV32I_LBU, riscv32i_lbu);
+    smudge_opcode_ISB(RV32I_LHU, riscv32i_lhu);
+    smudge_opcode_ISB(RV32I_SB, riscv32i_sb);
+    smudge_opcode_ISB(RV32I_SH, riscv32i_sh);
+    smudge_opcode_ISB(RV32I_SW, riscv32i_sw);
+    smudge_opcode_ISB(RV32I_ADDI, riscv32i_addi);
+    smudge_opcode_ISB(RV32I_SLTI, riscv32i_slti);
+    smudge_opcode_ISB(RV32I_SLTIU, riscv32i_sltiu);
+    smudge_opcode_ISB(RV32I_XORI, riscv32i_xori);
+    smudge_opcode_ISB(RV32I_ORI, riscv32i_ori);
+    smudge_opcode_ISB(RV32I_ANDI, riscv32i_andi);
+    smudge_opcode_ISB(RV32I_FENCE, riscv32i_fence);
 }
 
 // We already check instruction for correct code

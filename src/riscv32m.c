@@ -22,8 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32m.h"
 #include "bit_ops.h"
 
-void (*riscv32m_opcodes[8])(risc32_vm_state_t *vm, const uint32_t instruction);
-
 void riscv32m_mul(risc32_vm_state_t *vm, const uint32_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
@@ -166,18 +164,12 @@ void riscv32m_remu(risc32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_init()
 {
-    riscv32m_opcodes[0] = riscv32m_mul;
-    riscv32m_opcodes[1] = riscv32m_mulh;
-    riscv32m_opcodes[2] = riscv32m_mulhsu;
-    riscv32m_opcodes[3] = riscv32m_mulhu;
-    riscv32m_opcodes[4] = riscv32m_div;
-    riscv32m_opcodes[5] = riscv32m_divu;
-    riscv32m_opcodes[6] = riscv32m_rem;
-    riscv32m_opcodes[7] = riscv32m_remu;
-}
-
-void riscv32m_emulate(risc32_vm_state_t *vm, const uint32_t instruction)
-{
-    uint32_t funct3 = cut_bits(instruction, 12, 3);
-    riscv32m_opcodes[funct3](vm, instruction);
+    riscv32_opcodes[RV32M_MUL] = riscv32m_mul;
+    riscv32_opcodes[RV32M_MULH] = riscv32m_mulh;
+    riscv32_opcodes[RV32M_MULHSU] = riscv32m_mulhsu;
+    riscv32_opcodes[RV32M_MULHU] = riscv32m_mulhu;
+    riscv32_opcodes[RV32M_DIV] = riscv32m_div;
+    riscv32_opcodes[RV32M_DIVU] = riscv32m_divu;
+    riscv32_opcodes[RV32M_REM] = riscv32m_rem;
+    riscv32_opcodes[RV32M_REMU] = riscv32m_remu;
 }

@@ -24,4 +24,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define RISCV32C_VERSION 20 // 2.0
 
-void riscv32m_emulate(risc32_vm_state_t *vm, const uint32_t instruction);
+#define RV32M_MUL          0x10C
+#define RV32M_MULH         0x12C
+#define RV32M_MULHSU       0x14C
+#define RV32M_MULHU        0x16C
+#define RV32M_DIV          0x18C
+#define RV32M_DIVU         0x1AC
+#define RV32M_REM          0x1CC
+#define RV32M_REMU         0x1EC
