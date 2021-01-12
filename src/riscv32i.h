@@ -37,7 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RV32I_LUI          0xD
 #define RV32I_AUIPC        0x5
 #define RV32I_JAL          0x1B
-#define RV32I_SYSTEM       0x1C // let it just be here
 // R-type instructions
 #define RV32I_SLLI         0x24
 #define RV32I_SRLI_SRAI    0xA4
@@ -71,7 +70,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RV32I_XORI         0x84
 #define RV32I_ORI          0xC4
 #define RV32I_ANDI         0xE4
-#define RV32I_FENCE        0x3
 
 /*
 opcode

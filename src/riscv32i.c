@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32i.h"
-#include "riscv32m.h"
 #include "bit_ops.h"
 
 // translate register number into abi name
@@ -154,11 +153,6 @@ static void riscv32i_add_sub(risc32_vm_state_t *vm, const uint32_t instruction)
     } else {
         riscv32_illegal_insn(vm, instruction);
     }
-}
-
-static void riscv32i_system(risc32_vm_state_t *vm, const uint32_t instruction)
-{
-    printf("RV32I: SYSTEM instruction 0x%x in VM %p\n", instruction, vm);
 }
 
 static void riscv32i_srl_sra(risc32_vm_state_t *vm, const uint32_t instruction)
@@ -519,17 +513,11 @@ static void riscv32i_and(risc32_vm_state_t *vm, const uint32_t instruction)
     printf("RV32I: and %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
 }
 
-static void riscv32i_fence(risc32_vm_state_t *vm, const uint32_t instruction)
-{
-    printf("RV32I: FENCE instruction 0x%x in VM %p\n", instruction, vm);
-}
-
 void riscv32i_init()
 {
     smudge_opcode_UJ(RV32I_LUI, riscv32i_lui);
     smudge_opcode_UJ(RV32I_AUIPC, riscv32i_auipc);
     smudge_opcode_UJ(RV32I_JAL, riscv32i_jal);
-    smudge_opcode_UJ(RV32I_SYSTEM, riscv32i_system);
 
     riscv32_opcodes[RV32I_SLLI] = riscv32i_slli;
     riscv32_opcodes[RV32I_SRLI_SRAI] = riscv32i_srli_srai;
@@ -563,7 +551,6 @@ void riscv32i_init()
     smudge_opcode_ISB(RV32I_XORI, riscv32i_xori);
     smudge_opcode_ISB(RV32I_ORI, riscv32i_ori);
     smudge_opcode_ISB(RV32I_ANDI, riscv32i_andi);
-    smudge_opcode_ISB(RV32I_FENCE, riscv32i_fence);
 }
 
 // We already check instruction for correct code

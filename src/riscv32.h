@@ -124,3 +124,4 @@ void riscv32_illegal_insn(risc32_vm_state_t *vm, const uint32_t instruction);
 void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();
+void riscv32_priv_init();
