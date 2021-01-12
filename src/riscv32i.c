@@ -90,20 +90,26 @@ static void riscv32i_auipc(risc32_vm_state_t *vm, const uint32_t instruction)
     printf("RV32I: auipc %s, 0x%x in VM %p\n", riscv32i_translate_register(rds), imm, vm);
 }
 
+inline int32_t riscv32_decode_jal_imm(uint32_t instruction)
+{
+    // May be replaced by translation table
+    uint32_t imm = (cut_bits(instruction, 31, 1) << 20) |
+                   (cut_bits(instruction, 12, 8) << 12) |
+                   (cut_bits(instruction, 20, 1) << 11) |
+                   (cut_bits(instruction, 21, 10) << 1);
+    return sign_extend(imm, 21);
+}
+
 static void riscv32i_jal(risc32_vm_state_t *vm, const uint32_t instruction)
 {
     // Store PC+4 to rds, jump to PC+offset; remember further PC increment!
     // offset is signed imm * 2, left shift one more bit for *2
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t imm = (cut_bits(instruction, 31, 1) << 20) |
-                   (cut_bits(instruction, 12, 8) << 12) |
-                   (cut_bits(instruction, 20, 1) << 11) |
-                   (cut_bits(instruction, 21, 10) << 1);
-    int32_t offset = sign_extend(imm, 21);
+    int32_t offset = riscv32_decode_jal_imm(instruction);
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
 
     riscv32i_write_register_u(vm, rds, pc + 4);
-    riscv32i_write_register_u(vm, REGISTER_PC, ((int32_t)pc) + offset - 4);
+    riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 4);
 
     printf("RV32I: jal %d in VM %p\n", offset, vm);
 }
@@ -116,12 +122,16 @@ static void riscv32i_srli_srai(risc32_vm_state_t *vm, const uint32_t instruction
     uint32_t shamt = cut_bits(instruction, 20, 5);
     uint32_t src_reg = riscv32i_read_register_s(vm, rs1);
 
-    if (cut_bits(instruction, 25, 7)) {
+    uint32_t funct7 = cut_bits(instruction, 25, 7);
+
+    if (funct7 == 0x20) {
         riscv32i_write_register_s(vm, rds, ((int32_t)src_reg) >> shamt);
         printf("RV32I: srai %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
-    } else {
+    } else if (funct7 == 0x0) {
         riscv32i_write_register_u(vm, rds, src_reg >> shamt);
         printf("RV32I: srli %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), shamt, vm);
+    } else {
+        riscv32_illegal_insn(vm, instruction);
     }
 }
 
@@ -160,26 +170,31 @@ static void riscv32i_srl_sra(risc32_vm_state_t *vm, const uint32_t instruction)
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    if (cut_bits(instruction, 25, 7)) {
+    uint32_t funct7 = cut_bits(instruction, 25, 7);
+
+    if (funct7 == 0x20) {
         riscv32i_write_register_s(vm, rds, ((int32_t)reg1) >> (reg2 & gen_mask(5)));
         printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
-    } else {
+    } else if (funct7 == 0x0) {
         riscv32i_write_register_u(vm, rds, reg1 >> (reg2 & gen_mask(5)));
         printf("RV32I: srl %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    } else {
+        riscv32_illegal_insn(vm, instruction);
     }
 }
 
 static void riscv32i_jalr(risc32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Save PC+4 to rds, jump to PC+rs1 (signed)
+    // Save PC+4 to rds, jump to rs1+offset (offset is signed)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t imm = cut_bits(instruction, 20, 12);
-    int32_t offset = sign_extend(imm, 20);
+    int32_t offset = sign_extend(imm, 12);
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+    uint32_t jmp_addr = riscv32i_read_register_u(vm, rs1);
 
     riscv32i_write_register_u(vm, rds, pc + 4);
-    riscv32i_write_register_u(vm, REGISTER_PC, ((((int32_t)pc) + offset)&(~0x1)) - 4);
+    riscv32i_write_register_u(vm, REGISTER_PC, ((jmp_addr + offset)&~1) - 4);
 
     printf("RV32I: jalr %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
