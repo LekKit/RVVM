@@ -24,47 +24,47 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_priv.h"
 #include "bit_ops.h"
 
-static void riscv32i_system(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: SYSTEM instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32i_fence(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32i_fence(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: FENCE instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zifence_i(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zifence_i(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: ZIFENCE_I instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrw(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRW instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrs(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRS instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrc(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRC instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrwi(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRWI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrsi(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRSI instruction 0x%x in VM %p\n", instruction, vm);
 }
 
-static void riscv32zicsr_csrrci(risc32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     printf("RV32priv: CSRRCI instruction 0x%x in VM %p\n", instruction, vm);
 }

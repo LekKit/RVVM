@@ -101,4 +101,4 @@ B type
 opcode  imm[11]  imm[1:4]   funct3   src1 register src2 register imm[5:10] imm[12]
 */
 
-void riscv32i_emulate(risc32_vm_state_t *vm, const uint32_t instruction);
+void riscv32i_emulate(riscv32_vm_state_t *vm, const uint32_t instruction);

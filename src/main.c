@@ -60,7 +60,7 @@ int main(int argc, char **argv)
 
     fclose(fp);
 
-    risc32_vm_state_t *vm = riscv32_create_vm();
+    riscv32_vm_state_t *vm = riscv32_create_vm();
 
     if (!vm) {
         printf("ERROR: VM creation failed.\n");

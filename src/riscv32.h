@@ -68,7 +68,7 @@ enum
     PRIVILEGE_MACHINE
 };
 
-struct risc32_vm_state_s
+struct riscv32_vm_state_s
 {
     uint32_t registers[REGISTERS_MAX];
     uint8_t priv_mode;
@@ -78,7 +78,7 @@ struct risc32_vm_state_s
     uint8_t *code;
 };
 
-typedef struct risc32_vm_state_s risc32_vm_state_t;
+typedef struct riscv32_vm_state_s riscv32_vm_state_t;
 
 #define RISCV32I_OPCODE_MASK 0x3
 
@@ -102,7 +102,7 @@ typedef struct risc32_vm_state_s risc32_vm_state_t;
 */
 #define RISCV32_GET_FUNCID(x) (((x >> 17) & 0x100) | ((x >> 7) & 0xE0) | ((x >> 2) & 0x1F))
 
-extern void (*riscv32_opcodes[512])(risc32_vm_state_t *vm, const uint32_t instruction);
+extern void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
 
 /*
 * The trick mentioned earlier, to decode non-R type instructions properly.
@@ -110,15 +110,15 @@ extern void (*riscv32_opcodes[512])(risc32_vm_state_t *vm, const uint32_t instru
 * smudge_opcode_ISB for I/S/B types (no func7, but has func3)
 * R-type instructions (both func3 and func7 present) are simply put into table
 */
-void smudge_opcode_UJ(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
-void smudge_opcode_ISB(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t));
+void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
+void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 
-risc32_vm_state_t *riscv32_create_vm();
-void riscv32_run(risc32_vm_state_t *vm);
-void riscv32_destroy_vm(risc32_vm_state_t *vm);
-void riscv32_dump_registers(risc32_vm_state_t *vm);
-void riscv32_illegal_insn(risc32_vm_state_t *vm, const uint32_t instruction);
-void riscv32c_illegal_insn(risc32_vm_state_t *vm, const uint16_t instruction);
+riscv32_vm_state_t *riscv32_create_vm();
+void riscv32_run(riscv32_vm_state_t *vm);
+void riscv32_destroy_vm(riscv32_vm_state_t *vm);
+void riscv32_dump_registers(riscv32_vm_state_t *vm);
+void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction);
+void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction);
 void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();

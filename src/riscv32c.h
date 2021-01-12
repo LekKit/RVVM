@@ -83,4 +83,4 @@ opcode   imm    rds/rs1      imm    funct3
 
 */
 
-void riscv32c_emulate(risc32_vm_state_t *vm, uint16_t instruction);
+void riscv32c_emulate(riscv32_vm_state_t *vm, uint16_t instruction);
