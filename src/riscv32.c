@@ -32,9 +32,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void (*riscv32_opcodes[512])(risc32_vm_state_t *vm, const uint32_t instruction);
 
+// This should redirect the VM to the trap handlers when they are implemented
+void riscv32c_illegal_insn(risc32_vm_state_t *vm, const uint16_t instruction)
+{
+    printf("RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_dump_registers(vm);
+    exit(0);
+}
+
 void riscv32_illegal_insn(risc32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_error(vm, "RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    printf("RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_dump_registers(vm);
+    exit(0);
 }
 
 void smudge_opcode_UJ(uint32_t opcode, void (*func)(risc32_vm_state_t*, const uint32_t))
@@ -84,32 +94,9 @@ void riscv32_dump_registers(risc32_vm_state_t *vm)
     printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
-void riscv32_error(risc32_vm_state_t *vm, const char *fmt, ...)
-{
-    assert(vm);
-    assert(fmt);
-
-    vm->error = true;
-
-    va_list va;
-    va_start(va, fmt);
-    int len = vsnprintf(vm->error_string, sizeof (vm->error_string), fmt, va);
-    va_end(va);
-
-    if (len < 0)
-    {
-        err(EXIT_FAILURE, "vsnprintf");
-    }
-
-    riscv32_dump_registers(vm);
-
-    longjmp(vm->jump_buff, 1);
-}
-
 void riscv32_exec_instruction(risc32_vm_state_t *vm)
 {
     // FYI: Any jump instruction implementation should take care of PC increment
-    // TODO: proper error handling (maybe not here)
     if ((vm->code[vm->registers[REGISTER_PC]] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
         // 16-bit opcode
         riscv32c_emulate(vm, read_uint16_le(vm->code+vm->registers[REGISTER_PC]));
@@ -126,12 +113,6 @@ void riscv32_run(risc32_vm_state_t *vm)
 {
     assert(vm);
     assert(vm->code);
-
-    switch (setjmp(vm->jump_buff)) {
-    case 0: break;
-    case 1: printf("vm error: %s\n", vm->error_string);
-    default: return;
-    }
 
     while (vm->registers[REGISTER_PC] != vm->code_len) {
         riscv32_exec_instruction(vm);

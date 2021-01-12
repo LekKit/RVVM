@@ -30,11 +30,6 @@ static inline uint32_t riscv32c_reg(uint32_t reg)
     return REGISTER_X8 + reg;
 }
 
-static void riscv32c_illegal_insn(risc32_vm_state_t *vm, const uint16_t instruction)
-{
-    riscv32_error(vm, "RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
-}
-
 static void riscv32c_addi4spn(risc32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add imm*4 to stack pointer (X2), store into rds
