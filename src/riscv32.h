@@ -60,27 +60,25 @@ enum
     REGISTERS_MAX
 };
 
-typedef struct risc32_vm_state_s risc32_vm_state_t;
-
-typedef struct {
-    uint32_t start;
-    uint32_t end;
-    const char *name;
-    void (*function)(risc32_vm_state_t *vm, uint32_t operation, uint32_t addr, uint32_t data);
-} memory_map_t;
+enum
+{
+    PRIVILEGE_USER,
+    PRIVILEGE_SUPERVISOR,
+    PRIVILEGE_HYPERVISOR,
+    PRIVILEGE_MACHINE
+};
 
 struct risc32_vm_state_s
 {
-    uint32_t cpu_instruction_flags;
-    uint32_t cpu_flags;
-    jmp_buf jump_buff;
-    bool error;
-    char error_string[4096];
-    uint8_t *code;
-    uint32_t code_len;
     uint32_t registers[REGISTERS_MAX];
-    memory_map_t *memory_map;
+    uint8_t priv_mode;
+
+    // Those will be replaced by proper memory address space soon
+    uint32_t code_len;
+    uint8_t *code;
 };
+
+typedef struct risc32_vm_state_s risc32_vm_state_t;
 
 #define RISCV32I_OPCODE_MASK 0x3
 

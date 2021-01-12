@@ -75,6 +75,8 @@ risc32_vm_state_t *riscv32_create_vm()
     memset(vm, 0, sizeof(risc32_vm_state_t));
     // Put other stuff here
 
+    vm->priv_mode = PRIVILEGE_MACHINE;
+
     return vm;
 }
 
