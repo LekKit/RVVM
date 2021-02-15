@@ -68,17 +68,32 @@ enum
     PRIVILEGE_MACHINE
 };
 
-struct riscv32_vm_state_s
-{
+#define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
+
+// Address translation cache
+typedef struct {
+    uint32_t pte;    // Upper 20 bits of virtual address + access bits
+    uint8_t* ptr;    // Page address in emulator memory
+} riscv32_tlb_t;
+
+typedef struct {
+    uint8_t* data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
+    uint32_t begin;  // First usable address in physical memory
+    uint32_t size;   // Amount of usable memory after mem_begin
+} riscv32_phys_mem_t;
+
+typedef struct {
     uint32_t registers[REGISTERS_MAX];
+    riscv32_phys_mem_t mem;
+    riscv32_tlb_t tlb[TLB_SIZE];
+    uint32_t root_page_table;
+    bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
 
     // Those will be replaced by proper memory address space soon
     uint32_t code_len;
     uint8_t *code;
-};
-
-typedef struct riscv32_vm_state_s riscv32_vm_state_t;
+} riscv32_vm_state_t;
 
 #define RISCV32I_OPCODE_MASK 0x3
 
