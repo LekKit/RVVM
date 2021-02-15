@@ -89,10 +89,6 @@ typedef struct {
     uint32_t root_page_table;
     bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
-
-    // Those will be replaced by proper memory address space soon
-    uint32_t code_len;
-    uint8_t *code;
 } riscv32_vm_state_t;
 
 #define RISCV32I_OPCODE_MASK 0x3

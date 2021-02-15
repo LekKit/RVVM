@@ -84,6 +84,7 @@ riscv32_vm_state_t *riscv32_create_vm()
     riscv32_tlb_flush(vm);
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
+    vm->registers[REGISTER_PC] = vm->mem.begin;
 
     return vm;
 }
@@ -107,25 +108,30 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
 
 void riscv32_exec_instruction(riscv32_vm_state_t *vm)
 {
+    uint8_t instruction[4];
+    // This could cause a trap executing RVC instruction at the end of the page
+    // Should be fixed at some point but is not a priority nor issue
+    if (!riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC))
+        return;
     // FYI: Any jump instruction implementation should take care of PC increment
-    if ((vm->code[vm->registers[REGISTER_PC]] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
+    if ((instruction[0] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
         // 16-bit opcode
-        riscv32c_emulate(vm, read_uint16_le(vm->code+vm->registers[REGISTER_PC]));
+        riscv32c_emulate(vm, read_uint16_le(instruction));
         vm->registers[REGISTER_PC] += 2;
     } else {
-        riscv32i_emulate(vm, read_uint32_le(vm->code+vm->registers[REGISTER_PC]));
+        riscv32i_emulate(vm, read_uint32_le(instruction));
         vm->registers[REGISTER_PC] += 4;
     }
 
     riscv32_dump_registers(vm);
+    getchar();
 }
 
 void riscv32_run(riscv32_vm_state_t *vm)
 {
     assert(vm);
-    assert(vm->code);
 
-    while (vm->registers[REGISTER_PC] != vm->code_len) {
+    while (true) {
         riscv32_exec_instruction(vm);
     }
 }
