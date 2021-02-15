@@ -26,6 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32_mmu.h"
 #include "riscv32i.h"
 #include "riscv32c.h"
 #include "mem_ops.h"
@@ -73,8 +74,15 @@ riscv32_vm_state_t *riscv32_create_vm()
 
     riscv32_vm_state_t *vm = (riscv32_vm_state_t*)malloc(sizeof(riscv32_vm_state_t));
     memset(vm, 0, sizeof(riscv32_vm_state_t));
-    // Put other stuff here
 
+    // 0x10000 pages = 256M
+    if (!riscv32_init_phys_mem(&vm->mem, 0x80000000, 0x10000)) {
+        printf("Failed to allocate VM physical RAM!\n");
+        free(vm);
+        return NULL;
+    }
+    riscv32_tlb_flush(vm);
+    vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
 
     return vm;
@@ -82,6 +90,7 @@ riscv32_vm_state_t *riscv32_create_vm()
 
 void riscv32_destroy_vm(riscv32_vm_state_t *vm)
 {
+    riscv32_destroy_phys_mem(&vm->mem);
     free(vm);
 }
 
