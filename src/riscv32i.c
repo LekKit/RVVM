@@ -314,7 +314,7 @@ static void riscv32i_bgeu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lb(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Read 8-bit signed integer from address rs1+offset (offset is signed)
+    // Read 8-bit signed integer from address rs1+offset (offset is signed) to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
@@ -331,7 +331,7 @@ static void riscv32i_lb(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lh(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Read 16-bit signed integer from address rs1+offset (offset is signed)
+    // Read 16-bit signed integer from address rs1+offset (offset is signed) to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
@@ -348,7 +348,7 @@ static void riscv32i_lh(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lw(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Read 32-bit integer from address rs1+offset (offset is signed)
+    // Read 32-bit integer from address rs1+offset (offset is signed) to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
@@ -365,7 +365,7 @@ static void riscv32i_lw(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lbu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Read 8-bit unsigned integer from address rs1+offset (offset is signed)
+    // Read 8-bit unsigned integer from address rs1+offset (offset is signed) to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
@@ -382,7 +382,7 @@ static void riscv32i_lbu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lhu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Read 16-bit unsigned integer from address rs1+offset (offset is signed)
+    // Read 16-bit unsigned integer from address rs1+offset (offset is signed) to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);

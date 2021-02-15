@@ -99,7 +99,20 @@ static void riscv32c_fldsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 
 static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: LW instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 32-bit integer from address rs1+offset to rds
+    uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
+    uint32_t rs1 = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t offset = (cut_bits(instruction, 5, 1)  << 2) |
+                      (cut_bits(instruction, 10, 3) << 3) |
+                      (cut_bits(instruction, 6, 1)  << 6);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[sizeof(uint32_t)];
+
+    if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, read_uint32_le(val));
+    }
+    printf("RVC: c.lw %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -114,7 +127,19 @@ static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
 
 static void riscv32c_lwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: LWSP instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 32-bit integer from address sp+offset to rds
+    uint32_t rds = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t offset = (cut_bits(instruction, 4, 3)  << 2) |
+                      (cut_bits(instruction, 12, 1) << 5) |
+                      (cut_bits(instruction, 2, 2)  << 6);
+
+    uint32_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(uint32_t)];
+
+    if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, read_uint32_le(val));
+    }
+    printf("RVC: c.lwsp %s, %d in VM %p\n", riscv32i_translate_register(rds), offset, vm);
 }
 
 static void riscv32c_flw(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -270,7 +295,19 @@ static void riscv32c_fsdsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 
 static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: SW instruction 0x%x in VM %p\n", instruction, vm);
+    // Write 32-bit integer rs2 to address rs1+offset
+    uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 2, 3));
+    uint32_t rs1 = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t offset = (cut_bits(instruction, 5, 1)  << 2) |
+                      (cut_bits(instruction, 10, 3) << 3) |
+                      (cut_bits(instruction, 6, 1)  << 6);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[sizeof(uint32_t)];
+    write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
+    riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+
+    printf("RVC: c.sw %s, %s, %d in VM %p\n", riscv32i_translate_register(rs2), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -293,7 +330,17 @@ static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
 
 static void riscv32c_swsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: SWSP instruction 0x%x in VM %p\n", instruction, vm);
+    // Write 32-bit integer rs2 to address sp+offset
+    uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t offset = (cut_bits(instruction, 9, 4)  << 2) |
+                      (cut_bits(instruction, 7, 2) << 6);
+
+    uint32_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(uint32_t)];
+    write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
+    riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+
+    printf("RVC: c.swsp %s, %d in VM %p\n", riscv32i_translate_register(rs2), offset, vm);
 }
 
 static void riscv32c_fsw(riscv32_vm_state_t *vm, const uint16_t instruction)
