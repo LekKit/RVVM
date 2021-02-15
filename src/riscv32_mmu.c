@@ -107,7 +107,7 @@ bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pag
     if (begin & 0xFFF) return false;
     void* tmp = calloc(pages, 4096);
     if (!tmp) return false;
-    mem->data = tmp + begin;
+    mem->data = tmp - begin;
     mem->begin = begin;
     mem->size = pages * 4096;
     return true;
