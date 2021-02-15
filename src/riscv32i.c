@@ -403,7 +403,7 @@ static void riscv32i_sb(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
-                                (cut_bits(instruction, 20, 7) << 5), 12);
+                                (cut_bits(instruction, 25, 7) << 5), 12);
 
     uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val = riscv32i_read_register_u(vm, rs2);
@@ -419,7 +419,7 @@ static void riscv32i_sh(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
-                                (cut_bits(instruction, 20, 7) << 5), 12);
+                                (cut_bits(instruction, 25, 7) << 5), 12);
 
     uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[2];
@@ -436,7 +436,7 @@ static void riscv32i_sw(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
-                                (cut_bits(instruction, 20, 7) << 5), 12);
+                                (cut_bits(instruction, 25, 7) << 5), 12);
 
     uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[4];
