@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32_mmu.h"
 #include "riscv32i.h"
 #include "bit_ops.h"
 
@@ -313,42 +314,137 @@ static void riscv32i_bgeu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_lb(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: LB instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 8-bit signed integer from address rs1+offset (offset is signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val;
+
+    if (riscv32_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, sign_extend(val, 8));
+    }
+
+    printf("RV32I: lb %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_lh(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: LH instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 16-bit signed integer from address rs1+offset (offset is signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[sizeof(uint16_t)];
+
+    if (riscv32_mem_op(vm, addr, val, sizeof(uint16_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, sign_extend(read_uint16_le(val), 16));
+    }
+
+    printf("RV32I: lh %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_lw(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: LW instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 32-bit integer from address rs1+offset (offset is signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[sizeof(uint32_t)];
+
+    if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, sign_extend(read_uint32_le(val), 32));
+    }
+
+    printf("RV32I: lw %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_lbu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: LBU instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 8-bit unsigned integer from address rs1+offset (offset is signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val;
+
+    if (riscv32_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, val);
+    }
+
+    printf("RV32I: lbu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_lhu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: LHU instruction 0x%x in VM %p\n", instruction, vm);
+    // Read 16-bit unsigned integer from address rs1+offset (offset is signed)
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 20, 12), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[sizeof(uint16_t)];
+
+    if (riscv32_mem_op(vm, addr, val, sizeof(uint16_t), MMU_READ)) {
+        riscv32i_write_register_u(vm, rds, read_uint16_le(val));
+    }
+
+    printf("RV32I: lhu %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_sb(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: SB instruction 0x%x in VM %p\n", instruction, vm);
+    // Write 8-bit integer rs2 to address rs1+offset (offset is signed)
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
+                                (cut_bits(instruction, 20, 7) << 5), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val = riscv32i_read_register_u(vm, rs2);
+
+    riscv32_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_WRITE);
+
+    printf("RV32I: sb %s, %s, %d in VM %p\n", riscv32i_translate_register(rs2), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_sh(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: SH instruction 0x%x in VM %p\n", instruction, vm);
+    // Write 16-bit integer rs2 to address rs1+offset (offset is signed)
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
+                                (cut_bits(instruction, 20, 7) << 5), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[2];
+    write_uint16_le(val, riscv32i_read_register_u(vm, rs2));
+
+    riscv32_mem_op(vm, addr, val, sizeof(uint16_t), MMU_WRITE);
+
+    printf("RV32I: sh %s, %s, %d in VM %p\n", riscv32i_translate_register(rs2), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_sw(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32I: SW instruction 0x%x in VM %p\n", instruction, vm);
+    // Write 32-bit integer rs2 to address rs1+offset (offset is signed)
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    int32_t offset = sign_extend(cut_bits(instruction, 7, 5) |
+                                (cut_bits(instruction, 20, 7) << 5), 12);
+
+    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    uint8_t val[4];
+    write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
+
+    riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+
+    printf("RV32I: sw %s, %s, %d in VM %p\n", riscv32i_translate_register(rs2), riscv32i_translate_register(rs1), offset, vm);
 }
 
 static void riscv32i_addi(riscv32_vm_state_t *vm, const uint32_t instruction)
