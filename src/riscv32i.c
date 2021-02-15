@@ -357,7 +357,7 @@ static void riscv32i_lw(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint8_t val[sizeof(uint32_t)];
 
     if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
-        riscv32i_write_register_u(vm, rds, sign_extend(read_uint32_le(val), 32));
+        riscv32i_write_register_u(vm, rds, read_uint32_le(val));
     }
 
     printf("RV32I: lw %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
