@@ -35,10 +35,10 @@ static void riscv32c_addi4spn(riscv32_vm_state_t *vm, const uint16_t instruction
 {
     // Add imm*4 to stack pointer (X2), store into rds
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
-    uint32_t imm = (cut_bits(instruction, 11, 2) << 8) |
-                   (cut_bits(instruction, 7, 4) << 4) |
-                   (cut_bits(instruction, 5, 1) << 3) |
-                   (cut_bits(instruction, 6, 1) << 2);
+    uint32_t imm =  (cut_bits(instruction, 6, 1)  << 2) |
+                    (cut_bits(instruction, 5, 1)  << 3) |
+                    (cut_bits(instruction, 11, 2) << 4) |
+                    (cut_bits(instruction, 7, 4)  << 6);
     uint32_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
     riscv32i_write_register_u(vm, rds, rsp + imm);
     printf("RVC: c.addi4spn %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
