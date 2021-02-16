@@ -284,7 +284,7 @@ static void riscv32i_bltu(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t pc;
     int32_t offset;
 
-    if (riscv32i_read_register_u(vm, rs1) > riscv32i_read_register_u(vm, rs2)) {
+    if (riscv32i_read_register_u(vm, rs1) < riscv32i_read_register_u(vm, rs2)) {
         offset = riscv32_decode_branch_imm(instruction);
 
         pc = riscv32i_read_register_u(vm, REGISTER_PC);
