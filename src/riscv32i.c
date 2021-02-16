@@ -278,7 +278,7 @@ static void riscv32i_bge(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_bltu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    // Conditional jump when rs1 > rs2
+    // Conditional jump when rs1 < rs2
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     uint32_t pc;

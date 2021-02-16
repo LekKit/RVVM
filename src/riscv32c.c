@@ -102,9 +102,9 @@ static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
     // Read 32-bit integer from address rs1+offset to rds
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
     uint32_t rs1 = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t offset = (cut_bits(instruction, 5, 1)  << 2) |
+    uint32_t offset = (cut_bits(instruction, 6, 1)  << 2) |
                       (cut_bits(instruction, 10, 3) << 3) |
-                      (cut_bits(instruction, 6, 1)  << 6);
+                      (cut_bits(instruction, 5, 1)  << 6);
 
     uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[sizeof(uint32_t)];
@@ -128,7 +128,7 @@ static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_lwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Read 32-bit integer from address sp+offset to rds
-    uint32_t rds = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t offset = (cut_bits(instruction, 4, 3)  << 2) |
                       (cut_bits(instruction, 12, 1) << 5) |
                       (cut_bits(instruction, 2, 2)  << 6);
@@ -298,9 +298,9 @@ static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
     // Write 32-bit integer rs2 to address rs1+offset
     uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 2, 3));
     uint32_t rs1 = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t offset = (cut_bits(instruction, 5, 1)  << 2) |
+    uint32_t offset = (cut_bits(instruction, 6, 1)  << 2) |
                       (cut_bits(instruction, 10, 3) << 3) |
-                      (cut_bits(instruction, 6, 1)  << 6);
+                      (cut_bits(instruction, 5, 1)  << 6);
 
     uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[sizeof(uint32_t)];
@@ -331,9 +331,9 @@ static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_swsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Write 32-bit integer rs2 to address sp+offset
-    uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 7, 3));
+    uint32_t rs2 = cut_bits(instruction, 2, 5);
     uint32_t offset = (cut_bits(instruction, 9, 4)  << 2) |
-                      (cut_bits(instruction, 7, 2) << 6);
+                      (cut_bits(instruction, 7, 2)  << 6);
 
     uint32_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(uint32_t)];
