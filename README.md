@@ -20,7 +20,8 @@ RISC-V CPU & System software implementation written in С
 Currently builds on *nix systems using GNU Make. Actual code however is cross-platform and more build targets are going to be supported, including Windows, or even embedded systems.
 The bootrom.bin file is a user-provided raw binary, loaded at 0x80000000 address where it starts execution.
 ```
-git clone https://github.com/Mr0maks/rvvm
+git clone https://github.com/LekKit/RVVM
+cd RVVM
 make
 cd release.linux.x86_64
 ./rvvm_x86_64 bootrom.bin
