@@ -21,12 +21,50 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32_mmu.h"
 #include "riscv32_priv.h"
 #include "bit_ops.h"
 
 static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: SYSTEM instruction 0x%x in VM %p\n", instruction, vm);
+    switch (instruction) {
+    case RV32_S_ECALL:
+        printf("RV32priv: ecall in VM %p\n", vm);
+        return;
+    case RV32_S_EBREAK:
+        printf("RV32priv: ebreak in VM %p\n", vm);
+        return;
+    case RV32_S_URET:
+        printf("RV32priv: uret in VM %p\n", vm);
+        return;
+    case RV32_S_SRET:
+        printf("RV32priv: sret in VM %p\n", vm);
+        return;
+    case RV32_S_MRET:
+        printf("RV32priv: mret in VM %p\n", vm);
+        return;
+    case RV32_S_WFI:
+        printf("RV32priv: wfi in VM %p\n", vm);
+        return;
+    }
+
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    switch (instruction & RV32_S_FENCE_MASK) {
+    case RV32_S_SFENCE_VMA:
+        riscv32_tlb_flush(vm);
+        printf("RV32priv: sfence.vma %s, %s in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+        return;
+    // The extension is not ratified yet, no reason to implement these now
+    case RV32_S_HFENCE_BVMA:
+        printf("RV32priv: hfence.bvma instruction 0x%x in VM %p\n", instruction, vm);
+        return;
+    case RV32_S_HFENCE_GVMA:
+        printf("RV32priv: hfence.gvma instruction 0x%x in VM %p\n", instruction, vm);
+        return;
+    }
+
+    riscv32_illegal_insn(vm, instruction);
 }
 
 static void riscv32i_fence(riscv32_vm_state_t *vm, const uint32_t instruction)

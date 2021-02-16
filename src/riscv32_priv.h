@@ -35,3 +35,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RV32_ZICSR_CSRRWI  0xBC
 #define RV32_ZICSR_CSRRSI  0xDC
 #define RV32_ZICSR_CSRRCI  0xFC
+
+// Precise instruction values for SYSTEM opcode decoding
+#define RV32_S_ECALL       0x73
+#define RV32_S_EBREAK      0x100073
+#define RV32_S_URET        0x200073
+#define RV32_S_SRET        0x10200073
+#define RV32_S_MRET        0x30200073
+#define RV32_S_WFI         0x10500073
+
+// Privileged FENCE instructions mask and decoding
+#define RV32_S_FENCE_MASK  0xFE007FFF
+#define RV32_S_SFENCE_VMA  0x12000073
+#define RV32_S_HFENCE_BVMA 0x22000073
+#define RV32_S_HFENCE_GVMA 0xA2000073
