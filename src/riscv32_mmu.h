@@ -66,6 +66,12 @@ bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pag
 // Free emulator memory and VM physical addrspace
 void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem);
 
+// Register MMIO range in the physical address space
+void riscv32_mmio_add(riscv32_vm_state_t* vm, uint32_t begin, uint32_t end, bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access));
+
+// Remove MMIO range (whatever addr in the range will do)
+void riscv32_mmio_remove(riscv32_vm_state_t* vm, uint32_t addr);
+
 // Flush the TLB (on context switch, SFENCE.VMA, etc)
 void riscv32_tlb_flush(riscv32_vm_state_t* vm);
 

@@ -82,14 +82,26 @@ typedef struct {
     uint32_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
+typedef struct riscv32_vm_state_t riscv32_vm_state_t;
+
 typedef struct {
+    uint32_t count;
+    struct {
+        uint32_t begin;
+        uint32_t end;
+        bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+    } regions[256];
+} riscv32_mmio_regions_t;
+
+struct riscv32_vm_state_t {
     uint32_t registers[REGISTERS_MAX];
     riscv32_phys_mem_t mem;
     riscv32_tlb_t tlb[TLB_SIZE];
+    riscv32_mmio_regions_t mmio;
     uint32_t root_page_table;
     bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
-} riscv32_vm_state_t;
+};
 
 #define RISCV32I_OPCODE_MASK 0x3
 
