@@ -30,27 +30,13 @@ ifeq ($(TCC), 1)
 CC=tcc
 endif
 
-OPT_CFLAGS = -O2 -funroll-loops -fno-omit-frame-pointer
+OPT_CFLAGS = -O2 -flto
 
-BASE_CFLAGS = -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -fcommon -fPIC -fstack-protector-all
+BASE_CFLAGS = -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra
 
 ARCH=$(shell uname -m)
 
 COMMIT := $(firstword $(shell git rev-parse --short=6 HEAD) unknown)
-
-ifeq ($(ARCH), i686)
-ARCH_CFLAGS +=-msse3 -march=i686 -mtune=generic
-else ifeq ($(ARCH), x86_64)
-ARCH_CFLAGS +=-msse3 -mtune=generic
-ifeq ($(TARGET_ARCH), i686)
-ARCH = i686
-ARCH_CFLAGS +=-m32 -msse3 -march=i686 -mtune=generic
-endif
-else ifeq ($(ARCH), aarch64)
-ARCH_CFLAGS +=
-else ifeq (, $(findstring arm,$(ARCH_UNAME)))
-ARCH_CFLAGS +=
-endif
 
 ifeq ($(DEBUG),1)
 BUILD_TYPE = debug
@@ -70,7 +56,7 @@ CFLAGS = $(BUILD_TYPE_CFLAGS) $(BASE_CFLAGS) $(OPT_CFLAGS) $(ARCH_CFLAGS)
 
 INCLUDE=-I. -I$(SRCDIR)
 
-LDFLAGS += -ldl -flto
+LDFLAGS += -flto
 
 DO_CC=$(CC) $(CFLAGS) $(INCLUDE) -o $@ -c $<
 
