@@ -86,7 +86,10 @@ bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_
 
     // check read only
     if(access == 0x3)
-        return false;
+    {
+        riscv32i_write_register_u(vm, rds, self->value);
+        return true;
+    }
 
     //TODO: error here?
     if(vm->priv_mode < minimal_level)
