@@ -6,9 +6,3 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdbool.h>
-
-enum
-{
-    OPERATION_READ,
-    OPERATION_WRITE,
-};

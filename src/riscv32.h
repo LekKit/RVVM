@@ -70,6 +70,8 @@ enum
 
 #define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
 
+typedef struct riscv32_vm_state_s riscv32_vm_state_t;
+
 // Address translation cache
 typedef struct {
     uint32_t pte;    // Upper 20 bits of virtual address + access bits
@@ -82,14 +84,22 @@ typedef struct {
     uint32_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
-typedef struct {
+typedef struct riscv32_csr_s {
+    const char *name;
+    void (*callback_w)(riscv32_vm_state_t *vm, struct riscv32_csr_s*self, uint32_t value);
+    uint32_t (*callback_r)(riscv32_vm_state_t *vm, struct riscv32_csr_s *self);
+    uint32_t value;
+} riscv32_csr_t;
+
+struct riscv32_vm_state_s {
     uint32_t registers[REGISTERS_MAX];
     riscv32_phys_mem_t mem;
     riscv32_tlb_t tlb[TLB_SIZE];
     uint32_t root_page_table;
+    riscv32_csr_t csr[4][256];
     bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
-} riscv32_vm_state_t;
+};
 
 #define RISCV32I_OPCODE_MASK 0x3
 
@@ -101,9 +111,9 @@ typedef struct {
 #define RISCV32_IIS_I (1u << 1) // base and minimal ISA with 32 registers
 #define RISCV32_IIS_E (1u << 2) // base and minimal ISA with 16 registers
 
-#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 0) // mark cpu with custom opcodes to enable hacks
-#define RISCV32_HAVE_M_EXTENSION (1u << 1) // multiplication and division for intergers
-#define RISCV32_HAVE_C_EXTENSION (1u << 2) // compressed instructions extension
+#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 3) // mark cpu with custom opcodes to enable hacks
+#define RISCV32_HAVE_M_EXTENSION (1u << 4) // multiplication and division for intergers
+#define RISCV32_HAVE_C_EXTENSION (1u << 5) // compressed instructions extension
 
 /*
 * Concatenate func7[25] func3[14:12] and opcode[6:2] into 9-bit id for decoding.
