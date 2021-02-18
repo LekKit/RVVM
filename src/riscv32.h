@@ -70,8 +70,6 @@ enum
 
 #define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
 
-typedef struct riscv32_vm_state_s riscv32_vm_state_t;
-
 // Address translation cache
 typedef struct {
     uint32_t pte;    // Upper 20 bits of virtual address + access bits
@@ -84,17 +82,29 @@ typedef struct {
     uint32_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
+typedef struct riscv32_vm_state_t riscv32_vm_state_t;
+
 typedef struct riscv32_csr_s {
     const char *name;
-    void (*callback_w)(riscv32_vm_state_t *vm, struct riscv32_csr_s*self, uint32_t value);
-    uint32_t (*callback_r)(riscv32_vm_state_t *vm, struct riscv32_csr_s *self);
+    void (*callback_w)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self, uint32_t value);
+    uint32_t (*callback_r)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self);
     uint32_t value;
 } riscv32_csr_t;
 
-struct riscv32_vm_state_s {
+typedef struct {
+    uint32_t count;
+    struct {
+        uint32_t begin;
+        uint32_t end;
+        bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+    } regions[256];
+} riscv32_mmio_regions_t;
+
+struct riscv32_vm_state_t {
     uint32_t registers[REGISTERS_MAX];
     riscv32_phys_mem_t mem;
     riscv32_tlb_t tlb[TLB_SIZE];
+    riscv32_mmio_regions_t mmio;
     uint32_t root_page_table;
     riscv32_csr_t csr[4][256];
     bool mmu_virtual; // To be replaced by CSR
@@ -133,6 +143,18 @@ extern void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instr
 */
 void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
+
+//#define RV_DEBUG
+
+void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...);
+
+#ifdef RV_DEBUG
+#define riscv32_debug riscv32_debug_always
+#else
+#define riscv32_debug(...)
+#endif
+
+#define UNUSED(x) (void)x
 
 riscv32_vm_state_t *riscv32_create_vm();
 void riscv32_run(riscv32_vm_state_t *vm);

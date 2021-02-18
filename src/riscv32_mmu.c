@@ -28,7 +28,9 @@ inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
 // Memory traps fall here
 static void riscv32_mmu_trap(riscv32_vm_state_t* vm, uint32_t addr)
 {
-    printf("MMU trap at %p in VM %p\n", (void*)(uintptr_t)addr, vm);
+    riscv32_debug_always(vm, "MMU: trap at %h", addr);
+    riscv32_dump_registers(vm);
+    exit(0);
 }
 
 // Put address translation into TLB
@@ -95,10 +97,13 @@ static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, ui
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv32_mmio_check(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
-    // TODO: Check MMIO regions, call appropriate handlers
-    printf("Non-RAM range physical access %d:%p at addr %p size %d in vm %p\n", access, dest, (void*)(uintptr_t)addr, size, vm);
+    for (uint32_t i=0; i<vm->mmio.count; ++i) {
+        if (addr >= vm->mmio.regions[i].begin && addr <= vm->mmio.regions[i].end) {
+            return vm->mmio.regions[i].handler(vm, addr, dest, size, access);
+        }
+    }
     return false;
 }
 
@@ -121,6 +126,31 @@ void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem)
     mem->size = 0;
 }
 
+void riscv32_mmio_add(riscv32_vm_state_t* vm, uint32_t begin, uint32_t end, bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access))
+{
+    if (vm->mmio.count > 255) {
+        printf("ERROR: Too much MMIO zones!\n");
+        exit(0);
+    }
+    vm->mmio.regions[vm->mmio.count].begin = begin;
+    vm->mmio.regions[vm->mmio.count].end = end;
+    vm->mmio.regions[vm->mmio.count].handler = handler;
+    vm->mmio.count++;
+}
+
+void riscv32_mmio_remove(riscv32_vm_state_t* vm, uint32_t addr)
+{
+    for (uint32_t i=0; i<vm->mmio.count; ++i) {
+        if (addr >= vm->mmio.regions[i].begin && addr <= vm->mmio.regions[i].end) {
+            vm->mmio.count--;
+            for (uint32_t j=i; j<vm->mmio.count; ++j) {
+                vm->mmio.regions[j] = vm->mmio.regions[j+1];
+            }
+            return;
+        }
+    }
+}
+
 void riscv32_tlb_flush(riscv32_vm_state_t* vm)
 {
     // No ASID support as of now (TLB is quite small, there are no benefits)
@@ -141,7 +171,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
         // Handle misalign between 2 pages
         uint8_t part_size = 4096 - (addr & 0xFFF);
         return riscv32_mmu_op(vm, addr, dest, part_size, access) &&
-               riscv32_mmu_op(vm, addr, dest + part_size, size - part_size, access);
+               riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
     }
     uint32_t phys_addr;
     // Translation function also checks access rights and caches addr translation in TLB
@@ -155,7 +185,9 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
             return true;
         }
         // Physical address not in memory region, check MMIO
-        return riscv32_mmio_check(vm, addr, dest, size, access);
+        if (riscv32_mmio_op(vm, addr, dest, size, access)) {
+            return true;
+        }
     }
     // Memory access fault (address translation fault, bad physical address)
     // Trap the CPU & tell the caller to discard operation

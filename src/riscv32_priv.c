@@ -30,38 +30,40 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     switch (instruction) {
     case RV32_S_ECALL:
-        printf("RV32priv: ecall in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: ecall");
         return;
     case RV32_S_EBREAK:
-        printf("RV32priv: ebreak in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: ebreak");
         return;
     case RV32_S_URET:
-        printf("RV32priv: uret in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: uret");
         return;
     case RV32_S_SRET:
-        printf("RV32priv: sret in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: sret");
         return;
     case RV32_S_MRET:
-        printf("RV32priv: mret in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: mret");
         return;
     case RV32_S_WFI:
-        printf("RV32priv: wfi in VM %p\n", vm);
+        riscv32_debug(vm, "RV32I: wfi");
         return;
     }
 
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
+    UNUSED(rs1);
+    UNUSED(rs2);
     switch (instruction & RV32_S_FENCE_MASK) {
     case RV32_S_SFENCE_VMA:
         riscv32_tlb_flush(vm);
-        printf("RV32priv: sfence.vma %s, %s in VM %p\n", riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+        riscv32_debug(vm, "RV32I: sfence.vma %r, %r", rs1, rs1);
         return;
     // The extension is not ratified yet, no reason to implement these now
     case RV32_S_HFENCE_BVMA:
-        printf("RV32priv: hfence.bvma instruction 0x%x in VM %p\n", instruction, vm);
+        riscv32_debug_always(vm, "RV32I: unimplemented hfence.bvma %h", instruction);
         return;
     case RV32_S_HFENCE_GVMA:
-        printf("RV32priv: hfence.gvma instruction 0x%x in VM %p\n", instruction, vm);
+        riscv32_debug_always(vm, "RV32I: unimplemented hfence.gvma %h", instruction);
         return;
     }
 
@@ -70,12 +72,12 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_fence(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: FENCE instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented fence %h", instruction);
 }
 
 static void riscv32zifence_i(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: ZIFENCE_I instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented zifence.i %h", instruction);
 }
 
 static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -89,33 +91,34 @@ static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instructio
 
     if(!riscv32_csr_swap(vm, csr, rs1, rds)) {
         //TODO: error here
+        riscv32_debug_always(vm, "RV32priv: bad csr %h\n", csr);
     }
-    printf("RV32priv: CSRRW instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug(vm, "RV32priv: csrrw %r, %h, %r\n", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: CSRRS instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented csrrs %h", instruction);
 }
 
 static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: CSRRC instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented csrrc %h", instruction);
 }
 
 static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: CSRRWI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented csrrwi %h", instruction);
 }
 
 static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: CSRRSI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented csrrsi %h", instruction);
 }
 
 static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32priv: CSRRCI instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: unimplemented csrrci %h", instruction);
 }
 
 void riscv32_priv_init()

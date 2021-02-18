@@ -29,11 +29,9 @@ void riscv32m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    uint64_t result = reg1 * reg2;
 
-    riscv32i_write_register_u(vm, rds, (uint32_t)result);
-
-    printf("RV32M: mul %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_u(vm, rds, reg1 * reg2);
+    riscv32_debug(vm, "RV32M: mul %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -41,13 +39,11 @@ void riscv32m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    int32_t reg1 = riscv32i_read_register_s(vm, rs1);
-    int32_t reg2 = riscv32i_read_register_s(vm, rs2);
-    uint64_t result = reg1 * reg2;
+    int64_t reg1 = riscv32i_read_register_s(vm, rs1);
+    int64_t reg2 = riscv32i_read_register_s(vm, rs2);
 
-    riscv32i_write_register_u(vm, rds, (uint32_t)(result >> 32));
-
-    printf("RV32M: mulh %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_s(vm, rds, (reg1 * reg2) >> 32);
+    riscv32_debug(vm, "RV32M: mulh %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -55,13 +51,11 @@ void riscv32m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    int32_t reg1 = riscv32i_read_register_s(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    uint64_t result = reg1 * reg2;
+    int64_t reg1 = riscv32i_read_register_s(vm, rs1);
+    uint64_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    riscv32i_write_register_u(vm, rds, (uint32_t)(result >> 32));
-
-    printf("RV32M: mulhsu %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_u(vm, rds, (reg1 * reg2) >> 32);
+    riscv32_debug(vm, "RV32M: mulhsu %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -69,13 +63,11 @@ void riscv32m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
-    uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    uint64_t result = reg1 * reg2;
+    uint64_t reg1 = riscv32i_read_register_u(vm, rs1);
+    uint64_t reg2 = riscv32i_read_register_u(vm, rs2);
 
-    riscv32i_write_register_u(vm, rds, (uint32_t)(result >> 32));
-
-    printf("RV32M: mulhu %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_u(vm, rds, (reg1 * reg2) >> 32);
+    riscv32_debug(vm, "RV32M: mulhu %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -85,7 +77,7 @@ void riscv32m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     int32_t reg1 = riscv32i_read_register_s(vm, rs1);
     int32_t reg2 = riscv32i_read_register_s(vm, rs2);
-    int64_t result = -1;
+    int32_t result = 0xFFFFFFFF;
 
     // overflow
     if (reg1 == -2147483648 && reg2 == -1) {
@@ -95,9 +87,8 @@ void riscv32m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
         result = reg1 / reg2;
     }
 
-    riscv32i_write_register_s(vm, rds, (int32_t)result);
-
-    printf("RV32M: div %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_s(vm, rds, result);
+    riscv32_debug(vm, "RV32M: div %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -107,16 +98,15 @@ void riscv32m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    uint64_t result = 4294967295;
+    uint32_t result = 0xFFFFFFFF;
 
     // division by zero check (we already setup result var for error)
     if (reg2 != 0) {
         result = reg1 / reg2;
     }
 
-    riscv32i_write_register_s(vm, rds, (uint32_t)result);
-
-    printf("RV32M: divu %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_u(vm, rds, result);
+    riscv32_debug(vm, "RV32M: divu %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -126,20 +116,18 @@ void riscv32m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     int32_t reg1 = riscv32i_read_register_u(vm, rs1);
     int32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    int64_t result = reg1;
+    int32_t result = reg1;
 
     // overflow
     if (reg1 == -2147483648 && reg2 == -1) {
         result = 0;
     // division by zero check (we already setup result var for error)
     } else if (reg2 != 0) {
-        result = reg1 / reg2;
-        result >>= 32;
+        result = reg1 % reg2;
     }
 
-    riscv32i_write_register_s(vm, rds, (int32_t)(result));
-
-    printf("RV32M: rem %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_s(vm, rds, result);
+    riscv32_debug(vm, "RV32M: rem %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_remu(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -149,17 +137,15 @@ void riscv32m_remu(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
-    uint64_t result = reg1;
+    uint32_t result = reg1;
 
     // division by zero check (we already setup result var for error)
     if (reg2 != 0) {
-        result = reg1 / reg2;
-        result >>= 32;
+        result = reg1 % reg2;
     }
 
-    riscv32i_write_register_s(vm, rds, (uint32_t)(result));
-
-    printf("RV32M: remu %s, %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), riscv32i_translate_register(rs2), vm);
+    riscv32i_write_register_u(vm, rds, result);
+    riscv32_debug(vm, "RV32M: renu %r, %r, %r", rds, rs1, rs2);
 }
 
 void riscv32m_init()
