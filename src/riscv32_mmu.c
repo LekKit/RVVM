@@ -28,7 +28,8 @@ inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
 // Memory traps fall here
 static void riscv32_mmu_trap(riscv32_vm_state_t* vm, uint32_t addr)
 {
-    printf("MMU trap at %p in VM %p\n", (void*)(uintptr_t)addr, vm);
+    riscv32_debug_always(vm, "MMU: trap at %h", addr);
+    riscv32_dump_registers(vm);
     exit(0);
 }
 

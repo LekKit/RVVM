@@ -41,7 +41,7 @@ static void riscv32c_addi4spn(riscv32_vm_state_t *vm, const uint16_t instruction
                     (cut_bits(instruction, 7, 4)  << 6);
     uint32_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
     riscv32i_write_register_u(vm, rds, rsp + imm);
-    printf("RVC: c.addi4spn %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
+    riscv32_debug(vm, "RV32C: c.addi4spn %r, %d", rds, imm);
 }
 
 static void riscv32c_addi_nop(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -53,7 +53,7 @@ static void riscv32c_addi_nop(riscv32_vm_state_t *vm, const uint16_t instruction
                               (cut_bits(instruction, 2, 5)), 6);
 
     riscv32i_write_register_u(vm, rds, src_reg + imm);
-    printf("RVC: c.addi %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
+    riscv32_debug(vm, "RV32C: c.addi %r, %d", rds, imm);
 }
 
 static void riscv32c_slli(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -64,12 +64,12 @@ static void riscv32c_slli(riscv32_vm_state_t *vm, const uint16_t instruction)
     uint32_t shamt = cut_bits(instruction, 2, 5);
 
     riscv32i_write_register_u(vm, rds, src_reg << shamt);
-    printf("RVC: c.slli %s, %d in VM %p\n", riscv32i_translate_register(rds), shamt, vm);
+    riscv32_debug(vm, "RV32C: c.slli %r, %d", rds, shamt);
 }
 
 static void riscv32c_fld(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FLD instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FLD: %h", instruction);
 }
 
 static void riscv32c_jal(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -89,12 +89,12 @@ static void riscv32c_jal(riscv32_vm_state_t *vm, const uint16_t instruction)
 
     riscv32i_write_register_u(vm, REGISTER_X1, pc + 2);
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
-    printf("RVC: c.jal %d in VM %p\n", offset, vm);
+    riscv32_debug(vm, "RV32C: c.jal %d", offset);
 }
 
 static void riscv32c_fldsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FLDSP instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FLDSP: %h", instruction);
 }
 
 static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -112,7 +112,7 @@ static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
     if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
         riscv32i_write_register_u(vm, rds, read_uint32_le(val));
     }
-    printf("RVC: c.lw %s, %s, %d in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs1), offset, vm);
+    riscv32_debug(vm, "RV32C: c.lw %r, %r, %d", rds, rs1, offset);
 }
 
 static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -122,7 +122,7 @@ static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
                               (cut_bits(instruction, 2, 5)), 6);
 
     riscv32i_write_register_s(vm, rds, imm);
-    printf("RVC: c.li %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
+    riscv32_debug(vm, "RV32C: c.li %r, %d", rds, imm);
 }
 
 static void riscv32c_lwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -139,12 +139,12 @@ static void riscv32c_lwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
     if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
         riscv32i_write_register_u(vm, rds, read_uint32_le(val));
     }
-    printf("RVC: c.lwsp %s, %d in VM %p\n", riscv32i_translate_register(rds), offset, vm);
+    riscv32_debug(vm, "RV32C: c.lwsp %r, %d", rds, offset);
 }
 
 static void riscv32c_flw(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FLW instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FLW: %h", instruction);
 }
 
 static void riscv32c_addi16sp_lui(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -161,19 +161,19 @@ static void riscv32c_addi16sp_lui(riscv32_vm_state_t *vm, const uint16_t instruc
 
         uint32_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
         riscv32i_write_register_u(vm, REGISTER_X2, rsp + sign_extend(imm, 10));
-        printf("RVC: c.addi16sp %d in VM %p\n", sign_extend(imm, 10), vm);
+        riscv32_debug(vm, "RV32C: c.addi16sp %d", sign_extend(imm, 10));
     } else {
         imm = (cut_bits(instruction, 2, 5) << 12) |
               (cut_bits(instruction, 12, 1) << 17);
 
         riscv32i_write_register_u(vm, rds, imm);
-        printf("RVC: c.lui %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
+        riscv32_debug(vm, "RV32C: c.lui %r, %h", rds, imm);
     }
 }
 
 static void riscv32c_flwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FLWSP instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FLWSP: %h", instruction);
 }
 
 static void riscv32c_alops1(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -187,18 +187,18 @@ static void riscv32c_alops1(riscv32_vm_state_t *vm, const uint16_t instruction)
         // c.srli
         uint32_t shamt = cut_bits(instruction, 2, 5);
         riscv32i_write_register_u(vm, rds, reg1 >> shamt);
-        printf("RVC: c.srli %s, %d in VM %p\n", riscv32i_translate_register(rds), shamt, vm);
+        riscv32_debug(vm, "RV32C: c.srli %r, %d", rds, shamt);
     } else if (opc == 1) {
         // c.srai
         uint32_t shamt = cut_bits(instruction, 2, 5);
         riscv32i_write_register_u(vm, rds, ((int32_t)reg1) >> shamt);
-        printf("RVC: c.srai %s, %d in VM %p\n", riscv32i_translate_register(rds), shamt, vm);
+        riscv32_debug(vm, "RV32C: c.srai %r, %d", rds, shamt);
     } else if (opc == 2) {
         // c.andi
         int32_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
                                    cut_bits(instruction, 2, 5), 6);
         riscv32i_write_register_u(vm, rds, reg1 & imm);
-        printf("RVC: c.andi %s, %d in VM %p\n", riscv32i_translate_register(rds), imm, vm);
+        riscv32_debug(vm, "RV32C: c.andi %r, %h", rds, imm);
     } else {
         opc = cut_bits(instruction, 5, 2);
         uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 2, 3));
@@ -207,19 +207,19 @@ static void riscv32c_alops1(riscv32_vm_state_t *vm, const uint16_t instruction)
         if (opc == 0) {
             // c.sub
             riscv32i_write_register_u(vm, rds, reg1 - reg2);
-            printf("RVC: c.sub %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+            riscv32_debug(vm, "RV32C: c.sub %r, %r", rds, rs2);
         } else if (opc == 1) {
             // c.xor
             riscv32i_write_register_u(vm, rds, reg1 ^ reg2);
-            printf("RVC: c.xor %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+            riscv32_debug(vm, "RV32C: c.xor %r, %r", rds, rs2);
         } else if (opc == 2) {
             // c.or
             riscv32i_write_register_u(vm, rds, reg1 | reg2);
-            printf("RVC: c.or %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+            riscv32_debug(vm, "RV32C: c.or %r, %r", rds, rs2);
         } else {
             // c.and
             riscv32i_write_register_u(vm, rds, reg1 & reg2);
-            printf("RVC: c.and %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+            riscv32_debug(vm, "RV32C: c.and %r, %r", rds, rs2);
         }
     }
 }
@@ -236,37 +236,37 @@ static void riscv32c_alops2(riscv32_vm_state_t *vm, const uint16_t instruction)
                 uint32_t reg1 = riscv32i_read_register_u(vm, rds);
                 uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
                 riscv32i_write_register_u(vm, rds, reg1 + reg2);
-                printf("RVC: c.add %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+                riscv32_debug(vm, "RV32C: c.add %r, %r", rds, rs2);
             } else {
                 // c.jalr
                 uint32_t reg1 = riscv32i_read_register_u(vm, rds);
                 uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
                 riscv32i_write_register_u(vm, REGISTER_X1, pc + 2);
                 riscv32i_write_register_u(vm, REGISTER_PC, reg1 - 2);
-                printf("RVC: c.jalr %s in VM %p\n", riscv32i_translate_register(rds), vm);
+                riscv32_debug(vm, "RV32C: c.jalr %r", rds);
             }
         } else {
             // c.ebreak
-            printf("RVC: c.ebreak in VM %p\n", vm);
+            riscv32_debug(vm, "RV32C: c.ebreak");
         }
     } else {
         if (rs2 != 0) {
             // c.mv
             uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
             riscv32i_write_register_u(vm, rds, reg2);
-            printf("RVC: c.mv %s, %s in VM %p\n", riscv32i_translate_register(rds), riscv32i_translate_register(rs2), vm);
+            riscv32_debug(vm, "RV32C: c.mv %r, %r", rds, rs2);
         } else {
             // c.jr
             uint32_t reg1 = riscv32i_read_register_u(vm, rds);
             riscv32i_write_register_u(vm, REGISTER_PC, reg1 - 2);
-            printf("RVC: c.jr %s in VM %p\n", riscv32i_translate_register(rds), vm);
+            riscv32_debug(vm, "RV32C: c.jr %r", rds);
         }
     }
 }
 
 static void riscv32c_fsd(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FSD instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FSD: %h", instruction);
 }
 
 static void riscv32c_j(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -285,12 +285,12 @@ static void riscv32c_j(riscv32_vm_state_t *vm, const uint16_t instruction)
     int32_t offset = sign_extend(imm, 12);
 
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
-    printf("RVC: c.j %d in VM %p\n", offset, vm);
+    riscv32_debug(vm, "RV32C: c.j %d", offset);
 }
 
 static void riscv32c_fsdsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FSDSP instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FSDSP: %h", instruction);
 }
 
 static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -307,7 +307,7 @@ static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
     write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
     riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
 
-    printf("RVC: c.sw %s, %s, %d in VM %p\n", riscv32i_translate_register(rs2), riscv32i_translate_register(rs1), offset, vm);
+    riscv32_debug(vm, "RV32C: c.sw %r, %r, %d", rs2, rs1, offset);
 }
 
 static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -325,7 +325,7 @@ static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
 
         riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     }
-    printf("RVC: c.beqz %s in VM %p\n", riscv32i_translate_register(rds), vm);
+    riscv32_debug(vm, "RV32C: c.beqz %r", rds);
 }
 
 static void riscv32c_swsp(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -340,12 +340,12 @@ static void riscv32c_swsp(riscv32_vm_state_t *vm, const uint16_t instruction)
     write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
     riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
 
-    printf("RVC: c.swsp %s, %d in VM %p\n", riscv32i_translate_register(rs2), offset, vm);
+    riscv32_debug(vm, "RV32C: c.swsp %r, %d", rs2, offset);
 }
 
 static void riscv32c_fsw(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FSW instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FSW: %h", instruction);
 }
 
 static void riscv32c_bnez(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -363,12 +363,12 @@ static void riscv32c_bnez(riscv32_vm_state_t *vm, const uint16_t instruction)
 
         riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     }
-    printf("RVC: c.bnez %s in VM %p\n", riscv32i_translate_register(rds), vm);
+    riscv32_debug(vm, "RV32C: c.bnez %r", rds);
 }
 
 static void riscv32c_fswsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: FSWSP instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: unimplemented FSWSP: %h", instruction);
 }
 
 static void (*opcodes[32])(riscv32_vm_state_t *vm, const uint16_t instruction);

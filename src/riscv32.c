@@ -36,14 +36,14 @@ void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction)
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
-    printf("RVC: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32C: illegal instruction %h", instruction);
     riscv32_dump_registers(vm);
     exit(0);
 }
 
 void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    printf("RV32: illegal instruction 0x%x in VM %p\n", instruction, vm);
+    riscv32_debug_always(vm, "RV32I: illegal instruction %h", instruction);
     riscv32_dump_registers(vm);
     exit(0);
 }
@@ -62,7 +62,15 @@ void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const 
 
 static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
-    printf("USART: %c to addr 0x%x size %d op %d in VM %p\n", *(char*)dest, addr, size, access, vm);
+    UNUSED(vm);
+    UNUSED(addr);
+    UNUSED(size);
+    UNUSED(access);
+#ifdef RV_DEBUG
+    printf("USART: %c\n", *(char*)dest);
+#else
+    printf("%c", *(char*)dest);
+#endif
     return true;
 }
 
@@ -102,6 +110,41 @@ void riscv32_destroy_vm(riscv32_vm_state_t *vm)
     free(vm);
 }
 
+void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    char buffer[256];
+    uint32_t size = sprintf(buffer, "[VM %p] ", vm);
+    uint32_t begin = 0;
+    uint32_t len = strlen(fmt);
+    uint32_t i;
+    for (i=0; i<len; ++i) {
+        if (fmt[i] == '%') {
+            memcpy(buffer+size, fmt+begin, i-begin);
+            size += i-begin;
+            begin = i+2;
+            i++;
+            switch (fmt[i]) {
+            case 'r':
+                size += sprintf(buffer+size, "%s", riscv32i_translate_register(va_arg(ap, uint32_t)));
+                break;
+            case 'd':
+                size += sprintf(buffer+size, "%d", va_arg(ap, int32_t));
+                break;
+            case 'h':
+                size += sprintf(buffer+size, "0x%x", va_arg(ap, uint32_t));
+                break;
+            }
+        }
+    }
+    memcpy(buffer+size, fmt+begin, i-begin);
+    size += i-begin;
+    buffer[size] = 0;
+    printf("%s\n", buffer);
+    va_end(ap);
+}
+
 void riscv32_dump_registers(riscv32_vm_state_t *vm)
 {
     for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
@@ -130,8 +173,10 @@ void riscv32_exec_instruction(riscv32_vm_state_t *vm)
         vm->registers[REGISTER_PC] += 4;
     }
 
+#ifdef RV_DEBUG
     riscv32_dump_registers(vm);
     getchar();
+#endif
 }
 
 void riscv32_run(riscv32_vm_state_t *vm)

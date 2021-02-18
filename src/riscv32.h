@@ -136,6 +136,18 @@ extern void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instr
 void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 
+//#define RV_DEBUG
+
+void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...);
+
+#ifdef RV_DEBUG
+#define riscv32_debug riscv32_debug_always
+#else
+#define riscv32_debug(...)
+#endif
+
+#define UNUSED(x) (void)x
+
 riscv32_vm_state_t *riscv32_create_vm();
 void riscv32_run(riscv32_vm_state_t *vm);
 void riscv32_destroy_vm(riscv32_vm_state_t *vm);
