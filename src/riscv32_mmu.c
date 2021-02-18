@@ -171,7 +171,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
         // Handle misalign between 2 pages
         uint8_t part_size = 4096 - (addr & 0xFFF);
         return riscv32_mmu_op(vm, addr, dest, part_size, access) &&
-               riscv32_mmu_op(vm, addr, dest + part_size, size - part_size, access);
+               riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
     }
     uint32_t phys_addr;
     // Translation function also checks access rights and caches addr translation in TLB
