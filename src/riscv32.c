@@ -156,34 +156,29 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
     printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
-void riscv32_exec_instruction(riscv32_vm_state_t *vm)
-{
-    uint8_t instruction[4];
-    // This could cause a trap executing RVC instruction at the end of the page
-    // Should be fixed at some point but is not a priority nor issue
-    if (!riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC))
-        return;
-    // FYI: Any jump instruction implementation should take care of PC increment
-    if ((instruction[0] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
-        // 16-bit opcode
-        riscv32c_emulate(vm, read_uint16_le(instruction));
-        vm->registers[REGISTER_PC] += 2;
-    } else {
-        riscv32i_emulate(vm, read_uint32_le(instruction));
-        vm->registers[REGISTER_PC] += 4;
-    }
-
-#ifdef RV_DEBUG
-    riscv32_dump_registers(vm);
-    getchar();
-#endif
-}
-
 void riscv32_run(riscv32_vm_state_t *vm)
 {
     assert(vm);
 
+    uint8_t instruction[4];
     while (true) {
-        riscv32_exec_instruction(vm);
+        // This could cause a trap executing RVC instruction at the end of the page
+        // Should be fixed at some point but is not a priority nor issue
+        if (!riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC))
+            return;
+        // FYI: Any jump instruction implementation should take care of PC increment
+        if ((instruction[0] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
+            // 16-bit opcode
+            riscv32c_emulate(vm, read_uint16_le(instruction));
+            vm->registers[REGISTER_PC] += 2;
+        } else {
+            riscv32i_emulate(vm, read_uint32_le(instruction));
+            vm->registers[REGISTER_PC] += 4;
+        }
+
+    #ifdef RV_DEBUG
+        riscv32_dump_registers(vm);
+        getchar();
+    #endif
     }
 }
