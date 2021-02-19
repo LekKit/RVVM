@@ -61,10 +61,12 @@ static uint32_t riscv32_csr_callback_unimplemented_m(riscv32_vm_state_t *vm, ris
 }
 
 // can be 0 but we setup it normaly
-static uint32_t riscv32_csr_misa_read(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint8_t op, uint32_t value)
+static uint32_t riscv32_csr_misa(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint8_t op, uint32_t value)
 {
     UNUSED(vm);
     UNUSED(self);
+    UNUSED(op);
+    UNUSED(value);
     //TODO: allow change bits
     return RISCV32_MISA_CSR_RV32 | RISCV32_MISA_CSR_I | RISCV32_MISA_CSR_C | RISCV32_MISA_CSR_M;
 }
@@ -78,7 +80,7 @@ void riscv32_csr_m_init(riscv32_vm_state_t *vm)
     riscv32_csr_init(vm, "mhartid", 0xF14, riscv32_csr_callback_unimplemented_m);
 
     riscv32_csr_init(vm, "mstatus", 0x300, riscv32_csr_callback_unimplemented_m);
-    riscv32_csr_init(vm, "misa", 0x301, riscv32_csr_callback_unimplemented_m);
+    riscv32_csr_init(vm, "misa", 0x301, riscv32_csr_misa);
     riscv32_csr_init(vm, "medeleg", 0x302, riscv32_csr_callback_unimplemented_m);
     riscv32_csr_init(vm, "mideleg", 0x303, riscv32_csr_callback_unimplemented_m);
     riscv32_csr_init(vm, "mie", 0x304, riscv32_csr_callback_unimplemented_m);
