@@ -111,6 +111,12 @@ typedef struct {
 
 typedef struct riscv32_vm_state_t riscv32_vm_state_t;
 
+typedef struct riscv32_csr_s {
+    const char *name;
+    uint32_t (*callback)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self, uint8_t op, uint32_t value);
+    uint32_t value;
+} riscv32_csr_t;
+
 typedef struct {
     uint32_t count;
     struct {
@@ -130,7 +136,8 @@ struct riscv32_vm_state_t {
     // To be replaced by CSR
     uint32_t mcause, mtval;
     uint32_t root_page_table;
-    bool mmu_virtual;
+    riscv32_csr_t csr[4][256];
+    bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
 };
 
@@ -144,9 +151,9 @@ struct riscv32_vm_state_t {
 #define RISCV32_IIS_I (1u << 1) // base and minimal ISA with 32 registers
 #define RISCV32_IIS_E (1u << 2) // base and minimal ISA with 16 registers
 
-#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 0) // mark cpu with custom opcodes to enable hacks
-#define RISCV32_HAVE_M_EXTENSION (1u << 1) // multiplication and division for intergers
-#define RISCV32_HAVE_C_EXTENSION (1u << 2) // compressed instructions extension
+#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 3) // mark cpu with custom opcodes to enable hacks
+#define RISCV32_HAVE_M_EXTENSION (1u << 4) // multiplication and division for intergers
+#define RISCV32_HAVE_C_EXTENSION (1u << 5) // compressed instructions extension
 
 /*
 * Concatenate func7[25] func3[14:12] and opcode[6:2] into 9-bit id for decoding.

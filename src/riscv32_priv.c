@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "riscv32_mmu.h"
 #include "riscv32_priv.h"
+#include "riscv32_csr.h"
 #include "bit_ops.h"
 
 static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -81,7 +82,18 @@ static void riscv32zifence_i(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrw %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+
+    if(rds == REGISTER_ZERO)
+        return;
+
+    if(!riscv32_csr_swap(vm, csr, rs1, rds)) {
+        //TODO: error here
+        riscv32_debug_always(vm, "RV32priv: bad csr %h\n", csr);
+    }
+    riscv32_debug(vm, "RV32priv: csrrw %r, %h, %r\n", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
