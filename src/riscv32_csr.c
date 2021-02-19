@@ -44,12 +44,7 @@ bool riscv32_csr_read(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
     if(vm->priv_mode < minimal_level)
         return false;
 
-    if(self->name != NULL)
-        printf("%s %x %x %x %x\n", vm->csr[access][csr8].name, csr, csr8, access, minimal_level);
-    else
-        printf("%x %x %x %x\n", csr, csr8, access, minimal_level);
-
-    if(self->callback)
+    if(!self->callback)
         vm->registers[reg] = self->value;
     else
         riscv32i_write_register_u(vm, reg, self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0));
@@ -64,12 +59,12 @@ bool riscv32_csr_write(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
     uint32_t csr8 = cut_bits(csr, 0, 8);
     riscv32_csr_t *self = &vm->csr[access][csr8];
 
-    // check read only
-    if(access == 0x3)
-        return false;
-
     //TODO: error here?
     if(vm->priv_mode < minimal_level)
+        return false;
+
+    // check read only
+    if(access == 0x3)
         return false;
 
     self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, reg));
@@ -85,8 +80,7 @@ bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_
     uint32_t temp = 0;
 
     // check read only
-    if(access == 0x3)
-    {
+    if(access == 0x3) {
         riscv32i_write_register_u(vm, rds, self->value);
         return true;
     }
@@ -95,8 +89,7 @@ bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_
     if(vm->priv_mode < minimal_level)
         return false;
 
-    if(self->callback)
-    {
+    if(self->callback) {
         temp = self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0);
         self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, rs));
         riscv32i_write_register_u(vm, rds, temp);
@@ -109,15 +102,16 @@ void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, ui
 {
     uint32_t access = cut_bits(csr, 10, 2);
     uint32_t csr8 = cut_bits(csr, 0, 8);
+    riscv32_csr_t *self = &vm->csr[access][csr8];
 
-    vm->csr[access][csr8].name = name;
+    self->name = name;
 
     // read only?
-    if(access == 0x3)
-    {
-        vm->csr[access][csr8].value = callback(vm, &vm->csr[access][csr8], RISCV32_CSR_OPERATION_READ, 0);
+    if(access == 0x3) {
+        self->value = callback(vm, &vm->csr[access][csr8], RISCV32_CSR_OPERATION_READ, 0);
+        self->callback = NULL;
     } else {
-        vm->csr[access][csr8].callback = callback;
+        self->callback = callback;
     }
 }
 

@@ -61,7 +61,7 @@ static uint32_t riscv32_csr_callback_unimplemented_m(riscv32_vm_state_t *vm, ris
 }
 
 // can be 0 but we setup it normaly
-static uint32_t riscv32_csr_misa_read(riscv32_vm_state_t *vm, riscv32_csr_t *self)
+static uint32_t riscv32_csr_misa_read(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint8_t op, uint32_t value)
 {
     UNUSED(vm);
     UNUSED(self);
