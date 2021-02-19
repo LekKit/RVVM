@@ -17,20 +17,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "riscv32.h"
 #include "riscv32_mmu.h"
 
 // Check that specific physical address belongs to RAM
 inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
 {
     return page_addr >= mem.begin && (page_addr - mem.begin) < mem.size;
-}
-
-// Memory traps fall here
-static void riscv32_mmu_trap(riscv32_vm_state_t* vm, uint32_t addr)
-{
-    riscv32_debug_always(vm, "MMU: trap at %h", addr);
-    riscv32_dump_registers(vm);
-    exit(0);
 }
 
 // Put address translation into TLB
@@ -174,6 +167,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
                riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
     }
     uint32_t phys_addr;
+    uint32_t trap_cause = 0;
     // Translation function also checks access rights and caches addr translation in TLB
     if (riscv32_mmu_translate(vm, addr, access, &phys_addr)) {
         if (phys_addr_in_mem(vm->mem, phys_addr)) {
@@ -188,9 +182,33 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
         if (riscv32_mmio_op(vm, addr, dest, size, access)) {
             return true;
         }
+        // Physical memory access fault (bad physical address)
+        switch (access) {
+        case MMU_WRITE:
+            trap_cause = TRAP_STORE_FAULT;
+            break;
+        case MMU_READ:
+            trap_cause = TRAP_LOAD_FAULT;
+            break;
+        case MMU_EXEC:
+            trap_cause = TRAP_INSTR_FETCH;
+            break;
+        }
+    } else {
+        // Pagefault (no translation for address or protection fault)
+        switch (access) {
+        case MMU_WRITE:
+            trap_cause = TRAP_STORE_PAGEFAULT;
+            break;
+        case MMU_READ:
+            trap_cause = TRAP_LOAD_PAGEFAULT;
+            break;
+        case MMU_EXEC:
+            trap_cause = TRAP_INSTR_PAGEFAULT;
+            break;
+        }
     }
-    // Memory access fault (address translation fault, bad physical address)
-    // Trap the CPU & tell the caller to discard operation
-    riscv32_mmu_trap(vm, addr);
+    // Trap the CPU & instruct the caller to discard operation
+    riscv32_trap(vm, trap_cause, addr);
     return false;
 }
