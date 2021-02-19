@@ -68,6 +68,33 @@ enum
     PRIVILEGE_MACHINE
 };
 
+#define INTERRUPT_MASK 0x80000000
+
+#define INTERRUPT_USOFTWARE    0x0
+#define INTERRUPT_SSOFTWARE    0x1
+#define INTERRUPT_MSOFTWARE    0x3
+#define INTERRUPT_UTIMER       0x4
+#define INTERRUPT_STIMER       0x5
+#define INTERRUPT_MTIMER       0x7
+#define INTERRUPT_UEXTERNAL    0x8
+#define INTERRUPT_SEXTERNAL    0x9
+#define INTERRUPT_MEXTERNAL    0xB
+
+#define TRAP_INSTR_MISALIGN    0x0
+#define TRAP_INSTR_FETCH       0x1
+#define TRAP_ILL_INSTR         0x2
+#define TRAP_BREAKPOINT        0x3
+#define TRAP_LOAD_MISALIGN     0x4
+#define TRAP_LOAD_FAULT        0x5
+#define TRAP_STORE_MISALIGN    0x6
+#define TRAP_STORE_FAULT       0x7
+#define TRAP_ENVCALL_UMODE     0x8
+#define TRAP_ENVCALL_SMODE     0x9
+#define TRAP_ENVCALL_MMODE     0xB
+#define TRAP_INSTR_PAGEFAULT   0xC
+#define TRAP_LOAD_PAGEFAULT    0xD
+#define TRAP_STORE_PAGEFAULT   0xF
+
 #define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
 
 // Address translation cache
@@ -94,12 +121,16 @@ typedef struct {
 } riscv32_mmio_regions_t;
 
 struct riscv32_vm_state_t {
+    size_t wait_event;
     uint32_t registers[REGISTERS_MAX];
-    riscv32_phys_mem_t mem;
     riscv32_tlb_t tlb[TLB_SIZE];
+    riscv32_phys_mem_t mem;
     riscv32_mmio_regions_t mmio;
+
+    // To be replaced by CSR
+    uint32_t mcause, mtval;
     uint32_t root_page_table;
-    bool mmu_virtual; // To be replaced by CSR
+    bool mmu_virtual;
     uint8_t priv_mode;
 };
 
@@ -158,3 +189,5 @@ void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();
 void riscv32_priv_init();
+void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
+void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval);

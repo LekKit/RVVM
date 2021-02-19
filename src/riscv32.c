@@ -37,15 +37,13 @@ void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction)
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     riscv32_debug_always(vm, "RV32C: illegal instruction %h", instruction);
-    riscv32_dump_registers(vm);
-    exit(0);
+    riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
 }
 
 void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     riscv32_debug_always(vm, "RV32I: illegal instruction %h", instruction);
-    riscv32_dump_registers(vm);
-    exit(0);
+    riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
 }
 
 void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t))
@@ -110,6 +108,25 @@ void riscv32_destroy_vm(riscv32_vm_state_t *vm)
     free(vm);
 }
 
+void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
+{
+    vm->mcause = cause | INTERRUPT_MASK;
+    vm->wait_event = 0;
+}
+
+void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
+{
+    /*
+    * This should set the PC to trap vector, save current execution context
+    * when we have CSRs, etc
+    * Currently works the same as interrupt
+    */
+    UNUSED(tval);
+    vm->mcause = cause & (~INTERRUPT_MASK);
+    vm->mtval = tval;
+    vm->wait_event = 0;
+}
+
 void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
 {
     va_list ap;
@@ -156,16 +173,13 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
     printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
-void riscv32_run(riscv32_vm_state_t *vm)
+static void riscv32_run_till_event(riscv32_vm_state_t *vm)
 {
-    assert(vm);
-
     uint8_t instruction[4];
-    while (true) {
-        // This could cause a trap executing RVC instruction at the end of the page
-        // Should be fixed at some point but is not a priority nor issue
-        if (!riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC))
-            return;
+    // Execute hot instructions loop until some event occurs (interrupt, etc)
+    // This adds little to no overhead, and the loop can be forcefully unrolled
+    while (vm->wait_event) {
+        riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC);
         // FYI: Any jump instruction implementation should take care of PC increment
         if ((instruction[0] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
             // 16-bit opcode
@@ -181,4 +195,17 @@ void riscv32_run(riscv32_vm_state_t *vm)
         getchar();
     #endif
     }
+}
+
+void riscv32_run(riscv32_vm_state_t *vm)
+{
+    assert(vm);
+
+    vm->wait_event = 1;
+    riscv32_run_till_event(vm);
+    if (vm->mcause & INTERRUPT_MASK)
+        riscv32_debug_always(vm, "Interrupted the VM, mcause: %h", vm->mcause);
+    else
+        riscv32_debug_always(vm, "Trapped the VM, mcause: %h, mtval: %h", vm->mcause, vm->mtval);
+    riscv32_dump_registers(vm);
 }
