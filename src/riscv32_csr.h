@@ -21,7 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
+
+enum
+{
+    RISCV32_CSR_OPERATION_READ,
+    RISCV32_CSR_OPERATION_WRITE,
+};
+
 bool riscv32_csr_read(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg);
 bool riscv32_csr_write(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg);
 bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_t rds);
-void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback_r)(riscv32_vm_state_t *vm, riscv32_csr_t *self), void (*callback_w)(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint32_t value));
+void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback)(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint8_t op, uint32_t value));

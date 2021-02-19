@@ -49,10 +49,10 @@ bool riscv32_csr_read(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
     else
         printf("%x %x %x %x\n", csr, csr8, access, minimal_level);
 
-    if(self->callback_r)
+    if(self->callback)
         vm->registers[reg] = self->value;
     else
-        riscv32i_write_register_u(vm, reg, self->callback_r(vm, self));
+        riscv32i_write_register_u(vm, reg, self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0));
 
     return true;
 }
@@ -72,7 +72,7 @@ bool riscv32_csr_write(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
     if(vm->priv_mode < minimal_level)
         return false;
 
-    self->callback_w(vm, self, riscv32i_read_register_u(vm, reg));
+    self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, reg));
     return true;
 }
 
@@ -95,30 +95,29 @@ bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_
     if(vm->priv_mode < minimal_level)
         return false;
 
-    if(self->callback_r)
+    if(self->callback)
     {
-        temp = self->callback_r(vm, self);
-        self->callback_w(vm, self, riscv32i_read_register_u(vm, rs));
+        temp = self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0);
+        self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, rs));
         riscv32i_write_register_u(vm, rds, temp);
         return true;
     }
     return false;
 }
 
-void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback_r)(riscv32_vm_state_t *vm, riscv32_csr_t *self), void (*callback_w)(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint32_t value))
+void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback)(riscv32_vm_state_t *, riscv32_csr_t *, uint8_t, uint32_t))
 {
     uint32_t access = cut_bits(csr, 10, 2);
     uint32_t csr8 = cut_bits(csr, 0, 8);
 
     vm->csr[access][csr8].name = name;
 
-    // read only
+    // read only?
     if(access == 0x3)
     {
-        vm->csr[access][csr8].value = callback_r(vm, &vm->csr[access][csr8]);
+        vm->csr[access][csr8].value = callback(vm, &vm->csr[access][csr8], RISCV32_CSR_OPERATION_READ, 0);
     } else {
-        vm->csr[access][csr8].callback_r = callback_r;
-        vm->csr[access][csr8].callback_w = callback_w;
+        vm->csr[access][csr8].callback = callback;
     }
 }
 

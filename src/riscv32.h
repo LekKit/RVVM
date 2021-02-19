@@ -86,8 +86,7 @@ typedef struct riscv32_vm_state_t riscv32_vm_state_t;
 
 typedef struct riscv32_csr_s {
     const char *name;
-    void (*callback_w)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self, uint32_t value);
-    uint32_t (*callback_r)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self);
+    uint32_t (*callback)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self, uint8_t op, uint32_t value);
     uint32_t value;
 } riscv32_csr_t;
 
