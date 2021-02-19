@@ -162,6 +162,19 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
 {
     if (!block_inside_page(addr, size)) {
         // Handle misalign between 2 pages
+        if (access == MMU_EXEC) {
+            /*
+            * If we are fetching a 2-byte instruction at the end of page,
+            * do not fetch other 2 bytes to prevent spurious pagefaults
+            */
+            uint32_t inst_addr;
+            if (riscv32_mmu_translate(vm, addr, access, &inst_addr)
+            && phys_addr_in_mem(vm->mem, inst_addr)) {
+                uint8_t ibyte = *(uint8_t*)(vm->mem.data + inst_addr);
+                if ((ibyte & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK)
+                    return riscv32_mmu_op(vm, addr, dest, 2, MMU_EXEC);
+            }
+        }
         uint8_t part_size = 4096 - (addr & 0xFFF);
         return riscv32_mmu_op(vm, addr, dest, part_size, access) &&
                riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
