@@ -176,17 +176,27 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
 static void riscv32_run_till_event(riscv32_vm_state_t *vm)
 {
     uint8_t instruction[4];
+    uint32_t tlb_key, inst_addr, rv32_inst;
     // Execute hot instructions loop until some event occurs (interrupt, etc)
     // This adds little to no overhead, and the loop can be forcefully unrolled
     while (vm->wait_event) {
-        riscv32_mem_op(vm, vm->registers[REGISTER_PC], instruction, 4, MMU_EXEC);
-        // FYI: Any jump instruction implementation should take care of PC increment
-        if ((instruction[0] & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
+        // Copying the riscv32_mem_op code here increases performance
+        inst_addr = vm->registers[REGISTER_PC];
+        tlb_key = tlb_hash(inst_addr);
+        if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
+            memcpy(instruction, vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF), 4);
+        } else {
+            riscv32_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC);
+        }
+        rv32_inst = read_uint32_le(instruction);
+        // Bit operations directly on 32-bit values are faster
+        if ((rv32_inst & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
             // 16-bit opcode
             riscv32c_emulate(vm, read_uint16_le(instruction));
+            // FYI: Any jump instruction implementation should take care of PC increment
             vm->registers[REGISTER_PC] += 2;
         } else {
-            riscv32i_emulate(vm, read_uint32_le(instruction));
+            riscv32i_emulate(vm, rv32_inst);
             vm->registers[REGISTER_PC] += 4;
         }
 
