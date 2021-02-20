@@ -20,15 +20,60 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include "riscv32.h"
+#include "bit_ops.h"
 
+#define CSR_SWAP       0x0
+#define CSR_SETBITS    0x1
+#define CSR_CLEARBITS  0x2
 
-enum
+inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
 {
-    RISCV32_CSR_OPERATION_READ,
-    RISCV32_CSR_OPERATION_WRITE,
-};
+    uint32_t csr8 = cut_bits(csr_id, 0, 8);
+    uint32_t priv = cut_bits(csr_id, 8, 2);
+    riscv32_csr_t *self = &vm->csr[priv][csr8];
+    if (priv > vm->priv_mode)
+        return false;
+    else
+        return self->handler(vm, self, dest, op);
+}
 
-bool riscv32_csr_read(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg);
-bool riscv32_csr_write(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg);
-bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_t rds);
-void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback)(riscv32_vm_state_t *vm, riscv32_csr_t *self, uint8_t op, uint32_t value));
+inline bool csr_helper_check_rw(riscv32_csr_t* csr, uint32_t val, uint32_t op)
+{
+    switch (op) {
+    case CSR_SWAP:
+        return val != csr->value;
+    case CSR_SETBITS:
+        return val != 0;
+    case CSR_CLEARBITS:
+        return val != 0;
+    default:
+        return true;
+    }
+}
+
+inline void csr_helper_rw(riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+{
+    uint32_t tmp;
+    switch (op) {
+    case CSR_SWAP:
+        tmp = csr->value;
+        csr->value = *dest;
+        *dest = tmp;
+        break;
+    case CSR_SETBITS:
+        tmp = csr->value;
+        csr->value = tmp | *dest;
+        *dest = tmp;
+        break;
+    case CSR_CLEARBITS:
+        tmp = csr->value;
+        csr->value = tmp & (~*dest);
+        *dest = tmp;
+        break;
+    }
+}
+
+void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op));
+bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
+bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
+bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);

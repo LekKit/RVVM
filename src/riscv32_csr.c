@@ -22,96 +22,40 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "bit_ops.h"
 
-static const char *riscv32_csr_level(uint32_t level)
+void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op))
 {
-    switch (level) {
-    case 0: return "U";
-    case 1: return "S";
-    case 2: return "H";
-    case 4: return "M";
-    default: return "unknown";
-    }
-}
-
-bool riscv32_csr_read(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
-{
-    uint32_t access = cut_bits(csr, 10, 2);
-    uint32_t minimal_level = cut_bits(csr, 8, 2);
-    uint32_t csr8 = cut_bits(csr, 0, 8);
-    riscv32_csr_t *self = &vm->csr[access][csr8];
-
-    //TODO: error here?
-    if(vm->priv_mode < minimal_level)
-        return false;
-
-    if(!self->callback)
-        vm->registers[reg] = self->value;
-    else
-        riscv32i_write_register_u(vm, reg, self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0));
-
-    return true;
-}
-
-bool riscv32_csr_write(riscv32_vm_state_t *vm, uint32_t csr, uint32_t reg)
-{
-    uint32_t access = cut_bits(csr, 10, 2);
-    uint32_t minimal_level = cut_bits(csr, 8, 2);
-    uint32_t csr8 = cut_bits(csr, 0, 8);
-    riscv32_csr_t *self = &vm->csr[access][csr8];
-
-    //TODO: error here?
-    if(vm->priv_mode < minimal_level)
-        return false;
-
-    // check read only
-    if(access == 0x3)
-        return false;
-
-    self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, reg));
-    return true;
-}
-
-bool riscv32_csr_swap(riscv32_vm_state_t *vm, uint32_t csr, uint32_t rs, uint32_t rds)
-{
-    uint32_t access = cut_bits(csr, 10, 2);
-    uint32_t minimal_level = cut_bits(csr, 8, 2);
-    uint32_t csr8 = cut_bits(csr, 0, 8);
-    riscv32_csr_t *self = &vm->csr[access][csr8];
-    uint32_t temp = 0;
-
-    //TODO: error here?
-    if(vm->priv_mode < minimal_level)
-        return false;
-
-    // check read only
-    if(access == 0x3) {
-        riscv32i_write_register_u(vm, rds, self->value);
-        return true;
-    }
-
-    if(self->callback) {
-        temp = self->callback(vm, self, RISCV32_CSR_OPERATION_READ, 0);
-        self->callback(vm, self, RISCV32_CSR_OPERATION_WRITE, riscv32i_read_register_u(vm, rs));
-        riscv32i_write_register_u(vm, rds, temp);
-        return true;
-    }
-    return false;
-}
-
-void riscv32_csr_init(riscv32_vm_state_t *vm, const char *name, uint32_t csr, uint32_t (*callback)(riscv32_vm_state_t *, riscv32_csr_t *, uint8_t, uint32_t))
-{
-    uint32_t access = cut_bits(csr, 10, 2);
-    uint32_t csr8 = cut_bits(csr, 0, 8);
-    riscv32_csr_t *self = &vm->csr[access][csr8];
+    uint32_t csr8 = cut_bits(csr_id, 0, 8);
+    uint32_t priv = cut_bits(csr_id, 8, 2);
+    riscv32_csr_t *self = &vm->csr[priv][csr8];
 
     self->name = name;
+    self->handler = handler;
+    self->value = def_val;
+}
 
-    // read only?
-    if(access == 0x3) {
-        self->value = callback(vm, &vm->csr[access][csr8], RISCV32_CSR_OPERATION_READ, 0);
-        self->callback = NULL;
+bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+{
+    UNUSED(vm);
+    csr_helper_rw(csr, dest, op);
+    return true;
+}
+
+bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+{
+    UNUSED(vm);
+    if (csr_helper_check_rw(csr, *dest, op)) {
+        return false;
     } else {
-        self->callback = callback;
+        *dest = csr->value;
+        return true;
     }
 }
 
+bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+{
+    UNUSED(vm);
+    UNUSED(csr);
+    UNUSED(dest);
+    UNUSED(op);
+    return false;
+}

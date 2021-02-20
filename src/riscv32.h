@@ -110,12 +110,13 @@ typedef struct {
 } riscv32_phys_mem_t;
 
 typedef struct riscv32_vm_state_t riscv32_vm_state_t;
+typedef struct riscv32_csr_t riscv32_csr_t;
 
-typedef struct riscv32_csr_s {
+struct riscv32_csr_t {
     const char *name;
-    uint32_t (*callback)(struct riscv32_vm_state_t *vm, struct riscv32_csr_s *self, uint8_t op, uint32_t value);
+    bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
     uint32_t value;
-} riscv32_csr_t;
+};
 
 typedef struct {
     uint32_t count;
