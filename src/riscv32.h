@@ -195,6 +195,7 @@ void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction);
 void riscv32m_init();
 void riscv32c_init();
 void riscv32i_init();
+void riscv32a_init();
 void riscv32_priv_init();
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
 void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval);

@@ -81,6 +81,7 @@ riscv32_vm_state_t *riscv32_create_vm()
         riscv32i_init();
         riscv32m_init();
         riscv32c_init();
+        riscv32a_init();
         riscv32_priv_init();
         global_init = true;
     }
