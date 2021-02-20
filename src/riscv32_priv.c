@@ -85,40 +85,92 @@ static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instructio
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
+    uint32_t val = riscv32i_read_register_u(vm, rs1);
 
-    if(rds == REGISTER_ZERO)
-        return;
-
-    if(!riscv32_csr_swap(vm, csr, rs1, rds)) {
-        //TODO: error here
-        riscv32_debug_always(vm, "RV32priv: bad csr %h\n", csr);
+    if (riscv32_csr_op(vm, csr, &val, CSR_SWAP)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug(vm, "RV32priv: csrrw %r, %h, %r\n", rds, csr, rs1);
+    riscv32_debug_always(vm, "RV32priv: csrrw %r, %h, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrs %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+    uint32_t val = riscv32i_read_register_u(vm, rs1);
+
+    if (riscv32_csr_op(vm, csr, &val, CSR_SETBITS)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+    }
+    riscv32_debug_always(vm, "RV32I: csrrs %r, %h, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrc %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t rs1 = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+    uint32_t val = riscv32i_read_register_u(vm, rs1);
+
+    if (riscv32_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h\n", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+    }
+    riscv32_debug_always(vm, "RV32I: csrrc %r, %h, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrwi %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t val = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+
+    if (riscv32_csr_op(vm, csr, &val, CSR_SWAP)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+    }
+    riscv32_debug_always(vm, "RV32I: csrrwi %r, %h, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrsi %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t val = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+
+    if (riscv32_csr_op(vm, csr, &val, CSR_SETBITS)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+    }
+    riscv32_debug_always(vm, "RV32I: csrrsi %r, %h, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented csrrci %h", instruction);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    uint32_t val = cut_bits(instruction, 15, 5);
+    uint32_t csr = cut_bits(instruction, 20, 12);
+
+    if (riscv32_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+        riscv32i_write_register_u(vm, rds, val);
+    } else {
+        riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+    }
+    riscv32_debug_always(vm, "RV32I: csrrci %r, %h, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 void riscv32_priv_init()
