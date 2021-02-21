@@ -73,7 +73,7 @@ inline void csr_helper_rw(riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
     }
 }
 
-void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op));
+void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, riscv32_csr_handler_t handler);
 bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
 bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
 bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);

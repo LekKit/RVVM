@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "bit_ops.h"
 
-void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op))
+void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, riscv32_csr_handler_t handler)
 {
     uint32_t csr8 = cut_bits(csr_id, 0, 8);
     uint32_t priv = cut_bits(csr_id, 8, 2);

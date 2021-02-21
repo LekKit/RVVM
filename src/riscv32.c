@@ -59,9 +59,10 @@ void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const 
     riscv32_opcodes[opcode | 0x100] = func;
 }
 
-static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
     UNUSED(vm);
+    UNUSED(device);
     UNUSED(addr);
     UNUSED(size);
     UNUSED(access);
@@ -96,7 +97,7 @@ riscv32_vm_state_t *riscv32_create_vm()
         return NULL;
     }
     riscv32_tlb_flush(vm);
-    riscv32_mmio_add(vm, 0x40013800, 0x40013BFF, mmio_usart_handler);
+    riscv32_mmio_add_device(vm, 0x40013800, 0x40013BFF, mmio_usart_handler, NULL);
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->registers[REGISTER_PC] = vm->mem.begin;

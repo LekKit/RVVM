@@ -92,9 +92,11 @@ static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, ui
 // Receives any operation on physical address space out of RAM region
 static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
+    riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
-        if (addr >= vm->mmio.regions[i].begin && addr <= vm->mmio.regions[i].end) {
-            return vm->mmio.regions[i].handler(vm, addr, dest, size, access);
+        device = &vm->mmio.regions[i];
+        if (addr >= device->base_addr && addr <= device->end_addr) {
+            return device->handler(vm, device, addr, dest, size, access);
         }
     }
     return false;
@@ -119,22 +121,27 @@ void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem)
     mem->size = 0;
 }
 
-void riscv32_mmio_add(riscv32_vm_state_t* vm, uint32_t begin, uint32_t end, bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access))
+void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data)
 {
     if (vm->mmio.count > 255) {
         printf("ERROR: Too much MMIO zones!\n");
         exit(0);
     }
-    vm->mmio.regions[vm->mmio.count].begin = begin;
-    vm->mmio.regions[vm->mmio.count].end = end;
-    vm->mmio.regions[vm->mmio.count].handler = handler;
+    riscv32_mmio_device_t* device = &vm->mmio.regions[vm->mmio.count];
+    device->base_addr = base_addr;
+    device->end_addr = end_addr;
+    device->handler = handler;
+    device->data = data;
     vm->mmio.count++;
 }
 
-void riscv32_mmio_remove(riscv32_vm_state_t* vm, uint32_t addr)
+void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr)
 {
+    riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
-        if (addr >= vm->mmio.regions[i].begin && addr <= vm->mmio.regions[i].end) {
+        device = &vm->mmio.regions[i];
+        if (addr >= device->base_addr && addr <= device->end_addr) {
+            if (device->data) free(device->data);
             vm->mmio.count--;
             for (uint32_t j=i; j<vm->mmio.count; ++j) {
                 vm->mmio.regions[j] = vm->mmio.regions[j+1];

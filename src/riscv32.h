@@ -111,20 +111,27 @@ typedef struct {
 
 typedef struct riscv32_vm_state_t riscv32_vm_state_t;
 typedef struct riscv32_csr_t riscv32_csr_t;
+typedef struct riscv32_mmio_device_t riscv32_mmio_device_t;
+
+typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+typedef bool (*riscv32_csr_handler_t)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
 
 struct riscv32_csr_t {
     const char *name;
-    bool (*handler)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
+    riscv32_csr_handler_t handler;
     uint32_t value;
+};
+
+struct riscv32_mmio_device_t {
+    uint32_t base_addr;
+    uint32_t end_addr;
+    riscv32_mmio_handler_t handler;
+    void* data;
 };
 
 typedef struct {
     uint32_t count;
-    struct {
-        uint32_t begin;
-        uint32_t end;
-        bool (*handler)(struct riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
-    } regions[256];
+    riscv32_mmio_device_t regions[256];
 } riscv32_mmio_regions_t;
 
 struct riscv32_vm_state_t {
