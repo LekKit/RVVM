@@ -96,7 +96,7 @@ static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, u
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
         device = &vm->mmio.regions[i];
         if (addr >= device->base_addr && addr <= device->end_addr) {
-            return device->handler(vm, device, addr, dest, size, access);
+            return device->handler(vm, device, addr - device->base_addr, dest, size, access);
         }
     }
     return false;
