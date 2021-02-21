@@ -8,12 +8,14 @@ RISC-V CPU & System software implementation written in С
 
 ## What's done so far
 - Feature-complete RV32I instruction set
-- C, M instruction extensions
+- C, M, A instruction extensions
 - Extendable and fast instruction decoder
 - Physical memory
 - Memory mapping unit (MMU) with SV32 virtual addressing
 - TLB address caching (greatly speeds up memory operations)
 - MMIO handlers
+- CSR operations
+- UART text console
 - Bootrom loading
 
 ## Usage
@@ -28,8 +30,8 @@ cd release.linux.x86_64
 ```
 
 ## Our team
-- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, parts of RV32I/C ISA
-- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, bootrom testing
+- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32ICA ISA, lots of fixes
+- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work
 - *Hoping to see more contributors here*
 
 ## TODO
