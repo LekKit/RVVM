@@ -77,3 +77,7 @@ void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name,
 bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
 bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
 bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
+
+void riscv32_csr_m_init(riscv32_vm_state_t *vm);
+void riscv32_csr_s_init(riscv32_vm_state_t *vm);
+void riscv32_csr_u_init(riscv32_vm_state_t *vm);
