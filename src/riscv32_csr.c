@@ -24,9 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, riscv32_csr_handler_t handler)
 {
-    uint32_t csr8 = cut_bits(csr_id, 0, 8);
-    uint32_t priv = cut_bits(csr_id, 8, 2);
-    riscv32_csr_t *self = &vm->csr[priv][csr8];
+    riscv32_csr_t *self = &vm->csr[csr_id];
 
     self->name = name;
     self->handler = handler;

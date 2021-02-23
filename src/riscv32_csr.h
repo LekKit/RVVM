@@ -28,9 +28,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
 {
-    uint32_t csr8 = cut_bits(csr_id, 0, 8);
     uint32_t priv = cut_bits(csr_id, 8, 2);
-    riscv32_csr_t *self = &vm->csr[priv][csr8];
+    riscv32_csr_t *self = &vm->csr[csr_id];
     if (priv > vm->priv_mode)
         return false;
     else

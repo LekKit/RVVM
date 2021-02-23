@@ -144,7 +144,7 @@ struct riscv32_vm_state_t {
     // To be replaced by CSR
     uint32_t mcause, mtval;
     uint32_t root_page_table;
-    riscv32_csr_t csr[4][256];
+    riscv32_csr_t csr[4096];
     bool mmu_virtual; // To be replaced by CSR
     uint8_t priv_mode;
 };

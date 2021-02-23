@@ -27,7 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32_mmu.h"
-#include "riscv32_csr_m.h"
+#include "riscv32_csr.h"
 #include "riscv32i.h"
 #include "riscv32c.h"
 #include "mem_ops.h"
@@ -102,7 +102,11 @@ riscv32_vm_state_t *riscv32_create_vm()
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->registers[REGISTER_PC] = vm->mem.begin;
 
+    for (uint32_t i=0; i<4096; ++i)
+        riscv32_csr_init(vm, i, "illegal", 0, riscv32_csr_illegal);
     riscv32_csr_m_init(vm);
+    riscv32_csr_s_init(vm);
+    riscv32_csr_u_init(vm);
 
     return vm;
 }
