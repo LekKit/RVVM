@@ -46,31 +46,40 @@ static void tlb_put(riscv32_vm_state_t* vm, uint32_t addr, uint32_t page_addr, u
     }
 }
 
-// Virtual memory addressing mode (SV32) - TODO a conforming implementation
+// Virtual memory addressing mode (SV32)
 static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
 {
-    // Shift addr by 10 instead of 12, and cut lower 2 bits to multiply it by 4
-    if (phys_addr_in_mem(vm->mem, vm->root_page_table)) {
-        uint32_t pte = read_uint32_le(vm->mem.data + vm->root_page_table + ((addr >> 10) & 0xFFC));
-        uint32_t page_addr;
+    uint32_t pte_addr = vm->root_page_table | ((addr >> 20) & 0xFFC);
+    uint32_t pte;
+
+    if (phys_addr_in_mem(vm->mem, pte_addr)) {
+        pte = read_uint32_le(vm->mem.data + pte_addr);
         if (pte & MMU_VALID_PTE) {
             if (pte & MMU_LEAF_PTE) {
-                // PGT entry was a leaf, 4 MiB hugepage mapped
-                if (pte & access) {
-                    page_addr = ((addr & 0xFFC00000) | (pte & 0x3FF000));
-                    tlb_put(vm, addr, page_addr, access);
-                    *dest_addr = page_addr + (addr & 0xFFF);
+                // PGT entry is a leaf, hugepage mapped
+                // Check that PPN[0] is 0, otherwise the page is misaligned
+                if ((pte & (access | 0xFFC00)) == access) {
+                    // TODO: A/D flag updates should be atomic
+                    pte |= MMU_PAGE_ACCESSED;
+                    if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
+                    write_uint32_le(vm->mem.data + pte_addr, pte);
+                    pte_addr = ((pte & 0xFFF00000) << 2) | (addr & 0x3FFFFF);
+                    tlb_put(vm, addr, pte_addr, access);
+                    *dest_addr = pte_addr;
                     return true;
                 }
             } else {
-                page_addr = (pte & 0xFFFFF000);
-                if (phys_addr_in_mem(vm->mem, page_addr)) {
-                    // Use PPN as nested PTE address
-                    pte = read_uint32_le(vm->mem.data + page_addr + ((addr >> 20) & 0xFFC));
+                // PGT entry is a pointer to next pagetable
+                pte_addr = ((pte & 0xFFFFFC00) << 2) | ((addr >> 10) & 0xFFC);
+                if (phys_addr_in_mem(vm->mem, pte_addr)) {
+                    pte = read_uint32_le(vm->mem.data + pte_addr);
                     if ((pte & MMU_VALID_PTE) && (pte & access)) {
-                        page_addr = (pte & 0xFFFFF000);
-                        tlb_put(vm, addr, page_addr, access);
-                        *dest_addr = page_addr + (addr & 0xFFF);
+                        pte |= MMU_PAGE_ACCESSED;
+                        if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
+                        write_uint32_le(vm->mem.data + pte_addr, pte);
+                        pte_addr = ((pte & 0xFFFFFC00) << 2) | (addr & 0xFFF);
+                        tlb_put(vm, addr, pte_addr, access);
+                        *dest_addr = pte_addr;
                         return true;
                     }
                 }

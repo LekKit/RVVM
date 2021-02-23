@@ -32,7 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MMU_READ          0x2
 #define MMU_WRITE         0x4
 #define MMU_EXEC          0x8
-#define MMU_LEAF_PTE      0xE
+#define MMU_LEAF_PTE      0xA
 #define MMU_USER_USABLE   0x10
 #define MMU_GLOBAL_MAP    0x20
 #define MMU_PAGE_ACCESSED 0x40
