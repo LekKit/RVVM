@@ -74,6 +74,35 @@ static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, riscv32_mmio_devic
     return true;
 }
 
+struct opensbi_fw_dynamic_info {
+	/** Info magic */
+	uint32_t magic;
+	/** Info version */
+	uint32_t version;
+	/** Next booting stage address */
+	uint32_t next_addr;
+	/** Next booting stage mode */
+	uint32_t next_mode;
+	/** Options for OpenSBI library */
+	uint32_t options;
+	/**
+	 * Preferred boot HART id
+	 *
+	 * It is possible that the previous booting stage uses same link
+	 * address as the FW_DYNAMIC firmware. In this case, the relocation
+	 * lottery mechanism can potentially overwrite the previous booting
+	 * stage while other HARTs are still running in the previous booting
+	 * stage leading to boot-time crash. To avoid this boot-time crash,
+	 * the previous booting stage can specify last HART that will jump
+	 * to the FW_DYNAMIC firmware as the preferred boot HART.
+	 *
+	 * To avoid specifying a preferred boot HART, the previous booting
+	 * stage can set it to -1UL which will force the FW_DYNAMIC firmware
+	 * to use the relocation lottery mechanism.
+	 */
+	uint32_t boot_hart;
+} __packed;
+
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
@@ -97,7 +126,7 @@ riscv32_vm_state_t *riscv32_create_vm()
         return NULL;
     }
     riscv32_tlb_flush(vm);
-    riscv32_mmio_add_device(vm, 0x40013800, 0x40013BFF, mmio_usart_handler, NULL);
+    riscv32_mmio_add_device(vm, 0x10000000, 0x100000FF, mmio_usart_handler, NULL);
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->registers[REGISTER_PC] = vm->mem.begin;
@@ -161,6 +190,9 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
             case 'h':
                 size += sprintf(buffer+size, "0x%x", va_arg(ap, uint32_t));
                 break;
+            case 'c':
+                size += sprintf(buffer+size, "%s", vm->csr[va_arg(ap, uint32_t)].name);
+                break;
             }
         }
     }
@@ -196,7 +228,9 @@ inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instructio
 
 #ifdef RV_DEBUG
     riscv32_dump_registers(vm);
+#ifdef RV_DEBUG_SINGLESTEP
     getchar();
+#endif
 #endif
 }
 

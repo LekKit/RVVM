@@ -183,6 +183,7 @@ void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const u
 void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 
 //#define RV_DEBUG
+//#define RV_DEBUG_SINGLESTEP
 
 void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...);
 
