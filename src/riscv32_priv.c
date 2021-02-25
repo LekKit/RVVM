@@ -72,12 +72,16 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 static void riscv32i_fence(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented fence %h", instruction);
+    UNUSED(vm);
+    UNUSED(instruction);
+    riscv32_debug(vm, "RV32I: unimplemented fence %h", instruction);
 }
 
 static void riscv32zifence_i(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    riscv32_debug_always(vm, "RV32I: unimplemented zifence.i %h", instruction);
+    UNUSED(vm);
+    UNUSED(instruction);
+    riscv32_debug(vm, "RV32I: unimplemented zifence.i %h", instruction);
 }
 
 static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instruction)
