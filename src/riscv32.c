@@ -74,35 +74,6 @@ static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, riscv32_mmio_devic
     return true;
 }
 
-struct opensbi_fw_dynamic_info {
-	/** Info magic */
-	uint32_t magic;
-	/** Info version */
-	uint32_t version;
-	/** Next booting stage address */
-	uint32_t next_addr;
-	/** Next booting stage mode */
-	uint32_t next_mode;
-	/** Options for OpenSBI library */
-	uint32_t options;
-	/**
-	 * Preferred boot HART id
-	 *
-	 * It is possible that the previous booting stage uses same link
-	 * address as the FW_DYNAMIC firmware. In this case, the relocation
-	 * lottery mechanism can potentially overwrite the previous booting
-	 * stage while other HARTs are still running in the previous booting
-	 * stage leading to boot-time crash. To avoid this boot-time crash,
-	 * the previous booting stage can specify last HART that will jump
-	 * to the FW_DYNAMIC firmware as the preferred boot HART.
-	 *
-	 * To avoid specifying a preferred boot HART, the previous booting
-	 * stage can set it to -1UL which will force the FW_DYNAMIC firmware
-	 * to use the relocation lottery mechanism.
-	 */
-	uint32_t boot_hart;
-} __packed;
-
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
