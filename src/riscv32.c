@@ -69,7 +69,13 @@ static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, riscv32_mmio_devic
 #ifdef RV_DEBUG
     printf("USART: %c\n", *(char*)dest);
 #else
-    printf("%c", *(char*)dest);
+    if (access == MMU_WRITE) {
+        printf("%c", *(char*)dest);
+        //printf("USART write: 0x%x, size %d, val %d\n", addr, size, *(char*)dest);
+    } else {
+        *(uint8_t*)dest = 0x20;
+        //printf("USART read: 0x%x, size %d\n", addr, size);
+    }
 #endif
     return true;
 }
