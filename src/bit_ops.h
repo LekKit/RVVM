@@ -52,6 +52,12 @@ inline uint32_t cut_bits(uint32_t val, uint32_t pos, uint32_t bits)
     return (val >> pos) & gen_mask(bits);
 }
 
+// Replace N bits in val at given position (from lower bit) by p
+inline uint32_t replace_bits(uint32_t val, uint32_t pos, uint32_t bits, uint32_t p)
+{
+    return (val & (~(gen_mask(bits) << pos))) | ((p & gen_mask(bits)) << pos);
+}
+
 // Check if Nth bit of val is 1
 inline bool is_bit_set(uint32_t val, uint32_t pos)
 {
