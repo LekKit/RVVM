@@ -218,7 +218,7 @@ static void riscv32_run_till_event(riscv32_vm_state_t *vm)
     // Execute hot instructions loop until some event occurs (interrupt, etc)
     // This adds little to no overhead, and the loop can be forcefully unrolled
     while (vm->wait_event) {
-        // Copying the riscv32_mem_op code here increases performance
+        riscv32i_write_register_u(vm, REGISTER_ZERO, 0);
         inst_addr = vm->registers[REGISTER_PC];
         tlb_key = tlb_hash(inst_addr);
         if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
