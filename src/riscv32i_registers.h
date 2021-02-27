@@ -1,6 +1,7 @@
 /*
 riscv32i_registers.h - register functions definitions for riscv32i
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -29,11 +30,6 @@ inline uint32_t riscv32i_read_register_u(riscv32_vm_state_t *vm, uint32_t reg)
 inline void riscv32i_write_register_u(riscv32_vm_state_t *vm, uint32_t reg, uint32_t data)
 {
     assert(reg < REGISTERS_MAX);
-
-    // always ignore for x0
-    if (reg == REGISTER_X0)
-        return;
-
     vm->registers[reg] = data;
 }
 
@@ -46,11 +42,6 @@ inline int32_t riscv32i_read_register_s(riscv32_vm_state_t *vm, uint32_t reg)
 inline void riscv32i_write_register_s(riscv32_vm_state_t *vm, uint32_t reg, int32_t data)
 {
     assert(reg < REGISTERS_MAX);
-
-    // always ignore for x0
-    if (reg == REGISTER_X0)
-        return;
-
     vm->registers[reg] = data;
 }
 
