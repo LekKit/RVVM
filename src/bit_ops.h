@@ -17,8 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_BIT_OPS_H
-#define RISCV_BIT_OPS_H
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -77,5 +76,3 @@ inline uint32_t rev_bits(uint32_t val, uint32_t bits)
 
     return ret;
 }
-
-#endif

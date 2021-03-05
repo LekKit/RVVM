@@ -17,8 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_MEM_OPS_H
-#define RISCV_MEM_OPS_H
+#pragma once
 
 #include <stdint.h>
 
@@ -52,5 +51,3 @@ static inline void write_uint16_le(void* addr, uint16_t val) {
     arr[0] = val & 0xFF;
     arr[1] = (val >> 8) & 0xFF;
 }
-
-#endif

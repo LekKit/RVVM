@@ -17,8 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_MMU_H
-#define RISCV_MMU_H
+#pragma once
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -107,5 +106,3 @@ inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, uint32_t addr, void* d
     // TLB miss, misaligned access or protection fault - perform non-TLB access
     return riscv32_mmu_op(vm, addr, dest, size, access);
 }
-
-#endif

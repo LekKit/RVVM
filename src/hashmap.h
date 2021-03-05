@@ -25,8 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 * which may help in the future for code executing in VM.
 */
 
-#ifndef HASHMAP_H
-#define HASHMAP_H
+#pragma once
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -109,5 +108,3 @@ inline void hashmap_remove(hashmap_t* map, size_t key)
         }
     }
 }
-
-#endif

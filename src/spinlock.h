@@ -16,8 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_SPINLOCK_H
-#define RISCV_SPINLOCK_H
+#pragma once
 
 #include <stdint.h>
 
@@ -59,5 +58,3 @@ inline void spin_unlock(spinlock_t* lock)
 {
     atomic_store(&lock->flag, 0);
 }
-
-#endif
