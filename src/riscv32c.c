@@ -31,6 +31,20 @@ static inline uint32_t riscv32c_reg(uint32_t reg)
     return REGISTER_X8 + reg;
 }
 
+// Decode c.j / c.jal offset
+static inline int16_t decode_jal_imm(uint16_t imm)
+{
+    imm = (cut_bits(imm, 1, 3) << 1)  |
+          (cut_bits(imm, 9, 1) << 4)  |
+          (cut_bits(imm, 0, 1) << 5)  |
+          (cut_bits(imm, 5, 1) << 6)  |
+          (cut_bits(imm, 4, 1) << 7)  |
+          (cut_bits(imm, 7, 2) << 8)  |
+          (cut_bits(imm, 6, 1) << 10) |
+          (cut_bits(imm, 10, 1) << 11);
+    return sign_extend(imm, 12);
+}
+
 static void riscv32c_addi4spn(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add imm*4 to stack pointer (X2), store into rds
@@ -76,16 +90,7 @@ static void riscv32c_jal(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Save PC+2 into X1 (return addr), jump to PC+offset
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
-    // This is total bullshit, we need translation table here in future
-    uint32_t imm = (cut_bits(instruction, 3, 3) << 1)  |
-                   (cut_bits(instruction, 11, 1) << 4) |
-                   (cut_bits(instruction, 2, 1) << 5)  |
-                   (cut_bits(instruction, 7, 1) << 6)  |
-                   (cut_bits(instruction, 6, 1) << 7)  |
-                   (cut_bits(instruction, 9, 2) << 8)  |
-                   (cut_bits(instruction, 8, 1) << 10) |
-                   (cut_bits(instruction, 12, 1) << 11);
-    int32_t offset = sign_extend(imm, 12);
+    int32_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
 
     riscv32i_write_register_u(vm, REGISTER_X1, pc + 2);
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
@@ -273,16 +278,7 @@ static void riscv32c_j(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Jump to PC+offset
     uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
-    // This is total bullshit, we need translation table here in future
-    uint32_t imm = (cut_bits(instruction, 3, 3) << 1)  |
-                   (cut_bits(instruction, 11, 1) << 4) |
-                   (cut_bits(instruction, 2, 1) << 5)  |
-                   (cut_bits(instruction, 7, 1) << 6)  |
-                   (cut_bits(instruction, 6, 1) << 7)  |
-                   (cut_bits(instruction, 9, 2) << 8)  |
-                   (cut_bits(instruction, 8, 1) << 10) |
-                   (cut_bits(instruction, 12, 1) << 11);
-    int32_t offset = sign_extend(imm, 12);
+    int32_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
 
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     riscv32_debug(vm, "RV32C: c.j %d", offset);
