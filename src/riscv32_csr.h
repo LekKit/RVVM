@@ -26,57 +26,60 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CSR_SETBITS    0x1
 #define CSR_CLEARBITS  0x2
 
+#define CSR_GENERIC_MASK 0xFFFFFFFF
+
+typedef bool (*riscv32_csr_handler_t)(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op);
+
+struct riscv32_csr_t {
+    const char *name;
+    riscv32_csr_handler_t handler;
+};
+
+extern riscv32_csr_t riscv32_csr_list[4096];
+
 inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
 {
     uint32_t priv = cut_bits(csr_id, 8, 2);
-    riscv32_csr_t *self = &vm->csr[csr_id];
     if (priv > vm->priv_mode)
         return false;
     else
-        return self->handler(vm, self, dest, op);
+        return riscv32_csr_list[csr_id].handler(vm, csr_id, dest, op);
 }
 
-inline bool csr_helper_check_rw(riscv32_csr_t* csr, uint32_t val, uint32_t op)
+inline uint32_t csr_helper_rw(uint32_t csr_val, uint32_t* dest, uint32_t op, uint32_t mask)
 {
+    uint32_t tmp = 0;
     switch (op) {
     case CSR_SWAP:
-        return val != csr->value;
+        tmp = (*dest & mask) | (csr_val & (~mask));
+        *dest = csr_val & mask;
+        break;
     case CSR_SETBITS:
-        return val != 0;
+        tmp = csr_val | (*dest & mask);
+        *dest = csr_val & mask;
+        break;
     case CSR_CLEARBITS:
-        return val != 0;
-    default:
-        return true;
+        tmp = csr_val & (~(*dest & mask));
+        *dest = csr_val & mask;
+        break;
     }
+    return tmp;
 }
 
-inline void csr_helper_rw(riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+inline void csr_helper_masked(uint32_t* csr, uint32_t* dest, uint32_t op, uint32_t mask)
 {
-    uint32_t tmp;
-    switch (op) {
-    case CSR_SWAP:
-        tmp = csr->value;
-        csr->value = *dest;
-        *dest = tmp;
-        break;
-    case CSR_SETBITS:
-        tmp = csr->value;
-        csr->value = tmp | *dest;
-        *dest = tmp;
-        break;
-    case CSR_CLEARBITS:
-        tmp = csr->value;
-        csr->value = tmp & (~*dest);
-        *dest = tmp;
-        break;
-    }
+    *csr = csr_helper_rw(*csr, dest, op, mask);
 }
 
-void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, riscv32_csr_handler_t handler);
-bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
-bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
-bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
+inline void csr_helper(uint32_t* csr, uint32_t* dest, uint32_t op)
+{
+    *csr = csr_helper_rw(*csr, dest, op, CSR_GENERIC_MASK);
+}
 
-void riscv32_csr_m_init(riscv32_vm_state_t *vm);
-void riscv32_csr_s_init(riscv32_vm_state_t *vm);
-void riscv32_csr_u_init(riscv32_vm_state_t *vm);
+void riscv32_csr_init(uint32_t csr_id, const char *name, riscv32_csr_handler_t handler);
+bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op);
+bool riscv32_csr_illegal(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op);
+
+void riscv32_csr_m_init();
+void riscv32_csr_s_init();
+void riscv32_csr_u_init();

@@ -1,7 +1,7 @@
 /*
-riscv32_csr_m.c - RISC-V Machine Level Control and Status Registers
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+riscv32_csr_u.c - RISC-V User Level Control and Status Registers
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -20,35 +20,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "riscv32_csr.h"
 
-void riscv32_csr_u_init(riscv32_vm_state_t *vm)
+#define CSR_USTATUS_MASK 0x11
+
+void riscv32_csr_u_init()
 {
     // User Trap Setup
-    riscv32_csr_init(vm, 0x000, "ustatus", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x004, "uie", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x005, "utvec", 0, riscv32_csr_generic_rw);
+    riscv32_csr_init(0x000, "ustatus", riscv32_csr_unimp);
+    riscv32_csr_init(0x004, "uie", riscv32_csr_unimp);
+    riscv32_csr_init(0x005, "utvec", riscv32_csr_unimp);
 
     // User Trap Handling
-    riscv32_csr_init(vm, 0x040, "uscratch", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x041, "uepc", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x042, "ucause", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x043, "utval", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x044, "uip", 0, riscv32_csr_generic_rw);
+    riscv32_csr_init(0x040, "uscratch", riscv32_csr_unimp);
+    riscv32_csr_init(0x041, "uepc", riscv32_csr_unimp);
+    riscv32_csr_init(0x042, "ucause", riscv32_csr_unimp);
+    riscv32_csr_init(0x043, "utval", riscv32_csr_unimp);
+    riscv32_csr_init(0x044, "uip", riscv32_csr_unimp);
 
     // User Floating-Point CSRs
-    riscv32_csr_init(vm, 0x001, "fflags", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x002, "frm", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x003, "fcsr", 0, riscv32_csr_generic_rw);
+    riscv32_csr_init(0x001, "fflags", riscv32_csr_unimp);
+    riscv32_csr_init(0x002, "frm", riscv32_csr_unimp);
+    riscv32_csr_init(0x003, "fcsr", riscv32_csr_unimp);
 
     // User Counter/Timers
-    riscv32_csr_init(vm, 0xC00, "cycle", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xC01, "time", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xC02, "instret", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xC80, "cycleh", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xC81, "timeh", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xC82, "instreth", 0, riscv32_csr_generic_ro);
+    riscv32_csr_init(0xC00, "cycle", riscv32_csr_unimp);
+    riscv32_csr_init(0xC01, "time", riscv32_csr_unimp);
+    riscv32_csr_init(0xC02, "instret", riscv32_csr_unimp);
+    riscv32_csr_init(0xC80, "cycleh", riscv32_csr_unimp);
+    riscv32_csr_init(0xC81, "timeh", riscv32_csr_unimp);
+    riscv32_csr_init(0xC82, "instreth", riscv32_csr_unimp);
 
     for (uint32_t i=3; i<32; ++i) {
-        riscv32_csr_init(vm, 0xC03+i, "hpmcounter", 0, riscv32_csr_generic_ro);
-        riscv32_csr_init(vm, 0xC83+i, "hpmcounterh", 0, riscv32_csr_generic_ro);
+        riscv32_csr_init(0xC00+i, "hpmcounter", riscv32_csr_unimp);
+        riscv32_csr_init(0xC80+i, "hpmcounterh", riscv32_csr_unimp);
     }
 }

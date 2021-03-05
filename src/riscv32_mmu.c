@@ -86,6 +86,7 @@ static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, uint32_t addr, ui
             }
         }
     }
+
     // No valid address translation can be done (invalid PTE or protection fault)
     return false;
 }
@@ -168,7 +169,7 @@ void riscv32_tlb_flush(riscv32_vm_state_t* vm)
 
 bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
 {
-    if (vm->mmu_virtual)
+    if (vm->mmu_virtual && vm->priv_mode <= PRIVILEGE_SUPERVISOR)
         return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
     else
         return riscv32_mmu_translate_bare(vm, addr, access, dest_addr);

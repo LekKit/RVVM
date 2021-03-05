@@ -1,7 +1,7 @@
 /*
-riscv32.c - Very stupid and slow RISC-V emulator code
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+riscv32.c - RISC-V Virtual Machine
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -59,37 +59,24 @@ void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const 
     riscv32_opcodes[opcode | 0x100] = func;
 }
 
-static bool mmio_usart_handler(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access)
-{
-    UNUSED(vm);
-    UNUSED(device);
-    UNUSED(addr);
-    UNUSED(size);
-    UNUSED(access);
-#ifdef RV_DEBUG
-    printf("USART: %c\n", *(char*)dest);
-#else
-    if (access == MMU_WRITE) {
-        printf("%c", *(char*)dest);
-        //printf("USART write: 0x%x, size %d, val %d\n", addr, size, *(char*)dest);
-    } else {
-        *(uint8_t*)dest = 0x20;
-        //printf("USART read: 0x%x, size %d\n", addr, size);
-    }
-#endif
-    return true;
-}
+void ns16550a_init(riscv32_vm_state_t *vm, uint32_t base_addr);
 
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
     if (!global_init) {
-        for (uint32_t i=0; i<512; ++i) riscv32_opcodes[i] = riscv32_illegal_insn;
+        for (uint32_t i=0; i<512; ++i)
+            riscv32_opcodes[i] = riscv32_illegal_insn;
         riscv32i_init();
         riscv32m_init();
         riscv32c_init();
         riscv32a_init();
         riscv32_priv_init();
+        for (uint32_t i=0; i<4096; ++i)
+            riscv32_csr_init(i, "illegal", riscv32_csr_illegal);
+        riscv32_csr_m_init();
+        riscv32_csr_s_init();
+        riscv32_csr_u_init();
         global_init = true;
     }
 
@@ -103,16 +90,12 @@ riscv32_vm_state_t *riscv32_create_vm()
         return NULL;
     }
     riscv32_tlb_flush(vm);
-    riscv32_mmio_add_device(vm, 0x10000000, 0x100000FF, mmio_usart_handler, NULL);
+    ns16550a_init(vm, 0x10000000);
+    //riscv32_mmio_add_device(vm, 0x10000000, 0x100000FF, mmio_usart_handler, NULL);
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
+    vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     vm->registers[REGISTER_PC] = vm->mem.begin;
-
-    for (uint32_t i=0; i<4096; ++i)
-        riscv32_csr_init(vm, i, "illegal", 0, riscv32_csr_illegal);
-    riscv32_csr_m_init(vm);
-    riscv32_csr_s_init(vm);
-    riscv32_csr_u_init(vm);
 
     return vm;
 }
@@ -123,23 +106,39 @@ void riscv32_destroy_vm(riscv32_vm_state_t *vm)
     free(vm);
 }
 
+static void riscv32_break(riscv32_vm_state_t *vm)
+{
+    vm->wait_event = 0;
+}
+
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
 {
-    vm->mcause = cause | INTERRUPT_MASK;
-    vm->wait_event = 0;
+    riscv32_trap(vm, INTERRUPT_MASK | cause, 0);
 }
 
 void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
 {
-    /*
-    * This should set the PC to trap vector, save current execution context
-    * when we have CSRs, etc
-    * Currently works the same as interrupt
-    */
-    UNUSED(tval);
-    vm->mcause = cause & (~INTERRUPT_MASK);
-    vm->mtval = tval;
-    vm->wait_event = 0;
+    uint8_t priv;
+    // Delegate to lower privilege mode if needed
+    for (priv=PRIVILEGE_MACHINE; priv>vm->priv_mode; --priv) {
+        if ((vm->csr.edeleg[priv] & (1 << cause)) == 0) break;
+    }
+    riscv32_debug_always(vm, "Trap priv %d -> %d, cause: %h, tval: %h", vm->priv_mode, priv, cause, tval);
+    vm->csr.epc[priv] = riscv32i_read_register_u(vm, REGISTER_PC);
+    vm->csr.cause[priv] = cause;
+    vm->csr.tval[priv] = tval;
+    // Save current priv mode to xPP, xIE to xPIE, disable interrupts
+    if (priv == PRIVILEGE_MACHINE) {
+        vm->csr.status = replace_bits(vm->csr.status, 11, 2, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, 7, 1, cut_bits(vm->csr.status, 3, 1));
+        vm->csr.status &= 0xFFFFFFF7;
+    } else if (priv == PRIVILEGE_SUPERVISOR) {
+        vm->csr.status = replace_bits(vm->csr.status, 8, 1, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, 5, 1, cut_bits(vm->csr.status, 1, 1));
+        vm->csr.status &= 0xFFFFFFFD;
+    }
+    vm->priv_mode = priv;
+    riscv32_break(vm);
 }
 
 void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
@@ -168,7 +167,7 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
                 size += sprintf(buffer+size, "0x%x", va_arg(ap, uint32_t));
                 break;
             case 'c':
-                size += sprintf(buffer+size, "%s", vm->csr[va_arg(ap, uint32_t)].name);
+                size += sprintf(buffer+size, "%s", riscv32_csr_list[va_arg(ap, uint32_t)].name);
                 break;
             }
         }
@@ -235,11 +234,14 @@ void riscv32_run(riscv32_vm_state_t *vm)
 {
     assert(vm);
 
-    vm->wait_event = 1;
-    riscv32_run_till_event(vm);
-    if (vm->mcause & INTERRUPT_MASK)
-        riscv32_debug_always(vm, "Interrupted the VM, mcause: %h", vm->mcause);
-    else
-        riscv32_debug_always(vm, "Trapped the VM, mcause: %h, mtval: %h", vm->mcause, vm->mtval);
-    riscv32_dump_registers(vm);
+    while (true) {
+        vm->wait_event = 1;
+        riscv32_run_till_event(vm);
+        if ((vm->csr.cause[vm->priv_mode] & INTERRUPT_MASK) && (vm->csr.tvec[vm->priv_mode] & 1)) {
+            size_t pc = (vm->csr.tvec[vm->priv_mode] & (~3)) + (vm->csr.cause[vm->priv_mode] << 2);
+            riscv32i_write_register_u(vm, REGISTER_PC, pc);
+        } else {
+            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.tvec[vm->priv_mode] & (~3));
+        }
+    }
 }

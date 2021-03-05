@@ -1,7 +1,7 @@
 /*
 riscv32_csr_m.c - RISC-V Machine Level Control and Status Registers
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -20,13 +20,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "riscv32_csr.h"
 
-#define RISCV32_MISA_RV32  0x40000000
-#define RISCV32_MISA_RV64  0x80000000
-#define RISCV32_MISA_RV128 0xC0000000
+#define CSR_MARCHID 0x5256564D // 'RVVM'
+
+#define CSR_MSTATUS_MASK 0x807FF9BB
+
+#define CSR_MISA_RV32  0x40000000
+#define CSR_MISA_RV64  0x80000000
+#define CSR_MISA_RV128 0xC0000000
 
 static uint32_t riscv32_mkmisa(const char* str)
 {
-    uint32_t ret = RISCV32_MISA_RV32;
+    uint32_t ret = CSR_MISA_RV32;
     while (*str) {
         ret |= (1 << (*str - 'A'));
         str++;
@@ -34,46 +38,136 @@ static uint32_t riscv32_mkmisa(const char* str)
     return ret;
 }
 
-void riscv32_csr_m_init(riscv32_vm_state_t *vm)
+static bool riscv32_csr_mhartid(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
-    riscv32_csr_init(vm, 0xF11, "mvendor", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xF12, "marchid", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xF13, "mimpid", 0, riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0xF14, "mhartid", 0, riscv32_csr_generic_ro);
+    UNUSED(vm);
+    UNUSED(csr_id);
+    UNUSED(op);
+    *dest = 0;
+    return true;
+}
 
-    riscv32_csr_init(vm, 0x300, "mstatus", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x301, "misa", riscv32_mkmisa("ICMAS"), riscv32_csr_generic_ro);
-    riscv32_csr_init(vm, 0x302, "medeleg", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x303, "mideleg", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x304, "mie", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x305, "mtvec", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x306, "mcounteren", 0, riscv32_csr_generic_rw);
+static bool riscv32_csr_mstatus(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper_masked(&vm->csr.status, dest, op, CSR_MSTATUS_MASK);
+    return true;
+}
 
-    riscv32_csr_init(vm, 0x340, "mscratch", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x341, "mepc", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x342, "mcause", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x343, "mtval", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x344, "mip", 0, riscv32_csr_generic_rw);
+static bool riscv32_csr_misa(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(vm);
+    UNUSED(csr_id);
+    UNUSED(op);
+    *dest = riscv32_mkmisa("IMACSU");
+    return true;
+}
 
-    riscv32_csr_init(vm, 0x3A0, "pmpcfg0", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3A1, "pmpcfg1", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3A2, "pmpcfg2", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3A3, "pmpcfg3", 0, riscv32_csr_generic_rw);
+static bool riscv32_csr_medeleg(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.edeleg[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
 
-    riscv32_csr_init(vm, 0x3B0, "pmpaddr0", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B1, "pmpaddr1", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B2, "pmpaddr2", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B3, "pmpaddr3", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B4, "pmpaddr4", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B5, "pmpaddr5", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B6, "pmpaddr6", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B7, "pmpaddr7", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B8, "pmpaddr8", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3B9, "pmpaddr9", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BA, "pmpaddr10", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BB, "pmpaddr11", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BC, "pmpaddr12", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BD, "pmpaddr13", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BE, "pmpaddr14", 0, riscv32_csr_generic_rw);
-    riscv32_csr_init(vm, 0x3BF, "pmpaddr15", 0, riscv32_csr_generic_rw);
+static bool riscv32_csr_mideleg(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.ideleg[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.ie[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mtvec(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.tvec[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mscratch(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.scratch[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mepc(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.epc[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mcause(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.cause[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mtval(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.tval[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+static bool riscv32_csr_mip(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    csr_helper(&vm->csr.ip[PRIVILEGE_MACHINE], dest, op);
+    return true;
+}
+
+void riscv32_csr_m_init()
+{
+    // Machine Information Registers
+    riscv32_csr_init(0xF11, "mvendorid", riscv32_csr_unimp);
+    riscv32_csr_init(0xF12, "marchid", riscv32_csr_unimp);
+    riscv32_csr_init(0xF13, "mimpid", riscv32_csr_unimp);
+    riscv32_csr_init(0xF14, "mhartid", riscv32_csr_mhartid);
+
+    // Machine Trap Setup
+    riscv32_csr_init(0x300, "mstatus", riscv32_csr_mstatus);
+    riscv32_csr_init(0x301, "misa", riscv32_csr_misa);
+    riscv32_csr_init(0x302, "medeleg", riscv32_csr_medeleg);
+    riscv32_csr_init(0x303, "mideleg", riscv32_csr_mideleg);
+    riscv32_csr_init(0x304, "mie", riscv32_csr_mie);
+    riscv32_csr_init(0x305, "mtvec", riscv32_csr_mtvec);
+    riscv32_csr_init(0x306, "mcounteren", riscv32_csr_unimp);
+
+    // Machine Trap Handling
+    riscv32_csr_init(0x340, "mscratch", riscv32_csr_mscratch);
+    riscv32_csr_init(0x341, "mepc", riscv32_csr_mepc);
+    riscv32_csr_init(0x342, "mcause", riscv32_csr_mcause);
+    riscv32_csr_init(0x343, "mtval", riscv32_csr_mtval);
+    riscv32_csr_init(0x344, "mip", riscv32_csr_mip);
+
+    // Machine Memory Protection
+    for (uint32_t i=0; i<4; ++i)
+        riscv32_csr_init(0x3A0+i, "pmpcfg", riscv32_csr_unimp);
+    for (uint32_t i=0; i<16; ++i)
+        riscv32_csr_init(0x3B0+i, "pmpaddr", riscv32_csr_unimp);
+
+    // Machine Counter/Timers
+    riscv32_csr_init(0xB00, "mcycle", riscv32_csr_unimp);
+    riscv32_csr_init(0xB02, "minstret", riscv32_csr_unimp);
+    riscv32_csr_init(0xB80, "mcycleh", riscv32_csr_unimp);
+    riscv32_csr_init(0xB82, "minstreth", riscv32_csr_unimp);
+    for (uint32_t i=3; i<32; ++i) {
+        riscv32_csr_init(0xB00+i, "mhpmcounter", riscv32_csr_unimp);
+        riscv32_csr_init(0xB80+i, "mhpmcounterh", riscv32_csr_unimp);
+    }
+
+    // Machine Counter Setup
+    riscv32_csr_init(0x320, "mcountinhibit", riscv32_csr_unimp);
+    for (uint32_t i=3; i<32; ++i)
+        riscv32_csr_init(0x320+i, "mhpmevent", riscv32_csr_unimp);
 }

@@ -22,37 +22,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "bit_ops.h"
 
-void riscv32_csr_init(riscv32_vm_state_t *vm, uint32_t csr_id, const char *name, uint32_t def_val, riscv32_csr_handler_t handler)
-{
-    riscv32_csr_t *self = &vm->csr[csr_id];
+riscv32_csr_t riscv32_csr_list[4096];
 
-    self->name = name;
-    self->handler = handler;
-    self->value = def_val;
+void riscv32_csr_init(uint32_t csr_id, const char *name, riscv32_csr_handler_t handler)
+{
+    riscv32_csr_list[csr_id].name = name;
+    riscv32_csr_list[csr_id].handler = handler;
 }
 
-bool riscv32_csr_generic_rw(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
-    csr_helper_rw(csr, dest, op);
-    return true;
+    UNUSED(dest);
+    UNUSED(op);
+    riscv32_debug_always(vm, "unimplemented csr %c!!!", csr_id);
+    return false;
 }
 
-bool riscv32_csr_generic_ro(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
+bool riscv32_csr_illegal(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
-    if (csr_helper_check_rw(csr, *dest, op)) {
-        return false;
-    } else {
-        *dest = csr->value;
-        return true;
-    }
-}
-
-bool riscv32_csr_illegal(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op)
-{
-    UNUSED(vm);
-    UNUSED(csr);
+    UNUSED(csr_id);
     UNUSED(dest);
     UNUSED(op);
     return false;

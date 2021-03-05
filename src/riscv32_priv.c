@@ -1,7 +1,7 @@
 /*
 riscv32_priv.c - RISC-V privileged mode emulation
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -30,22 +30,46 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     switch (instruction) {
     case RV32_S_ECALL:
-        riscv32_debug(vm, "RV32I: ecall");
+        riscv32_debug_always(vm, "RV32I: ecall");
+        riscv32_trap(vm, TRAP_ENVCALL_UMODE + vm->priv_mode, 0);
         return;
     case RV32_S_EBREAK:
-        riscv32_debug(vm, "RV32I: ebreak");
+        riscv32_debug_always(vm, "RV32I: ebreak");
+        riscv32_trap(vm, TRAP_BREAKPOINT, 0);
         return;
     case RV32_S_URET:
-        riscv32_debug(vm, "RV32I: uret");
+        riscv32_debug_always(vm, "RV32I: uret");
+        // No N extension
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
         return;
     case RV32_S_SRET:
-        riscv32_debug(vm, "RV32I: sret");
+        riscv32_debug_always(vm, "RV32I: sret");
+        if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
+            // Set privilege mode to SPP
+            vm->priv_mode = cut_bits(vm->csr.status, 8, 1);
+            // Set SIE to SPIE
+            vm->csr.status = replace_bits(vm->csr.status, 1, 1, cut_bits(vm->csr.status, 5, 1));
+            // Set PC to csr.sepc
+            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.epc[PRIVILEGE_SUPERVISOR] - 4);
+        } else {
+            riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+        }
         return;
     case RV32_S_MRET:
-        riscv32_debug(vm, "RV32I: mret");
+        riscv32_debug_always(vm, "RV32I: mret");
+        if (vm->priv_mode >= PRIVILEGE_MACHINE) {
+            // Set privilege mode to MPP
+            vm->priv_mode = cut_bits(vm->csr.status, 11, 2);
+            // Set MIE to MPIE
+            vm->csr.status = replace_bits(vm->csr.status, 3, 1, cut_bits(vm->csr.status, 7, 1));
+            // Set PC to csr.mepc
+            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.epc[PRIVILEGE_MACHINE] - 4);
+        } else {
+            riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+        }
         return;
     case RV32_S_WFI:
-        riscv32_debug(vm, "RV32I: wfi");
+        riscv32_debug_always(vm, "RV32I: wfi");
         return;
     }
 
@@ -55,15 +79,21 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
     UNUSED(rs2);
     switch (instruction & RV32_S_FENCE_MASK) {
     case RV32_S_SFENCE_VMA:
-        riscv32_tlb_flush(vm);
-        riscv32_debug(vm, "RV32I: sfence.vma %r, %r", rs1, rs1);
+        riscv32_debug_always(vm, "RV32I: sfence.vma %r, %r", rs1, rs1);
+        if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
+            riscv32_tlb_flush(vm);
+        } else {
+            riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
+        }
         return;
     // The extension is not ratified yet, no reason to implement these now
     case RV32_S_HFENCE_BVMA:
         riscv32_debug_always(vm, "RV32I: unimplemented hfence.bvma %h", instruction);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
         return;
     case RV32_S_HFENCE_GVMA:
         riscv32_debug_always(vm, "RV32I: unimplemented hfence.gvma %h", instruction);
+        riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
         return;
     }
 

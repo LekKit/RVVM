@@ -1,7 +1,7 @@
 /*
 riscv32.h - RISC-V virtual machine code definitions
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -114,13 +114,6 @@ typedef struct riscv32_csr_t riscv32_csr_t;
 typedef struct riscv32_mmio_device_t riscv32_mmio_device_t;
 
 typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
-typedef bool (*riscv32_csr_handler_t)(riscv32_vm_state_t *vm, riscv32_csr_t* csr, uint32_t* dest, uint32_t op);
-
-struct riscv32_csr_t {
-    const char *name;
-    riscv32_csr_handler_t handler;
-    uint32_t value;
-};
 
 struct riscv32_mmio_device_t {
     uint32_t base_addr;
@@ -141,12 +134,23 @@ struct riscv32_vm_state_t {
     riscv32_phys_mem_t mem;
     riscv32_mmio_regions_t mmio;
 
-    // To be replaced by CSR
-    uint32_t mcause, mtval;
+    struct {
+        uint32_t status;
+        uint32_t edeleg[4];
+        uint32_t ideleg[4];
+        uint32_t ie[4];
+        uint32_t tvec[4];
+        uint32_t counteren[4];
+        uint32_t scratch[4];
+        uint32_t epc[4];
+        uint32_t cause[4];
+        uint32_t tval[4];
+        uint32_t ip[4];
+    } csr;
     uint32_t root_page_table;
-    riscv32_csr_t csr[4096];
-    bool mmu_virtual; // To be replaced by CSR
+    bool mmu_virtual;
     uint8_t priv_mode;
+    bool running;
 };
 
 #define RISCV32I_OPCODE_MASK 0x3
