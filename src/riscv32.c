@@ -31,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32i.h"
 #include "riscv32c.h"
 #include "mem_ops.h"
+#include "ns16550a.h"
 
 void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
 
@@ -58,8 +59,6 @@ void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const 
     riscv32_opcodes[opcode] = func;
     riscv32_opcodes[opcode | 0x100] = func;
 }
-
-void ns16550a_init(riscv32_vm_state_t *vm, uint32_t base_addr);
 
 riscv32_vm_state_t *riscv32_create_vm()
 {
@@ -91,7 +90,6 @@ riscv32_vm_state_t *riscv32_create_vm()
     }
     riscv32_tlb_flush(vm);
     ns16550a_init(vm, 0x10000000);
-    //riscv32_mmio_add_device(vm, 0x10000000, 0x100000FF, mmio_usart_handler, NULL);
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
