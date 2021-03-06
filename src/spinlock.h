@@ -30,6 +30,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef C11_ATOMICS
 
+typedef int atomic_int;
+
 #ifdef __GNUC__
 #define atomic_exchange(A, C) __atomic_exchange_n(A, C, __ATOMIC_SEQ_CST)
 #define atomic_store(A, C) __atomic_store_n(A, C, __ATOMIC_SEQ_CST)
@@ -42,7 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 typedef struct {
-    uint32_t flag;
+    atomic_int flag;
 } spinlock_t;
 
 inline void spin_init(spinlock_t* lock)
