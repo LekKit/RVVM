@@ -38,6 +38,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MMU_PAGE_ACCESSED 0x40
 #define MMU_PAGE_DIRTY    0x80
 
+#define GET_VPN1(addr) ((addr) >> 22)
+#define GET_VPN2(addr) (((addr) >> 12) & gen_mask(10))
+
+#define GET_PHYS_PAGE(pte) (cut_bits(pte, 10, 22))
+#define SET_PHYS_PAGE(pte, pgnum) replace_bits(pte, 10, 22, pgnum)
+
+#define GET_PHYS_ADDR(pte) (GET_PHYS_PAGE(pte) << 12)
+#define SET_PHYS_ADDR(pte, addr) SET_PHYS_PAGE(pte, (addr) >> 12)
+
 // Hash-function for the TLB, this is subject to further optimisations
 inline uint32_t tlb_hash(uint32_t addr)
 {
@@ -107,5 +116,7 @@ inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, uint32_t addr, void* d
     // TLB miss, misaligned access or protection fault - perform non-TLB access
     return riscv32_mmu_op(vm, addr, dest, size, access);
 }
+
+void riscv32_mmu_dump(riscv32_vm_state_t *vm);
 
 #endif

@@ -17,8 +17,64 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <inttypes.h>
+
 #include "riscv32.h"
 #include "riscv32_mmu.h"
+
+void riscv32_mmu_dump(riscv32_vm_state_t *vm)
+{
+	printf("root page table at: 0x%"PRIx32"\n", vm->root_page_table);
+
+	if (!vm->root_page_table || vm->root_page_table < vm->mem.begin || vm->root_page_table >= vm->mem.begin + vm->mem.size)
+	{
+		printf("page table is not in physical memory bounds\n");
+		return;
+	}
+
+	for (uint32_t i = 0; i < 4096; i += 4)
+	{
+		uint32_t pte = read_uint32_le(vm->mem.data + vm->root_page_table + i);
+		if (!(pte & MMU_VALID_PTE))
+		{
+			continue;
+		}
+
+		uint32_t pte0_base_addr = GET_PHYS_ADDR(pte);
+		printf("0x%08"PRIx32": 0x%08"PRIx32" %c%c%c%c%c%c%c\n", i << 20, pte0_base_addr,
+				pte & MMU_READ ? 'R': '.',
+				pte & MMU_WRITE ? 'W': '.',
+				pte & MMU_EXEC ? 'X': '.',
+				pte & MMU_USER_USABLE ? 'U': '.',
+				pte & MMU_GLOBAL_MAP ? 'G': '.',
+				pte & MMU_PAGE_ACCESSED ? 'A': '.',
+				pte & MMU_PAGE_DIRTY ? 'D': '.');
+
+		if (pte & MMU_LEAF_PTE)
+		{
+			continue;
+		}
+
+		for (uint32_t j = 0; j < 4096; j += 4)
+		{
+			pte = read_uint32_le(vm->mem.data + pte0_base_addr + j);
+			if (!(pte & MMU_VALID_PTE))
+			{
+				continue;
+			}
+
+			uint32_t page_addr = GET_PHYS_ADDR(pte);
+			printf("\t0x%08"PRIx32": 0x%08"PRIx32" %c%c%c%c%c%c%c\n", (i << 20) + (j << 10), page_addr,
+				pte & MMU_READ ? 'R': '.',
+				pte & MMU_WRITE ? 'W': '.',
+				pte & MMU_EXEC ? 'X': '.',
+				pte & MMU_USER_USABLE ? 'U': '.',
+				pte & MMU_GLOBAL_MAP ? 'G': '.',
+				pte & MMU_PAGE_ACCESSED ? 'A': '.',
+				pte & MMU_PAGE_DIRTY ? 'D': '.');
+		}
+	}
+}
 
 // Check that specific physical address belongs to RAM
 inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
@@ -209,7 +265,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
             return true;
         }
         // Physical address not in memory region, check MMIO
-        if (riscv32_mmio_op(vm, addr, dest, size, access)) {
+        if (riscv32_mmio_op(vm, phys_addr, dest, size, access)) {
             return true;
         }
         // Physical memory access fault (bad physical address)
