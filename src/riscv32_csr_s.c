@@ -84,9 +84,15 @@ static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* 
     UNUSED(csr_id);
     uint32_t satp = (vm->mmu_virtual ? 0x80000000 : 0) | (vm->root_page_table >> 12);
     csr_helper(&satp, dest, op);
-    vm->mmu_virtual = satp & 0x80000000;
+    bool mmu_enable = satp & 0x80000000;
+    /*
+    * We currently cache physical addresses in TLB as well, so switching
+    * between bare/virtual modes will pollute the address space with illegal entries
+    * Hence, a TLB flush is required on switch
+    */
+    if (vm->mmu_virtual != mmu_enable) riscv32_tlb_flush(vm);
+    vm->mmu_virtual = mmu_enable;
     vm->root_page_table = satp << 12;
-    riscv32_tlb_flush(vm);
     return true;
 }
 
