@@ -21,90 +21,163 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <malloc.h>
 #include <stdint.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "mem_ops.h"
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32_csr.h"
 #include "riscv32i.h"
+#include "elf_load.h"
 
 typedef struct {
     const char* bootrom;
     const char* dtb;
+    bool is_linux;
 } vm_args_t;
 
-uint32_t load_file_to_ram(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+size_t load_file_to_ram(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
 {
     FILE* file = fopen(filename, "rb");
+    size_t ret = 0;
+
     if (file == NULL) {
         printf("ERROR: Cannot open file %s.\n", filename);
-        return 0;
+        return ret;
     }
-    fseek(file, 0, SEEK_END);
-    size_t file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if (vm->mem.begin - addr < file_size) {
-        printf("ERROR: File %s does not fit in VM RAM.\n", filename);
-        fclose(file);
-        return 0;
+
+    char *buf = malloc(BUFSIZ);
+    if (!buf)
+    {
+	    printf("ERROR: Unable to allocate buffer for file %s\n", filename);
+	    goto err_fclose;
     }
-    fread(vm->mem.data + vm->mem.begin + addr, 1, file_size, file);
+
+    size_t to_end = vm->mem.begin + vm->mem.size - addr;
+    size_t buffer_size = to_end < BUFSIZ ? to_end : BUFSIZ;
+
+    while (addr >= vm->mem.begin && addr + buffer_size <= vm->mem.begin + vm->mem.size)
+    {
+	    size_t bytes_read = fread(vm->mem.data + addr, 1, buffer_size, file);
+	    ret += bytes_read;
+	    addr += bytes_read;
+
+	    if (buffer_size != bytes_read)
+	    {
+		    break;
+	    }
+    }
+
+    if (!feof(file))
+    {
+        printf("ERROR: File %s does not fit in VM RAM. Bytes read: 0x%zx\n", filename, ret);
+	ret = 0;
+	goto err_free;
+    }
+
+err_free:
+    free(buf);
+err_fclose:
     fclose(file);
-    return file_size;
+    return ret;
 }
 
 void parse_args(int argc, char** argv, vm_args_t* args)
 {
-
     for (int i=1; i<argc; ++i) {
         if (strncmp(argv[i], "-dtb=", 5) == 0) {
-            args->dtb = argv[i] + 5;
-        } else args->bootrom = argv[i];
+		args->dtb = argv[i] + 5;
+	} else if (strcmp(argv[i], "--linux") == 0) {
+		args->is_linux = true;
+        } else
+		args->bootrom = argv[i];
     }
 }
 
 int main(int argc, char** argv)
 {
-    vm_args_t args = {NULL};
+    vm_args_t args = { };
     parse_args(argc, argv, &args);
-    if (args.bootrom == NULL) {
-        printf("Usage: %s [bootrom] -dtb=[device.dtb]\n", argv[0]);
+    if (args.bootrom == NULL)
+    {
+        printf("Usage: %s <bootrom> [--linux] [-dtb=<device.dtb>]\n", argv[0]);
         return 0;
     }
 
     riscv32_vm_state_t* vm = riscv32_create_vm();
-    if (vm == NULL) {
+    if (vm == NULL)
+    {
         printf("ERROR: VM creation failed.\n");
         return 1;
     }
 
-    if (load_file_to_ram(vm, 0, args.bootrom) == 0) {
+    if (args.is_linux)
+    {
+	    if (!riscv32_elf_load_by_path(vm, args.bootrom, true, 0))
+	    {
+		printf("ERROR: Failed to load vmlinux ELF file.\n");
+		return 1;
+	    }
+    }
+    else if (load_file_to_ram(vm, vm->mem.begin, args.bootrom) == 0)
+    {
         printf("ERROR: Failed to load bootrom.\n");
         return 1;
     }
 
-    if (args.dtb) {
-        // Explicitly set a0 to 0 as boot hart
-        riscv32i_write_register_u(vm, REGISTER_X10, 0);
-        // DTB is aligned by 2MB
-        uint32_t dts = load_file_to_ram(vm, vm->mem.size - 0x200000, args.dtb);
-        if (dts == 0) {
-           printf("ERROR: Failed to load DTB.\n");
-           return 1;
-       }
-       // pass DTB address in a1 register
-       riscv32i_write_register_u(vm, REGISTER_X11, vm->mem.begin + vm->mem.size - 0x200000);
+    if (args.dtb)
+    {
+	    size_t dtb_addr = vm->mem.begin + vm->mem.size - 0x8000000;
 
-       // OpenSBI FW_DYNAMIC struct passed in a2 register
-       if (0x200000 - dts >= 24) {
-           void* addr = vm->mem.data + vm->mem.begin + vm->mem.size - 0x200000 + dts;
-           write_uint32_le(addr, 0x4942534F); // magic
-           write_uint32_le(addr+4, 0x2); // version
-           write_uint32_le(addr+8, 0x0); // next_addr
-           write_uint32_le(addr+12, 0x1); // next_mode
-           write_uint32_le(addr+16, 0x0); // options
-           write_uint32_le(addr+20, 0x0); // boot_hart
-           riscv32i_write_register_u(vm, REGISTER_X12, vm->mem.begin + vm->mem.size - 0x200000 + dts);
-       } else printf("WARN: No space for FW_DYNAMIC struct\n");
+	    // Explicitly set a0 to 0 as boot hart
+	    riscv32i_write_register_u(vm, REGISTER_X10, 0);
+
+	    // DTB is aligned by 2MB
+	    uint32_t dts = load_file_to_ram(vm, dtb_addr, args.dtb);
+	    if (dts == 0)
+	    {
+		    printf("ERROR: Failed to load DTB.\n");
+		    return 1;
+	    }
+
+	    printf("DTB loaded at: 0x%zx size: %"PRId32"\n", dtb_addr, dts);
+
+	    // pass DTB address in a1 register
+	    riscv32i_write_register_u(vm, REGISTER_X11, dtb_addr);
+
+	    if (args.is_linux)
+	    {
+		    uint32_t medeleg = -1;
+		    riscv32_csr_op(vm, 0x302, &medeleg, CSR_SWAP);
+
+		    vm->priv_mode = PRIVILEGE_SUPERVISOR;
+	    }
+	    else
+	    {
+		    // OpenSBI FW_DYNAMIC struct passed in a2 register
+		    if (vm->mem.size - dtb_addr + dts >= 24)
+		    {
+			    void* addr = vm->mem.data + vm->mem.begin + vm->mem.size - 0x200000 + dts;
+			    write_uint32_le(addr, 0x4942534F); // magic
+			    write_uint32_le(addr+4, 0x2); // version
+			    write_uint32_le(addr+8, 0x0); // next_addr
+			    write_uint32_le(addr+12, 0x1); // next_mode
+			    write_uint32_le(addr+16, 0x1); // options
+			    write_uint32_le(addr+20, 0x0); // boot_hart
+			    riscv32i_write_register_u(vm, REGISTER_X12, vm->mem.begin + vm->mem.size - 0x200000 + dts);
+		    }
+		    else
+		    {
+			    printf("WARN: No space for FW_DYNAMIC struct\n");
+		    }
+
+#if 0
+		    //XXX - Linux raw image
+		    uint32_t medeleg = -1;
+		    riscv32_csr_op(vm, 0x302, &medeleg, CSR_SWAP);
+		    vm->priv_mode = PRIVILEGE_SUPERVISOR;
+#endif
+	    }
     }
 
     riscv32_run(vm);

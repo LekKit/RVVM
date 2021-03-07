@@ -168,8 +168,9 @@ static void riscv32c_addi16sp_lui(riscv32_vm_state_t *vm, const uint16_t instruc
         riscv32i_write_register_u(vm, REGISTER_X2, rsp + sign_extend(imm, 10));
         riscv32_debug(vm, "RV32C: c.addi16sp %d", sign_extend(imm, 10));
     } else {
+        bool bit17 = !!cut_bits(instruction, 12, 1);
         imm = (cut_bits(instruction, 2, 5) << 12) |
-              (cut_bits(instruction, 12, 1) << 17);
+              (bit17 << 17) | bit17 * (-(uint32_t)1 << 17);
 
         riscv32i_write_register_u(vm, rds, imm);
         riscv32_debug(vm, "RV32C: c.lui %r, %h", rds, imm);
