@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdio.h>
 #include <string.h>
 #include <err.h>
+#include <inttypes.h>
 
 #include "riscv.h"
 #include "riscv32.h"
@@ -122,6 +123,7 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
         if ((vm->csr.edeleg[priv] & (1 << cause)) == 0) break;
     }
     riscv32_debug_always(vm, "Trap priv %d -> %d, cause: %h, tval: %h", vm->priv_mode, priv, cause, tval);
+
     vm->csr.epc[priv] = riscv32i_read_register_u(vm, REGISTER_PC);
     vm->csr.cause[priv] = cause;
     vm->csr.tval[priv] = tval;
@@ -144,7 +146,7 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     char buffer[256];
-    uint32_t size = sprintf(buffer, "[VM %p] ", vm);
+    uint32_t size = sprintf(buffer, "[VM 0x%x] ", vm->registers[REGISTER_PC]);
     uint32_t begin = 0;
     uint32_t len = strlen(fmt);
     uint32_t i;
@@ -180,12 +182,12 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
 void riscv32_dump_registers(riscv32_vm_state_t *vm)
 {
     for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
-        printf("%-5s: 0x%08X  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
+        printf("%-5s: 0x%08"PRIX32"  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
 
         if (((i + 1) % 4) == 0)
             printf("\n");
     }
-    printf("%-5s: 0x%08X\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
+    printf("%-5s: 0x%08"PRIX32"\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
 inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instruction)

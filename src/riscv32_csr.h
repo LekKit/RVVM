@@ -37,7 +37,7 @@ struct riscv32_csr_t {
 
 extern riscv32_csr_t riscv32_csr_list[4096];
 
-inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
+static inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
 {
     uint32_t priv = cut_bits(csr_id, 8, 2);
     if (priv > vm->priv_mode)
@@ -46,7 +46,7 @@ inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* de
         return riscv32_csr_list[csr_id].handler(vm, csr_id, dest, op);
 }
 
-inline uint32_t csr_helper_rw(uint32_t csr_val, uint32_t* dest, uint32_t op, uint32_t mask)
+static inline uint32_t csr_helper_rw(uint32_t csr_val, uint32_t* dest, uint32_t op, uint32_t mask)
 {
     uint32_t tmp = 0;
     switch (op) {
@@ -66,12 +66,12 @@ inline uint32_t csr_helper_rw(uint32_t csr_val, uint32_t* dest, uint32_t op, uin
     return tmp;
 }
 
-inline void csr_helper_masked(uint32_t* csr, uint32_t* dest, uint32_t op, uint32_t mask)
+static inline void csr_helper_masked(uint32_t* csr, uint32_t* dest, uint32_t op, uint32_t mask)
 {
     *csr = csr_helper_rw(*csr, dest, op, mask);
 }
 
-inline void csr_helper(uint32_t* csr, uint32_t* dest, uint32_t op)
+static inline void csr_helper(uint32_t* csr, uint32_t* dest, uint32_t op)
 {
     *csr = csr_helper_rw(*csr, dest, op, CSR_GENERIC_MASK);
 }

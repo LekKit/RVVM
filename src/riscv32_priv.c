@@ -79,7 +79,7 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
     UNUSED(rs2);
     switch (instruction & RV32_S_FENCE_MASK) {
     case RV32_S_SFENCE_VMA:
-        riscv32_debug_always(vm, "RV32I: sfence.vma %r, %r", rs1, rs1);
+        riscv32_debug(vm, "RV32I: sfence.vma %r, %r", rs1, rs1);
         if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
             riscv32_tlb_flush(vm);
         } else {
@@ -127,7 +127,7 @@ static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instructio
         riscv32_debug_always(vm, "RV32I: bad csr %h", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrw %r, %c, %r", rds, csr, rs1);
+    riscv32_debug(vm, "RV32I: csrrw %r, %c, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -143,7 +143,7 @@ static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instructio
         riscv32_debug_always(vm, "RV32I: bad csr %h", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrs %r, %c, %r", rds, csr, rs1);
+    riscv32_debug(vm, "RV32I: csrrs %r, %c, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -159,7 +159,7 @@ static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instructio
         riscv32_debug_always(vm, "RV32I: bad csr %h\n", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrc %r, %c, %r", rds, csr, rs1);
+    riscv32_debug(vm, "RV32I: csrrc %r, %c, %r", rds, csr, rs1);
 }
 
 static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -174,7 +174,7 @@ static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instructi
         riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrwi %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
+    riscv32_debug(vm, "RV32I: csrrwi %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -189,7 +189,7 @@ static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instructi
         riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrsi %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
+    riscv32_debug(vm, "RV32I: csrrsi %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -204,7 +204,7 @@ static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instructi
         riscv32_debug_always(vm, "RV32priv: bad csr %h", csr);
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
     }
-    riscv32_debug_always(vm, "RV32I: csrrci %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
+    riscv32_debug(vm, "RV32I: csrrci %r, %c, %h", rds, csr, cut_bits(instruction, 15, 5));
 }
 
 void riscv32_priv_init()
