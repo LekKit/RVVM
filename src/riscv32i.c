@@ -476,7 +476,7 @@ static void riscv32i_sltiu(riscv32_vm_state_t *vm, const uint32_t instruction)
     // Set rds to 1 if rs1 < imm
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t imm = cut_bits(instruction, 20, 12);
+    uint32_t imm = sign_extend(cut_bits(instruction, 20, 12), 12);
     uint32_t src_reg = riscv32i_read_register_u(vm, rs1);
 
     riscv32i_write_register_u(vm, rds, (src_reg < imm) ? 1 : 0);
