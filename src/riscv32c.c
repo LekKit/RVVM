@@ -253,6 +253,7 @@ static void riscv32c_alops2(riscv32_vm_state_t *vm, const uint16_t instruction)
             }
         } else {
             // c.ebreak
+            riscv32_trap(vm, TRAP_BREAKPOINT, 0);
             riscv32_debug(vm, "RV32C: c.ebreak");
         }
     } else {
