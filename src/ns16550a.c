@@ -49,6 +49,7 @@ struct ns16550a_data {
 
 static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t *value)
 {
+    UNUSED(vm);
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     if (regs->regs[NS16550A_REG_LCR] & 0x80) {
         riscv32_debug(vm, "NS16550A: DLAB = 1\n");
@@ -79,7 +80,7 @@ static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
 
         switch (offset) {
             case NS16550A_REG_RBR: {
-                *value = getchar();
+                *value = 0;
                 break;
             }
             case NS16550A_REG_IER:
@@ -104,6 +105,7 @@ static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
 
 static bool ns16550a_mmio_write(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t value)
 {
+    UNUSED(vm);
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
 
     if (regs->regs[NS16550A_REG_LCR] & 0x80) {
@@ -134,6 +136,7 @@ static bool ns16550a_mmio_write(riscv32_vm_state_t* vm, riscv32_mmio_device_t* d
         switch (offset) {
             case NS16550A_REG_THR: {
                 printf("%c", value);
+                fflush(stdout);
                 break;
             }
             case NS16550A_REG_IER:
