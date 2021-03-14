@@ -29,22 +29,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 static inline uint64_t read_uint64_le(const void* addr) {
-	const uint8_t* arr = (const uint8_t*)addr;
-	uint64_t res = 0;
-	for (int i = 0; i < 8; ++i)
-	{
-		res |= (uint64_t)arr[i] << 8 * i;
-	}
-	return res;
+    const uint8_t* arr = (const uint8_t*)addr;
+    return (uint64_t)arr[0] | ((uint64_t)arr[1] << 8)
+    | ((uint64_t)arr[2] << 16) | ((uint64_t)arr[3] << 24)
+    | ((uint64_t)arr[4] << 32) | ((uint64_t)arr[5] << 40)
+    | ((uint64_t)arr[6] << 48) | ((uint64_t)arr[7] << 56);
 }
 
-static inline void write_uint64_le(void *addr, uint64_t val) {
-	uint8_t* arr = (uint8_t*)addr;
-	for (int i = 0; i < 8; ++i)
-	{
-		arr[i] = val & 0xFF;
-		val >>= 8;
-	}
+static inline void write_uint64_le(void* addr, uint64_t val) {
+    uint8_t* arr = (uint8_t*)addr;
+    arr[0] = val & 0xFF;
+    arr[1] = (val >> 8) & 0xFF;
+    arr[2] = (val >> 16) & 0xFF;
+    arr[3] = (val >> 24) & 0xFF;
+    arr[4] = (val >> 32) & 0xFF;
+    arr[5] = (val >> 40) & 0xFF;
+    arr[6] = (val >> 48) & 0xFF;
+    arr[7] = (val >> 56) & 0xFF;
 }
 
 static inline uint32_t read_uint32_le(const void* addr) {
