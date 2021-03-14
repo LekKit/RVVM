@@ -20,56 +20,58 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_BIT_OPS_H
 #define RISCV_BIT_OPS_H
 
-#include <stdint.h>
+#include <stddef.h>
+#include <limits.h>
 #include <stdbool.h>
 
 // Simple math operations (sign-extend int bits, etc) for internal usage
 // this entire header is cursed (though everything optimizes fine)
 
-/*
-* Sign-extend bits in the lower part of uint32_t into signed int32_t
-* usage:
-*     int32_t ext = sign_extend(val, 20);
-*
-*     [ext is now equal to signed lower 20 bits of val]
-*/
-//#define sign_extend(val, dest, bits) { struct {int32_t v:bits;} __FILE____LINE__; __FILE____LINE__.v = val; dest = __FILE____LINE__.v; }
-
-inline int32_t sign_extend(uint32_t val, uint32_t bits)
+// Generate bitmask of given size
+static inline size_t gen_mask(size_t size)
 {
-    return ((int32_t)(val << (32 - bits))) >> (32 - bits);
+    return -(size_t)1 >> (sizeof(size) * CHAR_BIT - size);
 }
 
-// Generate bitmask of given size
-inline uint32_t gen_mask(uint32_t size)
+// Check if Nth bit of val is 1
+static inline bool is_bit_set(size_t val, size_t pos)
 {
-    return 0xFFFFFFFF >> (32 - size);
+    return (val >> pos) & 1;
+}
+
+/*
+ * Sign-extend bits in the lower part of uint32_t into signed int32_t
+ * usage:
+ *     int32_t ext = sign_extend(val, 20);
+ *
+ * 20 is the size of the val in bits. ext is sign-extended using
+ * bit at index 19.
+ */
+static inline ptrdiff_t sign_extend(size_t val, size_t bits)
+{
+    //return ((int32_t)(val << (32 - bits))) >> (32 - bits);
+    //return ((ptrdiff_t)(val << (sizeof(val) * CHAR_BIT - bits))) >> (sizeof(val) * CHAR_BIT - bits);
+    return (~gen_mask(bits)) * is_bit_set(val, bits - 1) | (val & gen_mask(bits));
 }
 
 // Cut N bits from val at given position (from lower bit)
-inline uint32_t cut_bits(uint32_t val, uint32_t pos, uint32_t bits)
+static inline size_t cut_bits(size_t val, size_t pos, size_t bits)
 {
     return (val >> pos) & gen_mask(bits);
 }
 
 // Replace N bits in val at given position (from lower bit) by p
-inline uint32_t replace_bits(uint32_t val, uint32_t pos, uint32_t bits, uint32_t p)
+static inline size_t replace_bits(size_t val, size_t pos, size_t bits, size_t p)
 {
     return (val & (~(gen_mask(bits) << pos))) | ((p & gen_mask(bits)) << pos);
 }
 
-// Check if Nth bit of val is 1
-inline bool is_bit_set(uint32_t val, uint32_t pos)
-{
-    return (val >> pos) & 0x1;
-}
-
 // Reverse N bits in val (from lower bit), remaining bits are zero
-inline uint32_t rev_bits(uint32_t val, uint32_t bits)
+static inline size_t rev_bits(size_t val, size_t bits)
 {
-    uint32_t ret = 0;
+    size_t ret = 0;
 
-    for (uint32_t i=0; i<bits; ++i) {
+    for (size_t i=0; i<bits; ++i) {
         ret <<= 1;
         ret |= val & 0x1;
         val >>= 1;

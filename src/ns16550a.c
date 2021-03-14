@@ -47,7 +47,7 @@ struct ns16550a_data {
 #define NS16550A_REG_MSR 6
 #define NS16550A_REG_SCR 7
 
-static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t *value)
+static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, physaddr_t offset, uint8_t *value)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     if (regs->regs[NS16550A_REG_LCR] & 0x80) {
@@ -102,7 +102,7 @@ static bool ns16550a_mmio_read(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
     return true;
 }
 
-static bool ns16550a_mmio_write(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t value)
+static bool ns16550a_mmio_write(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, physaddr_t offset, uint8_t value)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
 
@@ -157,7 +157,7 @@ static bool ns16550a_mmio_write(riscv32_vm_state_t* vm, riscv32_mmio_device_t* d
     return true;
 }
 
-static bool ns16550a_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ns16550a_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, physaddr_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
     UNUSED(size);
     if (access == MMU_READ) {
@@ -168,7 +168,7 @@ static bool ns16550a_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t*
     return false;
 }
 
-void ns16550a_init(riscv32_vm_state_t *vm, uint32_t base_addr)
+void ns16550a_init(riscv32_vm_state_t *vm, physaddr_t base_addr)
 {
     struct ns16550a_data *ptr = calloc(1, sizeof (struct ns16550a_data));
 

@@ -21,10 +21,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <err.h>
 #include <inttypes.h>
 
+#include "bit_ops.h"
 #include "riscv.h"
 #include "riscv32.h"
 #include "riscv32_mmu.h"
@@ -33,6 +35,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32c.h"
 #include "mem_ops.h"
 #include "ns16550a.h"
+#include "riscv32i_registers.h"
 
 void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
 
@@ -80,8 +83,11 @@ riscv32_vm_state_t *riscv32_create_vm()
         global_init = true;
     }
 
-    riscv32_vm_state_t *vm = (riscv32_vm_state_t*)malloc(sizeof(riscv32_vm_state_t));
-    memset(vm, 0, sizeof(riscv32_vm_state_t));
+    riscv32_vm_state_t *vm = (riscv32_vm_state_t*)calloc(sizeof(riscv32_vm_state_t), 1);
+    if (!vm)
+    {
+	    return NULL;
+    }
 
     // 0x10000 pages = 256M
     if (!riscv32_init_phys_mem(&vm->mem, 0x80000000, 0x10000)) {
@@ -91,9 +97,14 @@ riscv32_vm_state_t *riscv32_create_vm()
     }
     riscv32_tlb_flush(vm);
     ns16550a_init(vm, 0x10000000);
+    vm->isa[PRIVILEGE_MACHINE]
+	    = vm->isa[PRIVILEGE_SUPERVISOR]
+	    = vm->isa[PRIVILEGE_HYPERVISOR]
+	    = vm->isa[PRIVILEGE_USER] = ISA_MAX;
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
-    vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
+    vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = gen_mask(XLEN(vm));
+    riscv32i_write_register_u(vm, REGISTER_PC, vm->mem.begin);
     vm->registers[REGISTER_PC] = vm->mem.begin;
 
     return vm;
@@ -115,7 +126,7 @@ void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
     riscv32_trap(vm, INTERRUPT_MASK | cause, 0);
 }
 
-void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
+void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval)
 {
     uint8_t priv;
     // Delegate to lower privilege mode if needed
@@ -129,13 +140,13 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
     vm->csr.tval[priv] = tval;
     // Save current priv mode to xPP, xIE to xPIE, disable interrupts
     if (priv == PRIVILEGE_MACHINE) {
-        vm->csr.status = replace_bits(vm->csr.status, 11, 2, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 7, 1, cut_bits(vm->csr.status, 3, 1));
-        vm->csr.status &= 0xFFFFFFF7;
+        vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_MPP_START, CSR_STATUS_MPP_SIZE, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_MPIE, 1, cut_bits(vm->csr.status, CSR_STATUS_MIE, 1));
+        vm->csr.status &= ~(1 << CSR_STATUS_MIE);
     } else if (priv == PRIVILEGE_SUPERVISOR) {
-        vm->csr.status = replace_bits(vm->csr.status, 8, 1, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 5, 1, cut_bits(vm->csr.status, 1, 1));
-        vm->csr.status &= 0xFFFFFFFD;
+        vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_SPP, 1, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_SPIE, 1, cut_bits(vm->csr.status, CSR_STATUS_SIE, 1));
+        vm->csr.status &= ~(1 << CSR_STATUS_SIE);
     }
     vm->priv_mode = priv;
     riscv32_break(vm);
@@ -146,7 +157,7 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     char buffer[256];
-    uint32_t size = sprintf(buffer, "[VM 0x%x] ", vm->registers[REGISTER_PC]);
+    int size = sprintf(buffer, "[VM 0x%"PRIxreg"] ", riscv32i_read_register_u(vm, REGISTER_PC));
     uint32_t begin = 0;
     uint32_t len = strlen(fmt);
     uint32_t i;
@@ -182,24 +193,26 @@ void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
 void riscv32_dump_registers(riscv32_vm_state_t *vm)
 {
     for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
-        printf("%-5s: 0x%08"PRIX32"  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
+        printf("%-5s: 0x%08"PRIxreg"  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
 
         if (((i + 1) % 4) == 0)
             printf("\n");
     }
-    printf("%-5s: 0x%08"PRIX32"\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
+    printf("%-5s: 0x%08"PRIxreg"\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
-inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instruction)
+static inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instruction)
 {
     if ((instruction & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
         // 16-bit opcode
         riscv32c_emulate(vm, instruction);
         // FYI: Any jump instruction implementation should take care of PC increment
-        vm->registers[REGISTER_PC] += 2;
+	riscv32i_write_register_u(vm, REGISTER_PC,
+			riscv32i_read_register_u(vm, REGISTER_PC) + 2);
     } else {
         riscv32i_emulate(vm, instruction);
-        vm->registers[REGISTER_PC] += 4;
+	riscv32i_write_register_u(vm, REGISTER_PC,
+			riscv32i_read_register_u(vm, REGISTER_PC) + 4);
     }
 
 #ifdef RV_DEBUG
@@ -212,18 +225,18 @@ inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instructio
 
 static void riscv32_run_till_event(riscv32_vm_state_t *vm)
 {
-    uint8_t instruction[4];
-    uint32_t tlb_key, inst_addr;
+    virtaddr_t tlb_key, inst_addr;
+
     // Execute hot instructions loop until some event occurs (interrupt, etc)
     // This adds little to no overhead, and the loop can be forcefully unrolled
     while (vm->wait_event) {
         riscv32i_write_register_u(vm, REGISTER_ZERO, 0);
-        inst_addr = vm->registers[REGISTER_PC];
+        inst_addr = riscv32i_read_register_u(vm, REGISTER_PC);
         tlb_key = tlb_hash(inst_addr);
         if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
-            memcpy(instruction, vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF), 4);
-            riscv32_exec_instruction(vm, read_uint32_le(instruction));
+            riscv32_exec_instruction(vm, read_uint32_le(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
         } else {
+            uint8_t instruction[4];
             if (riscv32_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC))
                 riscv32_exec_instruction(vm, read_uint32_le(instruction));
         }
@@ -238,10 +251,10 @@ void riscv32_run(riscv32_vm_state_t *vm)
         vm->wait_event = 1;
         riscv32_run_till_event(vm);
         if ((vm->csr.cause[vm->priv_mode] & INTERRUPT_MASK) && (vm->csr.tvec[vm->priv_mode] & 1)) {
-            size_t pc = (vm->csr.tvec[vm->priv_mode] & (~3)) + (vm->csr.cause[vm->priv_mode] << 2);
+            reg_t pc = (vm->csr.tvec[vm->priv_mode] & (~(reg_t)3)) + (vm->csr.cause[vm->priv_mode] << 2);
             riscv32i_write_register_u(vm, REGISTER_PC, pc);
         } else {
-            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.tvec[vm->priv_mode] & (~3));
+            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.tvec[vm->priv_mode] & (~(reg_t)3));
         }
     }
 }

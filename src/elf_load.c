@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +10,7 @@
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 
-bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset)
+bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ptrdiff_t offset)
 {
 	FILE *fp = fopen(path, "rb");
 	if (!fp)
@@ -57,7 +58,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 	}
 
 	size_t pgd = 0;
-	size_t load_addr = offset;
+	physaddr_t load_addr = offset;
 	if (use_mmu)
 	{
 		/* set up page table */
@@ -65,7 +66,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 
 		/* put memory mappings at the end of physical memory to avoid overlap with program */
 		pgd = vm->mem.begin + vm->mem.size - 4096;
-		uint32_t satp = (pgd >> 12) | (1 << 31);
+		reg_t satp = (pgd >> 12) | (1 << 31);
 		riscv32_csr_op(vm, 0x180, &satp, CSR_SWAP);
 	}
 
@@ -93,12 +94,12 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 			continue;
 		}
 
-		size_t dest_addr = load_addr + phdr.p_vaddr;
+		physaddr_t dest_addr = load_addr + phdr.p_vaddr;
 		if (dest_addr < vm->mem.begin || dest_addr + phdr.p_memsz >= vm->mem.begin + vm->mem.size)
 		{
 			printf("Unable to load ELF segment at offset 0x%lx of file %s - segment doesnt't fit in memory\n", phdr_start, path);
-			printf("load addr: 0x%lx p_memsz: 0x%x end: 0x%lx\n", dest_addr, phdr.p_memsz, dest_addr + phdr.p_memsz);
-			printf("mem begin: 0x%x size: 0x%x end: 0x%x\n", vm->mem.begin, vm->mem.size, vm->mem.begin + vm->mem.size);
+			printf("load addr: 0x%"PRIxpaddr" p_memsz: 0x%x end: 0x%"PRIxpaddr"\n", dest_addr, phdr.p_memsz, dest_addr + phdr.p_memsz);
+			printf("mem begin: 0x%"PRIxpaddr" size: 0x%"PRIxpaddr" end: 0x%"PRIxpaddr"\n", vm->mem.begin, vm->mem.size, vm->mem.begin + vm->mem.size);
 			status = false;
 			goto err_fclose;
 		}

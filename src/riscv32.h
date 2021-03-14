@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include "riscv.h"
+#include <inttypes.h>
 
 enum
 {
@@ -65,8 +66,18 @@ enum
     PRIVILEGE_USER,
     PRIVILEGE_SUPERVISOR,
     PRIVILEGE_HYPERVISOR,
-    PRIVILEGE_MACHINE
+    PRIVILEGE_MACHINE,
+    PRIVILEGE_MAX
 };
+
+enum
+{
+	ISA_RV32 = 1,
+	ISA_RV64,
+	ISA_RV128
+};
+
+#define ISA_MAX ISA_RV32
 
 #define INTERRUPT_MASK 0x80000000
 
@@ -95,29 +106,51 @@ enum
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
 
+// 64 bit
+#if 0
+typedef uint64_t reg_t;
+typedef int64_t sreg_t;
+typedef uint64_t physaddr_t;
+
+#define PRIxreg PRIx64
+#define PRIxpaddr PRIx64
+#define PRIxvaddr PRIx64
+#else
+// 32 bit
+typedef uint32_t reg_t;
+typedef int32_t sreg_t;
+typedef uint32_t physaddr_t;
+
+#define PRIxreg PRIx32
+#define PRIxpaddr PRIx32
+#define PRIxvaddr PRIx32
+#endif
+
+typedef reg_t virtaddr_t;
+
 #define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
 
 // Address translation cache
 typedef struct {
-    uint32_t pte;    // Upper 20 bits of virtual address + access bits
+    virtaddr_t pte;    // Upper 20 bits of virtual address + access bits
     uint8_t* ptr;    // Page address in emulator memory
 } riscv32_tlb_t;
 
 typedef struct {
     uint8_t* data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
-    uint32_t begin;  // First usable address in physical memory
-    uint32_t size;   // Amount of usable memory after mem_begin
+    physaddr_t begin;  // First usable address in physical memory
+    physaddr_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
 typedef struct riscv32_vm_state_t riscv32_vm_state_t;
 typedef struct riscv32_csr_t riscv32_csr_t;
 typedef struct riscv32_mmio_device_t riscv32_mmio_device_t;
 
-typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, virtaddr_t addr, void* dest, uint32_t size, uint8_t access);
 
 struct riscv32_mmio_device_t {
-    uint32_t base_addr;
-    uint32_t end_addr;
+    physaddr_t base_addr;
+    physaddr_t end_addr;
     riscv32_mmio_handler_t handler;
     void* data;
 };
@@ -128,30 +161,38 @@ typedef struct {
 } riscv32_mmio_regions_t;
 
 struct riscv32_vm_state_t {
-    size_t wait_event;
-    uint32_t registers[REGISTERS_MAX];
-    riscv32_tlb_t tlb[TLB_SIZE];
+    size_t wait_event;              // event pending - e.g. trap
+    reg_t registers[REGISTERS_MAX]; // register file of current hart
+
+    riscv32_tlb_t tlb[TLB_SIZE]; // TLB of hart
     riscv32_phys_mem_t mem;
     riscv32_mmio_regions_t mmio;
 
     struct {
-        uint32_t status;
-        uint32_t edeleg[4];
-        uint32_t ideleg[4];
-        uint32_t ie[4];
-        uint32_t tvec[4];
-        uint32_t counteren[4];
-        uint32_t scratch[4];
-        uint32_t epc[4];
-        uint32_t cause[4];
-        uint32_t tval[4];
-        uint32_t ip[4];
+        reg_t status;
+        reg_t edeleg[4];
+        reg_t ideleg[4];
+        reg_t ie[4];
+        reg_t tvec[4];
+        reg_t counteren[4];
+        reg_t scratch[4];
+        reg_t epc[4];
+        reg_t cause[4];
+        reg_t tval[4];
+        reg_t ip[4];
+	// when adding new CSRs here, don't forget to modify riscv32_csr_isa_change
     } csr;
-    uint32_t root_page_table;
-    bool mmu_virtual;
-    uint8_t priv_mode;
-    bool running;
+    physaddr_t root_page_table;
+    uint8_t mmu_virtual;
+    uint8_t priv_mode;           // hart's current privilege mode
+    uint8_t isa[PRIVILEGE_MAX];  // ISA encoded as MXL field in misa register
+    bool running;                // halted or not?
 };
+
+// Get the pow2 value of current ISA bitness (e.g. 5 for 32-bit ISA)
+#define XLEN_BIT(vm) ((vm)->isa[(vm)->priv_mode] + 4)
+// Get the current ISA bitness (e.g. 32, 64)
+#define XLEN(vm) (1 << XLEN_BIT(vm))
 
 #define RISCV32I_OPCODE_MASK 0x3
 
@@ -211,4 +252,4 @@ void riscv32i_init();
 void riscv32a_init();
 void riscv32_priv_init();
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
-void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval);
+void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval);

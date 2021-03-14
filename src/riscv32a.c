@@ -47,24 +47,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 * There is no multi-core support, but will eventually come with proper atomics
 */
 static spinlock_t global_amo_lock;
-static uint32_t lr_addr;
+static virtaddr_t lr_addr;
 
-inline int32_t amo_min(int32_t a, int32_t b)
+static inline int32_t amo_min(int32_t a, int32_t b)
 {
     return (a < b) ? a : b;
 }
 
-inline int32_t amo_max(int32_t a, int32_t b)
+static inline int32_t amo_max(int32_t a, int32_t b)
 {
     return (a > b) ? a : b;
 }
 
-inline uint32_t amo_minu(uint32_t a, uint32_t b)
+static inline uint32_t amo_minu(uint32_t a, uint32_t b)
 {
     return (a < b) ? a : b;
 }
 
-inline uint32_t amo_maxu(uint32_t a, uint32_t b)
+static inline uint32_t amo_maxu(uint32_t a, uint32_t b)
 {
     return (a > b) ? a : b;
 }
@@ -75,8 +75,8 @@ static void riscv32a_atomic(riscv32_vm_state_t *vm, const uint32_t instruction)
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t rs2 = cut_bits(instruction, 20, 5);
     uint32_t op = cut_bits(instruction, 27, 5);
-    uint32_t address = riscv32i_read_register_u(vm, rs1);
-    uint32_t val = riscv32i_read_register_u(vm, rs2);
+    virtaddr_t address = riscv32i_read_register_u(vm, rs1);
+    reg_t val = riscv32i_read_register_u(vm, rs2);
     uint8_t tmp[4];
 
     spin_lock(&global_amo_lock);

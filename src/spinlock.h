@@ -47,17 +47,17 @@ typedef struct {
     atomic_int flag;
 } spinlock_t;
 
-inline void spin_init(spinlock_t* lock)
+static inline void spin_init(spinlock_t* lock)
 {
     lock->flag = 0;
 }
 
-inline void spin_lock(spinlock_t* lock)
+static inline void spin_lock(spinlock_t* lock)
 {
     while (atomic_exchange(&lock->flag, 1));
 }
 
-inline void spin_unlock(spinlock_t* lock)
+static inline void spin_unlock(spinlock_t* lock)
 {
     atomic_store(&lock->flag, 0);
 }

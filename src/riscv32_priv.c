@@ -46,9 +46,9 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         riscv32_debug_always(vm, "RV32I: sret");
         if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
             // Set privilege mode to SPP
-            vm->priv_mode = cut_bits(vm->csr.status, 8, 1);
+            vm->priv_mode = cut_bits(vm->csr.status, CSR_STATUS_SPP, 1);
             // Set SIE to SPIE
-            vm->csr.status = replace_bits(vm->csr.status, 1, 1, cut_bits(vm->csr.status, 5, 1));
+            vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_SIE, 1, cut_bits(vm->csr.status, CSR_STATUS_SPIE, 1));
             // Set PC to csr.sepc
             riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.epc[PRIVILEGE_SUPERVISOR] - 4);
         } else {
@@ -59,9 +59,9 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         riscv32_debug_always(vm, "RV32I: mret");
         if (vm->priv_mode >= PRIVILEGE_MACHINE) {
             // Set privilege mode to MPP
-            vm->priv_mode = cut_bits(vm->csr.status, 11, 2);
+            vm->priv_mode = cut_bits(vm->csr.status, CSR_STATUS_MPP_START, CSR_STATUS_MPP_SIZE);
             // Set MIE to MPIE
-            vm->csr.status = replace_bits(vm->csr.status, 3, 1, cut_bits(vm->csr.status, 7, 1));
+            vm->csr.status = replace_bits(vm->csr.status, CSR_STATUS_MIE, 1, cut_bits(vm->csr.status, CSR_STATUS_MPIE, 1));
             // Set PC to csr.mepc
             riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.epc[PRIVILEGE_MACHINE] - 4);
         } else {
@@ -119,7 +119,7 @@ static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instructio
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
-    uint32_t val = riscv32i_read_register_u(vm, rs1);
+    reg_t val = riscv32i_read_register_u(vm, rs1);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_SWAP)) {
         riscv32i_write_register_u(vm, rds, val);
@@ -135,7 +135,7 @@ static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instructio
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
-    uint32_t val = riscv32i_read_register_u(vm, rs1);
+    reg_t val = riscv32i_read_register_u(vm, rs1);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_SETBITS)) {
         riscv32i_write_register_u(vm, rds, val);
@@ -151,7 +151,7 @@ static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instructio
     uint32_t rds = cut_bits(instruction, 7, 5);
     uint32_t rs1 = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
-    uint32_t val = riscv32i_read_register_u(vm, rs1);
+    reg_t val = riscv32i_read_register_u(vm, rs1);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
         riscv32i_write_register_u(vm, rds, val);
@@ -165,7 +165,7 @@ static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instructio
 static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t val = cut_bits(instruction, 15, 5);
+    reg_t val = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_SWAP)) {
@@ -180,7 +180,7 @@ static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instructi
 static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t val = cut_bits(instruction, 15, 5);
+    reg_t val = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_SETBITS)) {
@@ -195,7 +195,7 @@ static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instructi
 static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t val = cut_bits(instruction, 15, 5);
+    reg_t val = cut_bits(instruction, 15, 5);
     uint32_t csr = cut_bits(instruction, 20, 12);
 
     if (riscv32_csr_op(vm, csr, &val, CSR_CLEARBITS)) {

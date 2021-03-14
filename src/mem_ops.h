@@ -23,34 +23,55 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 
 /*
-* Simple memory operations (write, read integers) for internal usage,
-* and load/store instructions. Should be optimised into direct copy
-* on little-endian systems, and into copy+byteswap on big-endian.
-*/
+ * Simple memory operations (write, read integers) for internal usage,
+ * and load/store instructions. Should be optimised into direct copy
+ * on little-endian systems, and into copy+byteswap on big-endian.
+ */
+
+static inline uint64_t read_uint64_le(const void* addr) {
+	const uint8_t* arr = (const uint8_t*)addr;
+	uint64_t res = 0;
+	for (int i = 0; i < 8; ++i)
+	{
+		res |= (uint64_t)arr[i] << 8 * i;
+	}
+	return res;
+}
+
+static inline void write_uint64_le(void *addr, uint64_t val) {
+	uint8_t* arr = (uint8_t*)addr;
+	for (int i = 0; i < 8; ++i)
+	{
+		arr[i] = val & 0xFF;
+		val >>= 8;
+	}
+}
 
 static inline uint32_t read_uint32_le(const void* addr) {
-    const uint8_t* arr = (const uint8_t*)addr;
-    return (uint32_t)arr[0] | ((uint32_t)arr[1] << 8)
-    | ((uint32_t)arr[2] << 16) | ((uint32_t)arr[3] << 24);
+	const uint8_t* arr = (const uint8_t*)addr;
+	return (uint32_t)arr[0]
+		| ((uint32_t)arr[1] << 8)
+		| ((uint32_t)arr[2] << 16)
+		| ((uint32_t)arr[3] << 24);
 }
 
 static inline void write_uint32_le(void* addr, uint32_t val) {
-    uint8_t* arr = (uint8_t*)addr;
-    arr[0] = val & 0xFF;
-    arr[1] = (val >> 8) & 0xFF;
-    arr[2] = (val >> 16) & 0xFF;
-    arr[3] = (val >> 24) & 0xFF;
+	uint8_t* arr = (uint8_t*)addr;
+	arr[0] = val & 0xFF;
+	arr[1] = (val >> 8) & 0xFF;
+	arr[2] = (val >> 16) & 0xFF;
+	arr[3] = (val >> 24) & 0xFF;
 }
 
 static inline uint16_t read_uint16_le(const void* addr) {
-    const uint8_t* arr = (const uint8_t*)addr;
-    return (uint16_t)arr[0] | ((uint16_t)arr[1] << 8);
+	const uint8_t* arr = (const uint8_t*)addr;
+	return (uint16_t)arr[0] | ((uint16_t)arr[1] << 8);
 }
 
 static inline void write_uint16_le(void* addr, uint16_t val) {
-    uint8_t* arr = (uint8_t*)addr;
-    arr[0] = val & 0xFF;
-    arr[1] = (val >> 8) & 0xFF;
+	uint8_t* arr = (uint8_t*)addr;
+	arr[0] = val & 0xFF;
+	arr[1] = (val >> 8) & 0xFF;
 }
 
 #endif

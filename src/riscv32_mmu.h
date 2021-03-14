@@ -28,6 +28,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "riscv32.h"
 
+enum {
+	MMU_SV32 = 1,
+	MMU_SV39 = 8,
+	MMU_SV48 = 9
+};
+
 #define MMU_VALID_PTE     0x1
 #define MMU_READ          0x2
 #define MMU_WRITE         0x4
@@ -48,7 +54,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SET_PHYS_ADDR(pte, addr) SET_PHYS_PAGE(pte, (addr) >> 12)
 
 // Hash-function for the TLB, this is subject to further optimisations
-inline uint32_t tlb_hash(uint32_t addr)
+static inline virtaddr_t tlb_hash(virtaddr_t addr)
 {
     #ifdef RISCV_TLB_DIRECT_MAP
         return (addr >> 12) & (TLB_SIZE - 1); // direct-mapped
@@ -58,38 +64,38 @@ inline uint32_t tlb_hash(uint32_t addr)
 }
 
 // Validate TLB entry
-inline bool tlb_check(riscv32_tlb_t tlb, uint32_t addr, uint8_t access)
+static inline bool tlb_check(riscv32_tlb_t tlb, virtaddr_t addr, uint8_t access)
 {
-    return (tlb.pte & 0xFFFFF000) == (addr & 0xFFFFF000) && (tlb.pte & access) && tlb.ptr;
+    return (tlb.pte & ~gen_mask(12)) == (addr & ~gen_mask(12)) && (tlb.pte & access) && tlb.ptr;
 }
 
 // Check that memory block doesn't cross page boundaries
-inline bool block_inside_page(uint32_t addr, uint32_t size)
+static inline bool block_inside_page(physaddr_t addr, uint32_t size)
 {
-    return (addr & 0xFFF) + size <= 4096;
+    return (addr & gen_mask(12)) + size <= 4096;
 }
 
 // Init VM physical memory (be careful to not overlap MMIO regions!)
-bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pages);
+bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, physaddr_t begin, physaddr_t pages);
 
 // Free emulator memory and VM physical addrspace
 void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem);
 
 // Register MMIO device in the physical address space
-void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data);
+void riscv32_mmio_add_device(riscv32_vm_state_t* vm, physaddr_t base_addr, physaddr_t end_addr, riscv32_mmio_handler_t handler, void* data);
 
 // Remove MMIO device (whatever addr in the range will do)
 // Frees device->data as well if not NULL
-void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr);
+void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, physaddr_t addr);
 
 // Flush the TLB (on context switch, SFENCE.VMA, etc)
 void riscv32_tlb_flush(riscv32_vm_state_t* vm);
 
 // Performs translation corresponding to current CSR satp[MODE]
-bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr);
+bool riscv32_mmu_translate(riscv32_vm_state_t* vm, virtaddr_t addr, uint8_t access, physaddr_t* dest_addr);
 
 // Parse the MMU, perform memory operation and cache address translation in TLB
-bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+bool riscv32_mmu_op(riscv32_vm_state_t* vm, virtaddr_t addr, void* dest, uint32_t size, uint8_t access);
 
 /*
 * Inlined TLB-cached function (used for performance)
@@ -100,10 +106,10 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
 *     MMIO is accessed
 * Why is static used? GCC prevents inlining otherwise, i assume it's a bug
 */
-inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, virtaddr_t addr, void* dest, uint32_t size, uint8_t access)
 {
     // Check for TLB cached address translation and cross-page alignment
-    uint32_t key = tlb_hash(addr);
+    virtaddr_t key = tlb_hash(addr);
     if (tlb_check(vm->tlb[key], addr, access) && block_inside_page(addr, size)) {
         if (access == MMU_WRITE) {
             memcpy(vm->tlb[key].ptr + (addr & 0xFFF), dest, size);

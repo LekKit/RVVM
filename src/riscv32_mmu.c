@@ -19,12 +19,57 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <inttypes.h>
 
+#include "bit_ops.h"
 #include "riscv32.h"
 #include "riscv32_mmu.h"
+#include "riscv32_csr.h"
+
+struct bit_range
+{
+	unsigned begin;
+	unsigned size;
+};
+
+struct mmu {
+	size_t levels;
+	struct bit_range *vaddr_ranges;
+	struct bit_range *paddr_ranges;
+	size_t ptesize;
+};
+
+
+static const struct mmu mmu_list[] =
+{
+	[MMU_SV32] = {
+		.levels = 2,
+		.vaddr_ranges = (struct bit_range[]) { { 12, 10 }, { 22, 10 } },
+		.paddr_ranges = (struct bit_range[]) { { 10, 10 }, { 20, 12 } },
+		.ptesize = 4,
+	},
+	[MMU_SV39] = {
+		.levels = 3,
+		.vaddr_ranges = (struct bit_range[]) { { 12, 9 }, { 21, 9 }, { 30, 9 } },
+		.paddr_ranges = (struct bit_range[]) { { 12, 9 }, { 21, 9 }, { 30, 26 } },
+		.ptesize = 8,
+	},
+	[MMU_SV48] = {
+		.levels = 4,
+		.vaddr_ranges = (struct bit_range[]) { { 12, 9 }, { 21, 9 }, { 30, 9 }, { 39, 9 } },
+		.paddr_ranges = (struct bit_range[]) { { 12, 9 }, { 21, 9 }, { 30, 9 }, { 39, 17 } },
+		.ptesize = 8,
+	},
+};
 
 void riscv32_mmu_dump(riscv32_vm_state_t *vm)
 {
-	printf("root page table at: 0x%"PRIx32"\n", vm->root_page_table);
+	// TODO: rewrite using new MMU struct
+	if (vm->mmu_virtual != MMU_SV32)
+	{
+		printf("unsupported MMU to dump: %d\n", vm->mmu_virtual);
+		return;
+	}
+
+	printf("root page table at: 0x%"PRIxpaddr"\n", vm->root_page_table);
 
 	if (!vm->root_page_table || vm->root_page_table < vm->mem.begin || vm->root_page_table >= vm->mem.begin + vm->mem.size)
 	{
@@ -77,24 +122,24 @@ void riscv32_mmu_dump(riscv32_vm_state_t *vm)
 }
 
 // Check that specific physical address belongs to RAM
-inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
+static inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, physaddr_t page_addr)
 {
     return page_addr >= mem.begin && (page_addr - mem.begin) < mem.size;
 }
 
 // Put address translation into TLB
-static void tlb_put(riscv32_vm_state_t* vm, uint32_t addr, uint32_t page_addr, uint8_t access)
+static void tlb_put(riscv32_vm_state_t* vm, virtaddr_t addr, physaddr_t page_addr, uint8_t access)
 {
     if (phys_addr_in_mem(vm->mem, page_addr)) {
-        addr &= 0xFFFFF000;
-        page_addr &= 0xFFFFF000;
-        uint32_t key = tlb_hash(addr);
+        addr &= ~gen_mask(12);
+        page_addr &= ~gen_mask(12);
+        virtaddr_t key = tlb_hash(addr);
         /*
         * Add only requested access bits for correct access/dirty flags
         * implementation. Assume the software does not clear A/D bits without
         * calling SFENCE.VMA
         */
-        if ((vm->tlb[key].pte & 0xFFFFF000) == addr)
+        if ((vm->tlb[key].pte & ~gen_mask(12)) == addr)
             vm->tlb[key].pte |= access;
         else
             vm->tlb[key].pte = addr | access;
@@ -103,52 +148,136 @@ static void tlb_put(riscv32_vm_state_t* vm, uint32_t addr, uint32_t page_addr, u
 }
 
 // Virtual memory addressing mode (SV32)
-static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+bool riscv_mmu_translate(riscv32_vm_state_t *vm, const virtaddr_t va, physaddr_t *pa, const uint8_t access, bool update_pages)
 {
-    uint32_t pte_addr = vm->root_page_table | ((addr >> 20) & 0xFFC);
-    uint32_t pte;
+	if (vm->mmu_virtual != MMU_SV32
+			&& vm->mmu_virtual != MMU_SV39
+			&& vm->mmu_virtual != MMU_SV48)
+	{
+		/* wut iz dat? */
+		return false;
+	}
+	const struct mmu *mmu = &mmu_list[vm->mmu_virtual];
+	physaddr_t a = vm->root_page_table;
 
-    if (phys_addr_in_mem(vm->mem, pte_addr)) {
-        pte = read_uint32_le(vm->mem.data + pte_addr);
-        if (pte & MMU_VALID_PTE) {
-            if (pte & MMU_LEAF_PTE) {
-                // PGT entry is a leaf, hugepage mapped
-                // Check that PPN[0] is 0, otherwise the page is misaligned
-                if ((pte & (access | 0xFFC00)) == access) {
-                    // TODO: A/D flag updates should be atomic
-                    pte |= MMU_PAGE_ACCESSED;
-                    if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
-                    write_uint32_le(vm->mem.data + pte_addr, pte);
-                    pte_addr = ((pte & 0xFFF00000) << 2) | (addr & 0x3FFFFF);
-                    tlb_put(vm, addr, pte_addr, access);
-                    *dest_addr = pte_addr;
-                    return true;
-                }
-            } else {
-                // PGT entry is a pointer to next pagetable
-                pte_addr = ((pte & 0xFFFFFC00) << 2) | ((addr >> 10) & 0xFFC);
-                if (phys_addr_in_mem(vm->mem, pte_addr)) {
-                    pte = read_uint32_le(vm->mem.data + pte_addr);
-                    if ((pte & MMU_VALID_PTE) && (pte & access)) {
-                        pte |= MMU_PAGE_ACCESSED;
-                        if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
-                        write_uint32_le(vm->mem.data + pte_addr, pte);
-                        pte_addr = ((pte & 0xFFFFFC00) << 2) | (addr & 0xFFF);
-                        tlb_put(vm, addr, pte_addr, access);
-                        *dest_addr = pte_addr;
-                        return true;
-                    }
-                }
-            }
-        }
-    }
+	assert((access & (MMU_READ | MMU_WRITE | MMU_EXEC)) == access);
+	assert((a & gen_mask(12)) == 0);
 
-    // No valid address translation can be done (invalid PTE or protection fault)
-    return false;
+	size_t i = mmu->levels - 1;
+	do
+	{
+		size_t vpn = cut_bits(va, mmu->vaddr_ranges[i].begin, mmu->vaddr_ranges[i].size);
+		physaddr_t pte_addr = a + vpn * mmu->ptesize;
+
+		physaddr_t pte = 0;
+		for (size_t j = 0; j < mmu->ptesize; ++j)
+		{
+			/* TODO: update PTE atomically */
+			if (!phys_addr_in_mem(vm->mem, pte_addr + j))
+			{
+				return false;
+			}
+			pte |= (physaddr_t)vm->mem.data[pte_addr + j] << 8 * j;
+		}
+
+		if (   !(pte & MMU_VALID_PTE)
+		    || (!(pte & MMU_READ) && (pte & MMU_WRITE)))
+		{
+			/* invalid PTE */
+			/* raise an exception corresponding to original access type */
+			return false;
+		}
+
+		/* PTE is valid */
+
+		if (!(pte & MMU_READ) && !(pte & MMU_WRITE))
+		{
+			/* Non-leaf PTE; go to the next one */
+			a = 0;
+			for (size_t j = 0; j < mmu->levels; ++j)
+			{
+				size_t ppn = cut_bits(pte, mmu->paddr_ranges[j].begin, mmu->paddr_ranges[j].size);
+				a |= ppn << mmu->vaddr_ranges[j].begin;
+			}
+
+			continue;
+		}
+
+		/* This is a leaf PTE */
+
+		/* MXR and permissions handling */
+		if (   ((pte | (MMU_READ * !!(pte & MMU_EXEC && is_bit_set(vm->csr.status, CSR_STATUS_MXR)))) & access) != access
+		    /* supervisor user page access */
+		    || ((pte & MMU_USER_USABLE) && vm->priv_mode == PRIVILEGE_SUPERVISOR && !is_bit_set(vm->csr.status, CSR_STATUS_SUM)))
+		{
+			/* raise an exception corresponding to original access type */
+			return false;
+		}
+
+		for (size_t j = 0; j < i; ++j)
+		{
+			if (cut_bits(pte, mmu->paddr_ranges[j].begin, mmu->paddr_ranges[j].size) != 0)
+			{
+				/* Page is misaligned */
+				/* raise an exception corresponding to original access type */
+				return false;
+			}
+		}
+
+		if (update_pages && (!(pte & MMU_PAGE_ACCESSED) || ((access & MMU_WRITE) && (pte & MMU_PAGE_DIRTY))))
+		{
+			pte |= MMU_PAGE_ACCESSED;
+			pte |= MMU_PAGE_DIRTY * !!(access & MMU_WRITE);
+
+			/* TODO: update PTE atomically */
+			physaddr_t val = pte;
+			for (size_t j = 0; j < mmu->ptesize; ++j)
+			{
+				if (!phys_addr_in_mem(vm->mem, pte_addr + j))
+				{
+					return false;
+				}
+
+				/* XXX: need to check bounds here? */
+				vm->mem.data[pte_addr + j] = (val >> 8 * j) & 0xFF;
+			}
+		}
+
+		/* The translation is successful */
+		if (pa != NULL)
+		{
+			*pa = va & gen_mask(12);
+
+			for (size_t j = 0; j < mmu->levels; ++j)
+			{
+				if (j >= i)
+				{
+					/* This is a normal translation */
+					*pa |= cut_bits(pte, mmu->paddr_ranges[j].begin, mmu->paddr_ranges[j].size)
+						<< mmu->vaddr_ranges[j].begin;
+				}
+				else
+				{
+					/* This is a superpage translation */
+					*pa |= cut_bits(va, mmu->vaddr_ranges[j].begin, mmu->vaddr_ranges[j].size)
+						<< mmu->vaddr_ranges[j].begin;
+				}
+			}
+
+			tlb_put(vm, va, *pa, access);
+		}
+
+		return true;
+	}
+	while (i-- != 0);
+
+	/* top level PTE reached */
+	return false;
 }
 
+
 // Flat 32-bit physical addressing mode (Mbare)
-static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, virtaddr_t addr, uint8_t access, physaddr_t* dest_addr)
 {
     tlb_put(vm, addr, addr, access);
     *dest_addr = addr;
@@ -156,7 +285,7 @@ static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, ui
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+static bool riscv32_mmio_op(riscv32_vm_state_t* vm, physaddr_t addr, void* dest, uint32_t size, uint8_t access)
 {
     riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
@@ -168,7 +297,7 @@ static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, u
     return false;
 }
 
-bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pages)
+bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, physaddr_t begin, physaddr_t pages)
 {
     if (begin & 0xFFF) return false;
     void* tmp = calloc(pages, 4096);
@@ -181,13 +310,13 @@ bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pag
 
 void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem)
 {
-    if (mem->data + mem->begin) free(mem->data + mem->begin);
+    free(mem->data + mem->begin);
     mem->data = NULL;
     mem->begin = 0;
     mem->size = 0;
 }
 
-void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data)
+void riscv32_mmio_add_device(riscv32_vm_state_t* vm, physaddr_t base_addr, physaddr_t end_addr, riscv32_mmio_handler_t handler, void* data)
 {
     if (vm->mmio.count > 255) {
         printf("ERROR: Too much MMIO zones!\n");
@@ -201,7 +330,7 @@ void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_
     vm->mmio.count++;
 }
 
-void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr)
+void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, physaddr_t addr)
 {
     riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
@@ -223,15 +352,16 @@ void riscv32_tlb_flush(riscv32_vm_state_t* vm)
     memset(vm->tlb, 0, sizeof(vm->tlb));
 }
 
-bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+bool riscv32_mmu_translate(riscv32_vm_state_t* vm, virtaddr_t addr, uint8_t access, physaddr_t* dest_addr)
 {
     if (vm->mmu_virtual && vm->priv_mode <= PRIVILEGE_SUPERVISOR)
-        return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
+        return riscv_mmu_translate(vm, addr, dest_addr, access, true);
+	//return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
     else
         return riscv32_mmu_translate_bare(vm, addr, access, dest_addr);
 }
 
-bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+bool riscv32_mmu_op(riscv32_vm_state_t* vm, virtaddr_t addr, void* dest, uint32_t size, uint8_t access)
 {
     if (!block_inside_page(addr, size)) {
         // Handle misalign between 2 pages
@@ -240,7 +370,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
             * If we are fetching a 2-byte instruction at the end of page,
             * do not fetch other 2 bytes to prevent spurious pagefaults
             */
-            uint32_t inst_addr;
+            physaddr_t inst_addr;
             if (riscv32_mmu_translate(vm, addr, access, &inst_addr)
             && phys_addr_in_mem(vm->mem, inst_addr)) {
                 uint8_t ibyte = *(uint8_t*)(vm->mem.data + inst_addr);
@@ -252,7 +382,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
         return riscv32_mmu_op(vm, addr, dest, part_size, access) &&
                riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
     }
-    uint32_t phys_addr;
+    physaddr_t phys_addr;
     uint32_t trap_cause = 0;
     // Translation function also checks access rights and caches addr translation in TLB
     if (riscv32_mmu_translate(vm, addr, access, &phys_addr)) {

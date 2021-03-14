@@ -19,30 +19,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 
+#include "bit_ops.h"
 #include "riscv32.h"
 
-inline uint32_t riscv32i_read_register_u(riscv32_vm_state_t *vm, uint32_t reg)
+static inline reg_t riscv32i_read_register_u(const riscv32_vm_state_t *vm, uint32_t reg)
 {
     assert(reg < REGISTERS_MAX);
-    return vm->registers[reg];
+    return vm->registers[reg] & gen_mask(XLEN(vm));
 }
 
-inline void riscv32i_write_register_u(riscv32_vm_state_t *vm, uint32_t reg, uint32_t data)
+static inline void riscv32i_write_register_u(riscv32_vm_state_t *vm, uint32_t reg, reg_t data)
 {
     assert(reg < REGISTERS_MAX);
-    vm->registers[reg] = data;
+    vm->registers[reg] = sign_extend(data, XLEN(vm));
 }
 
-inline int32_t riscv32i_read_register_s(riscv32_vm_state_t *vm, uint32_t reg)
+static inline sreg_t riscv32i_read_register_s(const riscv32_vm_state_t *vm, uint32_t reg)
 {
     assert(reg < REGISTERS_MAX);
-    return vm->registers[reg];
+    return sign_extend(vm->registers[reg] & gen_mask(XLEN(vm)), XLEN(vm));
 }
 
-inline void riscv32i_write_register_s(riscv32_vm_state_t *vm, uint32_t reg, int32_t data)
+static inline void riscv32i_write_register_s(riscv32_vm_state_t *vm, uint32_t reg, sreg_t data)
 {
     assert(reg < REGISTERS_MAX);
-    vm->registers[reg] = data;
+    vm->registers[reg] = sign_extend(data, XLEN(vm));
 }
 
 const char *riscv32i_translate_register(uint32_t reg);

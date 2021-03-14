@@ -17,74 +17,96 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "bit_ops.h"
 #include "riscv32.h"
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 
-#define CSR_SSTATUS_MASK 0x800DE133
+#define CSR_SSTATUS_MASK(vm) \
+	  (1 << CSR_STATUS_UIE) \
+	| (1 << CSR_STATUS_SIE) \
+	| (1 << CSR_STATUS_UPIE) \
+	| (1 << CSR_STATUS_SPIE) \
+	| (1 << CSR_STATUS_SPP) \
+	| (gen_mask(CSR_STATUS_FS_SIZE) << CSR_STATUS_FS_START) \
+	| (gen_mask(CSR_STATUS_XS_SIZE) << CSR_STATUS_XS_START) \
+	| (1 << CSR_STATUS_SUM) \
+	| (1 << CSR_STATUS_MXR) \
+	| (gen_mask(CSR_STATUS_UXL_SIZE) << CSR_STATUS_UXL_START) \
+	| (1 << CSR_STATUS_SD(vm))
 
-static bool riscv32_csr_sstatus(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sstatus(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK);
+    csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK(vm));
+    riscv32_csr_isa_change(vm, PRIVILEGE_USER, cut_bits(vm->csr.status, CSR_STATUS_UXL_START, CSR_STATUS_UXL_SIZE));
     return true;
 }
 
-static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.ie[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_stvec(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_stvec(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tvec[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sscratch(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sscratch(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.scratch[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sepc(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sepc(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.epc[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_scause(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_scause(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.cause[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_stval(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_stval(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tval[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sip(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sip(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.ip[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
-void riscv32_print_sv32_pagetable(riscv32_vm_state_t* vm, uint32_t pagetable);
-static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+
+static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    uint32_t satp = (vm->mmu_virtual ? 0x80000000 : 0) | (vm->root_page_table >> 12);
+    reg_t satp;
+    bool is32bit = vm->isa[PRIVILEGE_SUPERVISOR] == ISA_RV32;
+    if (is32bit)
+    {
+	    satp = (!!vm->mmu_virtual << 31) | (vm->root_page_table >> 12);
+    }
+    else
+    {
+	    satp = ((reg_t)vm->mmu_virtual << 60) | ((vm->root_page_table >> 12) & gen_mask(44));
+    }
     csr_helper(&satp, dest, op);
-    bool mmu_enable = satp & 0x80000000;
+    uint8_t mmu_enable = is32bit ? satp >> 31 : satp >> 60;
     /*
     * We currently cache physical addresses in TLB as well, so switching
     * between bare/virtual modes will pollute the address space with illegal entries
@@ -92,7 +114,11 @@ static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* 
     */
     if (vm->mmu_virtual != mmu_enable) riscv32_tlb_flush(vm);
     vm->mmu_virtual = mmu_enable;
-    vm->root_page_table = satp << 12;
+    vm->root_page_table = (satp << 12) & gen_mask(XLEN(vm));
+    if (!is32bit)
+    {
+	    vm->root_page_table = sign_extend(vm->root_page_table & gen_mask(56), 57);
+    }
     return true;
 }
 

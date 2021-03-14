@@ -53,12 +53,12 @@ void hashmap_init(hashmap_t* map, size_t bits);
 void hashmap_destroy(hashmap_t* map);
 void hashmap_realloc(hashmap_t* map, size_t key, size_t val);
 
-inline size_t hashmap_hash(size_t key, size_t size)
+static inline size_t hashmap_hash(size_t key, size_t size)
 {
     return (key + (key >> 12) + (key >> 24)) & size;
 }
 
-inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
+static inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
 {
     if (!key) {
         map->zkval = val;
@@ -79,7 +79,7 @@ inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
     hashmap_realloc(map, key, val);
 }
 
-inline size_t hashmap_get(const hashmap_t* map, size_t key)
+static inline size_t hashmap_get(const hashmap_t* map, size_t key)
 {
     if (!key) return map->zkval;
     size_t hash = hashmap_hash(key, map->size);
@@ -93,7 +93,7 @@ inline size_t hashmap_get(const hashmap_t* map, size_t key)
     return 0;
 }
 
-inline void hashmap_remove(hashmap_t* map, size_t key)
+static inline void hashmap_remove(hashmap_t* map, size_t key)
 {
     if (!key) {
         map->zkval = 0;

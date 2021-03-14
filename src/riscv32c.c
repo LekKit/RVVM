@@ -32,7 +32,7 @@ static inline uint32_t riscv32c_reg(uint32_t reg)
 }
 
 // Decode c.j / c.jal offset
-static inline int16_t decode_jal_imm(uint16_t imm)
+static inline reg_t decode_jal_imm(uint16_t imm)
 {
     imm = (cut_bits(imm, 1, 3) << 1)  |
           (cut_bits(imm, 9, 1) << 4)  |
@@ -48,12 +48,13 @@ static inline int16_t decode_jal_imm(uint16_t imm)
 static void riscv32c_addi4spn(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add imm*4 to stack pointer (X2), store into rds
-    uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
-    uint32_t imm =  (cut_bits(instruction, 6, 1)  << 2) |
+    reg_t imm =  (cut_bits(instruction, 6, 1)  << 2) |
                     (cut_bits(instruction, 5, 1)  << 3) |
                     (cut_bits(instruction, 11, 2) << 4) |
                     (cut_bits(instruction, 7, 4)  << 6);
-    uint32_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
+    uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
+    reg_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
+
     riscv32i_write_register_u(vm, rds, rsp + imm);
     riscv32_debug(vm, "RV32C: c.addi4spn %r, %d", rds, imm);
 }
@@ -61,10 +62,10 @@ static void riscv32c_addi4spn(riscv32_vm_state_t *vm, const uint16_t instruction
 static void riscv32c_addi_nop(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Add 6-bit signed immediate to rds (this also serves as NOP for X0 reg)
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t src_reg = riscv32i_read_register_u(vm, rds);
-    int32_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
+    reg_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
                               (cut_bits(instruction, 2, 5)), 6);
+    uint32_t rds = cut_bits(instruction, 7, 5);
+    reg_t src_reg = riscv32i_read_register_u(vm, rds);
 
     riscv32i_write_register_u(vm, rds, src_reg + imm);
     riscv32_debug(vm, "RV32C: c.addi %r, %d", rds, imm);
@@ -74,7 +75,7 @@ static void riscv32c_slli(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Left shift rds by imm, store into rds
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t src_reg = riscv32i_read_register_u(vm, rds);
+    reg_t src_reg = riscv32i_read_register_u(vm, rds);
     uint32_t shamt = cut_bits(instruction, 2, 5);
 
     riscv32i_write_register_u(vm, rds, src_reg << shamt);
@@ -89,8 +90,8 @@ static void riscv32c_fld(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_jal(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Save PC+2 into X1 (return addr), jump to PC+offset
-    uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
-    int32_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
+    reg_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+    sreg_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
 
     riscv32i_write_register_u(vm, REGISTER_X1, pc + 2);
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
@@ -107,11 +108,11 @@ static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
     // Read 32-bit integer from address rs1+offset to rds
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 2, 3));
     uint32_t rs1 = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t offset = (cut_bits(instruction, 6, 1)  << 2) |
+    reg_t offset = (cut_bits(instruction, 6, 1)  << 2) |
                       (cut_bits(instruction, 10, 3) << 3) |
                       (cut_bits(instruction, 5, 1)  << 6);
 
-    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    reg_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[sizeof(uint32_t)];
 
     if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
@@ -123,7 +124,7 @@ static void riscv32c_lw(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_li(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
-    int32_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
+    sreg_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
                               (cut_bits(instruction, 2, 5)), 6);
 
     riscv32i_write_register_s(vm, rds, imm);
@@ -134,11 +135,11 @@ static void riscv32c_lwsp(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Read 32-bit integer from address sp+offset to rds
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t offset = (cut_bits(instruction, 4, 3)  << 2) |
+    reg_t offset = (cut_bits(instruction, 4, 3)  << 2) |
                       (cut_bits(instruction, 12, 1) << 5) |
                       (cut_bits(instruction, 2, 2)  << 6);
 
-    uint32_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
+    reg_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(uint32_t)];
 
     if (riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
@@ -155,7 +156,7 @@ static void riscv32c_flw(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_addi16sp_lui(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t imm;
+    reg_t imm;
 
     if (rds == REGISTER_X2) {
         imm = (cut_bits(instruction, 6, 1) << 4) |
@@ -164,15 +165,15 @@ static void riscv32c_addi16sp_lui(riscv32_vm_state_t *vm, const uint16_t instruc
               (cut_bits(instruction, 3, 2) << 7) |
               (cut_bits(instruction, 12, 1) << 9);
 
-        uint32_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
+        reg_t rsp = riscv32i_read_register_u(vm, REGISTER_X2);
+
         riscv32i_write_register_u(vm, REGISTER_X2, rsp + sign_extend(imm, 10));
         riscv32_debug(vm, "RV32C: c.addi16sp %d", sign_extend(imm, 10));
     } else {
-        bool bit17 = !!cut_bits(instruction, 12, 1);
-        imm = (cut_bits(instruction, 2, 5) << 12) |
-              (bit17 << 17) | bit17 * (-(uint32_t)1 << 17);
+        imm = (cut_bits(instruction, 2, 5) << 12)
+		| (cut_bits(instruction, 12, 1) << 17);
 
-        riscv32i_write_register_u(vm, rds, imm);
+        riscv32i_write_register_s(vm, rds, sign_extend(imm, 18));
         riscv32_debug(vm, "RV32C: c.lui %r, %h", rds, imm);
     }
 }
@@ -186,7 +187,7 @@ static void riscv32c_alops1(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // goddamn glue opcode
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t reg1 = riscv32i_read_register_u(vm, rds);
+    reg_t reg1 = riscv32i_read_register_u(vm, rds);
     uint32_t opc = cut_bits(instruction, 10, 2);
 
     if (opc == 0) {
@@ -197,18 +198,18 @@ static void riscv32c_alops1(riscv32_vm_state_t *vm, const uint16_t instruction)
     } else if (opc == 1) {
         // c.srai
         uint32_t shamt = cut_bits(instruction, 2, 5);
-        riscv32i_write_register_u(vm, rds, ((int32_t)reg1) >> shamt);
+        riscv32i_write_register_u(vm, rds, sign_extend(reg1 >> shamt, XLEN(vm) - shamt));
         riscv32_debug(vm, "RV32C: c.srai %r, %d", rds, shamt);
     } else if (opc == 2) {
         // c.andi
-        int32_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
+        sreg_t imm = sign_extend((cut_bits(instruction, 12, 1) << 5) |
                                    cut_bits(instruction, 2, 5), 6);
         riscv32i_write_register_u(vm, rds, reg1 & imm);
         riscv32_debug(vm, "RV32C: c.andi %r, %h", rds, imm);
     } else {
         opc = cut_bits(instruction, 5, 2);
         uint32_t rs2 = riscv32c_reg(cut_bits(instruction, 2, 3));
-        uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+        reg_t reg2 = riscv32i_read_register_u(vm, rs2);
 
         if (opc == 0) {
             // c.sub
@@ -239,14 +240,14 @@ static void riscv32c_alops2(riscv32_vm_state_t *vm, const uint16_t instruction)
         if (rds != 0) {
             if (rs2 != 0) {
                 // c.add
-                uint32_t reg1 = riscv32i_read_register_u(vm, rds);
-                uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+                reg_t reg1 = riscv32i_read_register_u(vm, rds);
+                reg_t reg2 = riscv32i_read_register_u(vm, rs2);
                 riscv32i_write_register_u(vm, rds, reg1 + reg2);
                 riscv32_debug(vm, "RV32C: c.add %r, %r", rds, rs2);
             } else {
                 // c.jalr
-                uint32_t reg1 = riscv32i_read_register_u(vm, rds);
-                uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+                reg_t reg1 = riscv32i_read_register_u(vm, rds);
+                reg_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
                 riscv32i_write_register_u(vm, REGISTER_X1, pc + 2);
                 riscv32i_write_register_u(vm, REGISTER_PC, reg1 - 2);
                 riscv32_debug(vm, "RV32C: c.jalr %r", rds);
@@ -259,12 +260,12 @@ static void riscv32c_alops2(riscv32_vm_state_t *vm, const uint16_t instruction)
     } else {
         if (rs2 != 0) {
             // c.mv
-            uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
+            reg_t reg2 = riscv32i_read_register_u(vm, rs2);
             riscv32i_write_register_u(vm, rds, reg2);
             riscv32_debug(vm, "RV32C: c.mv %r, %r", rds, rs2);
         } else {
             // c.jr
-            uint32_t reg1 = riscv32i_read_register_u(vm, rds);
+            reg_t reg1 = riscv32i_read_register_u(vm, rds);
             riscv32i_write_register_u(vm, REGISTER_PC, reg1 - 2);
             riscv32_debug(vm, "RV32C: c.jr %r", rds);
         }
@@ -279,8 +280,8 @@ static void riscv32c_fsd(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_j(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     // Jump to PC+offset
-    uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
-    int32_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
+    reg_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+    sreg_t offset = decode_jal_imm(cut_bits(instruction, 2, 11));
 
     riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     riscv32_debug(vm, "RV32C: c.j %d", offset);
@@ -300,7 +301,7 @@ static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
                       (cut_bits(instruction, 10, 3) << 3) |
                       (cut_bits(instruction, 5, 1)  << 6);
 
-    uint32_t addr = riscv32i_read_register_u(vm, rs1) + offset;
+    reg_t addr = riscv32i_read_register_u(vm, rs1) + offset;
     uint8_t val[sizeof(uint32_t)];
     write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
     riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
@@ -311,15 +312,15 @@ static void riscv32c_sw(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_beqz(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t reg1 = riscv32i_read_register_u(vm, rds);
+    reg_t reg1 = riscv32i_read_register_u(vm, rds);
     if (reg1 == 0) {
-        uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        reg_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
         uint32_t imm = (cut_bits(instruction, 3, 2) << 1)  |
                        (cut_bits(instruction, 10, 2) << 3) |
                        (cut_bits(instruction, 2, 1) << 5)  |
                        (cut_bits(instruction, 5, 2) << 6)  |
                        (cut_bits(instruction, 12, 1) << 8);
-        int32_t offset = sign_extend(imm, 9);
+        sreg_t offset = sign_extend(imm, 9);
 
         riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     }
@@ -333,7 +334,7 @@ static void riscv32c_swsp(riscv32_vm_state_t *vm, const uint16_t instruction)
     uint32_t offset = (cut_bits(instruction, 9, 4)  << 2) |
                       (cut_bits(instruction, 7, 2)  << 6);
 
-    uint32_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
+    reg_t addr = riscv32i_read_register_u(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(uint32_t)];
     write_uint32_le(val, riscv32i_read_register_u(vm, rs2));
     riscv32_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
@@ -349,15 +350,15 @@ static void riscv32c_fsw(riscv32_vm_state_t *vm, const uint16_t instruction)
 static void riscv32c_bnez(riscv32_vm_state_t *vm, const uint16_t instruction)
 {
     uint32_t rds = riscv32c_reg(cut_bits(instruction, 7, 3));
-    uint32_t reg1 = riscv32i_read_register_u(vm, rds);
+    reg_t reg1 = riscv32i_read_register_u(vm, rds);
     if (reg1 != 0) {
-        uint32_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
+        reg_t pc = riscv32i_read_register_u(vm, REGISTER_PC);
         uint32_t imm = (cut_bits(instruction, 3, 2) << 1)  |
                        (cut_bits(instruction, 10, 2) << 3) |
                        (cut_bits(instruction, 2, 1) << 5)  |
                        (cut_bits(instruction, 5, 2) << 6)  |
                        (cut_bits(instruction, 12, 1) << 8);
-        int32_t offset = sign_extend(imm, 9);
+        sreg_t offset = sign_extend(imm, 9);
 
         riscv32i_write_register_u(vm, REGISTER_PC, pc + offset - 2);
     }
