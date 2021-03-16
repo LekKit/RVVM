@@ -8,7 +8,8 @@ RISC-V CPU & System software implementation written in С
 
 ## What's working
 - OpenSBI, custom firmwares boot and execute properly
-- Linux kernel boots! Although, without clint & timer it does not run init
+- Linux kernel boots!
+- Linux userspace works, interactive shell through UART
 
 ## What's done so far
 - Feature-complete RV32I instruction set
@@ -23,6 +24,8 @@ RISC-V CPU & System software implementation written in С
 - Bootrom loading
 - DTB loading, passing to firmware/kernel
 - ELF kernel loading
+- Interrupts
+- Core-local interrupt controller, timers
 
 ## Usage
 Currently builds on *nix systems using GNU Make. Actual code however is cross-platform and more build targets are going to be supported, including Windows, or even embedded systems.
@@ -36,17 +39,18 @@ cd release.linux.x86_64
 ```
 
 ## Our team
-- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32ICA ISA, privileged ISA, lots of fixes
-- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work
-- **cerg2010cerg2010**: ELF loading, important fixes and refactoring
+- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32ICA ISA, interrupts & timer, privileged ISA, lots of fixes
+- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
+- **cerg2010cerg2010**: ELF loading, important fixes and refactoring, initial RV64 work
 - *Hoping to see more contributors here*
 
 ## TODO
 - Debug the available functionality and make sure it's conforming to the specs
-- Timer, CLINT
-- Successfully running Linux userspace software (currently hangs at "Freeing unused kernel memory; Run /init as init process")
-- Floating-point extensions
 - Refactor the code; Make internal APIs usable for both 32 & 64 bit VMs
-- Basic peripherals, some kind of storage
+- Floating-point extensions
+- Framebuffer
+- Flash storage
+- Mouse/keyboard
+- Other peripherals
 - *A lot more...*
 - JIT? RV64? Userspace emulation?
