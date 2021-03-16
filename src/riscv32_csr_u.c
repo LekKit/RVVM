@@ -22,6 +22,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define CSR_USTATUS_MASK 0x11
 
+extern uint64_t clint_mtime;
+
+static bool riscv32_csr_time(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    UNUSED(op);
+    rvtimer_update(&vm->timer);
+    *dest = vm->timer.time;
+    return true;
+}
+
+static bool riscv32_csr_timeh(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+{
+    UNUSED(csr_id);
+    UNUSED(op);
+    *dest = vm->timer.time >> 32;
+    return true;
+}
+
 void riscv32_csr_u_init()
 {
     // User Trap Setup
@@ -43,10 +62,10 @@ void riscv32_csr_u_init()
 
     // User Counter/Timers
     riscv32_csr_init(0xC00, "cycle", riscv32_csr_unimp);
-    riscv32_csr_init(0xC01, "time", riscv32_csr_unimp);
+    riscv32_csr_init(0xC01, "time", riscv32_csr_time);
     riscv32_csr_init(0xC02, "instret", riscv32_csr_unimp);
     riscv32_csr_init(0xC80, "cycleh", riscv32_csr_unimp);
-    riscv32_csr_init(0xC81, "timeh", riscv32_csr_unimp);
+    riscv32_csr_init(0xC81, "timeh", riscv32_csr_timeh);
     riscv32_csr_init(0xC82, "instreth", riscv32_csr_unimp);
 
     for (uint32_t i=3; i<32; ++i) {

@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include "riscv.h"
+#include "rvtimer.h"
 
 enum
 {
@@ -138,19 +139,22 @@ struct riscv32_vm_state_t {
         uint32_t status;
         uint32_t edeleg[4];
         uint32_t ideleg[4];
-        uint32_t ie[4];
+        uint32_t ie;
         uint32_t tvec[4];
         uint32_t counteren[4];
         uint32_t scratch[4];
         uint32_t epc[4];
         uint32_t cause[4];
         uint32_t tval[4];
-        uint32_t ip[4];
+        uint32_t ip;
     } csr;
     uint32_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;
-    bool running;
+    rvtimer_t timer;
+    bool ev_trap;
+    bool ev_int; // delivered from IRQ thread
+    uint32_t ev_int_mask;
 };
 
 #define RISCV32I_OPCODE_MASK 0x3
@@ -187,12 +191,19 @@ void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const u
 void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 
 //#define RV_DEBUG
+//#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
 
-void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...);
+void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...);
 
 #ifdef RV_DEBUG
-#define riscv32_debug riscv32_debug_always
+#define riscv32_debug_always riscv32_debug_func
+#else
+#define riscv32_debug_always(...)
+#endif
+
+#ifdef RV_DEBUG_FULL
+#define riscv32_debug riscv32_debug_func
 #else
 #define riscv32_debug(...)
 #endif
@@ -210,5 +221,6 @@ void riscv32c_init();
 void riscv32i_init();
 void riscv32a_init();
 void riscv32_priv_init();
+bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi);
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
 void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval);
