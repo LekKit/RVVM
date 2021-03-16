@@ -109,7 +109,7 @@ enum
 #define TRAP_STORE_PAGEFAULT   0xF
 
 // 64 bit
-#if 1
+#if 0
 typedef uint64_t reg_t;
 typedef int64_t sreg_t;
 typedef uint64_t physaddr_t;

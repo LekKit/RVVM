@@ -17,12 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "clint.h"
+#include "riscv32.h"
 #include "riscv32_mmu.h"
 #include "rvtimer.h"
 #include "mem_ops.h"
 #include "bit_ops.h"
 
-bool clint_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t access)
+bool clint_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, physaddr_t offset, void* data, uint32_t size, uint8_t access)
 {
     UNUSED(device);
     uint8_t tmp[8];

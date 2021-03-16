@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 extern uint64_t clint_mtime;
 
-static bool riscv32_csr_time(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_time(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     UNUSED(op);
@@ -33,7 +33,7 @@ static bool riscv32_csr_time(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* 
     return true;
 }
 
-static bool riscv32_csr_timeh(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_timeh(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     UNUSED(op);
