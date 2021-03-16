@@ -36,6 +36,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "ns16550a.h"
 #include "riscv32i_registers.h"
+#include "clint.h"
+#include "threading.h"
+#include "spinlock.h"
 
 void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
 
@@ -64,6 +67,69 @@ void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const 
     riscv32_opcodes[opcode | 0x100] = func;
 }
 
+#define MAX_VMS 256
+
+static spinlock_t global_lock;
+static riscv32_vm_state_t* global_vm_list[MAX_VMS] = {NULL};
+static size_t global_vm_count = 0;
+static thread_handle_t global_irq_thread;
+
+static void* global_irq_handler(void* arg)
+{
+    riscv32_vm_state_t* vm;
+    while (true) {
+        sleep_ms(10);
+        spin_lock(&global_lock);
+        for (size_t i=0; i<global_vm_count; ++i) {
+            vm = global_vm_list[i];
+            /*
+            * Queue interrupt data & flag, wake CPU thread.
+            * Technically, writing to wait_event is a race condition,
+            * but this doesn't matter - failing to deliver an event will
+            * simply delay it, and sending a spurious event merely lowers performance
+            */
+            vm->ev_int_mask = (1 << INTERRUPT_MTIMER);
+            vm->ev_int = true;
+            vm->wait_event = 0;
+        }
+        spin_unlock(&global_lock);
+    }
+    return arg;
+}
+
+static void register_vm(riscv32_vm_state_t *vm)
+{
+    spin_lock(&global_lock);
+    if (global_vm_count == 0) {
+        global_irq_thread = thread_create(global_irq_handler);
+    }
+    if (global_vm_count >= MAX_VMS - 1) {
+        printf("ERROR: Too much VMs created!\n");
+        exit(-1);
+    }
+    global_vm_list[global_vm_count] = vm;
+    global_vm_count++;
+    spin_unlock(&global_lock);
+}
+
+static void deregister_vm(riscv32_vm_state_t *vm)
+{
+    spin_lock(&global_lock);
+    for (size_t i=0; i<global_vm_count; ++i) {
+        if (global_vm_list[i] == vm) {
+            global_vm_count--;
+            for (size_t j=i; j<global_vm_count; ++j) {
+                global_vm_list[j] = global_vm_list[j+1];
+            }
+            return;
+        }
+    }
+    if (global_vm_count == 0) {
+        thread_kill(global_irq_thread);
+    }
+    spin_unlock(&global_lock);
+}
+
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
@@ -80,6 +146,7 @@ riscv32_vm_state_t *riscv32_create_vm()
         riscv32_csr_m_init();
         riscv32_csr_s_init();
         riscv32_csr_u_init();
+        spin_init(&global_lock);
         global_init = true;
     }
 
@@ -101,29 +168,52 @@ riscv32_vm_state_t *riscv32_create_vm()
 	    = vm->isa[PRIVILEGE_SUPERVISOR]
 	    = vm->isa[PRIVILEGE_HYPERVISOR]
 	    = vm->isa[PRIVILEGE_USER] = ISA_MAX;
+    riscv32_mmio_add_device(vm, 0x2000000, 0x2010000, clint_mmio_handler, NULL);
+    rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = gen_mask(XLEN(vm));
+    vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = gen_mask(XLEN(vm));
     riscv32i_write_register_u(vm, REGISTER_PC, vm->mem.begin);
-    vm->registers[REGISTER_PC] = vm->mem.begin;
+    register_vm(vm);
 
     return vm;
 }
 
 void riscv32_destroy_vm(riscv32_vm_state_t *vm)
 {
+    deregister_vm(vm);
+    for (size_t i=0; i<vm->mmio.count; ++i) {
+        riscv32_mmio_remove_device(vm, vm->mmio.regions[i].base_addr);
+    }
     riscv32_destroy_phys_mem(&vm->mem);
     free(vm);
 }
 
-static void riscv32_break(riscv32_vm_state_t *vm)
+static void riscv32_perform_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
 {
-    vm->wait_event = 0;
-}
+    uint8_t priv;
+    for (priv=PRIVILEGE_MACHINE; priv>(cause & 0x3); --priv) {
+        if ((vm->csr.ideleg[priv] & (1 << cause)) == 0) break;
+    }
+    //printf("Int %x\n", cause);
+    riscv32_debug(vm, "Int %d -> %d, cause: %h", vm->priv_mode, priv, cause);
 
-void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
-{
-    riscv32_trap(vm, INTERRUPT_MASK | cause, 0);
+    vm->csr.epc[priv] = riscv32i_read_register_u(vm, REGISTER_PC);
+    vm->csr.cause[priv] = cause | INTERRUPT_MASK;
+    vm->csr.tval[priv] = 0;
+    // Save current priv mode to xPP, xIE to xPIE, disable interrupts
+    if (priv == PRIVILEGE_MACHINE) {
+        vm->csr.status = replace_bits(vm->csr.status, 11, 2, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, 7, 1, cut_bits(vm->csr.status, 3, 1));
+        vm->csr.status &= 0xFFFFFFF7;
+    } else if (priv == PRIVILEGE_SUPERVISOR) {
+        vm->csr.status = replace_bits(vm->csr.status, 8, 1, vm->priv_mode);
+        vm->csr.status = replace_bits(vm->csr.status, 5, 1, cut_bits(vm->csr.status, 1, 1));
+        vm->csr.status &= 0xFFFFFFFD;
+    }
+    vm->priv_mode = priv;
+    vm->wait_event = 0;
 }
 
 void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval)
@@ -133,7 +223,7 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval)
     for (priv=PRIVILEGE_MACHINE; priv>vm->priv_mode; --priv) {
         if ((vm->csr.edeleg[priv] & (1 << cause)) == 0) break;
     }
-    riscv32_debug_always(vm, "Trap priv %d -> %d, cause: %h, tval: %h", vm->priv_mode, priv, cause, tval);
+    riscv32_debug(vm, "Trap priv %d -> %d, cause: %h, tval: %h", vm->priv_mode, priv, cause, tval);
 
     vm->csr.epc[priv] = riscv32i_read_register_u(vm, REGISTER_PC);
     vm->csr.cause[priv] = cause;
@@ -149,10 +239,41 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval)
         vm->csr.status &= ~(1 << CSR_STATUS_SIE);
     }
     vm->priv_mode = priv;
-    riscv32_break(vm);
+    vm->ev_trap = true;
+    vm->wait_event = 0;
 }
 
-void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...)
+bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi)
+{
+    // Check if we have any pending interrupts
+    if (vm->csr.ip) {
+        // Loop over possible interrupt cause bits, prioritizing higher priv source
+        for (uint32_t i=11; i>0; --i) {
+            uint32_t imask = (1 << i);
+            if (vm->csr.ip & imask) {
+                uint8_t priv = i & 3;
+                bool iallow = priv > vm->priv_mode;
+                if (!iallow) {
+                    iallow = priv == vm->priv_mode && ((vm->csr.status & (1 << priv)) || wfi);
+                }
+                // If individual interrupt bit is enabled & privilege allows, interrupt is executed
+                //if (!(imask & vm->csr.ie)) printf("Int %x disabled!\n", i);
+                if ((vm->csr.ie & imask) && iallow) {
+                    // WFI should set epc to pc+4
+                    if (wfi) {
+                        riscv32i_write_register_u(vm, REGISTER_PC, riscv32i_read_register_u(vm, REGISTER_PC) + 4);
+                        vm->ev_trap = true;
+                    }
+                    riscv32_perform_interrupt(vm, i);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -215,7 +336,7 @@ static inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t ins
 			riscv32i_read_register_u(vm, REGISTER_PC) + 4);
     }
 
-#ifdef RV_DEBUG
+#ifdef RV_DEBUG_FULL
     riscv32_dump_registers(vm);
 #ifdef RV_DEBUG_SINGLESTEP
     getchar();
@@ -243,6 +364,13 @@ static void riscv32_run_till_event(riscv32_vm_state_t *vm)
     }
 }
 
+static void riscv32_trap_jump(riscv32_vm_state_t *vm)
+{
+    size_t pc = vm->csr.tvec[vm->priv_mode] & (~3);
+    if (vm->csr.tvec[vm->priv_mode] & 1) pc += vm->csr.cause[vm->priv_mode] << 2;
+    riscv32i_write_register_u(vm, REGISTER_PC, pc);
+}
+
 void riscv32_run(riscv32_vm_state_t *vm)
 {
     assert(vm);
@@ -250,11 +378,22 @@ void riscv32_run(riscv32_vm_state_t *vm)
     while (true) {
         vm->wait_event = 1;
         riscv32_run_till_event(vm);
-        if ((vm->csr.cause[vm->priv_mode] & INTERRUPT_MASK) && (vm->csr.tvec[vm->priv_mode] & 1)) {
-            reg_t pc = (vm->csr.tvec[vm->priv_mode] & (~(reg_t)3)) + (vm->csr.cause[vm->priv_mode] << 2);
-            riscv32i_write_register_u(vm, REGISTER_PC, pc);
-        } else {
-            riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.tvec[vm->priv_mode] & (~(reg_t)3));
+        if (vm->ev_trap) {
+            // Event came from CPU thread, either from trap or interrupted WFI
+            vm->ev_trap = false;
+            riscv32_trap_jump(vm);
+        } else if (vm->ev_int) {
+            // External interrupt, handle the pending bitmask
+            vm->csr.ip |= vm->ev_int_mask;
+            if (vm->csr.ip & (1 << INTERRUPT_MTIMER)) {
+                if (!rvtimer_pending(&vm->timer)) {
+                    vm->csr.ip &= ~(1 << INTERRUPT_MTIMER);
+                }
+            }
+            vm->ev_int = false;
+            if (riscv32_handle_ip(vm, false)) {
+                riscv32_trap_jump(vm);
+            }
         }
     }
 }

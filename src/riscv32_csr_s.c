@@ -22,23 +22,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 
-#define CSR_SSTATUS_MASK(vm) \
-	  (1 << CSR_STATUS_UIE) \
-	| (1 << CSR_STATUS_SIE) \
-	| (1 << CSR_STATUS_UPIE) \
-	| (1 << CSR_STATUS_SPIE) \
-	| (1 << CSR_STATUS_SPP) \
-	| (gen_mask(CSR_STATUS_FS_SIZE) << CSR_STATUS_FS_START) \
-	| (gen_mask(CSR_STATUS_XS_SIZE) << CSR_STATUS_XS_START) \
-	| (1 << CSR_STATUS_SUM) \
-	| (1 << CSR_STATUS_MXR) \
-	| (gen_mask(CSR_STATUS_UXL_SIZE) << CSR_STATUS_UXL_START) \
-	| (1 << CSR_STATUS_SD(vm))
+#define CSR_SEIP_MASK    0x222
+
+// no N extension, U_x bits are hardwired to 0
+static inline reg_t csr_sstatus_mask(const riscv32_vm_state_t *vm)
+{
+	return (1 << CSR_STATUS_SIE)
+	     | (1 << CSR_STATUS_SPIE)
+	     | (1 << CSR_STATUS_SPP)
+	     | (gen_mask(CSR_STATUS_FS_SIZE) << CSR_STATUS_FS_START)
+	     | (gen_mask(CSR_STATUS_XS_SIZE) << CSR_STATUS_XS_START)
+	     | (1 << CSR_STATUS_SUM)
+	     | (1 << CSR_STATUS_MXR)
+	     | (gen_mask(CSR_STATUS_UXL_SIZE) << CSR_STATUS_UXL_START)
+	     | (1 << CSR_STATUS_SD(vm));
+}
 
 static bool riscv32_csr_sstatus(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK(vm));
+    csr_helper_masked(&vm->csr.status, dest, op, csr_sstatus_mask(vm));
     riscv32_csr_isa_change(vm, PRIVILEGE_USER, cut_bits(vm->csr.status, CSR_STATUS_UXL_START, CSR_STATUS_UXL_SIZE));
     return true;
 }
@@ -46,7 +49,7 @@ static bool riscv32_csr_sstatus(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* 
 static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper(&vm->csr.ie[PRIVILEGE_SUPERVISOR], dest, op);
+    csr_helper_masked(&vm->csr.ie, dest, op, CSR_SEIP_MASK);
     return true;
 }
 
@@ -88,7 +91,7 @@ static bool riscv32_csr_stval(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* de
 static bool riscv32_csr_sip(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper(&vm->csr.ip[PRIVILEGE_SUPERVISOR], dest, op);
+    csr_helper_masked(&vm->csr.ip, dest, op, CSR_SEIP_MASK);
     return true;
 }
 

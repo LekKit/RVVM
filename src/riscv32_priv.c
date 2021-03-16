@@ -26,15 +26,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "bit_ops.h"
 
+extern uint64_t clint_mtimecmp;
+extern uint64_t clint_mtime;
+
 static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     switch (instruction) {
     case RV32_S_ECALL:
-        riscv32_debug_always(vm, "RV32I: ecall");
+        riscv32_debug(vm, "RV32I: ecall");
         riscv32_trap(vm, TRAP_ENVCALL_UMODE + vm->priv_mode, 0);
         return;
     case RV32_S_EBREAK:
-        riscv32_debug_always(vm, "RV32I: ebreak");
+        riscv32_debug(vm, "RV32I: ebreak");
         riscv32_trap(vm, TRAP_BREAKPOINT, 0);
         return;
     case RV32_S_URET:
@@ -43,7 +46,7 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
         return;
     case RV32_S_SRET:
-        riscv32_debug_always(vm, "RV32I: sret");
+        riscv32_debug(vm, "RV32I: sret");
         if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
             // Set privilege mode to SPP
             vm->priv_mode = cut_bits(vm->csr.status, CSR_STATUS_SPP, 1);
@@ -56,7 +59,7 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         }
         return;
     case RV32_S_MRET:
-        riscv32_debug_always(vm, "RV32I: mret");
+        riscv32_debug(vm, "RV32I: mret");
         if (vm->priv_mode >= PRIVILEGE_MACHINE) {
             // Set privilege mode to MPP
             vm->priv_mode = cut_bits(vm->csr.status, CSR_STATUS_MPP_START, CSR_STATUS_MPP_SIZE);
@@ -69,7 +72,18 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         }
         return;
     case RV32_S_WFI:
-        riscv32_debug_always(vm, "RV32I: wfi");
+        riscv32_debug(vm, "RV32I: wfi");
+
+        // Clear timer interrupt if needed
+        if (!rvtimer_pending(&vm->timer)) vm->csr.ip &= ~(1 << INTERRUPT_MTIMER);
+        // Check for external interrupts
+        if (riscv32_handle_ip(vm, true)) return;
+        // Sleep before timer interrupt
+        while (!rvtimer_pending(&vm->timer)) {
+            sleep_ms(1);
+        }
+        vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+        riscv32_handle_ip(vm, true);
         return;
     }
 

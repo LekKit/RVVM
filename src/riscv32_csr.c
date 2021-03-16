@@ -63,14 +63,14 @@ void riscv32_csr_isa_change(riscv32_vm_state_t *vm, uint8_t priv, uint8_t target
 
 	vm->csr.edeleg[priv] &= mask;
 	vm->csr.ideleg[priv] &= mask;
-	vm->csr.ie[priv] &= mask;
+	vm->csr.ie &= mask;
 	vm->csr.tvec[priv] &= mask;
 	vm->csr.counteren[priv] &= mask;
 	vm->csr.scratch[priv] &= mask;
 	vm->csr.epc[priv] &= mask;
 	vm->csr.cause[priv] &= mask;
 	vm->csr.tval[priv] &= mask;
-	vm->csr.ip[priv] &= mask;
+	vm->csr.ip &= mask;
 }
 
 void riscv32_csr_init(uint32_t csr_id, const char *name, riscv32_csr_handler_t handler)
@@ -84,6 +84,7 @@ bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uin
     UNUSED(vm);
     UNUSED(dest);
     UNUSED(op);
+    UNUSED(csr_id);
     riscv32_debug_always(vm, "unimplemented csr %c!!!", csr_id);
     return false;
 }

@@ -23,26 +23,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define CSR_MARCHID 0x5256564D // 'RVVM'
 
-#define CSR_MSTATUS_MASK(vm) \
-	  (1 << CSR_STATUS_UIE) \
-	| (1 << CSR_STATUS_SIE) \
-	| (1 << CSR_STATUS_MIE) \
-	| (1 << CSR_STATUS_UPIE) \
-	| (1 << CSR_STATUS_SPIE) \
-	| (1 << CSR_STATUS_MPIE) \
-	| (1 << CSR_STATUS_SPP) \
-	| (gen_mask(CSR_STATUS_MPP_SIZE) << CSR_STATUS_MPP_START) \
-	| (gen_mask(CSR_STATUS_FS_SIZE) << CSR_STATUS_FS_START) \
-	| (gen_mask(CSR_STATUS_XS_SIZE) << CSR_STATUS_XS_START) \
-	| (1 << CSR_STATUS_MPRV) \
-	| (1 << CSR_STATUS_SUM) \
-	| (1 << CSR_STATUS_MXR) \
-	| (1 << CSR_STATUS_TVM) \
-	| (1 << CSR_STATUS_TW) \
-	| (1 << CSR_STATUS_TSR) \
-	| (gen_mask(CSR_STATUS_UXL_SIZE) << CSR_STATUS_UXL_START) \
-	| (gen_mask(CSR_STATUS_SXL_SIZE) << CSR_STATUS_SXL_START) \
-	| (1 << CSR_STATUS_SD(vm))
+#define CSR_MEIP_MASK    0xAAA
+
+#define CSR_MISA_RV32  0x40000000
+#define CSR_MISA_RV64  0x80000000
+#define CSR_MISA_RV128 0xC0000000
+
+// no N extension, U_x bits are hardwired to 0
+static inline reg_t csr_mstatus_mask(const riscv32_vm_state_t *vm) 
+{
+	return (1 << CSR_STATUS_SIE)
+	     | (1 << CSR_STATUS_MIE)
+	     | (1 << CSR_STATUS_SPIE)
+	     | (1 << CSR_STATUS_MPIE)
+	     | (1 << CSR_STATUS_SPP)
+	     | (gen_mask(CSR_STATUS_MPP_SIZE) << CSR_STATUS_MPP_START)
+	     | (gen_mask(CSR_STATUS_FS_SIZE) << CSR_STATUS_FS_START)
+	     | (gen_mask(CSR_STATUS_XS_SIZE) << CSR_STATUS_XS_START)
+	     | (1 << CSR_STATUS_MPRV)
+	     | (1 << CSR_STATUS_SUM)
+	     | (1 << CSR_STATUS_MXR)
+	     | (1 << CSR_STATUS_TVM)
+	     | (1 << CSR_STATUS_TW)
+	     | (1 << CSR_STATUS_TSR)
+	     | (gen_mask(CSR_STATUS_UXL_SIZE) << CSR_STATUS_UXL_START)
+	     | (gen_mask(CSR_STATUS_SXL_SIZE) << CSR_STATUS_SXL_START)
+	     | (1 << CSR_STATUS_SD(vm));
+}
 
 static uint32_t riscv32_mkmisa(const char* str)
 {
@@ -66,7 +73,7 @@ static bool riscv32_csr_mhartid(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* 
 static bool riscv32_csr_mstatus(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper_masked(&vm->csr.status, dest, op, CSR_MSTATUS_MASK(vm));
+    csr_helper_masked(&vm->csr.status, dest, op, csr_mstatus_mask(vm));
     riscv32_csr_isa_change(vm, PRIVILEGE_SUPERVISOR, cut_bits(vm->csr.status, CSR_STATUS_SXL_START, CSR_STATUS_SXL_SIZE));
     riscv32_csr_isa_change(vm, PRIVILEGE_USER, cut_bits(vm->csr.status, CSR_STATUS_UXL_START, CSR_STATUS_UXL_SIZE));
     return true;
@@ -106,7 +113,7 @@ static bool riscv32_csr_mideleg(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* 
 static bool riscv32_csr_mie(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper(&vm->csr.ie[PRIVILEGE_MACHINE], dest, op);
+    csr_helper_masked(&vm->csr.ie, dest, op, CSR_MEIP_MASK);
     return true;
 }
 
@@ -148,7 +155,7 @@ static bool riscv32_csr_mtval(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* de
 static bool riscv32_csr_mip(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-    csr_helper(&vm->csr.ip[PRIVILEGE_MACHINE], dest, op);
+    csr_helper_masked(&vm->csr.ip, dest, op, CSR_MEIP_MASK);
     return true;
 }
 

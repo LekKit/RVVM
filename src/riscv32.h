@@ -19,8 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 
-#include "riscv.h"
 #include <inttypes.h>
+
+#include "riscv.h"
+#include "rvtimer.h"
 
 enum
 {
@@ -107,7 +109,7 @@ enum
 #define TRAP_STORE_PAGEFAULT   0xF
 
 // 64 bit
-#if 0
+#if 1
 typedef uint64_t reg_t;
 typedef int64_t sreg_t;
 typedef uint64_t physaddr_t;
@@ -170,23 +172,26 @@ struct riscv32_vm_state_t {
 
     struct {
         reg_t status;
-        reg_t edeleg[4];
-        reg_t ideleg[4];
-        reg_t ie[4];
-        reg_t tvec[4];
-        reg_t counteren[4];
-        reg_t scratch[4];
-        reg_t epc[4];
-        reg_t cause[4];
-        reg_t tval[4];
-        reg_t ip[4];
+        reg_t edeleg[PRIVILEGE_MAX];
+        reg_t ideleg[PRIVILEGE_MAX];
+        reg_t ie;
+        reg_t tvec[PRIVILEGE_MAX];
+        reg_t counteren[PRIVILEGE_MAX];
+        reg_t scratch[PRIVILEGE_MAX];
+        reg_t epc[PRIVILEGE_MAX];
+        reg_t cause[PRIVILEGE_MAX];
+        reg_t tval[PRIVILEGE_MAX];
+        reg_t ip;
 	// when adding new CSRs here, don't forget to modify riscv32_csr_isa_change
     } csr;
-    physaddr_t root_page_table;
-    uint8_t mmu_virtual;
     uint8_t priv_mode;           // hart's current privilege mode
     uint8_t isa[PRIVILEGE_MAX];  // ISA encoded as MXL field in misa register
-    bool running;                // halted or not?
+    physaddr_t root_page_table;
+    uint8_t mmu_virtual;
+    rvtimer_t timer;
+    bool ev_trap;
+    bool ev_int; // delivered from IRQ thread
+    uint32_t ev_int_mask;
 };
 
 // Get the pow2 value of current ISA bitness (e.g. 5 for 32-bit ISA)
@@ -228,12 +233,19 @@ void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const u
 void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
 
 //#define RV_DEBUG
+//#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
 
-void riscv32_debug_always(const riscv32_vm_state_t *vm, const char* fmt, ...);
+void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...);
 
 #ifdef RV_DEBUG
-#define riscv32_debug riscv32_debug_always
+#define riscv32_debug_always riscv32_debug_func
+#else
+#define riscv32_debug_always(...)
+#endif
+
+#ifdef RV_DEBUG_FULL
+#define riscv32_debug riscv32_debug_func
 #else
 #define riscv32_debug(...)
 #endif
@@ -251,5 +263,6 @@ void riscv32c_init();
 void riscv32i_init();
 void riscv32a_init();
 void riscv32_priv_init();
+bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi);
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
 void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, reg_t tval);
