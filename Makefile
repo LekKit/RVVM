@@ -28,7 +28,7 @@ CC = cc
 CXX = c++
 endif
 
-OPT_CFLAGS = -O2 -flto
+OPT_CFLAGS = -O2 -flto -pthread
 
 BASE_CFLAGS = -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra
 
@@ -54,7 +54,7 @@ CFLAGS = $(BUILD_TYPE_CFLAGS) $(BASE_CFLAGS) $(ARCH_CFLAGS)
 
 INCLUDE = -I. -I$(SRCDIR)
 
-LDFLAGS += -flto
+LDFLAGS += $(OPT_CFLAGS)
 
 DO_CC = $(CC) $(CFLAGS) $(INCLUDE) -o $@ -c $<
 DO_CXX = $(CXX) $(CFLAGS) $(INCLUDE) -o $@ -c $<
