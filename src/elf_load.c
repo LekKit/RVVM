@@ -135,8 +135,8 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 		size_t segment_start_addr = dest_addr;
 
 		size_t pte1_start = vm->root_page_table + GET_VPN1(phdr.p_vaddr) * 4;
-		size_t pte1_count = GET_VPN1(phdr.p_memsz + gen_mask(22));//(page_count + gen_mask(10)) >> 10;
-		size_t page_count = (phdr.p_memsz + gen_mask(12)) >> 12;
+		size_t pte1_count = GET_VPN1(phdr.p_memsz + bit_mask(22));//(page_count + gen_mask(10)) >> 10;
+		size_t page_count = (phdr.p_memsz + bit_mask(12)) >> 12;
 	
 		size_t pte = MMU_VALID_PTE
 			| MMU_PAGE_ACCESSED | MMU_PAGE_DIRTY /* optimize */
@@ -158,7 +158,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 			{
 				pgd -= 4096;
 				pte0_start = pgd;
-				assert((pte0_start & gen_mask(12)) == 0);
+				assert((pte0_start & bit_mask(12)) == 0);
 
 				write_uint32_le(vm->mem.data + pte1_addr,
 						SET_PHYS_ADDR(MMU_VALID_PTE, pte0_start));

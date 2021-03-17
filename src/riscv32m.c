@@ -24,9 +24,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void riscv32m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
 
@@ -36,9 +36,9 @@ void riscv32m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     int64_t reg1 = riscv32i_read_register_s(vm, rs1);
     int64_t reg2 = riscv32i_read_register_s(vm, rs2);
 
@@ -48,9 +48,9 @@ void riscv32m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     int64_t reg1 = riscv32i_read_register_s(vm, rs1);
     uint64_t reg2 = riscv32i_read_register_u(vm, rs2);
 
@@ -60,9 +60,9 @@ void riscv32m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     uint64_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint64_t reg2 = riscv32i_read_register_u(vm, rs2);
 
@@ -72,9 +72,9 @@ void riscv32m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     int32_t reg1 = riscv32i_read_register_s(vm, rs1);
     int32_t reg2 = riscv32i_read_register_s(vm, rs2);
     int32_t result = 0xFFFFFFFF;
@@ -93,9 +93,9 @@ void riscv32m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
     uint32_t result = 0xFFFFFFFF;
@@ -111,9 +111,9 @@ void riscv32m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     int32_t reg1 = riscv32i_read_register_u(vm, rs1);
     int32_t reg2 = riscv32i_read_register_u(vm, rs2);
     int32_t result = reg1;
@@ -132,9 +132,9 @@ void riscv32m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
 
 void riscv32m_remu(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
     uint32_t reg1 = riscv32i_read_register_u(vm, rs1);
     uint32_t reg2 = riscv32i_read_register_u(vm, rs2);
     uint32_t result = reg1;

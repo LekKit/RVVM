@@ -39,7 +39,7 @@ extern riscv32_csr_t riscv32_csr_list[4096];
 
 static inline bool riscv32_csr_op(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint32_t op)
 {
-    uint32_t priv = cut_bits(csr_id, 8, 2);
+    uint32_t priv = bit_cut(csr_id, 8, 2);
     if (priv > vm->priv_mode)
         return false;
     else

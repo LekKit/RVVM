@@ -194,12 +194,12 @@ static void riscv32_perform_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
     vm->csr.tval[priv] = 0;
     // Save current priv mode to xPP, xIE to xPIE, disable interrupts
     if (priv == PRIVILEGE_MACHINE) {
-        vm->csr.status = replace_bits(vm->csr.status, 11, 2, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 7, 1, cut_bits(vm->csr.status, 3, 1));
+        vm->csr.status = bit_replace(vm->csr.status, 11, 2, vm->priv_mode);
+        vm->csr.status = bit_replace(vm->csr.status, 7, 1, bit_cut(vm->csr.status, 3, 1));
         vm->csr.status &= 0xFFFFFFF7;
     } else if (priv == PRIVILEGE_SUPERVISOR) {
-        vm->csr.status = replace_bits(vm->csr.status, 8, 1, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 5, 1, cut_bits(vm->csr.status, 1, 1));
+        vm->csr.status = bit_replace(vm->csr.status, 8, 1, vm->priv_mode);
+        vm->csr.status = bit_replace(vm->csr.status, 5, 1, bit_cut(vm->csr.status, 1, 1));
         vm->csr.status &= 0xFFFFFFFD;
     }
     vm->priv_mode = priv;
@@ -220,12 +220,12 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
     vm->csr.tval[priv] = tval;
     // Save current priv mode to xPP, xIE to xPIE, disable interrupts
     if (priv == PRIVILEGE_MACHINE) {
-        vm->csr.status = replace_bits(vm->csr.status, 11, 2, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 7, 1, cut_bits(vm->csr.status, 3, 1));
+        vm->csr.status = bit_replace(vm->csr.status, 11, 2, vm->priv_mode);
+        vm->csr.status = bit_replace(vm->csr.status, 7, 1, bit_cut(vm->csr.status, 3, 1));
         vm->csr.status &= 0xFFFFFFF7;
     } else if (priv == PRIVILEGE_SUPERVISOR) {
-        vm->csr.status = replace_bits(vm->csr.status, 8, 1, vm->priv_mode);
-        vm->csr.status = replace_bits(vm->csr.status, 5, 1, cut_bits(vm->csr.status, 1, 1));
+        vm->csr.status = bit_replace(vm->csr.status, 8, 1, vm->priv_mode);
+        vm->csr.status = bit_replace(vm->csr.status, 5, 1, bit_cut(vm->csr.status, 1, 1));
         vm->csr.status &= 0xFFFFFFFD;
     }
     vm->priv_mode = priv;

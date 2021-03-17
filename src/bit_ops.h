@@ -33,39 +33,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-//#define sign_extend(val, dest, bits) { struct {int32_t v:bits;} __FILE____LINE__; __FILE____LINE__.v = val; dest = __FILE____LINE__.v; }
-
 inline int32_t sign_extend(uint32_t val, uint32_t bits)
 {
     return ((int32_t)(val << (32 - bits))) >> (32 - bits);
 }
 
 // Generate bitmask of given size
-inline uint32_t gen_mask(uint32_t size)
+inline uint32_t bit_mask(uint32_t count)
 {
-    return 0xFFFFFFFF >> (32 - size);
+    return 0xFFFFFFFF >> (32 - count);
 }
 
 // Cut N bits from val at given position (from lower bit)
-inline uint32_t cut_bits(uint32_t val, uint32_t pos, uint32_t bits)
+inline uint32_t bit_cut(uint32_t val, uint32_t pos, uint32_t count)
 {
-    return (val >> pos) & gen_mask(bits);
+    return (val >> pos) & bit_mask(count);
 }
 
 // Replace N bits in val at given position (from lower bit) by p
-inline uint32_t replace_bits(uint32_t val, uint32_t pos, uint32_t bits, uint32_t p)
+inline uint32_t bit_replace(uint32_t val, uint32_t pos, uint32_t bits, uint32_t p)
 {
-    return (val & (~(gen_mask(bits) << pos))) | ((p & gen_mask(bits)) << pos);
+    return (val & (~(bit_mask(bits) << pos))) | ((p & bit_mask(bits)) << pos);
 }
 
 // Check if Nth bit of val is 1
-inline bool is_bit_set(uint32_t val, uint32_t pos)
+inline bool bit_check(uint32_t val, uint32_t pos)
 {
     return (val >> pos) & 0x1;
 }
 
 // Reverse N bits in val (from lower bit), remaining bits are zero
-inline uint32_t rev_bits(uint32_t val, uint32_t bits)
+inline uint32_t bit_reverse(uint32_t val, uint32_t bits)
 {
     uint32_t ret = 0;
 

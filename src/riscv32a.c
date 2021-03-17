@@ -71,10 +71,10 @@ inline uint32_t amo_maxu(uint32_t a, uint32_t b)
 
 static void riscv32a_atomic(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
-    uint32_t rds = cut_bits(instruction, 7, 5);
-    uint32_t rs1 = cut_bits(instruction, 15, 5);
-    uint32_t rs2 = cut_bits(instruction, 20, 5);
-    uint32_t op = cut_bits(instruction, 27, 5);
+    uint32_t rds = bit_cut(instruction, 7, 5);
+    uint32_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t op = bit_cut(instruction, 27, 5);
     uint32_t address = riscv32i_read_register_u(vm, rs1);
     uint32_t val = riscv32i_read_register_u(vm, rs2);
     uint8_t tmp[4];

@@ -39,10 +39,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MMU_PAGE_DIRTY    0x80
 
 #define GET_VPN1(addr) ((addr) >> 22)
-#define GET_VPN2(addr) (((addr) >> 12) & gen_mask(10))
+#define GET_VPN2(addr) (((addr) >> 12) & bit_mask(10))
 
-#define GET_PHYS_PAGE(pte) (cut_bits(pte, 10, 22))
-#define SET_PHYS_PAGE(pte, pgnum) replace_bits(pte, 10, 22, pgnum)
+#define GET_PHYS_PAGE(pte) (bit_cut(pte, 10, 22))
+#define SET_PHYS_PAGE(pte, pgnum) bit_replace(pte, 10, 22, pgnum)
 
 #define GET_PHYS_ADDR(pte) (GET_PHYS_PAGE(pte) << 12)
 #define SET_PHYS_ADDR(pte, addr) SET_PHYS_PAGE(pte, (addr) >> 12)

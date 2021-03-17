@@ -30,10 +30,10 @@ bool clint_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, u
     if (offset == 0) {
         if (access == MMU_WRITE) {
             uint8_t msip = ((*(uint8_t*)data) & 1);
-            vm->csr.ip = replace_bits(vm->csr.ip, 3, 1, msip);
+            vm->csr.ip = bit_replace(vm->csr.ip, 3, 1, msip);
         } else {
             memset(data, 0, size);
-            *(uint8_t*)data = cut_bits(vm->csr.ip, 3, 1);
+            *(uint8_t*)data = bit_cut(vm->csr.ip, 3, 1);
         }
         return true;
     }
