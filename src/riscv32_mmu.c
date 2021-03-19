@@ -147,17 +147,61 @@ static void tlb_put(riscv32_vm_state_t* vm, virtaddr_t addr, physaddr_t page_add
     }
 }
 
+
 // Virtual memory addressing mode (SV32)
-bool riscv_mmu_translate(riscv32_vm_state_t *vm, const virtaddr_t va, physaddr_t *pa, const uint8_t access, bool update_pages)
+static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, virtaddr_t addr, uint8_t access, physaddr_t* dest_addr)
 {
-	if (vm->mmu_virtual != MMU_SV32
-			&& vm->mmu_virtual != MMU_SV39
-			&& vm->mmu_virtual != MMU_SV48)
-	{
-		/* wut iz dat? */
-		return false;
-	}
-	const struct mmu *mmu = &mmu_list[vm->mmu_virtual];
+    uint32_t pte_addr = vm->root_page_table | ((addr >> 20) & 0xFFC);
+    uint32_t pte;
+
+    if (phys_addr_in_mem(vm->mem, pte_addr)) {
+        pte = read_uint32_le(vm->mem.data + pte_addr);
+        if (pte & MMU_VALID_PTE) {
+            if (pte & MMU_LEAF_PTE) {
+                // PGT entry is a leaf, hugepage mapped
+                // Check that PPN[0] is 0, otherwise the page is misaligned
+                if ((pte & (access | 0xFFC00)) == access) {
+                    // TODO: A/D flag updates should be atomic
+                    pte |= MMU_PAGE_ACCESSED;
+                    if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
+                    write_uint32_le(vm->mem.data + pte_addr, pte);
+                    pte_addr = ((pte & 0xFFF00000) << 2) | (addr & 0x3FFFFF);
+                    tlb_put(vm, addr, pte_addr, access);
+                    *dest_addr = pte_addr;
+                    return true;
+                }
+            } else {
+                // PGT entry is a pointer to next pagetable
+                pte_addr = ((pte & 0xFFFFFC00) << 2) | ((addr >> 10) & 0xFFC);
+                if (phys_addr_in_mem(vm->mem, pte_addr)) {
+                    pte = read_uint32_le(vm->mem.data + pte_addr);
+                    if ((pte & MMU_VALID_PTE) && (pte & access)) {
+                        pte |= MMU_PAGE_ACCESSED;
+                        if (access & MMU_WRITE) pte |= MMU_PAGE_DIRTY;
+                        write_uint32_le(vm->mem.data + pte_addr, pte);
+                        pte_addr = ((pte & 0xFFFFFC00) << 2) | (addr & 0xFFF);
+                        tlb_put(vm, addr, pte_addr, access);
+                        *dest_addr = pte_addr;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // No valid address translation can be done (invalid PTE or protection fault)
+    return false;
+}
+
+// Virtual memory addressing mode (other)
+static bool riscv_mmu_translate(
+		riscv32_vm_state_t *vm,
+		virtaddr_t va,
+		physaddr_t *pa,
+		uint8_t access,
+		bool update_pages,
+		const struct mmu* mmu)
+{
 	physaddr_t a = vm->root_page_table;
 
 	assert((access & (MMU_READ | MMU_WRITE | MMU_EXEC)) == access);
@@ -354,9 +398,14 @@ void riscv32_tlb_flush(riscv32_vm_state_t* vm)
 
 bool riscv32_mmu_translate(riscv32_vm_state_t* vm, virtaddr_t addr, uint8_t access, physaddr_t* dest_addr)
 {
-    if (vm->mmu_virtual && vm->priv_mode <= PRIVILEGE_SUPERVISOR)
-        return riscv_mmu_translate(vm, addr, dest_addr, access, true);
-	//return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
+    if (vm->mmu_virtual && vm->priv_mode <= PRIVILEGE_SUPERVISOR) {
+	switch (vm->mmu_virtual) {
+		case MMU_SV32: return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
+		case MMU_SV39: return riscv_mmu_translate(vm, addr, dest_addr, access, true, &mmu_list[MMU_SV39]);
+		case MMU_SV48: return riscv_mmu_translate(vm, addr, dest_addr, access, true, &mmu_list[MMU_SV48]);
+		default: return false; // wut iz dat?
+	}
+    }
     else
         return riscv32_mmu_translate_bare(vm, addr, access, dest_addr);
 }
