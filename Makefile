@@ -31,6 +31,7 @@ endif
 OPT_CFLAGS = -O2 -flto
 
 BASE_CFLAGS = -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra
+#BASE_CFLAGS += -DRV_64
 
 ARCH=$(shell uname -m)
 

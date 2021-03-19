@@ -99,6 +99,7 @@ static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* des
 {
     UNUSED(csr_id);
     reg_t satp;
+#ifdef RV_64
     bool is32bit = vm->isa[PRIVILEGE_SUPERVISOR] == ISA_RV32;
     if (is32bit)
     {
@@ -108,8 +109,16 @@ static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* des
     {
 	    satp = ((reg_t)vm->mmu_virtual << 60) | ((vm->root_page_table >> 12) & gen_mask(44));
     }
+#else
+    satp = (!!vm->mmu_virtual << 31) | (vm->root_page_table >> 12);
+#endif
     csr_helper(&satp, dest, op);
-    uint8_t mmu_enable = is32bit ? satp >> 31 : satp >> 60;
+    uint8_t mmu_enable =
+#ifdef RV64
+	    !is32bit ? satp >> 60 :
+#else
+	    satp >> 31 ;
+#endif
     /*
     * We currently cache physical addresses in TLB as well, so switching
     * between bare/virtual modes will pollute the address space with illegal entries
@@ -118,10 +127,12 @@ static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, reg_t* des
     if (vm->mmu_virtual != mmu_enable) riscv32_tlb_flush(vm);
     vm->mmu_virtual = mmu_enable;
     vm->root_page_table = (satp << 12) & gen_mask(XLEN(vm));
+#ifdef RV_64
     if (!is32bit)
     {
 	    vm->root_page_table = sign_extend(vm->root_page_table & gen_mask(56), 57);
     }
+#endif
     return true;
 }
 

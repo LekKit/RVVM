@@ -109,7 +109,7 @@ enum
 #define TRAP_STORE_PAGEFAULT   0xF
 
 // 64 bit
-#if 0
+#ifdef RV_64
 typedef uint64_t reg_t;
 typedef int64_t sreg_t;
 typedef uint64_t physaddr_t;
@@ -194,10 +194,20 @@ struct riscv32_vm_state_t {
     uint32_t ev_int_mask;
 };
 
+#ifdef RV_64
+
 // Get the pow2 value of current ISA bitness (e.g. 5 for 32-bit ISA)
 #define XLEN_BIT(vm) ((vm)->isa[(vm)->priv_mode] + 4)
+
 // Get the current ISA bitness (e.g. 32, 64)
 #define XLEN(vm) (1 << XLEN_BIT(vm))
+
+#else
+// Force the XLEN constants to 32-bit for optimization purposes
+// Use cast to void to suppress compiler warnings
+#define XLEN_BIT(vm) ((void)(vm),5)
+#define XLEN(vm) ((void)(vm),32)
+#endif
 
 #define RISCV32I_OPCODE_MASK 0x3
 

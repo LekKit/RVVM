@@ -125,7 +125,7 @@ static void riscv32i_srli_srai(riscv32_vm_state_t *vm, const uint32_t instructio
     reg_t src_reg = riscv32i_read_register_u(vm, rs1);
 
     size_t extend_from = XLEN(vm);
-    for (size_t i = 5; i < XLEN_BIT(vm); ++i)
+    for (char i = 5; i < XLEN_BIT(vm); ++i)
     {
 	    if (!is_bit_set(shamt, i))
 	    {
@@ -135,7 +135,7 @@ static void riscv32i_srli_srai(riscv32_vm_state_t *vm, const uint32_t instructio
 	    }
     }
 
-    if (funct7 == 1 << (12 - XLEN_BIT(vm) - 2)) {
+    if (funct7 == (uint32_t)1 << (12 - XLEN_BIT(vm) - 2)) {
         riscv32i_write_register_u(vm, rds, sign_extend(src_reg >> shamt, XLEN(vm) - shamt));
         riscv32_debug(vm, "RV32I: srai %r, %r, %d", rds, rs1, shamt);
     } else if (funct7 == 0x0) {
@@ -548,7 +548,7 @@ static void riscv32i_slli(riscv32_vm_state_t *vm, const uint32_t instruction)
     reg_t src_reg = riscv32i_read_register_u(vm, rs1);
 
     size_t extend_from = XLEN(vm);
-    for (size_t i = 5; i < XLEN_BIT(vm); ++i)
+    for (char i = 5; i < XLEN_BIT(vm); ++i)
     {
 	    if (!is_bit_set(shamt, i))
 	    {

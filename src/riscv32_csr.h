@@ -50,10 +50,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CSR_STATUS_TW 21
 #define CSR_STATUS_TSR 22
 
+#ifdef RV_64
 #define CSR_STATUS_UXL_START 32
-#define CSR_STATUS_UXL_SIZE 2
 #define CSR_STATUS_SXL_START 34
+#define CSR_STATUS_UXL_SIZE 2
 #define CSR_STATUS_SXL_SIZE 2
+#else
+// Make the size 0 to avoid any interaction on these bits
+// Start bits are also redefined to suppress bitshift warnings
+#define CSR_STATUS_UXL_START 0
+#define CSR_STATUS_UXL_SIZE 0
+#define CSR_STATUS_SXL_START 0
+#define CSR_STATUS_SXL_SIZE 0
+#endif
 
 #define CSR_STATUS_SD(vm) (XLEN(vm) - 1)
 
