@@ -83,6 +83,7 @@ static uint8_t terminal_readchar(void* addr)
 
 #elif _WIN32
 #include <windows.h>
+#include <conio.h>
 
 // Needs to be tested on actual windows machine
 // Very likely to be broken in many ways when working
@@ -94,8 +95,10 @@ static void terminal_rawmode()
 
 static uint8_t terminal_readchar(void* addr)
 {
-    DWORD len;
-    return ReadConsole(GetStdHandle(STD_INPUT_HANDLE), addr, 1, &len, NULL) ? 1 : 0;
+    if (_kbhit()) {
+        *(uint8_t*)addr = _getch();
+        return 1;
+    } else return 0;
 }
 
 #else
