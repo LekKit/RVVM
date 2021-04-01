@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV_CPU_SOURCE
 
 #include "bit_ops.h"
-#include "riscv_isa.h"
+#include "riscv_cpu.h"
 #include "riscv32_mmu.h"
 
 static void riscv_i_lui(rvvm_hart_state_t *vm, const uint32_t instruction)
