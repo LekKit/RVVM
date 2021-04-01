@@ -162,7 +162,7 @@ static void riscv_c_addi16sp_lui(rvvm_hart_state_t *vm, const uint16_t instructi
         xlen_t rsp = riscv_read_register(vm, REGISTER_X2);
         riscv_write_register(vm, REGISTER_X2, rsp + sign_extend(imm, 10));
     } else {
-        imm = (bit_cut(instruction, 2, 4)  << 12) |
+        imm = (bit_cut(instruction, 2, 5)  << 12) |
               (bit_cut(instruction, 12, 1) << 17);
 
         riscv_write_register(vm, rds, sign_extend(imm, 18));

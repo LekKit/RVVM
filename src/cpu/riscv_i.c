@@ -132,7 +132,7 @@ static void riscv_i_jalr(rvvm_hart_state_t *vm, const uint32_t instruction)
     xlen_t jmp_addr = riscv_read_register(vm, rs1);
 
     riscv_write_register(vm, rds, pc + 4);
-    riscv_write_register(vm, REGISTER_PC, ((jmp_addr + offset)&~1) - 4);
+    riscv_write_register(vm, REGISTER_PC, ((jmp_addr + offset)&(~(xlen_t)1)) - 4);
 }
 
 static inline sxlen_t decode_branch_imm(const uint32_t instruction)
@@ -268,7 +268,7 @@ static void riscv_i_lh(rvvm_hart_state_t *vm, const uint32_t instruction)
 static void riscv_i_lwu(rvvm_hart_state_t *vm, const uint32_t instruction)
 {
     // Read 32-bit unsigned integer from address rs1+offset (offset is signed) to rds
-    // In fact, this is lw on RV32, for RV64 wthere is a real lw with signext
+    // In fact, this is lw on RV32, for RV64 there is a real lw with signext
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);

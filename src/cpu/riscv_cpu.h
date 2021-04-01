@@ -22,10 +22,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
-#define RISCV32I_VERSION 2.1
-#define RISCV32C_VERSION 2.0
-#define RISCV32M_VERSION 2.0
-#define RISCV32A_VERSION 2.0
+#define RISCV_I_VERSION 2.1
+#define RISCV_C_VERSION 2.0
+#define RISCV_M_VERSION 2.0
+#define RISCV_A_VERSION 2.0
 
 // Temporary compatibility with legacy riscv32_
 #define rvvm_hart_state_t riscv32_vm_state_t
@@ -37,8 +37,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void riscv32_cpu_init();
 void riscv32_run_till_event(rvvm_hart_state_t *vm);
+void riscv32_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv32_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv32_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv32_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t));
 void riscv64_cpu_init();
 void riscv64_run_till_event(rvvm_hart_state_t *vm);
+void riscv64_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv64_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv64_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
+void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t));
 
 // Private CPU implementation definitions
 #ifdef RISCV_CPU_SOURCE
@@ -58,7 +66,7 @@ typedef uint8_t regid_t;
     #define riscv_c_init riscv64c_init
     #define riscv_m_init riscv64m_init
     #define riscv_a_init riscv64a_init
-    #define riscv_cpu_init riscv64cpu_init
+    #define riscv_cpu_init riscv64_cpu_init
     #define riscv_run_till_event riscv64_run_till_event
 #else
     typedef uint32_t xlen_t;
@@ -73,14 +81,10 @@ typedef uint8_t regid_t;
     #define riscv_c_init riscv32c_init
     #define riscv_m_init riscv32m_init
     #define riscv_a_init riscv32a_init
-    #define riscv_cpu_init riscv32cpu_init
+    #define riscv_cpu_init riscv32_cpu_init
     #define riscv_run_till_event riscv32_run_till_event
 #endif
 
-void riscv_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t));
 void riscv_i_init();
 void riscv_c_init();
 void riscv_m_init();

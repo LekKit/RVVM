@@ -21,10 +21,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "mem_ops.h"
 #include "riscv32_mmu.h"
-#include "riscv_isa.h"
+#include "riscv_cpu.h"
 
-#define RV_GET_FUNCID(x) (((x >> 17) & 0x100) | ((x >> 7) & 0xE0) | ((x >> 2) & 0x1F))
-#define RVC_GET_FUNCID(x) (((x >> 13) << 2) | (x & 3))
+static inline uint32_t riscv_funcid(const uint32_t instr)
+{
+    return (((instr >> 17) & 0x100) | ((instr >> 7) & 0xE0) | ((instr >> 2) & 0x1F));
+}
+
+static inline uint32_t riscv_c_funcid(const uint16_t instr)
+{
+    return (((instr >> 13) << 2) | (instr & 3));
+}
+
 #define RV_OPCODE_MASK 0x3
 
 /*
@@ -84,15 +92,15 @@ void riscv_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, co
     riscv_c_opcodes[opcode] = func;
 }
 
-static inline void riscv_emulate(riscv32_vm_state_t *vm, uint32_t instruction)
+static inline void riscv_emulate(rvvm_hart_state_t *vm, uint32_t instruction)
 {
     if ((instruction & RV_OPCODE_MASK) != RV_OPCODE_MASK) {
         // 16-bit opcode
-        riscv_c_opcodes[RVC_GET_FUNCID(instruction)](vm, instruction);
+        riscv_c_opcodes[riscv_c_funcid(instruction)](vm, instruction);
         // FYI: Any jump instruction implementation should take care of PC increment
         vm->registers[REGISTER_PC] += 2;
     } else {
-        riscv_opcodes[RV_GET_FUNCID(instruction)](vm, instruction);
+        riscv_opcodes[riscv_funcid(instruction)](vm, instruction);
         vm->registers[REGISTER_PC] += 4;
     }
 }
@@ -105,6 +113,8 @@ void riscv_cpu_init()
         riscv_c_opcodes[i] = riscv_c_illegal_insn;
     riscv_i_init();
     riscv_c_init();
+    riscv_m_init();
+    riscv_a_init();
 }
 
 void riscv_run_till_event(rvvm_hart_state_t *vm)
@@ -119,8 +129,9 @@ void riscv_run_till_event(rvvm_hart_state_t *vm)
         if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
             riscv_emulate(vm, read_uint32_le(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
         } else {
-            if (riscv_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC))
+            if (riscv_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC)) {
                 riscv_emulate(vm, read_uint32_le(instruction));
+            }
         }
     }
 }
