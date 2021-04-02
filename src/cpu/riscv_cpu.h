@@ -51,6 +51,16 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, 
 // Private CPU implementation definitions
 #ifdef RISCV_CPU_SOURCE
 
+#ifdef __GNUC__
+#define likely(x)     __builtin_expect((x),1)
+#define unlikely(x)   __builtin_expect((x),0)
+#define HIDDEN        __attribute__((visibility("hidden")))
+#else
+#define likely(x)     (x)
+#define unlikely(x)   (x)
+#define HIDDEN
+#endif
+
 typedef uint8_t regid_t;
 
 #ifdef RV64
@@ -100,7 +110,7 @@ static inline sxlen_t riscv_read_register_s(rvvm_hart_state_t *vm, regid_t reg)
     return vm->registers[reg];
 }
 
-inline void riscv_write_register(rvvm_hart_state_t *vm, regid_t reg, xlen_t data)
+static inline void riscv_write_register(rvvm_hart_state_t *vm, regid_t reg, xlen_t data)
 {
     vm->registers[reg] = data;
 }

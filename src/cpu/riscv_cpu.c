@@ -96,10 +96,12 @@ static inline void riscv_emulate(rvvm_hart_state_t *vm, uint32_t instruction)
 {
     if ((instruction & RV_OPCODE_MASK) != RV_OPCODE_MASK) {
         // 16-bit opcode
+        //printf("RVC: %x\n", (uint16_t)instruction);
         riscv_c_opcodes[riscv_c_funcid(instruction)](vm, instruction);
         // FYI: Any jump instruction implementation should take care of PC increment
         vm->registers[REGISTER_PC] += 2;
     } else {
+        //printf("RV: %x\n", instruction);
         riscv_opcodes[riscv_funcid(instruction)](vm, instruction);
         vm->registers[REGISTER_PC] += 4;
     }
@@ -117,6 +119,8 @@ void riscv_cpu_init()
     riscv_a_init();
 }
 
+#if 0
+// Old dispatch loop in case new one has issues
 void riscv_run_till_event(rvvm_hart_state_t *vm)
 {
     uint8_t instruction[4];
@@ -135,3 +139,55 @@ void riscv_run_till_event(rvvm_hart_state_t *vm)
         }
     }
 }
+
+#else
+/*
+ * Optimized dispatch loop that does not fetch each instruction,
+ * and invokes MMU on page change instead.
+ * This gains us about 40-60% more performance depending on workload.
+ * Attention: Any TLB flush must clear vm->wait_event to
+ * restart dispatch loop, otherwise it will continue executing current page
+ */
+void riscv_run_till_event(rvvm_hart_state_t *vm)
+{
+    uint8_t instruction[4];
+    const void* inst_ptr = NULL;  // Updated before any read
+    // upper_addr should always mismatch pc by at least 1 page before execution
+    xaddr_t inst_addr, upper_addr = vm->registers[REGISTER_PC] + 0x1000, tlb_key;
+
+    // Execute instructions loop until some event occurs (interrupt, trap)
+    while (likely(vm->wait_event)) {
+        vm->registers[REGISTER_ZERO] = 0;
+        inst_addr = vm->registers[REGISTER_PC];
+        //if ((upper_addr | 0xFFF) - inst_addr > 0xFFC) { // idk
+        if (unlikely(inst_addr < upper_addr || inst_addr > (upper_addr + 0xFFC))) {
+            if (likely(riscv_mem_op(vm, inst_addr, instruction, 4, MMU_EXEC))) {
+                // Update pointer to the current page in real memory
+                tlb_key = tlb_hash(inst_addr);
+                inst_ptr = vm->tlb[tlb_key].ptr;
+                // If we are executing code from MMIO, direct memory fetch fails
+                upper_addr = vm->tlb[tlb_key].pte & ~0xFFF;
+                riscv_emulate(vm, read_uint32_le(instruction));
+            } else break;
+        } else riscv_emulate(vm, read_uint32_le(inst_ptr + (inst_addr & 0xFFF)));
+#ifndef DISABLE_DISPATCH_UNROLL
+        // Gains about 10% more performance with -O3
+        if (unlikely(!vm->wait_event)) break;
+
+        vm->registers[REGISTER_ZERO] = 0;
+        inst_addr = vm->registers[REGISTER_PC];
+        if (unlikely(inst_addr < upper_addr || inst_addr > (upper_addr + 0xFFC))) {
+            if (likely(riscv_mem_op(vm, inst_addr, instruction, 4, MMU_EXEC))) {
+                // Update pointer to the current page in real memory
+                tlb_key = tlb_hash(inst_addr);
+                inst_ptr = vm->tlb[tlb_key].ptr;
+                // If we are executing code from MMIO, direct memory fetch fails
+                upper_addr = vm->tlb[tlb_key].pte & ~0xFFF;
+                riscv_emulate(vm, read_uint32_le(instruction));
+            } else break;
+        } else riscv_emulate(vm, read_uint32_le(inst_ptr + (inst_addr & 0xFFF)));
+#endif
+    }
+}
+
+#endif
