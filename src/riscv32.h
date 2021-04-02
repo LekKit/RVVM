@@ -96,7 +96,7 @@ enum
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
 
-#define TLB_SIZE 32  // Always nonzero, power of 2 (1, 2, 4..)
+#define TLB_SIZE 256  // Always nonzero, power of 2 (1, 2, 4..)
 
 // Address translation cache
 typedef struct {
@@ -130,7 +130,7 @@ typedef struct {
 
 struct riscv32_vm_state_t {
     size_t wait_event;
-    uint32_t registers[REGISTERS_MAX];
+    size_t registers[REGISTERS_MAX];
     riscv32_tlb_t tlb[TLB_SIZE];
     riscv32_phys_mem_t mem;
     riscv32_mmio_regions_t mmio;
@@ -159,37 +159,6 @@ struct riscv32_vm_state_t {
 
 #define RISCV32I_OPCODE_MASK 0x3
 
-#define RISCV_ALIGN_32 4 // 4 byte align
-#define RISCV_ALIGN_16 2 // 2 byte align
-#define RISCV_ILEN 4 // 4 byte opcode len
-
-#define RISCV32_LITTLE_ENDIAN (1u << 0)
-#define RISCV32_IIS_I (1u << 1) // base and minimal ISA with 32 registers
-#define RISCV32_IIS_E (1u << 2) // base and minimal ISA with 16 registers
-
-#define RISCV32_HAVE_NONSTANDART_EXTENSION (1u << 3) // mark cpu with custom opcodes to enable hacks
-#define RISCV32_HAVE_M_EXTENSION (1u << 4) // multiplication and division for intergers
-#define RISCV32_HAVE_C_EXTENSION (1u << 5) // compressed instructions extension
-
-/*
-* Concatenate func7[25] func3[14:12] and opcode[6:2] into 9-bit id for decoding.
-* This is tricky for non-R type instructions since there's no func3/func7,
-* so we will simply smudge function pointers for those all over the jumptable.
-* Theoreticaly, this could be optimized more.
-*/
-#define RISCV32_GET_FUNCID(x) (((x >> 17) & 0x100) | ((x >> 7) & 0xE0) | ((x >> 2) & 0x1F))
-
-extern void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
-
-/*
-* The trick mentioned earlier, to decode non-R type instructions properly.
-* smudge_opcode_UJ for U/J types (no func3 or func7)
-* smudge_opcode_ISB for I/S/B types (no func7, but has func3)
-* R-type instructions (both func3 and func7 present) are simply put into table
-*/
-void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
-void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t));
-
 //#define RV_DEBUG
 //#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
@@ -216,10 +185,6 @@ void riscv32_destroy_vm(riscv32_vm_state_t *vm);
 void riscv32_dump_registers(riscv32_vm_state_t *vm);
 void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction);
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction);
-void riscv32m_init();
-void riscv32c_init();
-void riscv32i_init();
-void riscv32a_init();
 void riscv32_priv_init();
 bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi);
 void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);

@@ -18,7 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "riscv32.h"
-#include "riscv32i.h"
 #include "riscv32_csr.h"
 #include "bit_ops.h"
 

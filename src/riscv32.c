@@ -22,22 +22,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <err.h>
 #include <inttypes.h>
 
 #include "riscv.h"
 #include "riscv32.h"
+#include "cpu/riscv_cpu.h"
+#include "riscv32i_registers.h"
 #include "riscv32_mmu.h"
 #include "riscv32_csr.h"
-#include "riscv32i.h"
-#include "riscv32c.h"
 #include "mem_ops.h"
 #include "ns16550a.h"
 #include "clint.h"
 #include "threading.h"
 #include "spinlock.h"
-
-void (*riscv32_opcodes[512])(riscv32_vm_state_t *vm, const uint32_t instruction);
+#include "x11window.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -50,18 +48,6 @@ void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
 {
     riscv32_debug_always(vm, "RV32I: illegal instruction %h", instruction);
     riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
-}
-
-void smudge_opcode_UJ(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t))
-{
-    for (uint32_t f3=0; f3<0x10; ++f3)
-        riscv32_opcodes[opcode | (f3 << 5)] = func;
-}
-
-void smudge_opcode_ISB(uint32_t opcode, void (*func)(riscv32_vm_state_t*, const uint32_t))
-{
-    riscv32_opcodes[opcode] = func;
-    riscv32_opcodes[opcode | 0x100] = func;
 }
 
 #define MAX_VMS 256
@@ -90,6 +76,7 @@ static void* global_irq_handler(void* arg)
             vm->wait_event = 0;
         }
         spin_unlock(&global_lock);
+        update_fb();
     }
     return arg;
 }
@@ -127,16 +114,31 @@ static void deregister_vm(riscv32_vm_state_t *vm)
     spin_unlock(&global_lock);
 }
 
+static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
+{
+    uint8_t* devptr = ((uint8_t*)device->data) + offset;
+    uint8_t* dataptr = (uint8_t*)data;
+    UNUSED(vm);
+    if (op == MMU_WRITE) {
+        for (size_t i=0; i<size; ++i) devptr[i] = dataptr[i];
+    } else {
+        for (size_t i=0; i<size; ++i) dataptr[i] = devptr[i];
+    }
+    return true;
+}
+
+static void init_fb(riscv32_vm_state_t* vm, uint32_t addr)
+{
+    char* tmp = malloc(640*480*4);
+    riscv32_mmio_add_device(vm, addr, addr + (640*480*4), fb_mmio_handler, tmp);
+    create_window(tmp, 640, 480, "RVVM");
+}
+
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
     if (!global_init) {
-        for (uint32_t i=0; i<512; ++i)
-            riscv32_opcodes[i] = riscv32_illegal_insn;
-        riscv32i_init();
-        riscv32m_init();
-        riscv32c_init();
-        riscv32a_init();
+        riscv32_cpu_init();
         riscv32_priv_init();
         for (uint32_t i=0; i<4096; ++i)
             riscv32_csr_init(i, "illegal", riscv32_csr_illegal);
@@ -159,6 +161,7 @@ riscv32_vm_state_t *riscv32_create_vm()
     riscv32_tlb_flush(vm);
     ns16550a_init(vm, 0x10000000);
     riscv32_mmio_add_device(vm, 0x2000000, 0x2010000, clint_mmio_handler, NULL);
+    init_fb(vm, 0x30000000);
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
@@ -301,6 +304,47 @@ void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...)
     va_end(ap);
 }
 
+const char *riscv32i_translate_register(uint32_t reg)
+{
+    assert(reg < REGISTERS_MAX);
+    switch (reg) {
+    case REGISTER_ZERO: return "zero";
+    case REGISTER_X1: return "ra";
+    case REGISTER_X2: return "sp";
+    case REGISTER_X3: return "gp";
+    case REGISTER_X4: return "tp";
+    case REGISTER_X5: return "t0";
+    case REGISTER_X6: return "t1";
+    case REGISTER_X7: return "t2";
+    case REGISTER_X8: return "s0/fp";
+    case REGISTER_X9: return "s1";
+    case REGISTER_X10: return "a0";
+    case REGISTER_X11: return "a1";
+    case REGISTER_X12: return "a2";
+    case REGISTER_X13: return "a3";
+    case REGISTER_X14: return "a4";
+    case REGISTER_X15: return "a5";
+    case REGISTER_X16: return "a6";
+    case REGISTER_X17: return "a7";
+    case REGISTER_X18: return "s2";
+    case REGISTER_X19: return "s3";
+    case REGISTER_X20: return "s4";
+    case REGISTER_X21: return "s5";
+    case REGISTER_X22: return "s6";
+    case REGISTER_X23: return "s7";
+    case REGISTER_X24: return "s8";
+    case REGISTER_X25: return "s9";
+    case REGISTER_X26: return "s10";
+    case REGISTER_X27: return "s11";
+    case REGISTER_X28: return "t3";
+    case REGISTER_X29: return "t4";
+    case REGISTER_X30: return "t5";
+    case REGISTER_X31: return "t6";
+    case REGISTER_PC: return "pc";
+    default: return "unknown";
+    }
+}
+
 void riscv32_dump_registers(riscv32_vm_state_t *vm)
 {
     for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
@@ -310,46 +354,6 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
             printf("\n");
     }
     printf("%-5s: 0x%08"PRIX32"\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
-}
-
-static inline void riscv32_exec_instruction(riscv32_vm_state_t *vm, uint32_t instruction)
-{
-    if ((instruction & RISCV32I_OPCODE_MASK) != RISCV32I_OPCODE_MASK) {
-        // 16-bit opcode
-        riscv32c_emulate(vm, instruction);
-        // FYI: Any jump instruction implementation should take care of PC increment
-        vm->registers[REGISTER_PC] += 2;
-    } else {
-        riscv32i_emulate(vm, instruction);
-        vm->registers[REGISTER_PC] += 4;
-    }
-
-#ifdef RV_DEBUG_FULL
-    riscv32_dump_registers(vm);
-#ifdef RV_DEBUG_SINGLESTEP
-    getchar();
-#endif
-#endif
-}
-
-static void riscv32_run_till_event(riscv32_vm_state_t *vm)
-{
-    uint8_t instruction[4];
-    uint32_t tlb_key, inst_addr;
-    // Execute hot instructions loop until some event occurs (interrupt, etc)
-    // This adds little to no overhead, and the loop can be forcefully unrolled
-    while (vm->wait_event) {
-        riscv32i_write_register_u(vm, REGISTER_ZERO, 0);
-        inst_addr = vm->registers[REGISTER_PC];
-        tlb_key = tlb_hash(inst_addr);
-        if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
-            memcpy(instruction, vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF), 4);
-            riscv32_exec_instruction(vm, read_uint32_le(instruction));
-        } else {
-            if (riscv32_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC))
-                riscv32_exec_instruction(vm, read_uint32_le(instruction));
-        }
-    }
 }
 
 static void riscv32_trap_jump(riscv32_vm_state_t *vm)
