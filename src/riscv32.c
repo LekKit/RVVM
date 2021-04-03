@@ -76,7 +76,9 @@ static void* global_irq_handler(void* arg)
             vm->wait_event = 0;
         }
         spin_unlock(&global_lock);
+#ifdef USE_X11
         update_fb();
+#endif
     }
     return arg;
 }
@@ -114,6 +116,7 @@ static void deregister_vm(riscv32_vm_state_t *vm)
     spin_unlock(&global_lock);
 }
 
+#ifdef USE_X11
 static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
 {
     uint8_t* devptr = ((uint8_t*)device->data) + offset;
@@ -133,6 +136,7 @@ static void init_fb(riscv32_vm_state_t* vm, uint32_t addr)
     riscv32_mmio_add_device(vm, addr, addr + (640*480*4), fb_mmio_handler, tmp);
     create_window(tmp, 640, 480, "RVVM");
 }
+#endif
 
 riscv32_vm_state_t *riscv32_create_vm()
 {
@@ -161,7 +165,9 @@ riscv32_vm_state_t *riscv32_create_vm()
     riscv32_tlb_flush(vm);
     ns16550a_init(vm, 0x10000000);
     riscv32_mmio_add_device(vm, 0x2000000, 0x2010000, clint_mmio_handler, NULL);
+#ifdef USE_X11
     init_fb(vm, 0x30000000);
+#endif
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
