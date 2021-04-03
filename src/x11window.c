@@ -1,4 +1,4 @@
-#ifndef _WIN32
+#ifdef USE_X11
 
 #include <stdio.h>
 #include <errno.h>
