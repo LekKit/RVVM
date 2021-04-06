@@ -10,6 +10,8 @@ RISC-V CPU & System software implementation written in С
 - OpenSBI, custom firmwares boot and execute properly
 - Linux kernel boots!
 - Linux userspace works, interactive shell through UART
+- Framebuffer graphics, working Xorg
+- Raw image mounted as rootfs
 
 ## What's done so far
 - Feature-complete RV32I instruction set
@@ -26,6 +28,7 @@ RISC-V CPU & System software implementation written in С
 - ELF kernel loading
 - Interrupts
 - Core-local interrupt controller, timers
+- [Somewhat WIP] Flash, framebuffer, RV64 CPU, JIT prototype
 
 ## Usage
 Currently builds on *nix systems using GNU Make. Actual code however is cross-platform and more build targets are going to be supported, including Windows, or even embedded systems.
@@ -48,8 +51,6 @@ cd release.linux.x86_64
 - Debug the available functionality and make sure it's conforming to the specs
 - Refactor the code; Make internal APIs usable for both 32 & 64 bit VMs
 - Floating-point extensions
-- Framebuffer
-- Flash storage
 - Mouse/keyboard
 - Other peripherals
 - *A lot more...*
