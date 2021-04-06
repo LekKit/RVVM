@@ -68,6 +68,7 @@ typedef uint8_t regid_t;
     typedef int64_t sxlen_t;
     typedef uint64_t xaddr_t;
     #define SHAMT_BITS 6
+    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x8000000000000000)
     #define riscv_install_opcode_R riscv64_install_opcode_R
     #define riscv_install_opcode_UJ riscv64_install_opcode_UJ
     #define riscv_install_opcode_ISB riscv64_install_opcode_ISB
@@ -83,6 +84,7 @@ typedef uint8_t regid_t;
     typedef int32_t sxlen_t;
     typedef uint32_t xaddr_t;
     #define SHAMT_BITS 5
+    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x80000000)
     #define riscv_install_opcode_R riscv32_install_opcode_R
     #define riscv_install_opcode_UJ riscv32_install_opcode_UJ
     #define riscv_install_opcode_ISB riscv32_install_opcode_ISB

@@ -30,7 +30,7 @@ static void riscv_m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
     sxlen_t reg1 = riscv_read_register_s(vm, rs1);
     sxlen_t reg2 = riscv_read_register_s(vm, rs2);
 
-    riscv_write_register(vm, rds, reg1 * reg2);
+    riscv_write_register(vm, rds, (int64_t)reg1 * (int64_t)reg2);
 }
 
 static void riscv_m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
@@ -100,8 +100,8 @@ static void riscv_m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
     sxlen_t result = -1;
 
     // overflow
-    if (reg1 == (((xlen_t)(sxlen_t)-1) / -2) && reg2 == -1) {
-        result = (((xlen_t)(sxlen_t)-1) / -2);
+    if (reg1 == DIV_OVERFLOW_RS1 && reg2 == -1) {
+        result = DIV_OVERFLOW_RS1;
     // division by zero check (we already setup result var for error)
     } else if (reg2 != 0) {
         result = reg1 / reg2;
@@ -137,7 +137,7 @@ static void riscv_m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
     sxlen_t result = reg1;
 
     // overflow
-    if (reg1 == (((xlen_t)(sxlen_t)-1) / -2) && reg2 == -1) {
+    if (reg1 == DIV_OVERFLOW_RS1 && reg2 == -1) {
         result = 0;
     // division by zero check (we already setup result var for error)
     } else if (reg2 != 0) {
