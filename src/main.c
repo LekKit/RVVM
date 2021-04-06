@@ -26,13 +26,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "riscv.h"
 #include "riscv32.h"
+#include "riscv32i_registers.h"
+#include "riscv32_mmu.h"
 #include "riscv32_csr.h"
-#include "riscv32i.h"
 #include "elf_load.h"
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 typedef struct {
     const char* bootrom;
     const char* dtb;
+    const char* flash_image;
     bool is_linux;
 } vm_args_t;
 
@@ -86,17 +93,47 @@ void parse_args(int argc, char** argv, vm_args_t* args)
 {
     for (int i=1; i<argc; ++i) {
         if (strncmp(argv[i], "-dtb=", 5) == 0) {
-		args->dtb = argv[i] + 5;
-	} else if (strcmp(argv[i], "--linux") == 0) {
-		args->is_linux = true;
-        } else
-		args->bootrom = argv[i];
+    		args->dtb = argv[i] + 5;
+    	} else if (strncmp(argv[i], "-image=", 7) == 0) {
+    		args->flash_image = argv[i] + 7;
+        } else if (strcmp(argv[i], "--linux") == 0) {
+    		args->is_linux = true;
+        } else {
+            args->bootrom = argv[i];
+        }
     }
+}
+
+static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
+{
+    uint8_t* devptr = ((uint8_t*)device->data) + offset;
+    uint8_t* dataptr = (uint8_t*)data;
+    UNUSED(vm);
+    if (op == MMU_WRITE) {
+        for (size_t i=0; i<size; ++i) devptr[i] = dataptr[i];
+    } else {
+        for (size_t i=0; i<size; ++i) dataptr[i] = devptr[i];
+    }
+    return true;
+}
+
+static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+{
+    int fd = open(filename, O_RDWR);
+    if (fd == -1) {
+        printf("ERROR: Failed to open image %s\n", filename);
+        return;
+    }
+    struct stat filestat;
+    fstat(fd, &filestat);
+    size_t filesize = filestat.st_size & ~(sysconf(_SC_PAGE_SIZE) - 1);
+    void* tmp = mmap(NULL, filesize, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
+    riscv32_mmio_add_device(vm, addr, addr + filesize - 1, flash_mmio_handler, tmp);
 }
 
 int main(int argc, char** argv)
 {
-    vm_args_t args = { };
+    vm_args_t args = {0};
     parse_args(argc, argv, &args);
     if (args.bootrom == NULL)
     {
@@ -179,6 +216,8 @@ int main(int argc, char** argv)
 #endif
 	    }
     }
+
+    if (args.flash_image) init_flash(vm, 0x40000000, args.flash_image);
 
     riscv32_run(vm);
 

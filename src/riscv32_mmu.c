@@ -221,6 +221,8 @@ void riscv32_tlb_flush(riscv32_vm_state_t* vm)
 {
     // No ASID support as of now (TLB is quite small, there are no benefits)
     memset(vm->tlb, 0, sizeof(vm->tlb));
+	// Flush dispatch loop page
+	vm->wait_event = 0;
 }
 
 bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)

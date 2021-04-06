@@ -37,37 +37,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-inline long sign_extend(long val, uint8_t bits)
+static inline long sign_extend(long val, uint8_t bits)
 {
     return (val << (LONG_BITS - bits)) >> (LONG_BITS - bits);
 }
 
 // Generate bitmask of given size
-inline size_t bit_mask(uint8_t count)
+static inline size_t bit_mask(uint8_t count)
 {
     return (1UL << count) - 1;
 }
 
 // Cut N bits from val at given position (from lower bit)
-inline size_t bit_cut(size_t val, uint8_t pos, uint8_t count)
+static inline size_t bit_cut(size_t val, uint8_t pos, uint8_t count)
 {
     return (val >> pos) & bit_mask(count);
 }
 
 // Replace N bits in val at given position (from lower bit) by p
-inline size_t bit_replace(size_t val, uint8_t pos, uint8_t bits, size_t p)
+static inline size_t bit_replace(size_t val, uint8_t pos, uint8_t bits, size_t p)
 {
     return (val & (~(bit_mask(bits) << pos))) | ((p & bit_mask(bits)) << pos);
 }
 
 // Check if Nth bit of val is 1
-inline bool bit_check(size_t val, uint8_t pos)
+static inline bool bit_check(size_t val, uint8_t pos)
 {
     return (val >> pos) & 0x1;
 }
 
 // Reverse N bits in val (from lower bit), remaining bits are zero
-inline size_t bit_reverse(size_t val, uint8_t bits)
+static inline size_t bit_reverse(size_t val, uint8_t bits)
 {
     size_t ret = 0;
 
@@ -78,6 +78,21 @@ inline size_t bit_reverse(size_t val, uint8_t bits)
     }
 
     return ret;
+}
+
+static inline uint64_t bit_mulh64(uint64_t a, uint64_t b)
+{
+#ifdef __SIZEOF_INT128__
+    return ((__int128)a * (__int128)b) >> 64;
+#else
+    uint64_t al = (uint32_t)a, ah = a >> 32;
+    uint64_t bl = (uint32_t)b, bh = b >> 32;
+    uint64_t ahbh = ah * bh, albh = al * bh;
+    uint64_t ahbl = ah * bl, albl = al * bl;
+    uint64_t middle = ahbl + (albl >> 32) + (uint32_t)albh;
+
+    return ahbh + (middle >> 32) + (albh >> 32);
+#endif
 }
 
 #endif

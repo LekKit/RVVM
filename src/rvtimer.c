@@ -33,7 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #elif defined(_WIN32)
 #include <windows.h>
 struct timespec { long tv_sec; long tv_nsec; };
-static void clock_gettime(int, struct timespec* tp)
+static void clock_gettime(int t, struct timespec* tp)
 {
     ULARGE_INTEGER tmp;
     GetSystemTimeAsFileTime((LPFILETIME)&tmp);
@@ -41,6 +41,7 @@ static void clock_gettime(int, struct timespec* tp)
     tp->tv_sec = tmp.QuadPart / 10000000ULL;
     tp->tv_nsec = (tmp.QuadPart % 10000000ULL) * 100;
 }
+#define CLOCK_MONOTONIC_RAW 0
 #define HAS_CLOCK_GETTIME
 #else
 #warning No support for platform clocksource!

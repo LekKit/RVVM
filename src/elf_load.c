@@ -1,4 +1,3 @@
-#include <elf.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -8,6 +7,11 @@
 #include "mem_ops.h"
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
+
+#ifndef _WIN32
+
+#include <elf.h>
+
 
 bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset)
 {
@@ -195,3 +199,9 @@ err_fclose:
 	fclose(fp);
 	return status;
 }
+
+#else
+
+bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset){}
+
+#endif
