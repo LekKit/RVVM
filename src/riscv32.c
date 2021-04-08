@@ -277,7 +277,7 @@ void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     char buffer[256];
-    uint32_t size = sprintf(buffer, "[VM 0x%x] ", vm->registers[REGISTER_PC]);
+    uint32_t size = sprintf(buffer, "[VM 0x%x] ", (uint32_t)vm->registers[REGISTER_PC]);
     uint32_t begin = 0;
     uint32_t len = strlen(fmt);
     uint32_t i;
