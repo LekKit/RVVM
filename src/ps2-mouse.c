@@ -2,6 +2,7 @@
 #include "ringbuf.h"
 #include "riscv32.h"
 #include "ps2-mouse.h"
+#include "rvtimer.h"
 
 /* The mouse is a state machine, see enum ps2_mouse_state */
 /* TODO: locking? */
@@ -60,6 +61,7 @@ struct ps2_mouse
 	bool yoverflow;
 
 	struct mouse_btns btns;
+	rvtimer_t sample_timer; // used in IRQ handling for sample rate
 
 	enum ps2_mouse_scale scale;
 	enum ps2_mouse_mode mode;
@@ -119,6 +121,13 @@ static void ps2_push_move_pkt(struct ps2_mouse *dev)
 	ringbuf_put_u8(&dev->cmdbuf, y);
 }
 
+static void ps2_set_sample_rate(struct ps2_mouse *dev, uint8_t rate)
+{
+	dev->rate = rate;
+	rvtimer_init(&dev->sample_timer, rate);
+	dev->sample_timer.timecmp = 1; /* one sample */
+}
+
 static void ps2_defaults(struct ps2_mouse *dev)
 {
 	dev->scale = SCALE_1_1;
@@ -126,7 +135,7 @@ static void ps2_defaults(struct ps2_mouse *dev)
 	dev->state = STATE_CMD;
 	dev->reporting = false;
 	dev->resolution = 2;
-	dev->rate = 100;
+	ps2_set_sample_rate(dev, 100);
 }
 
 static void ps2_reset_counters(struct ps2_mouse *dev)
@@ -279,7 +288,7 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 				/* go to the command switch */
 				break;
 			case STATE_SET_SAMPLE_RATE:
-				dev->rate = *val;
+				ps2_set_sample_rate(dev, *val);
 				dev->state = STATE_CMD;
 				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
 				goto out;
@@ -388,13 +397,13 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 	if (newx > 0xff || newx < -0x100)
 	{
 		dev->xoverflow = true;
-		newx %= 0xff;
+		newx &= 0xff;
 	}
 
 	if (newy > 0xff || newy < -0x100)
 	{
 		dev->yoverflow = true;
-		newy %= 0xff;
+		newy &= 0xff;
 	}
 
 	dev->xctr = newx;
@@ -404,6 +413,14 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 	{
 		return;
 	}
+
+	if (!rvtimer_pending(&dev->sample_timer))
+	{
+		return;
+	}
+
+	dev->sample_timer.time = 0;
+	rvtimer_rebase(&dev->sample_timer);
 
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);

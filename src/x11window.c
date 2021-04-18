@@ -94,6 +94,7 @@ void update_fb()
     static struct mouse_btns btns;
     static int x, y;
 
+    int xcur = 0, ycur = 0;
     for (int pending = XPending(dsp); pending != 0; --pending)
     {
 	    XEvent ev;
@@ -112,7 +113,6 @@ void update_fb()
 		    {
 			    btns.right = true;
 		    }
-		    ps2_handle_mouse(in_data.mouse, 0, 0, &btns);
 	    }
 	    else if (ev.type == ButtonRelease)
 	    {
@@ -128,15 +128,18 @@ void update_fb()
 		    {
 			    btns.right = false;
 		    }
-		    ps2_handle_mouse(in_data.mouse, 0, 0, &btns);
 	    }
 	    else if (ev.type == MotionNotify)
 	    {
-		    ps2_handle_mouse(in_data.mouse, ev.xmotion.x - x, ev.xmotion.y - y, NULL);
+		    xcur += ev.xmotion.x - x;
+		    ycur += -(ev.xmotion.y - y);
 		    x = ev.xmotion.x;
 		    y = ev.xmotion.y;
 	    }
     }
+
+    //if (xcur != 0 && ycur != 0) printf("motion x: %d y: %d\n", xcur, ycur);
+    ps2_handle_mouse(in_data.mouse, xcur, ycur, &btns);
 }
 
 #endif
