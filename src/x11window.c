@@ -10,20 +10,22 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xfixes.h>
+#include <X11/keysym.h>
 #include <unistd.h>
 #include <stdint.h>
 
 #include "x11window.h"
+#include "ps2-mouse.h"
 
 static Display* dsp = NULL;
 static Window window;
 static GC gc;
 XImage* ximage;
 
-const void* in_data;
-char* local_data;
+static struct x11_data in_data;
+static char* local_data;
 
-void create_window(const void* data, int width, int height, const char* name)
+void create_window(struct x11_data* data, int width, int height, const char* name)
 {
     dsp = XOpenDisplay(NULL);
     if (!dsp) {
@@ -31,27 +33,32 @@ void create_window(const void* data, int width, int height, const char* name)
         return;
     }
 
-    XSetWindowAttributes attributes;
-    attributes.backing_store = NotUseful;
+    in_data = *data;
+    local_data = in_data.data;//malloc(4*width*height);
+
+    XSetWindowAttributes attributes = {
+	    //.event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+	    .backing_store = NotUseful
+    };
     window = XCreateWindow(dsp, DefaultRootWindow(dsp),
             0, 0, width, height, 0,
             DefaultDepth(dsp, XDefaultScreen(dsp)),
             InputOutput, CopyFromParent, CWBackingStore, &attributes);
+
     XStoreName(dsp, window, name);
-    XSelectInput(dsp, window, StructureNotifyMask);
+    XSelectInput(dsp, window, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
     XMapWindow(dsp, window);
 
-    XGCValues xgcvalues;
-    xgcvalues.graphics_exposures = False;
+    XGCValues xgcvalues = {
+	    .graphics_exposures = False
+    };
     gc = XCreateGC(dsp, window, GCGraphicsExposures, &xgcvalues);
-
-    local_data = data;//malloc(4*width*height);
 
     ximage = XCreateImage(dsp, XDefaultVisual(dsp, XDefaultScreen(dsp)),
                         DefaultDepth(dsp, XDefaultScreen(dsp)), ZPixmap, 0,
-                        local_data, width, height, 8, 0);
+                        in_data.data, width, height, 8, 0);
+
     XSync(dsp, False);
-    in_data = data;
 }
 
 void close_window()
@@ -83,6 +90,53 @@ void update_fb()
     //r5g6b5_to_r8g8b8(in_data, local_data, ximage->width*ximage->height);
     XPutImage(dsp, window, gc, ximage, 0, 0, 0, 0, ximage->width, ximage->height);
     XSync(dsp, False);
+
+    static struct mouse_btns btns;
+    static int x, y;
+
+    for (int pending = XPending(dsp); pending != 0; --pending)
+    {
+	    XEvent ev;
+	    XNextEvent(dsp, &ev);
+	    if (ev.type == ButtonPress)
+	    {
+		    if (ev.xbutton.button == Button1)
+		    {
+			    btns.left = true;
+		    }
+		    else if (ev.xbutton.button == Button2)
+		    {
+			    btns.middle = true;
+		    }
+		    else if (ev.xbutton.button == Button3)
+		    {
+			    btns.right = true;
+		    }
+		    ps2_handle_mouse(in_data.mouse, 0, 0, &btns);
+	    }
+	    else if (ev.type == ButtonRelease)
+	    {
+		    if (ev.xbutton.button == Button1)
+		    {
+			    btns.left = false;
+		    }
+		    else if (ev.xbutton.button == Button2)
+		    {
+			    btns.middle = false;
+		    }
+		    else if (ev.xbutton.button == Button3)
+		    {
+			    btns.right = false;
+		    }
+		    ps2_handle_mouse(in_data.mouse, 0, 0, &btns);
+	    }
+	    else if (ev.type == MotionNotify)
+	    {
+		    ps2_handle_mouse(in_data.mouse, ev.xmotion.x - x, ev.xmotion.y - y, NULL);
+		    x = ev.xmotion.x;
+		    y = ev.xmotion.y;
+	    }
+    }
 }
 
 #endif
