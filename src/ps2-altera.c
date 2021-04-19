@@ -39,7 +39,7 @@ static bool altps2_mmio_handler_impl(riscv32_vm_state_t* vm, struct altps2* ps2p
 					uint8_t val;
 					uint16_t avail = ps2port->child->ps2_op(ps2port->child, &val, false);
 					*data = (val &= 0xff);
-					*data |= 1 << 15; // RVALID bit
+					*data |= (avail != 0) << 15; // RVALID bit
 					*data |= avail << 16; // RAVAIL
 					break;
 				}

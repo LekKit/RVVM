@@ -172,7 +172,7 @@ static bool plic_ie_handler(struct plic *dev, uint32_t offset, uint32_t *data, u
 	return true;
 }
 
-static bool plic_ctxflag_handler(struct plic *dev, uint32_t offset, uint32_t *data, uint8_t access)
+static bool plic_ctxflag_handler(riscv32_vm_state_t *vm, struct plic *dev, uint32_t offset, uint32_t *data, uint8_t access)
 {
 	uint32_t idx = offset & 1023;
 	uint32_t ctx = offset / 1024;
@@ -212,6 +212,21 @@ static bool plic_ctxflag_handler(struct plic *dev, uint32_t offset, uint32_t *da
 			 * The spec says we need not to. So what is the point of writing
 			 * previously claimed interrupt ID here, since pending bit is cleared on claim? */
 			select_int_from_pending(dev, ctx);
+
+			//printf("clear plic int\n");
+			if (dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] == 0)
+			{
+				/* if there's no interrupts waiting, clear the pending bit */
+				vm->csr.ip &= ~(1 << INTERRUPT_SEXTERNAL);
+				vm->ev_int_mask &= ~(1 << INTERRUPT_SEXTERNAL);
+			}
+			else
+			{
+				/* trigger CPU to execute our next interrupt */
+				vm->ev_int_mask |= (1 << INTERRUPT_SEXTERNAL);
+				vm->ev_int = 1;
+				vm->wait_event = 0;
+			}
 		}
 		else
 		{
@@ -289,7 +304,7 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		offset /= 4;
 		for (uint32_t i = 0; i < size / 4; ++i)
 		{
-			if (!plic_ctxflag_handler(dev, offset + i, (uint32_t*)memory_data + i, access))
+			if (!plic_ctxflag_handler(vm, dev, offset + i, (uint32_t*)memory_data + i, access))
 			{
 				return false;
 			}
@@ -321,7 +336,7 @@ bool plic_send_irq(riscv32_vm_state_t *vm, void *data, uint32_t id)
 	struct plic *dev = (struct plic*)data;
 
 	assert(id != 0);
-	riscv32_debug_always("plic IRQ raise: %d\n", id);
+	//printf("plic IRQ raise: %d\n", id);
 
 	/* mark the interrupt as pending */
 	set_int_pending(dev, id, 1);

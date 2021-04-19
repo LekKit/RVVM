@@ -73,7 +73,7 @@ struct ps2_mouse
 	struct ringbuf cmdbuf;
 };
 
-static uint8_t ps2_scale_coord(enum ps2_mouse_scale scale, uint8_t n)
+static int8_t ps2_scale_coord(enum ps2_mouse_scale scale, int8_t n)
 {
 	switch (scale)
 	{
@@ -82,12 +82,12 @@ static uint8_t ps2_scale_coord(enum ps2_mouse_scale scale, uint8_t n)
 				switch (n)
 				{
 					case 0:
-					case 1:
-					case 3:
+					case 1: case -1:
+					case 3: case -3:
 						return n;
-					case 2: return 1;
-					case 4: return 6;
-					case 5: return 9;
+					case 2: case -2: return 1;
+					case 4: case -4: return 6;
+					case 5: case -5: return 9;
 					default: return n * 2;
 				}
 		/* make compiler happy */
@@ -99,10 +99,10 @@ static uint8_t ps2_scale_coord(enum ps2_mouse_scale scale, uint8_t n)
 
 static void ps2_push_move_pkt(struct ps2_mouse *dev)
 {
-	uint8_t x = dev->xctr & 0xff;
-	uint8_t xsign = dev->xctr < 0;
-	uint8_t y = dev->yctr & 0xff;
-	uint8_t ysign = dev->yctr < 0;
+	int8_t x = dev->xctr & 0xff;
+	bool xsign = dev->xctr < 0;
+	int8_t y = dev->yctr & 0xff;
+	bool ysign = dev->yctr < 0;
 
 	x = ps2_scale_coord(dev->scale, x);
 	y = ps2_scale_coord(dev->scale, y);
@@ -280,7 +280,7 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 	struct ps2_mouse *dev = (struct ps2_mouse*)ps2dev->data;
 	if (is_write)
 	{
-		riscv32_debug_always("ps2 mice cmd sent: %h\n", *val);
+		//printf("ps2 mice cmd sent: %02x\n", (int)*val);
 		bool ret = false;
 		switch (dev->state)
 		{
@@ -347,8 +347,8 @@ out:
 		}
 
 		ringbuf_get_u8(&dev->cmdbuf, val);
-		riscv32_debug_always("ps2 mice cmd resp: %h avail: %h\n", *val, (uint16_t)avail);
-		return (uint16_t)(avail - 1);
+		//printf("ps2 mice cmd resp: %02x avail: %d\n", *val, (int)avail);
+		return (uint16_t)avail;
 	}
 }
 
@@ -358,7 +358,9 @@ struct ps2_device ps2_mouse_create()
 	struct ps2_device dev;
 	dev.ps2_op = ps2_mouse_op;
 	dev.data = ptr;
-	ringbuf_create(&ptr->cmdbuf, 256);
+	/* big number is needed because it can overrun when interrupts aren't delivered
+	 * a long time */
+	ringbuf_create(&ptr->cmdbuf, 1024);
 	ps2_cmd_reset(ptr);
 
 	/* consume first ACK from command */
@@ -391,23 +393,35 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 		dev->btns = *btns;
 	}
 
-	int32_t newx = dev->xctr + (x << dev->resolution);
-	int32_t newy = dev->yctr + (y << dev->resolution);
+	// 4 counts/mm is the default, make it report original coordinates
+	int shift = 2 - dev->resolution;
+	int32_t newx, newy;
+	if (shift >= 0)
+	{
+		newx = dev->xctr + (x >> shift);
+		newy = dev->yctr + (y >> shift);
+	}
+	else
+	{
+		newx = dev->xctr + (x << -shift);
+		newy = dev->yctr + (y << -shift);
+	}
 
 	if (newx > 0xff || newx < -0x100)
 	{
 		dev->xoverflow = true;
-		newx &= 0xff;
+		newx = (int8_t)newx;
 	}
 
 	if (newy > 0xff || newy < -0x100)
 	{
 		dev->yoverflow = true;
-		newy &= 0xff;
+		newy = (int8_t)newy;
 	}
 
 	dev->xctr = newx;
 	dev->yctr = newy;
+	//printf("mouse move x: %d y: %d shift: %d\n", newx, newy, shift);
 
 	if (dev->mode != MODE_STREAM || !dev->reporting)
 	{

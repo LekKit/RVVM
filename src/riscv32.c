@@ -74,7 +74,7 @@ static void* global_irq_handler(void* arg)
             * but this doesn't matter - failing to deliver an event will
             * simply delay it, and sending a spurious event merely lowers performance
             */
-            vm->ev_int_mask = (1 << INTERRUPT_MTIMER);
+            vm->ev_int_mask |= (1 << INTERRUPT_MTIMER);
             vm->ev_int = true;
             vm->wait_event = 0;
         }
@@ -231,7 +231,6 @@ static void riscv32_perform_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
         vm->csr.status &= 0xFFFFFFFD;
     }
     vm->priv_mode = priv;
-    vm->csr.ip &= ~(1 << cause);
     vm->wait_event = 0;
 }
 
