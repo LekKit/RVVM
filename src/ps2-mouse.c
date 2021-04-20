@@ -194,7 +194,6 @@ static bool ps2_cmd_get_dev_id(struct ps2_mouse *dev)
 {
 	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
 	ringbuf_put_u8(&dev->cmdbuf, '\0'); // 0x00 - standard PS/2 mouse
-	ringbuf_put_u8(&dev->cmdbuf, '\0'); // linux requires additional byte
 	return true;
 }
 
