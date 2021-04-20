@@ -10,12 +10,14 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xfixes.h>
-#include <X11/keysym.h>
+#include <X11/XKBlib.h>
 #include <unistd.h>
 #include <stdint.h>
 
 #include "x11window.h"
 #include "ps2-mouse.h"
+#include "ps2-keyboard.h"
+#include "x11keymap.h"
 
 static Display* dsp = NULL;
 static Window window;
@@ -47,6 +49,7 @@ void create_window(struct x11_data* data, int width, int height, const char* nam
 
     XStoreName(dsp, window, name);
     XSelectInput(dsp, window, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
+    XkbSetDetectableAutoRepeat(dsp, false, NULL); /* disable key auto repeat */
     XMapWindow(dsp, window);
 
     XGCValues xgcvalues = {
@@ -136,10 +139,55 @@ void update_fb()
 		    x = ev.xmotion.x;
 		    y = ev.xmotion.y;
 	    }
+	    else if (ev.type == KeyPress)
+	    {
+		    KeySym keysym = XkbKeycodeToKeysym(dsp, ev.xkey.keycode, 0, 0);
+		    struct key k = x11keysym2makecode(keysym);
+#if 0
+		    printf("keysym pressed: %04x code ", (uint16_t)keysym);
+		    for (size_t i = 0; i < k.len; ++i)
+		    {
+			    printf("%02x ", k.keycode[i]);
+		    }
+		    printf("\n");
+#endif
+		    ps2_handle_keyboard(in_data.keyboard, &k, true);
+	    }
+	    else if (ev.type == KeyRelease)
+	    {
+		    if (pending > 1)
+		    {
+			    XEvent nev;
+			    XPeekEvent(dsp, &nev);
+			    if (nev.type == KeyPress
+					    && nev.xkey.time == ev.xkey.time
+					    && nev.xkey.keycode == ev.xkey.keycode)
+			    {
+				    /* skip the fake key press/release event */
+				    XNextEvent(dsp, &nev);
+				    --pending;
+				    continue;
+			    }
+		    }
+
+		    KeySym keysym = XkbKeycodeToKeysym(dsp, ev.xkey.keycode, 0, 0);
+		    struct key k = x11keysym2makecode(keysym);
+#if 0
+		    printf("keysym released: %04x code ", (uint16_t)keysym);
+		    for (size_t i = 0; i < k.len; ++i)
+		    {
+			    printf("%02x ", k.keycode[i]);
+		    }
+		    printf("\n");
+#endif
+		    ps2_handle_keyboard(in_data.keyboard, &k, false);
+	    }
+
     }
 
     //if (xcur != 0 && ycur != 0) printf("motion x: %d y: %d\n", xcur, ycur);
     ps2_handle_mouse(in_data.mouse, xcur, ycur, &btns);
+    ps2_handle_keyboard(in_data.keyboard, NULL, false);
 }
 
 #endif

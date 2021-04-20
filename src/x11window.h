@@ -4,8 +4,9 @@
 
 struct x11_data
 {
-	struct ps2_device *mouse;
 	char *data; // framebuffer
+	struct ps2_device *mouse;
+	struct ps2_device *keyboard;
 };
 
 void create_window(struct x11_data* data, int width, int height, const char* name);

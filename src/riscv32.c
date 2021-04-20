@@ -39,6 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "plic.h"
 #include "ps2-altera.h"
 #include "ps2-mouse.h"
+#include "ps2-keyboard.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -142,11 +143,11 @@ static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* devic
     return true;
 }
 
-static void init_fb(riscv32_vm_state_t* vm, uint32_t addr, struct ps2_device *mouse)
+static void init_fb(riscv32_vm_state_t* vm, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard)
 {
     char* tmp = malloc(640*480*4);
     riscv32_mmio_add_device(vm, addr, addr + (640*480*4), fb_mmio_handler, tmp);
-    create_window(&(struct x11_data) { mouse, tmp }, 640, 480, "RVVM");
+    create_window(&(struct x11_data) { tmp, mouse, keyboard }, 640, 480, "RVVM");
 }
 #endif
 
@@ -184,8 +185,12 @@ riscv32_vm_state_t *riscv32_create_vm()
     ps2_mouse = ps2_mouse_create();
     altps2_init(vm, 0x20000000, plic_data, 1, &ps2_mouse);
 
+    static struct ps2_device ps2_keyboard;
+    ps2_keyboard = ps2_keyboard_create();
+    altps2_init(vm, 0x20001000, plic_data, 2, &ps2_keyboard);
+
 #ifdef USE_X11
-    init_fb(vm, 0x30000000, &ps2_mouse);
+    init_fb(vm, 0x30000000, &ps2_mouse, &ps2_keyboard);
 #endif
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
