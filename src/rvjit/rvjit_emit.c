@@ -139,184 +139,109 @@ void rvjit_emit_end(rvjit_block_t* block)
     // Recover clobbered registers
     for (regid_t i=REGISTERS_MAX; i>0; --i) {
         if (block->abireclaim_mask & rvjit_hreg_mask(i-1)) {
-            block->abireclaim_mask &= ~rvjit_hreg_mask(i-1);
             rvjit_native_pop(block, i-1);
         }
     }
     rvjit_native_ret(block);
 }
 
+#ifdef REGISTER_ZERO_ENABLED
+#define REGZERO_COND 1
+#else
+#define REGZERO_COND 0
+#endif
+
+/*
+ * Important: REG_DST (destination) registers should be mapped at the end,
+ * otherwise nasty errors occur, this simplifies register remapping
+ */
+
+#define RVJIT_3REG_OP(native_func, rds, rs1, rs2) { \
+    if (rds == 0 && REGZERO_COND) return; \
+    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC); \
+    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC); \
+    regid_t hrds = rvjit_map_reg(block, rds, REG_DST); \
+    native_func(block, hrds, hrs1, hrs2); }
+
+#define RVJIT_2REG_IMM_OP(native_func, rds, rs1, imm) { \
+    if (rds == 0 && REGZERO_COND) return; \
+    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC); \
+    regid_t hrds = rvjit_map_reg(block, rds, REG_DST); \
+    native_func(block, hrds, hrs1, imm); }
+
 void rvjit32_add(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_add(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_add, rds, rs1, rs2);
 }
 
 void rvjit32_sub(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_sub(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_sub, rds, rs1, rs2);
 }
 
 void rvjit32_or(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_or(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_or, rds, rs1, rs2);
 }
 
 void rvjit32_and(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_and(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_and, rds, rs1, rs2);
 }
 
 void rvjit32_xor(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_xor(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_xor, rds, rs1, rs2);
 }
 
 void rvjit32_sra(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_sra(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_sra, rds, rs1, rs2);
 }
 
 void rvjit32_srl(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_srl(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_srl, rds, rs1, rs2);
 }
 
 void rvjit32_sll(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrs2 = rvjit_map_reg(block, rs2, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_sll(block, hrds, hrs1, hrs2);
+    RVJIT_3REG_OP(rvjit32_native_sll, rds, rs1, rs2);
 }
 
 void rvjit32_addi(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_addi(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_addi, rds, rs1, imm);
 }
 
 void rvjit32_ori(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_ori(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_ori, rds, rs1, imm);
 }
 
 void rvjit32_andi(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_andi(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_andi, rds, rs1, imm);
 }
 
 void rvjit32_xori(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_xori(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_xori, rds, rs1, imm);
 }
 
 void rvjit32_srai(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_srai(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_srai, rds, rs1, imm);
 }
 
 void rvjit32_srli(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_srli(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_srli, rds, rs1, imm);
 }
 
 void rvjit32_slli(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
-#ifdef REGISTER_ZERO_ENABLED
-    if (rds == 0) return;
-#endif
-    regid_t hrs1 = rvjit_map_reg(block, rs1, REG_SRC);
-    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
-
-    rvjit32_native_slli(block, hrds, hrs1, imm);
+    RVJIT_2REG_IMM_OP(rvjit32_native_slli, rds, rs1, imm);
 }
 
 void rvjit_emit_call(rvjit_block_t* block, const void* funcaddr)

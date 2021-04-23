@@ -28,9 +28,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/mman.h>
 #endif
 
-void rvjit_heap_init(rvjit_heap_t* heap, size_t size_kb)
+void rvjit_heap_init(rvjit_heap_t* heap, size_t size)
 {
-    size_t size = ((size_kb + 3) & ~3) << 10;
+    size = (size + 0xFFF) & ~0xFFF;
 #ifdef _WIN32
 #ifdef RVJIT_PARANOID
     heap->data = VirtualAlloc(NULL, size, MEM_COMMIT, PAGE_READWRITE);

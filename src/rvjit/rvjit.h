@@ -102,7 +102,7 @@ typedef struct {
     rvjit_reginfo_t regs[REGISTERS_MAX];
 } rvjit_block_t;
 
-void rvjit_heap_init(rvjit_heap_t* heap, size_t size_kb);
+void rvjit_heap_init(rvjit_heap_t* heap, size_t size);
 void rvjit_heap_free(rvjit_heap_t* heap);
 void rvjit_block_init(rvjit_block_t* block, rvjit_heap_t* heap);
 code_ptr_t rvjit_block_finish(rvjit_block_t* block);
