@@ -275,6 +275,13 @@ void rvjit32_sltu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
     RVJIT_3REG_OP(rvjit32_native_sltu, rds, rs1, rs2);
 }
 
+void rvjit32_li(rvjit_block_t* block, regid_t rds, int32_t imm)
+{
+    if (rds == 0 && REGZERO_COND) return;
+    regid_t hrds = rvjit_map_reg(block, rds, REG_DST);
+    rvjit_native_setreg32(block, hrds, imm);
+}
+
 void rvjit_emit_call(rvjit_block_t* block, const void* funcaddr)
 {
     rvjit_save_all_regs(block);
