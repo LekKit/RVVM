@@ -169,6 +169,14 @@ void rvjit_emit_end(rvjit_block_t* block)
     regid_t hrds = rvjit_map_reg(block, rds, REG_DST); \
     native_func(block, hrds, hrs1, imm); }
 
+// Peephole optimization for cases like addi reg, zero, imm
+#define RVJIT_2REG_IMM_OPTIMIZE(rds, rs1, imm) \
+    if (rs1 == 0 && REGZERO_COND) { \
+        regid_t hrds = rvjit_map_reg(block, rds, REG_DST); \
+        rvjit_native_setreg32(block, hrds, imm); \
+        return; \
+    }
+
 void rvjit32_add(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 {
     RVJIT_3REG_OP(rvjit32_native_add, rds, rs1, rs2);
@@ -211,11 +219,13 @@ void rvjit32_sll(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
 
 void rvjit32_addi(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
+    RVJIT_2REG_IMM_OPTIMIZE(rds, rs1, imm);
     RVJIT_2REG_IMM_OP(rvjit32_native_addi, rds, rs1, imm);
 }
 
 void rvjit32_ori(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
+    RVJIT_2REG_IMM_OPTIMIZE(rds, rs1, imm);
     RVJIT_2REG_IMM_OP(rvjit32_native_ori, rds, rs1, imm);
 }
 
@@ -226,6 +236,7 @@ void rvjit32_andi(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 
 void rvjit32_xori(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
 {
+    RVJIT_2REG_IMM_OPTIMIZE(rds, rs1, imm);
     RVJIT_2REG_IMM_OP(rvjit32_native_xori, rds, rs1, imm);
 }
 
