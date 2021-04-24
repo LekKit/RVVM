@@ -36,6 +36,8 @@ static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* d
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.ie, dest, op, CSR_SEIP_MASK);
+    vm->ev_int = true;
+    vm->wait_event = 0;
     return true;
 }
 

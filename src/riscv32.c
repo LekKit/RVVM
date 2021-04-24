@@ -31,11 +31,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_mmu.h"
 #include "riscv32_csr.h"
 #include "mem_ops.h"
-#include "ns16550a.h"
-#include "clint.h"
 #include "threading.h"
 #include "spinlock.h"
-#include "x11window.h"
+
+#include "devices/ns16550a.h"
+#include "devices/clint.h"
+#include "devices/fb_window.h"
+#include "devices/plic.h"
+#include "devices/ps2-altera.h"
+#include "devices/ps2-mouse.h"
+#include "devices/ps2-keyboard.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -56,6 +61,7 @@ static spinlock_t global_lock;
 static riscv32_vm_state_t* global_vm_list[MAX_VMS] = {NULL};
 static size_t global_vm_count = 0;
 static thread_handle_t global_irq_thread;
+static struct fb_data global_screen;
 
 static void* global_irq_handler(void* arg)
 {
@@ -71,16 +77,23 @@ static void* global_irq_handler(void* arg)
             * but this doesn't matter - failing to deliver an event will
             * simply delay it, and sending a spurious event merely lowers performance
             */
-            vm->ev_int_mask = (1 << INTERRUPT_MTIMER);
+            vm->ev_int_mask |= (1 << INTERRUPT_MTIMER);
             vm->ev_int = true;
             vm->wait_event = 0;
         }
         spin_unlock(&global_lock);
-#ifdef USE_X11
-        update_fb();
-#endif
+        fb_update(&global_screen);
     }
     return arg;
+}
+
+void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
+{
+    spin_lock(&global_lock);
+    vm->ev_int_mask |= (1 << cause);
+    vm->ev_int = true;
+    vm->wait_event = 0;
+    spin_unlock(&global_lock);
 }
 
 static void register_vm(riscv32_vm_state_t *vm)
@@ -116,28 +129,6 @@ static void deregister_vm(riscv32_vm_state_t *vm)
     spin_unlock(&global_lock);
 }
 
-#ifdef USE_X11
-static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
-{
-    uint8_t* devptr = ((uint8_t*)device->data) + offset;
-    uint8_t* dataptr = (uint8_t*)data;
-    UNUSED(vm);
-    if (op == MMU_WRITE) {
-        for (size_t i=0; i<size; ++i) devptr[i] = dataptr[i];
-    } else {
-        for (size_t i=0; i<size; ++i) dataptr[i] = devptr[i];
-    }
-    return true;
-}
-
-static void init_fb(riscv32_vm_state_t* vm, uint32_t addr)
-{
-    char* tmp = malloc(640*480*4);
-    riscv32_mmio_add_device(vm, addr, addr + (640*480*4), fb_mmio_handler, tmp);
-    create_window(tmp, 640, 480, "RVVM");
-}
-#endif
-
 riscv32_vm_state_t *riscv32_create_vm()
 {
     static bool global_init = false;
@@ -165,9 +156,18 @@ riscv32_vm_state_t *riscv32_create_vm()
     riscv32_tlb_flush(vm);
     ns16550a_init(vm, 0x10000000);
     riscv32_mmio_add_device(vm, 0x2000000, 0x2010000, clint_mmio_handler, NULL);
-#ifdef USE_X11
-    init_fb(vm, 0x30000000);
-#endif
+
+    void *plic_data = plic_init(vm, 0x18000000);
+
+    static struct ps2_device ps2_mouse;
+    ps2_mouse = ps2_mouse_create();
+    altps2_init(vm, 0x20000000, plic_data, 1, &ps2_mouse);
+
+    static struct ps2_device ps2_keyboard;
+    ps2_keyboard = ps2_keyboard_create();
+    altps2_init(vm, 0x20001000, plic_data, 2, &ps2_keyboard);
+
+    init_fb(vm, &global_screen, 640, 480, 0x30000000, &ps2_mouse, &ps2_keyboard);
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;
