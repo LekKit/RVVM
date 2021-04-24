@@ -31,15 +31,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_mmu.h"
 #include "riscv32_csr.h"
 #include "mem_ops.h"
-#include "ns16550a.h"
-#include "clint.h"
 #include "threading.h"
 #include "spinlock.h"
-#include "fb_window.h"
-#include "plic.h"
-#include "ps2-altera.h"
-#include "ps2-mouse.h"
-#include "ps2-keyboard.h"
+
+#include "devices/ns16550a.h"
+#include "devices/clint.h"
+#include "devices/fb_window.h"
+#include "devices/plic.h"
+#include "devices/ps2-altera.h"
+#include "devices/ps2-mouse.h"
+#include "devices/ps2-keyboard.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
