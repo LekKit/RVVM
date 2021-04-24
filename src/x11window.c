@@ -14,180 +14,186 @@
 #include <unistd.h>
 #include <stdint.h>
 
-#include "x11window.h"
+#include "fb_window.h"
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"
 #include "x11keymap.h"
 
-static Display* dsp = NULL;
-static Window window;
-static GC gc;
-XImage* ximage;
-
-static struct x11_data in_data;
-static char* local_data;
-
-void create_window(struct x11_data* data, int width, int height, const char* name)
+struct x11_data
 {
-    dsp = XOpenDisplay(NULL);
-    if (!dsp) {
-        printf("Could not open a connection to the X server\n");
-        return;
-    }
+	Display* dsp;
+	Window window;
+	GC gc;
+	XImage* ximage;
+	char* local_data;
+};
 
-    in_data = *data;
-    local_data = in_data.data;//malloc(4*width*height);
+void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
+{
+	struct x11_data *xdata = malloc(sizeof(struct x11_data));
+	data->winsys_data = xdata;
+	xdata->dsp = XOpenDisplay(NULL);
+	if (!xdata->dsp) {
+		printf("Could not open a connection to the X server\n");
+		return;
+	}
 
-    XSetWindowAttributes attributes = {
+	xdata->local_data = data->framebuffer;//malloc(4*width*height);
+
+	XSetWindowAttributes attributes = {
 	    //.event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
 	    .backing_store = NotUseful
-    };
-    window = XCreateWindow(dsp, DefaultRootWindow(dsp),
-            0, 0, width, height, 0,
-            DefaultDepth(dsp, XDefaultScreen(dsp)),
-            InputOutput, CopyFromParent, CWBackingStore, &attributes);
+	};
+	xdata->window = XCreateWindow(xdata->dsp, DefaultRootWindow(xdata->dsp),
+	        0, 0, width, height, 0,
+	        DefaultDepth(xdata->dsp, XDefaultScreen(xdata->dsp)),
+	        InputOutput, CopyFromParent, CWBackingStore, &attributes);
 
-    XStoreName(dsp, window, name);
-    XSelectInput(dsp, window, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
-    XkbSetDetectableAutoRepeat(dsp, false, NULL); /* disable key auto repeat */
-    XMapWindow(dsp, window);
+	XStoreName(xdata->dsp, xdata->window, name);
+	XSelectInput(xdata->dsp, xdata->window, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
+	XkbSetDetectableAutoRepeat(xdata->dsp, false, NULL); /* disable key auto repeat */
+	XMapWindow(xdata->dsp, xdata->window);
 
-    XGCValues xgcvalues = {
+	XGCValues xgcvalues = {
 	    .graphics_exposures = False
-    };
-    gc = XCreateGC(dsp, window, GCGraphicsExposures, &xgcvalues);
+	};
+	xdata->gc = XCreateGC(xdata->dsp, xdata->window, GCGraphicsExposures, &xgcvalues);
 
-    ximage = XCreateImage(dsp, XDefaultVisual(dsp, XDefaultScreen(dsp)),
-                        DefaultDepth(dsp, XDefaultScreen(dsp)), ZPixmap, 0,
-                        in_data.data, width, height, 8, 0);
+	xdata->ximage = XCreateImage(xdata->dsp, XDefaultVisual(xdata->dsp, XDefaultScreen(xdata->dsp)),
+	        DefaultDepth(xdata->dsp, XDefaultScreen(xdata->dsp)), ZPixmap, 0,
+	        data->framebuffer, width, height, 8, 0);
 
-    XSync(dsp, False);
+	XSync(xdata->dsp, False);
 }
 
-void close_window()
+void fb_close_window(struct fb_data *data)
 {
-    XFreeGC(dsp, gc);
-    XDestroyWindow(dsp, window);
-    XCloseDisplay(dsp);
+	struct x11_data *xdata = data->winsys_data;
+	XFreeGC(xdata->dsp, xdata->gc);
+	XDestroyWindow(xdata->dsp, xdata->window);
+	XCloseDisplay(xdata->dsp);
 }
 
 static void r5g6b5_to_r8g8b8(const void* _in, void* _out, size_t length)
 {
-    const uint8_t* in = (uint8_t*)_in;
-    uint8_t* out = (uint8_t*)_out;
-    for (size_t i=0; i<length; ++i) {
-        uint8_t r5 = in[i*2] & 31;
-        uint8_t g6 = ((in[i*2] >> 5) | (in[i*2 + 1] << 3)) & 63;
-        uint8_t b5 = in[i*2 + 1] >> 3;
+	const uint8_t* in = (uint8_t*)_in;
+	uint8_t* out = (uint8_t*)_out;
+	for (size_t i=0; i<length; ++i) {
+		uint8_t r5 = in[i*2] & 31;
+		uint8_t g6 = ((in[i*2] >> 5) | (in[i*2 + 1] << 3)) & 63;
+		uint8_t b5 = in[i*2 + 1] >> 3;
 
-        out[i*4] = (r5 << 3) | (r5 >> 2);
-        out[i*4 + 1] = (g6 << 2) | (g6 >> 4);
-        out[i*4 + 2] = (b5 << 3) | (b5 >> 2);
-        out[i*4 + 3] = 0;
-    }
+		out[i*4] = (r5 << 3) | (r5 >> 2);
+		out[i*4 + 1] = (g6 << 2) | (g6 >> 4);
+		out[i*4 + 2] = (b5 << 3) | (b5 >> 2);
+		out[i*4 + 3] = 0;
+	}
 }
 
-void update_fb()
+void fb_update(struct fb_data *data)
 {
-    if (!dsp || !ximage) return;
-    //r5g6b5_to_r8g8b8(in_data, local_data, ximage->width*ximage->height);
-    XPutImage(dsp, window, gc, ximage, 0, 0, 0, 0, ximage->width, ximage->height);
-    XSync(dsp, False);
+	struct x11_data *xdata = data->winsys_data;
 
-    static struct mouse_btns btns;
-    static int x, y;
+	if (!xdata->dsp || !xdata->ximage) return;
+	UNUSED(r5g6b5_to_r8g8b8);
+	//r5g6b5_to_r8g8b8(in_data, local_data, ximage->width*ximage->height);
+	XPutImage(xdata->dsp, xdata->window, xdata->gc, xdata->ximage, 0, 0, 0, 0, xdata->ximage->width, xdata->ximage->height);
+	XSync(xdata->dsp, False);
 
-    int xcur = 0, ycur = 0;
-    for (int pending = XPending(dsp); pending != 0; --pending)
-    {
-	    XEvent ev;
-	    XNextEvent(dsp, &ev);
-	    if (ev.type == ButtonPress)
-	    {
-		    if (ev.xbutton.button == Button1)
-		    {
-			    btns.left = true;
-		    }
-		    else if (ev.xbutton.button == Button2)
-		    {
-			    btns.middle = true;
-		    }
-		    else if (ev.xbutton.button == Button3)
-		    {
-			    btns.right = true;
-		    }
-	    }
-	    else if (ev.type == ButtonRelease)
-	    {
-		    if (ev.xbutton.button == Button1)
-		    {
-			    btns.left = false;
-		    }
-		    else if (ev.xbutton.button == Button2)
-		    {
-			    btns.middle = false;
-		    }
-		    else if (ev.xbutton.button == Button3)
-		    {
-			    btns.right = false;
-		    }
-	    }
-	    else if (ev.type == MotionNotify)
-	    {
-		    xcur += ev.xmotion.x - x;
-		    ycur += -(ev.xmotion.y - y);
-		    x = ev.xmotion.x;
-		    y = ev.xmotion.y;
-	    }
-	    else if (ev.type == KeyPress)
-	    {
-		    KeySym keysym = XkbKeycodeToKeysym(dsp, ev.xkey.keycode, 0, 0);
-		    struct key k = x11keysym2makecode(keysym);
+	static struct mouse_btns btns;
+	static int x, y;
+
+	int xcur = 0, ycur = 0;
+	for (int pending = XPending(xdata->dsp); pending != 0; --pending)
+	{
+		XEvent ev;
+		XNextEvent(xdata->dsp, &ev);
+		if (ev.type == ButtonPress)
+		{
+			if (ev.xbutton.button == Button1)
+			{
+				btns.left = true;
+			}
+			else if (ev.xbutton.button == Button2)
+			{
+				btns.middle = true;
+			}
+			else if (ev.xbutton.button == Button3)
+			{
+				btns.right = true;
+			}
+		}
+		else if (ev.type == ButtonRelease)
+		{
+			if (ev.xbutton.button == Button1)
+			{
+				btns.left = false;
+			}
+			else if (ev.xbutton.button == Button2)
+			{
+				btns.middle = false;
+			}
+			else if (ev.xbutton.button == Button3)
+			{
+				btns.right = false;
+			}
+		}
+		else if (ev.type == MotionNotify)
+		{
+			xcur += ev.xmotion.x - x;
+			ycur += -(ev.xmotion.y - y);
+			x = ev.xmotion.x;
+			y = ev.xmotion.y;
+		}
+		else if (ev.type == KeyPress)
+		{
+			KeySym keysym = XkbKeycodeToKeysym(xdata->dsp, ev.xkey.keycode, 0, 0);
+			struct key k = x11keysym2makecode(keysym);
 #if 0
-		    printf("keysym pressed: %04x code ", (uint16_t)keysym);
-		    for (size_t i = 0; i < k.len; ++i)
-		    {
-			    printf("%02x ", k.keycode[i]);
-		    }
-		    printf("\n");
+			printf("keysym pressed: %04x code ", (uint16_t)keysym);
+			for (size_t i = 0; i < k.len; ++i)
+			{
+				printf("%02x ", k.keycode[i]);
+			}
+			printf("\n");
 #endif
-		    ps2_handle_keyboard(in_data.keyboard, &k, true);
-	    }
-	    else if (ev.type == KeyRelease)
-	    {
-		    if (pending > 1)
-		    {
-			    XEvent nev;
-			    XPeekEvent(dsp, &nev);
-			    if (nev.type == KeyPress
-					    && nev.xkey.time == ev.xkey.time
-					    && nev.xkey.keycode == ev.xkey.keycode)
-			    {
-				    /* skip the fake key press/release event */
-				    XNextEvent(dsp, &nev);
-				    --pending;
-				    continue;
-			    }
-		    }
+			ps2_handle_keyboard(data->keyboard, &k, true);
+		}
+		else if (ev.type == KeyRelease)
+		{
+			if (pending > 1)
+			{
+				XEvent nev;
+				XPeekEvent(xdata->dsp, &nev);
+				if (nev.type == KeyPress
+						&& nev.xkey.time == ev.xkey.time
+						&& nev.xkey.keycode == ev.xkey.keycode)
+				{
+					/* skip the fake key press/release event */
+					XNextEvent(xdata->dsp, &nev);
+					--pending;
+					continue;
+				}
+			}
 
-		    KeySym keysym = XkbKeycodeToKeysym(dsp, ev.xkey.keycode, 0, 0);
-		    struct key k = x11keysym2makecode(keysym);
+			KeySym keysym = XkbKeycodeToKeysym(xdata->dsp, ev.xkey.keycode, 0, 0);
+			struct key k = x11keysym2makecode(keysym);
 #if 0
-		    printf("keysym released: %04x code ", (uint16_t)keysym);
-		    for (size_t i = 0; i < k.len; ++i)
-		    {
-			    printf("%02x ", k.keycode[i]);
-		    }
-		    printf("\n");
+			printf("keysym released: %04x code ", (uint16_t)keysym);
+			for (size_t i = 0; i < k.len; ++i)
+			{
+				printf("%02x ", k.keycode[i]);
+			}
+			printf("\n");
 #endif
-		    ps2_handle_keyboard(in_data.keyboard, &k, false);
-	    }
+			ps2_handle_keyboard(data->keyboard, &k, false);
+		}
 
-    }
+	}
 
-    //if (xcur != 0 && ycur != 0) printf("motion x: %d y: %d\n", xcur, ycur);
-    ps2_handle_mouse(in_data.mouse, xcur, ycur, &btns);
-    ps2_handle_keyboard(in_data.keyboard, NULL, false);
+	//if (xcur != 0 && ycur != 0) printf("motion x: %d y: %d\n", xcur, ycur);
+	ps2_handle_mouse(data->mouse, xcur, ycur, &btns);
+	ps2_handle_keyboard(data->keyboard, NULL, false);
 }
 
 #endif
