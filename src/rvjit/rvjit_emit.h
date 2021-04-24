@@ -40,5 +40,9 @@ void rvjit32_xori(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 void rvjit32_srai(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 void rvjit32_srli(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 void rvjit32_slli(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
+void rvjit32_slti(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
+void rvjit32_sltiu(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
+void rvjit32_slt(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_sltu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 
 #endif

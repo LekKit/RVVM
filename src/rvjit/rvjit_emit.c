@@ -244,6 +244,26 @@ void rvjit32_slli(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
     RVJIT_2REG_IMM_OP(rvjit32_native_slli, rds, rs1, imm);
 }
 
+void rvjit32_slti(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
+{
+    RVJIT_2REG_IMM_OP(rvjit32_native_slti, rds, rs1, imm);
+}
+
+void rvjit32_sltiu(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)
+{
+    RVJIT_2REG_IMM_OP(rvjit32_native_sltiu, rds, rs1, imm);
+}
+
+void rvjit32_slt(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
+{
+    RVJIT_3REG_OP(rvjit32_native_slt, rds, rs1, rs2);
+}
+
+void rvjit32_sltu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2)
+{
+    RVJIT_3REG_OP(rvjit32_native_sltu, rds, rs1, rs2);
+}
+
 void rvjit_emit_call(rvjit_block_t* block, const void* funcaddr)
 {
     rvjit_save_all_regs(block);
