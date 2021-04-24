@@ -87,6 +87,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define X86_SRL       0xE8
 #define X86_SRA       0xF8
 
+#define X86_CMP_IMM   0xF8
+#define X86_CMP       0x39
+
+#define X86_SETB      0x92
+#define X86_SETL      0x9C
+
 static inline size_t rvjit_native_default_hregmask()
 {
 #ifdef RVJIT_NATIVE_64BIT
@@ -199,6 +205,20 @@ static inline void rvjit_x86_shift_op(rvjit_block_t* block, uint8_t opcode, regi
         code[2] += reg;
     }
     rvjit_put_code(block, code + (bits_64 ? 0 : 1), 2 + (bits_64 ? 1 : 0) + (imm ? 1 : 0));
+}
+
+// Set lower 8 bits of native register to specific cmp result
+static inline void rvjit_x86_setcc(rvjit_block_t* block, uint8_t opcode, regid_t reg)
+{
+    uint8_t code[4];
+    code[0] = X64_REX_B;
+    code[1] = 0x0F;
+    code[2] = opcode;
+    code[3] = 0xC0 + reg;
+    if (reg < X64_R8)
+        rvjit_put_code(block, code+1, 3);
+    else
+        rvjit_put_code(block, code, 4);
 }
 
 // Copy data from native register src to dest
@@ -487,6 +507,34 @@ static inline void rvjit32_native_slli(rvjit_block_t* block, regid_t hrds, regid
     rvjit_x86_2reg_imm_shift_op(block, X86_SLL, hrds, hrs1, imm, false);
 }
 
+static inline void rvjit32_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
+    rvjit_x86_setcc(block, X86_SETL, hrds);
+}
+
+static inline void rvjit32_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
+    rvjit_x86_setcc(block, X86_SETB, hrds);
+}
+
+static inline void rvjit32_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, false);
+    rvjit_x86_setcc(block, X86_SETL, hrds);
+}
+
+static inline void rvjit32_native_sltu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, false);
+    rvjit_x86_setcc(block, X86_SETB, hrds);
+}
+
 /*
  * RV64
  */
@@ -618,6 +666,34 @@ static inline void rvjit64_native_slliw(rvjit_block_t* block, regid_t hrds, regi
 {
     rvjit_x86_2reg_imm_shift_op(block, X86_SLL, hrds, hrs1, imm, false);
     rvjit_x86_movsxd(block, hrds, hrds);
+}
+
+static inline void rvjit64_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
+    rvjit_x86_setcc(block, X86_SETL, hrds);
+}
+
+static inline void rvjit64_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
+    rvjit_x86_setcc(block, X86_SETB, hrds);
+}
+
+static inline void rvjit64_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, true);
+    rvjit_x86_setcc(block, X86_SETL, hrds);
+}
+
+static inline void rvjit64_native_sltu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_native_zero_reg(block, hrds);
+    rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, true);
+    rvjit_x86_setcc(block, X86_SETB, hrds);
 }
 #endif
 
