@@ -67,7 +67,7 @@ struct ps2_mouse
 	enum ps2_mouse_mode mode;
 	enum ps2_mouse_state state;
 	uint8_t resolution; // in pow2, e.g. 2 means multiply by 4
-	uint8_t rate; // in samples per second; unused for now
+	uint8_t rate; // in samples per second
 	bool reporting; // data reporting enabled; needed for STATUS command
 
 	struct ringbuf cmdbuf;
