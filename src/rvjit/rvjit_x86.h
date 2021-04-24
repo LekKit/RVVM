@@ -239,6 +239,29 @@ static inline void rvjit_x86_movsxd(rvjit_block_t* block, regid_t dest, regid_t 
     rvjit_x86_2reg_op(block, X86_MOVSXD, dest, src, true);
 }
 
+// Zero-extend data from 8-bit src to full register
+static inline void rvjit_x86_movzxb(rvjit_block_t* block, regid_t dest, regid_t src)
+{
+    uint8_t code[4];
+    code[0] = 0;
+    code[1] = 0x0F;
+    code[2] = 0xB6;
+    code[3] = 0xC0;
+    if (src >= X64_R8) {
+        code[0] |= X64_REX_R;
+        code[3] += (src - X64_R8) << 3;
+    } else {
+        code[3] += src << 3;
+    }
+    if (dest >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[3] += dest - X64_R8;
+    } else {
+        code[3] += dest;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
+}
+
 static inline void rvjit_x86_3reg_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
 {
     if (hrds == hrs1) {
@@ -509,30 +532,34 @@ static inline void rvjit32_native_slli(rvjit_block_t* block, regid_t hrds, regid
 
 static inline void rvjit32_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
     rvjit_x86_setcc(block, X86_SETL, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit32_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
     rvjit_x86_setcc(block, X86_SETB, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit32_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, false);
     rvjit_x86_setcc(block, X86_SETL, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit32_native_sltu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, false);
     rvjit_x86_setcc(block, X86_SETB, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 /*
@@ -670,30 +697,34 @@ static inline void rvjit64_native_slliw(rvjit_block_t* block, regid_t hrds, regi
 
 static inline void rvjit64_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
     rvjit_x86_setcc(block, X86_SETL, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit64_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
     rvjit_x86_setcc(block, X86_SETB, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit64_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, true);
     rvjit_x86_setcc(block, X86_SETL, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit64_native_sltu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
-    rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_2reg_op(block, X86_CMP, hrs1, hrs2, true);
     rvjit_x86_setcc(block, X86_SETB, hrds);
+    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
 }
 #endif
 
