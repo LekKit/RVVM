@@ -287,7 +287,7 @@ void rvjit_emit_call(rvjit_block_t* block, const void* funcaddr)
     rvjit_save_all_regs(block);
     regid_t tmp_reg = rvjit_claim_hreg(block);
     rvjit_native_push(block, VM_PTR_REG);
-    rvjit_native_setreg(block, tmp_reg, (uintptr_t)funcaddr);
+    rvjit_native_setregw(block, tmp_reg, (uintptr_t)funcaddr);
     rvjit_native_callreg(block, tmp_reg);
     rvjit_native_pop(block, VM_PTR_REG);
     rvjit_free_hreg(block, tmp_reg);

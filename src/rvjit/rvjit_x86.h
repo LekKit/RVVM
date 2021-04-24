@@ -333,31 +333,27 @@ static inline void rvjit_native_pop(rvjit_block_t* block, regid_t reg)
     }
 }
 
-// Set native register reg to imm
-static inline void rvjit_native_setreg(rvjit_block_t* block, regid_t reg, uintptr_t imm)
+// Set native register reg to zero-extended 32-bit imm
+static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, uint32_t imm)
 {
-    uint8_t code[10];
-#ifdef RVJIT_NATIVE_64BIT
-    code[0] = X64_REX_W; // movabsq
-    code[1] = X86_MOV_IMM + reg;
+    uint8_t code[6];
+    code[0] = 0;
+    code[1] = X86_MOV_IMM;
     if (reg >= X64_R8) {
         code[0] |= X64_REX_B;
-        code[1] -= X64_R8;
+        code[1] += reg - X64_R8;
+    } else {
+        code[1] += reg;
     }
-    write_uint64_le(code + 2, imm);
-    rvjit_put_code(block, code, 10);
-#else
-    code[0] = X86_MOV_IMM + reg;
-    write_uint32_le(code + 1, imm);
-    rvjit_put_code(block, code, 5);
-#endif
+    write_uint32_le(code + 2, imm);
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 6 : 5);
 }
 
 // Set native register reg to sign-extended 32-bit imm
-static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, int32_t imm)
+static inline void rvjit_native_setreg32s(rvjit_block_t* block, regid_t reg, int32_t imm)
 {
-    uint8_t code[7];
 #ifdef RVJIT_NATIVE_64BIT
+    uint8_t code[7];
     code[0] = X64_REX_W;
     code[1] = 0xC7;
     code[2] = 0xC0;
@@ -370,9 +366,25 @@ static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, int3
     write_uint32_le(code + 3, imm);
     rvjit_put_code(block, code, 7);
 #else
-    code[0] = X86_MOV_IMM + reg;
-    write_uint32_le(code + 1, imm);
-    rvjit_put_code(block, code, 5);
+    rvjit_native_setreg32(block, reg, imm);
+#endif
+}
+
+// Set native register reg to wide imm
+static inline void rvjit_native_setregw(rvjit_block_t* block, regid_t reg, uintptr_t imm)
+{
+#ifdef RVJIT_NATIVE_64BIT
+    uint8_t code[10];
+    code[0] = X64_REX_W; // movabsq
+    code[1] = X86_MOV_IMM + reg;
+    if (reg >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[1] -= X64_R8;
+    }
+    write_uint64_le(code + 2, imm);
+    rvjit_put_code(block, code, 10);
+#else
+    rvjit_native_setreg32(block, reg, imm);
 #endif
 }
 
