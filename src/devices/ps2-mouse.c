@@ -255,7 +255,7 @@ static bool ps2_cmd_status_req(struct ps2_mouse *dev)
 
 static bool ps2_cmd_set_resolution(struct ps2_mouse *dev)
 {
-	dev->state = STATE_SET_SAMPLE_RATE;
+	dev->state = STATE_SET_RESOLUTION;
 	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
 	return true;
 }
@@ -392,8 +392,8 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 		dev->btns = *btns;
 	}
 
-	// 4 counts/mm is the default, make it report original coordinates
-	int shift = 2 - dev->resolution;
+	// 8 counts/mm is the default in Linux, make it report original coordinates
+	int shift = 3 - dev->resolution;
 	int32_t newx, newy;
 	if (shift >= 0)
 	{
