@@ -276,7 +276,7 @@ static inline void rvjit_x86_3reg_shift_op(rvjit_block_t* block, uint8_t opcode,
  */
 static inline void rvjit_native_zero_reg(rvjit_block_t* block, regid_t reg)
 {
-    rvjit_x86_3reg_op(block, X86_XOR, reg, reg, reg, true);
+    rvjit_x86_3reg_op(block, X86_XOR, reg, reg, reg, false);
 }
 
 static inline void rvjit_native_ret(rvjit_block_t* block)
