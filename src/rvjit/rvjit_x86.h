@@ -532,18 +532,18 @@ static inline void rvjit32_native_slli(rvjit_block_t* block, regid_t hrds, regid
 
 static inline void rvjit32_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
     rvjit_x86_setcc(block, X86_SETL, hrds);
-    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
+    if (hrds == hrs1) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit32_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, false);
     rvjit_x86_setcc(block, X86_SETB, hrds);
-    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
+    if (hrds == hrs1) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit32_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
@@ -697,18 +697,18 @@ static inline void rvjit64_native_slliw(rvjit_block_t* block, regid_t hrds, regi
 
 static inline void rvjit64_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
     rvjit_x86_setcc(block, X86_SETL, hrds);
-    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
+    if (hrds == hrs1) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit64_native_sltiu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
 {
-    if (hrds != hrs1 && hrds != hrs2) rvjit_native_zero_reg(block, hrds);
+    if (hrds != hrs1) rvjit_native_zero_reg(block, hrds);
     rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, true);
     rvjit_x86_setcc(block, X86_SETB, hrds);
-    if (hrds == hrs1 || hrds == hrs2) rvjit_x86_movzxb(block, hrds, hrds);
+    if (hrds == hrs1) rvjit_x86_movzxb(block, hrds, hrds);
 }
 
 static inline void rvjit64_native_slt(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
