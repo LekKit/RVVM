@@ -77,7 +77,7 @@ DO_CXX = $(CXX) $(CXXFLAGS) $(TARGET_ARCH) -o $@ -c $<
 OBJDIR := $(BUILD_TYPE).$(OS).$(ARCH)
 
 # Generic sources
-SRC           := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.cpp)
+SRC           := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.cpp $(SRCDIR)/devices/*.c $(SRCDIR)/devices/*.cpp)
 OBJ_GENERIC32 := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.32.o)
 OBJ_GENERIC32 := $(OBJ_GENERIC32:$(SRCDIR)/%.cpp=$(OBJDIR)/%.32.o)
 OBJ_GENERIC64 := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
