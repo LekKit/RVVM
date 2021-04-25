@@ -43,9 +43,10 @@ static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* devic
 
 void init_fb(riscv32_vm_state_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard)
 {
-    data->framebuffer = malloc(width * height * 4);
+    uint32_t fb_size = width * height * 4;
+    data->framebuffer = malloc(fb_size);
     data->mouse = mouse;
     data->keyboard = keyboard;
-    riscv32_mmio_add_device(vm, addr, addr + (width * height * 4), fb_mmio_handler, data->framebuffer);
+    riscv32_mmio_add_device(vm, addr, addr + fb_size, fb_mmio_handler, data->framebuffer);
     fb_create_window(data, width, height, "RVVM");
 }
