@@ -157,7 +157,7 @@ riscv32_vm_state_t *riscv32_create_vm()
     ns16550a_init(vm, 0x10000000);
     riscv32_mmio_add_device(vm, 0x2000000, 0x2010000, clint_mmio_handler, NULL);
 
-    void *plic_data = plic_init(vm, 0x18000000);
+    void *plic_data = plic_init(vm, 0xC000000);
 
     static struct ps2_device ps2_mouse;
     ps2_mouse = ps2_mouse_create();
