@@ -79,11 +79,15 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
         if (!rvtimer_pending(&vm->timer)) vm->csr.ip &= ~(1 << INTERRUPT_MTIMER);
         // Check for external interrupts
         if (riscv32_handle_ip(vm, true)) return;
-        // Sleep before timer interrupt
-        while (!rvtimer_pending(&vm->timer)) {
+        /*
+        * Sleep before timer interrupt or external interrupt.
+        * External interrupts are dropping CPU executor to scheduler,
+        * where it gets ev_int flags and jumps into trap handler on it's own
+        */
+        while (!rvtimer_pending(&vm->timer) && vm->wait_event) {
             sleep_ms(1);
         }
-        vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+        if (rvtimer_pending(&vm->timer)) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
         riscv32_handle_ip(vm, true);
         return;
     }
