@@ -1,3 +1,21 @@
+/*
+elf_load.c - ELF loader
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #include <stdio.h>
 #include <string.h>
 
@@ -29,7 +47,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 		printf("Unable to read ELF file header of %s\n", path);
 		status = false;
 		goto err_fclose;
-		
+
 	}
 
 	size_t phdr_num = ehdr.e_phnum;
@@ -141,7 +159,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 		size_t pte1_start = vm->root_page_table + GET_VPN1(phdr.p_vaddr) * 4;
 		size_t pte1_count = GET_VPN1(phdr.p_memsz + bit_mask(22));//(page_count + gen_mask(10)) >> 10;
 		size_t page_count = (phdr.p_memsz + bit_mask(12)) >> 12;
-	
+
 		size_t pte = MMU_VALID_PTE
 			| MMU_PAGE_ACCESSED | MMU_PAGE_DIRTY /* optimize */
 			| MMU_READ * !!(phdr.p_flags & PF_R)

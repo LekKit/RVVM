@@ -1,3 +1,21 @@
+/*
+ps2-keyboard.c - PS2 Keyboard
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #include "ps2-altera.h"
 #include "ringbuf.h"
 #include "riscv32.h"
@@ -363,7 +381,7 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 			keycmd[4] = 0xF0;
 			keycmd[5] = key->keycode[1];
 			keylen = 6;
-		}		
+		}
 		else if (key->len == 8 && key->keycode[0] == 0xE1)
 		{
 			/* pause key, ignore */
@@ -384,4 +402,3 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
 	altps2_interrupt(ps2keyboard);
 }
-
