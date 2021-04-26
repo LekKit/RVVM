@@ -10,7 +10,7 @@ RISC-V CPU & System software implementation written in С
 - OpenSBI, custom firmwares boot and execute properly
 - Linux kernel boots!
 - Linux userspace works, interactive shell through UART
-- Framebuffer graphics, working Xorg
+- Framebuffer graphics, working Xorg with mouse & keyboard
 - Raw image mounted as rootfs
 
 ## What's done so far
@@ -27,31 +27,37 @@ RISC-V CPU & System software implementation written in С
 - DTB loading, passing to firmware/kernel
 - ELF kernel loading
 - Interrupts
-- Core-local interrupt controller, timers
-- [Somewhat WIP] Flash, framebuffer, RV64 CPU, JIT prototype
+- PLIC/CLIC, timers
+- PS2 Altera Controller, PS2 keyboard & mouse
+- Graphical framebuffer
+- [Somewhat WIP] Flash, RV64 CPU, JIT prototype
 
 ## Usage
 Currently builds on *nix systems using GNU Make. Actual code however is cross-platform and more build targets are going to be supported, including Windows, or even embedded systems.
 The bootrom.bin file is a user-provided raw binary, loaded at 0x80000000 address where it starts execution, and device.dtb is a DTB file containing description of the machine.
+You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
 make
 cd release.linux.x86_64
-./rvvm_x86_64 bootrom.bin -dtb=device.dtb
+./rvvm_x86_64 bootrom.bin -dtb=device.dtb -image=rootfs.img
 ```
 
 ## Our team
-- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32ICA ISA, interrupts & timer, privileged ISA, lots of fixes
+- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32/64ICMA ISA, interrupts & timer, privileged ISA, JIT, lots of fixes
 - **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
-- **cerg2010cerg2010**: ELF loading, important fixes and refactoring, initial RV64 work
+- **cerg2010cerg2010**: ELF loading, important fixes and refactoring, initial RV64 work, PLIC, PS2 controller & devices, XCB window backend
 - *Hoping to see more contributors here*
 
 ## TODO
 - Debug the available functionality and make sure it's conforming to the specs
-- Refactor the code; Make internal APIs usable for both 32 & 64 bit VMs
+- Improve MMU & TLB, allow their usage from JIT'ed code
 - Floating-point extensions
-- Mouse/keyboard
+- RV64-only instructions & MMU
+- Integrate JIT into the VM
+- Networking, sound?
 - Other peripherals
+- DTB generation
 - *A lot more...*
-- JIT? RV64? Userspace emulation?
+- Userspace emulation?
