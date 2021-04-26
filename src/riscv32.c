@@ -56,12 +56,14 @@ void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
 }
 
 #define MAX_VMS 256
+#define MAX_SCREENS 2
 
 static spinlock_t global_lock;
 static riscv32_vm_state_t* global_vm_list[MAX_VMS] = {NULL};
 static size_t global_vm_count = 0;
 static thread_handle_t global_irq_thread;
-static struct fb_data global_screen;
+static struct fb_data global_screens[MAX_SCREENS];
+static size_t global_screen_count = 0;
 
 static void* global_irq_handler(void* arg)
 {
@@ -82,7 +84,7 @@ static void* global_irq_handler(void* arg)
             vm->wait_event = 0;
         }
         spin_unlock(&global_lock);
-        fb_update(&global_screen);
+        fb_update(global_screens, global_screen_count);
     }
     return arg;
 }
@@ -167,7 +169,7 @@ riscv32_vm_state_t *riscv32_create_vm()
     ps2_keyboard = ps2_keyboard_create();
     altps2_init(vm, 0x20001000, plic_data, 2, &ps2_keyboard);
 
-    init_fb(vm, &global_screen, 640, 480, 0x30000000, &ps2_mouse, &ps2_keyboard);
+    init_fb(vm, &global_screens[global_screen_count++], 640, 480, 0x30000000, &ps2_mouse, &ps2_keyboard);
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer
     vm->mmu_virtual = false;
     vm->priv_mode = PRIVILEGE_MACHINE;

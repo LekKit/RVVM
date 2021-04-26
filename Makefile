@@ -6,12 +6,20 @@ SRCDIR   := src
 OS_UNAME := $(shell uname -s)
 ARCH     := $(shell uname -m)
 
+ifeq ($(USE_XCB),1)
+CFLAGS_X11 = -DUSE_X11 -DUSE_XCB
+LDFLAGS_X11 = -lxcb
+else
+CFLAGS_X11 = -DUSE_X11
+LDFLAGS_X11 = -lX11
+endif
+
 linux_PROGRAMEXT   :=
-linux_CFLAGS       := -pthread -DUSE_X11
-linux_LDFLAGS      := -pthread -lX11
+linux_CFLAGS       := -pthread $(CFLAGS_X11)
+linux_LDFLAGS      := -pthread $(LDFLAGS_X11)
 freebsd_PROGRAMEXT :=
-freebsd_CFLAGS     := -pthread -DUSE_X11
-freebsd_LDFLAGS    := -pthread -lX11
+freebsd_CFLAGS     := -pthread $(CFLAGS_X11)
+freebsd_LDFLAGS    := -pthread $(LDFLAGS_X11)
 windows_PROGRAMEXT := .exe
 windows_CFLAGS     :=
 windows_LDFLAGS    := -pthread
