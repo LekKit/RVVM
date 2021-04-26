@@ -50,7 +50,7 @@ VERSION := $(COMMIT)-$(BUILD_TYPE)
 # (but actually you just need to pass CC/CXX variable to make for this)
 clang_debug_CFLAGS       := -Og -ggdb
 #-fsanitize=undefined -fsanitize=address -fsanitize=thread
-clang_release_CFLAGS     := -O2 -flto
+clang_release_CFLAGS     := -Ofast -flto
 clang++_debug_CXXFLAGS   := $(clang_debug_CFLAGS)
 clang++_release_CXXFLAGS := $(clang_release_CFLAGS)
 
@@ -59,7 +59,7 @@ tcc_release_CFLAGS       := -O2
 # no tcc for C++ :(
 
 cc_debug_CFLAGS          := -Og -ggdb
-cc_release_CFLAGS        := -O2 -flto -fwhole-program
+cc_release_CFLAGS        := -O3 -flto
 c++_debug_CXXFLAGS       := $(cc_debug_CFLAGS)
 c++_release_CXXFLAGS     := $(cc_release_CFLAGS)
 
