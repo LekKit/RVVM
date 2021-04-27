@@ -30,27 +30,42 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
+#ifdef USE_XSHM
+#include <xcb/shm.h>
+#include <errno.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#endif
 
 struct x11_data
 {
 	struct mouse_btns btns;
 	int x, y;
-	uint8_t* local_data;
 	xcb_window_t win;
 	xcb_gcontext_t gc;
 	xcb_pixmap_t ximage;
 	uint16_t width;
 	uint16_t height;
 	uint8_t depth;
+	uint8_t *local_data;
+#ifdef USE_XSHM
+	struct {
+		char *shmaddr;
+		xcb_shm_seg_t shmseg;
+		uint32_t shmid;
+	} seginfo;
+#endif
 };
 
 static xcb_connection_t *connection = NULL;
-static int prefscreen;
+static const xcb_setup_t *setup = NULL;
+static xcb_screen_t *screen = NULL;
 static xcb_keysym_t *keycodemap = NULL;
 static int keycodemap_len; // in xcb_keysym_t
 static xcb_keycode_t min_keycode;
 static xcb_keycode_t max_keycode;
 static uint8_t keysyms_per_keycode;
+static uint8_t bpp;
 static size_t window_count;
 
 static void x11_update_keymap()
@@ -79,6 +94,57 @@ static void x11_update_keymap()
 	free(kbmap_ret);
 }
 
+static void* x11_xshm_init(struct x11_data *xdata)
+{
+#ifdef USE_XSHM
+	xcb_shm_query_version_reply_t * query_ver_reply = xcb_shm_query_version_reply(connection, xcb_shm_query_version(connection), NULL);
+	if (query_ver_reply == NULL)
+	{
+		/* extension is not supported, quit silently */
+		goto err;
+	}
+
+	free(query_ver_reply);
+
+	xdata->seginfo.shmid = shmget(IPC_PRIVATE, 4 * xdata->width * xdata->height , IPC_CREAT | 0777);
+	if ((int)xdata->seginfo.shmid < 0)
+	{
+
+		printf("Error in shmget, err %d\n", errno);
+		goto err;
+	}
+
+	xdata->seginfo.shmaddr = shmat(xdata->seginfo.shmid, NULL, 0);
+	if (xdata->seginfo.shmaddr == (void*) -1)
+	{
+		printf("Error in shmat, err %d\n", errno);
+		goto err_shmget;
+	}
+
+	xdata->seginfo.shmseg = xcb_generate_id(connection);
+	xcb_generic_error_t *err;
+	if ((err = xcb_request_check(connection, xcb_shm_attach_checked(connection, xdata->seginfo.shmseg, xdata->seginfo.shmid, false))))
+	{
+		printf("Error in xcb_shm_attach, err %d\n", err->error_code);
+		free(err);
+		goto err_shmat;
+	}
+
+	return xdata->seginfo.shmaddr;
+
+err_shmat:
+	shmdt(xdata->seginfo.shmaddr);
+err_shmget:
+	shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
+err:
+	xdata->seginfo.shmaddr = NULL;
+	return NULL;
+#else
+	UNUSED(xdata);
+	return NULL;
+#endif
+}
+
 void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
 {
 	++window_count;
@@ -86,34 +152,53 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	struct x11_data *xdata = malloc(sizeof(struct x11_data));
 	xcb_generic_error_t *err;
 	data->winsys_data = xdata;
-	xdata->local_data = (uint8_t*)data->framebuffer;//malloc(4 * width * height);
 
 	/* connect to the X server */
 	if (connection == NULL)
 	{
+		int prefscreen;
 		connection = xcb_connect(NULL, &prefscreen);
 		if (connection == NULL)
 		{
 			printf("Could not open a connection to the X server\n");
 			return;
 		}
-	}
 
-	/* get the prefrred screen */
-	const xcb_setup_t *setup = xcb_get_setup(connection);
-	xcb_screen_iterator_t scr_iter = xcb_setup_roots_iterator(setup);
-	for (int i = 0; i < prefscreen; ++i)
-	{
-		xcb_screen_next(&scr_iter);
-	}
-	xcb_screen_t *screen = scr_iter.data;
+		/* get the prefrred screen */
+		setup = xcb_get_setup(connection);
+		xcb_screen_iterator_t scr_iter = xcb_setup_roots_iterator(setup);
+		for (int i = 0; i < prefscreen; ++i)
+		{
+			xcb_screen_next(&scr_iter);
+		}
+		screen = scr_iter.data;
 
-	/* get keyboard mapping */
-	if (keycodemap == NULL)
-	{
-		min_keycode = setup->min_keycode;
-		max_keycode = setup->max_keycode;
-		x11_update_keymap();
+		/* get keyboard mapping */
+		if (keycodemap == NULL)
+		{
+			min_keycode = setup->min_keycode;
+			max_keycode = setup->max_keycode;
+			x11_update_keymap();
+		}
+
+		/* try to get the bits per pixel value */
+		for (xcb_format_iterator_t format_iter = xcb_setup_pixmap_formats_iterator(setup);
+				format_iter.rem;
+				xcb_format_next(&format_iter))
+		{
+			if (format_iter.data->depth == screen->root_depth)
+			{
+				bpp = format_iter.data->bits_per_pixel;
+				break;
+			}
+		}
+
+		if (bpp != 16 && bpp != 32)
+		{
+			printf("Error, bits per pixel value %d is not supported\n", bpp);
+			goto err;
+		}
+
 	}
 
 	/* create window */
@@ -157,15 +242,21 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		goto err;
 	}
 
-	/* create pixmap */
 	xdata->width = width;
 	xdata->height = height;
 	xdata->depth = screen->root_depth;
-	xdata->ximage = xcb_generate_id(connection);
-	if ((err = xcb_request_check(connection, xcb_create_pixmap_checked(connection, xdata->depth, xdata->ximage, xdata->win, width, height))))
+	xdata->local_data = x11_xshm_init(xdata);
+	if (xdata->local_data == NULL)
 	{
-		printf("Error in xcb_create_pixmap, code: %d\n", err->error_code);
-		goto err;
+		/* create pixmap */
+		xdata->local_data = malloc((bpp / 8) * width * height);
+		xdata->ximage = xcb_generate_id(connection);
+		if ((err = xcb_request_check(connection, xcb_create_pixmap_checked(connection, xdata->depth, xdata->ximage, xdata->win, width, height))))
+		{
+			printf("Error in xcb_create_pixmap, code: %d\n", err->error_code);
+			free(xdata->local_data);
+			goto err;
+		}
 	}
 
 	/* flush events */
@@ -173,6 +264,16 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	{
 		printf("Error initializing X11\n");
 		goto err;
+	}
+
+	/* allocate buffer for 32-bit image */
+	if (bpp != 32)
+	{
+		data->framebuffer = malloc(4 * width * height);
+	}
+	else
+	{
+		data->framebuffer = (char*)xdata->local_data;
 	}
 
 	return;
@@ -195,7 +296,25 @@ void fb_close_window(struct fb_data *data)
 		free(keycodemap);
 		keycodemap = NULL;
 	}
-	xcb_free_pixmap(connection, xdata->ximage);
+
+	if (bpp != 32)
+	{
+		free(data->framebuffer);
+	}
+
+#ifdef USE_XSHM
+	if (xdata->seginfo.shmaddr != NULL)
+	{
+		shmdt(xdata->seginfo.shmaddr);
+		shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
+		xcb_shm_detach(connection, xdata->seginfo.shmseg);
+	}
+	else
+#endif
+	{
+		free(xdata->local_data);
+		xcb_free_pixmap(connection, xdata->ximage);
+	}
 	xcb_free_gc(connection, xdata->gc);
 	xcb_destroy_window(connection, xdata->win);
 	if (--window_count == 0)
@@ -264,6 +383,37 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 	{
 		struct x11_data *xdata = all_data[i].winsys_data;
 		xcb_generic_error_t *err;
+
+		if (bpp != 32)
+		{
+			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->local_data, xdata->width * xdata->height);
+		}
+
+#ifdef USE_XSHM
+		if (xdata->seginfo.shmaddr != NULL)
+		{
+			if ((err = xcb_request_check(connection, xcb_shm_put_image_checked(connection,
+					xdata->win,
+					xdata->gc,
+					xdata->width,
+					xdata->height,
+					0, /* src_x */
+					0, /* src_y */
+					xdata->width,
+					xdata->height,
+					0, /* dst_x */
+					0, /* dst_y */
+					xdata->depth,
+					XCB_IMAGE_FORMAT_Z_PIXMAP,
+					false, /* send_event */
+					xdata->seginfo.shmseg,
+					0 /* offset */))))
+			{
+				printf("err in shm_put_image, code: %d\n", err->error_code);
+			}
+		}
+		else
+#endif
 		if ((err = xcb_request_check(connection, xcb_put_image_checked(connection,
 							XCB_IMAGE_FORMAT_Z_PIXMAP,
 							xdata->win,

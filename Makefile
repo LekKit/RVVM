@@ -9,9 +9,17 @@ ARCH     := $(shell uname -m)
 ifeq ($(USE_XCB),1)
 CFLAGS_X11 = -DUSE_X11 -DUSE_XCB
 LDFLAGS_X11 = -lxcb
+ifeq ($(USE_XSHM),1)
+CFLAGS_X11 += -DUSE_XSHM
+LDFLAGS_X11 += -lxcb-shm
+endif
 else
 CFLAGS_X11 = -DUSE_X11
 LDFLAGS_X11 = -lX11
+ifeq ($(USE_XSHM),1)
+CFLAGS_X11 += -DUSE_XSHM
+LDFLAGS_X11 += -lXext
+endif
 endif
 
 linux_PROGRAMEXT   :=
