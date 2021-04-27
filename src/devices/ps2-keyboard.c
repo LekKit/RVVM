@@ -337,7 +337,7 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	if (pressed)
 	{
 		/* no other key types are known... */
-		assert(makelen == 1 || makelen == 2 || makelen == 8);
+		assert(key->len == 1 || key->len == 2 || key->len == 8);
 
 		keylen = dev->lastkey.len = key->len * sizeof(key->keycode[0]) > KEY_SIZE
 			? KEY_SIZE
