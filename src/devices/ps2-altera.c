@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "plic.h"
 #include "ps2-altera.h"
+#include "spinlock.h"
 
 #define ALTERA_DATA 0
 #define ALTERA_CONTROL 4
@@ -34,6 +35,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 struct altps2
 {
 	struct ps2_device *child; // device bound to this IRQ port
+	spinlock_t lock;
 
 	// IRQ data
 	riscv32_vm_state_t *hart; // hart to send IRQ to
@@ -106,20 +108,26 @@ static bool altps2_mmio_handler_impl(riscv32_vm_state_t* vm, struct altps2* ps2p
 static bool altps2_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
 	struct altps2 *ps2port = device->data;
+	spin_lock(&ps2port->lock);
+	bool ret = false;
+
 	if ((size % 4 != 0) || (offset % 4 != 0))
 	{
 		// TODO: misalign
-		return false;
+		goto out;
 	}
 
 	for (size_t i = 0; i < size; i += 4) {
 		if (!altps2_mmio_handler_impl(vm, ps2port, offset + i, (uint32_t*)memory_data, access)) {
 			ps2port->error = 1;
-			return false;
+			goto out;
 		}
 	}
 
-	return true;
+	ret = true;
+out:
+	spin_unlock(&ps2port->lock);
+	return ret;
 }
 
 void altps2_init(riscv32_vm_state_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
@@ -133,10 +141,14 @@ void altps2_init(riscv32_vm_state_t *vm, uint32_t base_addr, void *intc_data, ui
 
 	child->port_data = ptr;
 
+	spin_init(&ptr->lock);
+
 	riscv32_mmio_add_device(vm, base_addr, base_addr + ALTERA_REG_SIZE, altps2_mmio_handler, ptr);
 }
 
-void altps2_interrupt(struct ps2_device *dev)
+// Send interrupt via PS/2 controller.
+// Unlocked version - call from MMIO handler (aka ps2_op)
+void altps2_interrupt_unlocked(struct ps2_device *dev)
 {
 	struct altps2 *ptr = (struct altps2 *)dev->port_data;
 	if (!ptr->irq_enabled)
@@ -146,4 +158,14 @@ void altps2_interrupt(struct ps2_device *dev)
 
 	ptr->irq_pending = true;
 	plic_send_irq(ptr->hart, ptr->intc_data, ptr->irq);
+}
+
+// Send interrupt via PS/2 controller.
+// Locked version - call from other threads
+void altps2_interrupt(struct ps2_device *dev)
+{
+	struct altps2 *ptr = (struct altps2 *)dev->port_data;
+	spin_lock(&ptr->lock);
+	altps2_interrupt_unlocked(dev);
+	spin_unlock(&ptr->lock);
 }

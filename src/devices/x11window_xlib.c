@@ -18,7 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #if defined(USE_X11) && !defined(USE_XCB)
-
 #include "riscv32.h"
 #include "fb_window.h"
 #include "ps2-mouse.h"
@@ -27,9 +26,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#ifdef USE_XSHM
 #include <X11/extensions/XShm.h>
-#include <X11/extensions/Xfixes.h>
-#include <X11/XKBlib.h>
+#include <errno.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#endif
 
 struct x11_data
 {
@@ -38,8 +40,10 @@ struct x11_data
 	int y;
 	Window window;
 	GC gc;
-	XImage* ximage;
-	char* local_data;
+	XImage *ximage;
+#ifdef USE_XSHM
+	XShmSegmentInfo seginfo;
+#endif
 };
 
 static Display *dsp = NULL;
@@ -48,6 +52,7 @@ static int min_keycode;
 static int max_keycode;
 static int keysyms_per_keycode;
 static size_t window_count;
+static int bpp;
 
 static void x11_update_keymap()
 {
@@ -59,6 +64,75 @@ static void x11_update_keymap()
 			min_keycode,
 			max_keycode - min_keycode + 1,
 			&keysyms_per_keycode);
+}
+
+static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned height)
+{
+#ifdef USE_XSHM
+	if (!XShmQueryExtension(dsp))
+	{
+		/* extension is not supported, quit silently */
+		goto err;
+	}
+
+	xdata->ximage = XShmCreateImage(dsp,
+			DefaultVisual(dsp, DefaultScreen(dsp)),
+			DefaultDepth(dsp, DefaultScreen(dsp)),
+			ZPixmap,
+			NULL,
+			&xdata->seginfo,
+			width,
+			height);
+	if (!xdata->ximage)
+	{
+		printf("Error in XShmCreateImage\n");
+		goto err;
+	}
+
+	xdata->seginfo.shmid = shmget(IPC_PRIVATE, (bpp / 8) * width * height, IPC_CREAT | 0777);
+	if (xdata->seginfo.shmid < 0)
+	{
+
+		printf("Error in shmget, err %d\n", errno);
+		goto err_image;
+	}
+
+	xdata->seginfo.shmaddr = xdata->ximage->data = shmat(xdata->seginfo.shmid, NULL, 0);
+	if (xdata->seginfo.shmaddr == (void*) -1)
+	{
+		printf("Error in shmat, err %d\n", errno);
+		goto err_shmget;
+	}
+
+	xdata->seginfo.readOnly = False;
+
+	if (!XShmAttach(dsp, &xdata->seginfo))
+	{
+		printf("Error in XShmAttach\n");
+		goto err_shmat;
+	}
+
+	if (bpp != 32)
+	{
+		return malloc(4 * width * height);
+	}
+	return xdata->seginfo.shmaddr;
+
+err_shmat:
+	shmdt(xdata->seginfo.shmaddr);
+err_shmget:
+	shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
+err_image:
+	XDestroyImage(xdata->ximage);
+err:
+	xdata->seginfo.shmaddr = NULL;
+	return NULL;
+#else
+	UNUSED(xdata);
+	UNUSED(width);
+	UNUSED(height);
+	return NULL;
+#endif
 }
 
 void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
@@ -74,15 +148,39 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 			printf("Could not open a connection to the X server\n");
 			return;
 		}
-	}
 
-	if (keycodemap == NULL)
-	{
-		XDisplayKeycodes(dsp, &min_keycode, &max_keycode);
-		x11_update_keymap();
-	}
+		if (keycodemap == NULL)
+		{
+			XDisplayKeycodes(dsp, &min_keycode, &max_keycode);
+			x11_update_keymap();
+		}
 
-	xdata->local_data = data->framebuffer;//malloc(4*width*height);
+		/* try to get the bits per pixel value */
+		int nfmts;
+		XPixmapFormatValues *fmts = XListPixmapFormats(dsp, &nfmts);
+		if (fmts == NULL)
+		{
+			/* no memory, go away */
+			return;
+		}
+
+		for (int i = 0; i < nfmts; ++i)
+		{
+			if (fmts[i].depth == DefaultDepth(dsp, DefaultScreen(dsp)))
+			{
+				bpp = fmts[i].bits_per_pixel;
+				break;
+			}
+		}
+
+		XFree(fmts);
+
+		if (bpp != 16 && bpp != 32)
+		{
+			printf("Error, depth %d is not supported\n", bpp);
+			return;
+		}
+	}
 
 	XSetWindowAttributes attributes = {
 	    .event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
@@ -103,9 +201,15 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 
 	xdata->gc = XCreateGC(dsp, xdata->window, 0, NULL);
 
-	xdata->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
-	        DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
-	        data->framebuffer, width, height, 8, 0);
+	data->framebuffer = x11_xshm_init(xdata, width, height);
+	if (data->framebuffer == NULL)
+	{
+		xdata->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
+			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
+			NULL, width, height, 8, 0);
+		xdata->ximage->data = malloc(xdata->ximage->bytes_per_line * xdata->ximage->height);
+		data->framebuffer = bpp != 32 ? malloc(4 * width * height) : xdata->ximage->data;
+	}
 
 	XSync(dsp, False);
 }
@@ -118,29 +222,35 @@ void fb_close_window(struct fb_data *data)
 		XFree(keycodemap);
 		keycodemap = NULL;
 	}
-	XDestroyImage(xdata->ximage);
+
+	if (bpp != 32)
+	{
+		free(data->framebuffer);
+	}
+
+#ifdef USE_XSHM
+	if (xdata->seginfo.shmaddr != NULL)
+	{
+		XShmDetach(dsp, &xdata->seginfo);
+		shmdt(xdata->seginfo.shmaddr);
+		shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
+		XDestroyImage(xdata->ximage);
+	}
+	else
+#endif
+	{
+		free(xdata->ximage->data);
+		xdata->ximage->data = NULL;
+		XDestroyImage(xdata->ximage);
+	}
+
 	XFreeGC(dsp, xdata->gc);
 	XDestroyWindow(dsp, xdata->window);
 	if (--window_count == 0)
 	{
 		XCloseDisplay(dsp);
 	}
-}
 
-static void r5g6b5_to_r8g8b8(const void* _in, void* _out, size_t length)
-{
-	const uint8_t* in = (uint8_t*)_in;
-	uint8_t* out = (uint8_t*)_out;
-	for (size_t i=0; i<length; ++i) {
-		uint8_t r5 = in[i*2] & 31;
-		uint8_t g6 = ((in[i*2] >> 5) | (in[i*2 + 1] << 3)) & 63;
-		uint8_t b5 = in[i*2 + 1] >> 3;
-
-		out[i*4] = (r5 << 3) | (r5 >> 2);
-		out[i*4 + 1] = (g6 << 2) | (g6 >> 4);
-		out[i*4 + 2] = (b5 << 3) | (b5 >> 2);
-		out[i*4 + 3] = 0;
-	}
 }
 
 #define GET_DATA_FOR_WINDOW(data, all_data, nfbs, event) \
@@ -172,9 +282,40 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			continue;
 		}
 
-		UNUSED(r5g6b5_to_r8g8b8);
-		//r5g6b5_to_r8g8b8(in_data, local_data, ximage->width*ximage->height);
-		XPutImage(dsp, xdata->window, xdata->gc, xdata->ximage, 0, 0, 0, 0, xdata->ximage->width, xdata->ximage->height);
+		if (bpp != 32)
+		{
+			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->ximage->data, xdata->ximage->width * xdata->ximage->height);
+		}
+
+#ifdef USE_XSHM
+		if (xdata->seginfo.shmaddr != NULL)
+		{
+			XShmPutImage(dsp,
+					xdata->window,
+					xdata->gc,
+					xdata->ximage,
+					0, /* src_x */
+					0, /* src_y */
+					0, /* dst_x */
+					0, /* dst_y */
+					xdata->ximage->width,
+					xdata->ximage->height,
+					False /* send_event */);
+		}
+		else
+#endif
+		{
+			XPutImage(dsp,
+					xdata->window,
+					xdata->gc,
+					xdata->ximage,
+					0, /* src_x */
+					0, /* src_y */
+					0, /* dst_x */
+					0, /* dst_y */
+					xdata->ximage->width,
+					xdata->ximage->height);
+		}
 	}
 
 	XSync(dsp, False);

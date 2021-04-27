@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "ps2-mouse.h"
 #include "rvtimer.h"
+#include "spinlock.h"
 
 /* The mouse is a state machine, see enum ps2_mouse_state */
 /* TODO: locking? */
@@ -89,6 +90,7 @@ struct ps2_mouse
 	bool reporting; // data reporting enabled; needed for STATUS command
 
 	struct ringbuf cmdbuf;
+	spinlock_t lock;
 };
 
 static int8_t ps2_scale_coord(enum ps2_mouse_scale scale, int8_t n)
@@ -298,6 +300,7 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 	if (is_write)
 	{
 		//printf("ps2 mice cmd sent: %02x\n", (int)*val);
+		spin_lock(&dev->lock);
 		bool ret = false;
 		switch (dev->state)
 		{
@@ -351,20 +354,24 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 		}
 
 out:
-		altps2_interrupt(ps2dev);
+		altps2_interrupt_unlocked(ps2dev);
+		spin_unlock(&dev->lock);
 		return ret;
 	}
 	else
 	{
+		spin_lock(&dev->lock);
 		size_t avail = dev->cmdbuf.consumed;
 		if (avail == 0)
 		{
 			*val = '\0';
-			return 0;
+			goto out2;
 		}
 
 		ringbuf_get_u8(&dev->cmdbuf, val);
 		//printf("ps2 mice cmd resp: %02x avail: %d\n", *val, (int)avail);
+out2:
+		spin_unlock(&dev->lock);
 		return (uint16_t)avail;
 	}
 }
@@ -378,6 +385,7 @@ struct ps2_device ps2_mouse_create()
 	/* big number is needed because it can overrun when interrupts aren't delivered
 	 * a long time */
 	ringbuf_create(&ptr->cmdbuf, 1024);
+	spin_init(&ptr->lock);
 	ps2_cmd_reset(ptr);
 
 	/* consume first ACK from command */
@@ -394,6 +402,7 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 	y = TRANSFORM_COORD(y);
 
 	struct ps2_mouse *dev = (struct ps2_mouse *)ps2mouse->data;
+	spin_lock(&dev->lock);
 
 	if (x == 0 && y == 0
 			&& (btns == NULL
@@ -402,7 +411,7 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 					&& btns->right == dev->btns.right)))
 	{
 		/* nothing to do */
-		return;
+		goto out;
 	}
 
 	if (btns)
@@ -442,12 +451,12 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 
 	if (dev->mode != MODE_STREAM || !dev->reporting)
 	{
-		return;
+		goto out;
 	}
 
 	if (!rvtimer_pending(&dev->sample_timer))
 	{
-		return;
+		goto out;
 	}
 
 	dev->sample_timer.time = 0;
@@ -456,4 +465,6 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);
 	altps2_interrupt(ps2mouse);
+out:
+	spin_unlock(&dev->lock);
 }
