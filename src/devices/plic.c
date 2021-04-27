@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 #include "bit_ops.h"
+#include "spinlock.h"
 
 #include "plic.h"
 
@@ -37,6 +38,7 @@ struct plic
 	uint32_t pending[SOURCE_MAX/8/4];
 	uint32_t enable[SOURCE_MAX/8/4][CTX_MAX];
 	uint32_t ctxflags[CTXFLAG_MAX][CTX_MAX];
+	spinlock_t lock;
 };
 
 static inline void set_int_pending(struct plic *plic, uint32_t x, bool val)
@@ -267,6 +269,8 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		return false;
 	}
 
+	spin_lock(&dev->lock);
+	bool ret = false;
 	if (offset < 0x1000)
 	{
 		/* interrupt priority */
@@ -275,7 +279,7 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		{
 			if (!plic_prio_handler(dev, offset + i, (uint32_t*)memory_data + i, access))
 			{
-				return false;
+				goto out;
 			}
 		}
 	}
@@ -288,14 +292,15 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		{
 			if (!plic_pending_handler(dev, offset + i, (uint32_t*)memory_data + i, access))
 			{
-				return false;
+				goto out;
 			}
 		}
 	}
 	else if (offset < 0x2000)
 	{
 		/* reserved, ignore */
-		return true;
+		ret = true;
+		goto out;
 	}
 	else if (offset < 0x1f2000)
 	{
@@ -306,14 +311,15 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		{
 			if (!plic_ie_handler(dev, offset + i, (uint32_t*)memory_data + i, access))
 			{
-				return false;
+				goto out;
 			}
 		}
 	}
 	else if (offset < 0x200000)
 	{
 		/* reserved, ignore */
-		return true;
+		ret = true;
+		goto out;
 	}
 	else if (offset < 0x4000000)
 	{
@@ -324,22 +330,26 @@ static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* dev
 		{
 			if (!plic_ctxflag_handler(vm, dev, offset + i, (uint32_t*)memory_data + i, access))
 			{
-				return false;
+				goto out;
 			}
 		}
 	}
 	else
 	{
 		/* wtf is this? */
-		return false;
+		goto out;
 	}
 
-	return true;
+	ret = true;
+out:
+	spin_unlock(&dev->lock);
+	return ret;
 }
 
 void* plic_init(riscv32_vm_state_t *vm, uint32_t base_addr)
 {
 	struct plic *ptr = calloc(1, sizeof (struct plic));
+	spin_init(&ptr->lock);
 	riscv32_mmio_add_device(vm, base_addr, base_addr + 0x4000000, plic_mmio_handler, ptr);
 	return ptr;
 }
@@ -352,6 +362,7 @@ void* plic_init(riscv32_vm_state_t *vm, uint32_t base_addr)
 bool plic_send_irq(riscv32_vm_state_t *vm, void *data, uint32_t id)
 {
 	struct plic *dev = (struct plic*)data;
+	spin_lock(&dev->lock);
 
 	assert(id != 0);
 	//printf("plic IRQ raise: %d\n", id);
@@ -385,5 +396,6 @@ bool plic_send_irq(riscv32_vm_state_t *vm, void *data, uint32_t id)
 #else
 	riscv32_interrupt(vm, INTERRUPT_SEXTERNAL);
 #endif
+	spin_unlock(&dev->lock);
 	return true;
 }

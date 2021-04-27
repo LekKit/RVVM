@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "rvtimer.h"
 #include "ps2-keyboard.h"
+#include "spinlock.h"
 
 /* Based on the ps2-mouse.c */
 /* TODO: locking? */
@@ -60,6 +61,7 @@ struct ps2_keyboard
 	// TODO: disable typematic, make, break keycodes
 
 	struct ringbuf cmdbuf;
+	spinlock_t lock;
 };
 
 static void ps2_set_sample_rate(struct ps2_keyboard *dev, uint8_t rate)
@@ -154,6 +156,7 @@ static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is
 	if (is_write)
 	{
 		//printf("ps2 kbd cmd sent: %02x\n", (int)*val);
+		spin_lock(&dev->lock);
 		bool ret = false;
 		switch (dev->state)
 		{
@@ -208,20 +211,24 @@ static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is
 		}
 
 out:
-		altps2_interrupt(ps2dev);
+		altps2_interrupt_unlocked(ps2dev);
+		spin_unlock(&dev->lock);
 		return ret;
 	}
 	else
 	{
+		spin_lock(&dev->lock);
 		size_t avail = dev->cmdbuf.consumed;
 		if (avail == 0)
 		{
 			*val = '\0';
-			return 0;
+			goto out2;
 		}
 
 		ringbuf_get_u8(&dev->cmdbuf, val);
 		//printf("ps2 kbd cmd resp: %02x avail: %d\n", *val, (int)avail);
+out2:
+		spin_unlock(&dev->lock);
 		return (uint16_t)avail;
 	}
 }
@@ -235,6 +242,7 @@ struct ps2_device ps2_keyboard_create()
 	/* big number is needed because it can overrun when interrupts aren't delivered
 	 * a long time */
 	ringbuf_create(&ptr->cmdbuf, 1024);
+	spin_init(&ptr->lock);
 	ps2_cmd_reset(ptr);
 
 	/* consume first ACK from command */
@@ -318,18 +326,19 @@ static void ps2_handle_typematic(struct ps2_device *ps2keyboard)
 // Set key to NULL to handle typematic repeat
 void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool pressed)
 {
+	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
+	spin_lock(&dev->lock);
+
 	if (key == NULL)
 	{
 		ps2_handle_typematic(ps2keyboard);
-		return;
+		goto out;
 	}
-
-	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
 
 	if (!dev->reporting)
 	{
 		/* key reporting is disabled */
-		return;
+		goto out;
 	}
 
 	uint8_t keycmd[KEY_SIZE];
@@ -385,7 +394,7 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		else if (key->len == 8 && key->keycode[0] == 0xE1)
 		{
 			/* pause key, ignore */
-			return;
+			goto out;
 		}
 		else
 		{
@@ -395,10 +404,12 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 				fprintf(stderr, "%02X ", key->keycode[i]);
 			}
 			fputs("\n", stderr);
-			return;
+			goto out;
 		}
 	}
 
 	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
 	altps2_interrupt(ps2keyboard);
+out:
+	spin_unlock(&dev->lock);
 }
