@@ -32,6 +32,7 @@ void riscv32_csr_init(uint32_t csr_id, const char *name, riscv32_csr_handler_t h
 bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
+    UNUSED(csr_id);
     UNUSED(dest);
     UNUSED(op);
     riscv32_debug_always(vm, "unimplemented csr %c!!!", csr_id);
