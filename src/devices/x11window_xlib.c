@@ -207,8 +207,8 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		xdata->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
 			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
 			NULL, width, height, 8, 0);
-		xdata->ximage->data = malloc(xdata->ximage->bytes_per_line * xdata->ximage->height);
-		data->framebuffer = bpp != 32 ? malloc(4 * width * height) : xdata->ximage->data;
+		xdata->ximage->data = malloc((size_t)xdata->ximage->bytes_per_line * xdata->ximage->height);
+		data->framebuffer = bpp != 32 ? malloc((size_t)4 * width * height) : xdata->ximage->data;
 	}
 
 	XSync(dsp, False);
@@ -284,7 +284,8 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 
 		if (bpp != 32)
 		{
-			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->ximage->data, xdata->ximage->width * xdata->ximage->height);
+			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->ximage->data,
+					(size_t)xdata->ximage->width * xdata->ximage->height);
 		}
 
 #ifdef USE_XSHM
