@@ -79,7 +79,7 @@ static const struct {
 	KEY(XK_Control_R, 0xE0, 0x14),
 	KEY(XK_Super_R, 0xE0, 0x27),
 	KEY(XK_Alt_R, 0xE0, 0x11),
-	/* wtf is APPS? If you know, here's the code: 0xE0 0x2F */
+	KEY(XK_Menu, 0xE0, 0x2F),
 	KEY(XK_Return, 0x5A),
 	KEY(XK_Escape, 0x76),
 	KEY(XK_F1, 0x05),
