@@ -31,10 +31,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "elf_load.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 
 typedef struct {
     const char* bootrom;
@@ -117,6 +121,20 @@ static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
     return true;
 }
 
+// Temporary implementation, we probably need some kind of abstraction over mmap/MapViewOfFile/VirtualAlloc
+#ifdef _WIN32
+static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+{
+    HANDLE hf = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, 3, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (!hf) {
+        printf("ERROR: Failed to open image %s\n", filename);
+        return;
+    }
+    HANDLE hm = CreateFileMappingA(hf, NULL, PAGE_READWRITE, 0, 0, NULL);
+    void* tmp = MapViewOfFile(hm, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+    riscv32_mmio_add_device(vm, addr, addr + GetFileSize(hf, NULL) - 1, flash_mmio_handler, tmp);
+}
+#else
 static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
 {
     int fd = open(filename, O_RDWR);
@@ -130,10 +148,17 @@ static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filena
     void* tmp = mmap(NULL, filesize, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     riscv32_mmio_add_device(vm, addr, addr + filesize - 1, flash_mmio_handler, tmp);
 }
+#endif
 
 int main(int argc, char** argv)
 {
     vm_args_t args = {0};
+#ifdef _WIN32
+    // let the vm be run by simple double-click, heh
+    args.dtb = "rvvm.dtb";
+    args.bootrom = "fw_payload.bin";
+    args.flash_image = "rootfs.img";
+#endif
     parse_args(argc, argv, &args);
     if (args.bootrom == NULL)
     {
