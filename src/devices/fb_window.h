@@ -33,14 +33,24 @@ struct fb_data
 void r5g6b5_to_r8g8b8(const void* _in, void* _out, size_t length);
 void init_fb(riscv32_vm_state_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard);
 
-#if defined(USE_X11)
+#if defined(USE_FB)
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name);
 void fb_close_window(struct fb_data *data);
 void fb_update(struct fb_data *data, size_t nfbs);
 #else
 /* dummy functions when no window system available */
-inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) { }
-inline void fb_close_window(struct fb_data *data) { }
-inline void fb_update(struct fb_data *data, size_t nfbs) { }
+inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) {
+    UNUSED(data);
+    UNUSED(width);
+    UNUSED(height);
+    UNUSED(name);
+}
+inline void fb_close_window(struct fb_data *data) {
+    UNUSED(data);
+}
+inline void fb_update(struct fb_data *data, size_t nfbs) {
+    UNUSED(data);
+    UNUSED(nfbs);
+}
 #endif
 #endif
