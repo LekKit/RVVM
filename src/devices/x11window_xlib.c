@@ -17,7 +17,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#if defined(USE_X11) && !defined(USE_XCB)
 #include "riscv32.h"
 #include "fb_window.h"
 #include "ps2-mouse.h"
@@ -457,5 +456,3 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 		ps2_handle_keyboard(all_data[i].keyboard, NULL, false);
 	}
 }
-
-#endif
