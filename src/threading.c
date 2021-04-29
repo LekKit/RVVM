@@ -30,20 +30,23 @@ thread_handle_t thread_create(void*(*func_name)(void*))
     thread_handle_t handle;
 #ifdef _WIN32
     handle = malloc(sizeof(HANDLE));
-    *(HANDLE*)handle = CreateThread(NULL, 0, func_name, NULL, 0, NULL);
+    if (handle) *(HANDLE*)handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func_name, NULL, 0, NULL);
 #else
     handle = malloc(sizeof(pthread_t));
-    pthread_create((pthread_t*)handle, NULL, func_name, NULL);
+    if (handle) pthread_create((pthread_t*)handle, NULL, func_name, NULL);
 #endif
     return handle;
 }
 
 void* thread_join(thread_handle_t handle)
 {
+    if (handle == NULL) return NULL;
     void* ret;
 #ifdef _WIN32
+    DWORD ltmp;
     WaitForSingleObject(*(HANDLE*)handle, INFINITE);
-    GetExitCodeThread(*(HANDLE*)handle, &ret);
+    GetExitCodeThread(*(HANDLE*)handle, &ltmp);
+    ret = (void*)ltmp;
 #else
     pthread_join(*(pthread_t*)handle, &ret);
 #endif
@@ -53,6 +56,7 @@ void* thread_join(thread_handle_t handle)
 
 void thread_kill(thread_handle_t handle)
 {
+    if (handle == NULL) return;
 #ifdef _WIN32
     TerminateThread(*(HANDLE*)handle, 0);
 #else
