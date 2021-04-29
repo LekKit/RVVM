@@ -1,178 +1,252 @@
 # Makefile :)
 NAME     := rvvm
 SRCDIR   := src
+#VERSION := 0.1-release
 
-# OS-specific configuration
+
+# Passed by mingw make
+ifeq ($(OS),Windows_NT)
+WIN_SET := 1
+NULL_STDERR := 2>nul
+OS := windows
+$(info Detected OS: Windows)
+
+# On windows there is a special way of detecting arch
+ifndef ARCH
+ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
+ARCH := x86_64
+else ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+ARCH := x86_64
+endif
+
+ifeq ($(PROCESSOR_ARCHITECTURE),x86)
+ARCH := i386
+endif
+endif
+
+endif
+
+
+# Detect unix-like OS by uname
+ifndef OS
+
+NULL_STDERR := 2>/dev/null
 OS_UNAME := $(shell uname -s)
-ARCH     := $(shell uname -m)
-
-ifeq ($(USE_XCB),1)
-CFLAGS_X11 = -DUSE_X11 -DUSE_XCB
-LDFLAGS_X11 = -lxcb
-ifeq ($(USE_XSHM),1)
-CFLAGS_X11 += -DUSE_XSHM
-LDFLAGS_X11 += -lxcb-shm
-endif
-else
-CFLAGS_X11 = -DUSE_X11
-LDFLAGS_X11 = -lX11
-ifeq ($(USE_XSHM),1)
-CFLAGS_X11 += -DUSE_XSHM
-LDFLAGS_X11 += -lXext
-endif
-endif
-
-linux_PROGRAMEXT   :=
-linux_CFLAGS       := -pthread $(CFLAGS_X11)
-linux_LDFLAGS      := -pthread $(LDFLAGS_X11)
-freebsd_PROGRAMEXT :=
-freebsd_CFLAGS     := -pthread $(CFLAGS_X11)
-freebsd_LDFLAGS    := -pthread $(LDFLAGS_X11)
-windows_PROGRAMEXT := .exe
-windows_CFLAGS     :=
-windows_LDFLAGS    := -pthread
-
 ifeq ($(OS_UNAME),Linux)
 OS := linux
-else ifeq ($(OS_UNAME),FreeBSD)
-OS := freebsd
+$(info Detected OS: Linux)
+else ifneq (,$(findstring BSD,$(OS_UNAME)))
+OS := bsd
+$(info Detected OS: BSD)
+else ifeq ($(OS_UNAME),Darwin)
+OS := darwin
+$(info Detected OS: Darwin/MacOS)
 else
-OS := windows
+OS := unknown
+$(warning [WARN] Unknown OS)
 endif
 
-# Optimization/debug configuration
-debug_CFLAGS   := -DDEBUG
-release_CFLAGS := -DNDEBUG
+else ifneq ($(WIN_SET),1)
+$(info Chosen OS: $(OS))
+endif
 
-ifeq ($(DEBUG),1)
-BUILD_TYPE := debug
+
+# Set up OS options
+ifeq ($(OS),windows)
+override CFLAGS += -mwindows -static
+PROGRAMEXT := .exe
 else
+override CFLAGS += -pthread
+endif
+
+
+# Detect compiler type
+CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
+ifneq (,$(findstring clang,$(CC_HELP)))
+CC_TYPE := clang
+$(info Detected compiler: LLVM Clang)
+else ifneq (,$(findstring gcc,$(CC_HELP)))
+CC_TYPE := gcc
+$(info Detected compiler: GCC)
+else
+CC_TYPE := unknown
+$(warning [WARN] Unknown compiler)
+endif
+
+
+# Detect target arch
+ifndef ARCH
+ifeq ($(CC_TYPE),gcc)
+ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))))
+else ifeq ($(CC_TYPE),clang)
+ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))))
+endif
+
+
+# This may fail on older compilers, fallback to host arch then
+ifndef ARCH
+ARCH := $(shell uname -m)
+endif
+$(info Target arch: $(ARCH))
+else
+endif
+
+
+# Set up compilation options
+ifeq ($(DEBUG),1)
+
+BUILD_TYPE := debug
+override CFLAGS += -DDEBUG -Og -ggdb
+
+else
+
 BUILD_TYPE := release
+override CFLAGS += -DNDEBUG
+ifeq ($(CC_TYPE),gcc)
+override CFLAGS += -O3 -flto
+else ifeq ($(CC_TYPE),clang)
+override CFLAGS += -Ofast -flto
+else
+# Whatever compiler that might be, lets not enable aggressive optimizations
+override CFLAGS += -O2
+endif
+
 endif
 
 # Version string
-COMMIT  := $(firstword $(shell git rev-parse --short=6 HEAD) unknown)
-VERSION := $(COMMIT)-$(BUILD_TYPE)
+ifndef VERSION
+VERSION := git-$(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)-$(BUILD_TYPE)
+endif
 
-# Choose compiler
-# (but actually you just need to pass CC/CXX variable to make for this)
-clang_debug_CFLAGS       := -Og -ggdb
-#-fsanitize=undefined -fsanitize=address -fsanitize=thread
-clang_release_CFLAGS     := -Ofast -flto
-clang++_debug_CXXFLAGS   := $(clang_debug_CFLAGS)
-clang++_release_CXXFLAGS := $(clang_release_CFLAGS)
+$(info RVVM $(VERSION))
 
-tcc_debug_CFLAGS         := -Og -ggdb
-tcc_release_CFLAGS       := -O2
-# no tcc for C++ :(
+# Target-dependant sources
+SRC_deplist := $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c
 
-cc_debug_CFLAGS          := -Og -ggdb
-cc_release_CFLAGS        := -O3 -flto
-c++_debug_CXXFLAGS       := $(cc_debug_CFLAGS)
-c++_release_CXXFLAGS     := $(cc_release_CFLAGS)
+# Default build configuration
+USE_FB ?= 1
+USE_XCB ?= 0
+USE_RV64 ?= 0
+USE_JIT ?= 0
 
-ifeq ($(CLANG),1)
-CC  := clang
-CXX := clang++
-else ifeq ($(TCC),1)
-CC  := tcc
+ifeq ($(USE_FB),1)
+override CFLAGS += -DUSE_FB
+ifeq ($(OS),windows)
+SRC_depbuild += $(SRCDIR)/devices/win32window.c
+override LDFLAGS += -lgdi32
 else
-CC  := cc
-CXX := c++
+ifeq ($(USE_XCB),1)
+SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xcb.c
+override CFLAGS += -DUSE_X11 -DUSE_XCB
+override LDFLAGS += -lxcb
+else
+SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xlib.c
+override CFLAGS += -DUSE_X11
+override LDFLAGS += -lX11
+endif
+endif
+endif
+
+ifeq ($(USE_RV64),1)
+# All 64-bit arches have 64 in name
+ifneq (,$(findstring 64,$(ARCH)))
+override CFLAGS += -DUSE_RV64
+else
+USE_RV64 = 0
+endif
+endif
+
+ifeq ($(USE_JIT),1)
+# Not the best way of checking x86, but it'll do for now
+ifneq (,$(findstring 86,$(ARCH)))
+SRC_depbuild += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
+override CFLAGS += -DUSE_RVJIT
+else
+USE_JIT = 0
+endif
 endif
 
 # Generic compiler flags
-BASE_CFLAGS := -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I. -I$(SRCDIR)
-CFLAGS   += -std=gnu11 $(BASE_CFLAGS) $($(OS)_CFLAGS) $($(BUILD_TYPE)_CFLAGS) $($(CC)_$(BUILD_TYPE)_CFLAGS)
-CXXFLAGS += -std=gnu++17 $(BASE_CFLAGS) $($(OS)_CFLAGS) $($(BUILD_TYPE)_CFLAGS) $($(CXX)_$(BUILD_TYPE)_CXXFLAGS)
-LDFLAGS  += $($(OS)_LDFLAGS)
+override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
 
-DO_CC  = $(CC) $(CFLAGS) $(TARGET_ARCH) -o $@ -c $<
-DO_CXX = $(CXX) $(CXXFLAGS) $(TARGET_ARCH) -o $@ -c $<
+DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 
 OBJDIR := $(BUILD_TYPE).$(OS).$(ARCH)
 
-# Generic sources
-SRC           := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.cpp $(SRCDIR)/devices/*.c $(SRCDIR)/devices/*.cpp)
-OBJ_GENERIC32 := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.32.o)
-OBJ_GENERIC32 := $(OBJ_GENERIC32:$(SRCDIR)/%.cpp=$(OBJDIR)/%.32.o)
-OBJ_GENERIC64 := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
-OBJ_GENERIC64 := $(OBJ_GENERIC64:$(SRCDIR)/%.cpp=$(OBJDIR)/%.64.o)
+# Select sources to compile
+SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
+# Wipe all platform/config-dependant sources
+SRC := $(filter-out $(SRC_deplist),$(SRC))
+# Put only needed sources to list
+SRC += $(SRC_depbuild)
+OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 # Rules to build CPU object files for different architectures
-SRC_CPU   := $(wildcard $(SRCDIR)/cpu/*.c $(SRCDIR)/cpu/*.cpp)
+SRC_CPU   := $(wildcard $(SRCDIR)/cpu/*.c)
 OBJ_CPU32 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.32.o)
-OBJ_CPU32 := $(OBJ_CPU32:$(SRCDIR)/%.cpp=$(OBJDIR)/%.32.o)
+ifeq ($(USE_RV64),1)
 OBJ_CPU64 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
-OBJ_CPU64 := $(OBJ_CPU64:$(SRCDIR)/%.cpp=$(OBJDIR)/%.64.o)
-SRC += $(SRC_CPU)
+endif
 
 # Make directory if we need to.
 # This is really ugly, the proper solution would be a dependency on
 # an object file directory, but unfortunately we can't do that :(
 MKDIR_FOR_TARGET = @mkdir -p $(@D)
 
-# RV64
+# RV64 CPU
 $(OBJDIR)/%.64.o: $(SRCDIR)/%.c Makefile
 	$(MKDIR_FOR_TARGET)
+	$(info CC $<)
 	$(DO_CC) -DRV64
 
-$(OBJDIR)/%.64.o: $(SRCDIR)/%.cpp Makefile
-	$(MKDIR_FOR_TARGET)
-	$(DO_CXX) -DRV64
-
-# RV32 (no defines)
+# RV32 CPU
 $(OBJDIR)/%.32.o: $(SRCDIR)/%.c Makefile
 	$(MKDIR_FOR_TARGET)
+	$(info CC $<)
 	$(DO_CC)
 
-$(OBJDIR)/%.32.o: $(SRCDIR)/%.cpp Makefile
-	$(MKDIR_FOR_TARGET)
-	$(DO_CXX)
-
-# Default rules for generic code (should not be used, left just in case)
+# Any normal code
 $(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
 	$(MKDIR_FOR_TARGET)
+	$(info CC $<)
 	$(DO_CC)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
-	$(MKDIR_FOR_TARGET)
-	$(DO_CXX)
-
 DEPEND   := $(OBJDIR)/Rules.depend
-TARGET   := $(OBJDIR)/$(NAME)_$(ARCH)$($(OS)_PROGRAMEXT)
-TARGET64 := $(OBJDIR)/$(NAME)64_$(ARCH)$($(OS)_PROGRAMEXT)
+TARGET   := $(OBJDIR)/$(NAME)_$(ARCH)$(PROGRAMEXT)
 
 .PHONY: all
-all: $(TARGET) #$(TARGET64)
+all: $(TARGET)
 
-$(TARGET): $(DEPEND) $(OBJ_GENERIC32) $(OBJ_CPU32)
-	$(CC) $(CFLAGS) $(OBJ_GENERIC32) $(OBJ_CPU32) $(LDFLAGS) -o $@
-
-$(TARGET64): $(DEPEND) $(OBJ_GENERIC64) $(OBJ_CPU32) $(OBJ_CPU64)
-	$(CC) $(CFLAGS) $(OBJ_GENERIC64) $(OBJ_CPU32) $(OBJ_CPU64) $(LDFLAGS) -o $@
+$(TARGET): $(DEPEND) $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64)
+	$(info LD $@)
+	@$(CC) $(CFLAGS) $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64) $(LDFLAGS) -o $@
 
 .PHONY: neat
 neat: $(OBJDIR)
 
 $(OBJDIR):
-	mkdir -p $(OBJDIR)
+	@mkdir -p $(OBJDIR)
 
 .PHONY: clean
 clean: depend
-	-rm -f $(OBJDIR)/*.so
-	-rm -f $(OBJ_GENERIC32)
-	-rm -f $(OBJ_GENERIC64)
-	-rm -f $(OBJ_CPU32)
-	-rm -f $(OBJ_CPU64)
-	-rm -f $(TARGET) $(TARGET64)
-	-rm -f $(OBJDIR)/Rules.depend
-	-find $(OBJDIR)/ -depth -type d -exec rmdir {} +
+	@-rm -f $(OBJDIR)/*.so
+	@-rm -f $(OBJ)
+	@-rm -f $(OBJ_CPU32)
+	@-rm -f $(OBJ_CPU64)
+	@-rm -f $(TARGET)
+	@-rm -f $(OBJDIR)/Rules.depend
+#	@-find $(OBJDIR)/ -depth -type d -exec rmdir {} +
 
 .PHONY: depend
 depend: $(DEPEND)
 
+# If it fails, changing headers would not result in rebuilt sources.
+# Currently it's not properly working for CPU sources,
+# because rule "riscv_cpu.o" is not working on "riscv_cpu.64.o" target.
+# Ironically, was completely broken before makefile rework
+# Also may break on systems without GNU sed...
 $(OBJDIR)/Rules.depend: $(SRC) | $(OBJDIR)
-	$(CC) -MM $(INCLUDE) $(SRC) $(CFLAGS) | sed "s;\(^[^         ]*\):\(.*\);$(OBJDIR)/\1:\2;" > $@
+	@$(CC) -MM $(SRC) $(CFLAGS) $(NULL_STDERR) | sed "s;\(^[^         ]*\):\(.*\);$(OBJDIR)/\1:\2;" > $@
 
-include $(OBJDIR)/Rules.depend
+
+sinclude $(OBJDIR)/Rules.depend
