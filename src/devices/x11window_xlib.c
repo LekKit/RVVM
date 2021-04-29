@@ -113,7 +113,7 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 
 	if (bpp != 32)
 	{
-		return malloc(4 * width * height);
+		return calloc(4, (size_t)width * height);
 	}
 	return xdata->seginfo.shmaddr;
 
@@ -138,7 +138,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 {
 	++window_count;
 
-	struct x11_data *xdata = malloc(sizeof(struct x11_data));
+	struct x11_data *xdata = calloc(1, sizeof(struct x11_data));
 	data->winsys_data = xdata;
 	if (dsp == NULL)
 	{
@@ -206,8 +206,12 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		xdata->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
 			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
 			NULL, width, height, 8, 0);
-		xdata->ximage->data = malloc((size_t)xdata->ximage->bytes_per_line * xdata->ximage->height);
-		data->framebuffer = bpp != 32 ? malloc((size_t)4 * width * height) : xdata->ximage->data;
+		xdata->ximage->data = calloc(xdata->ximage->bytes_per_line, xdata->ximage->height);
+        if (bpp != 32) {
+            data->framebuffer = calloc(4, (size_t)width * height);
+        } else {
+            data->framebuffer = xdata->ximage->data;
+        }
 	}
 
 	XSync(dsp, False);
