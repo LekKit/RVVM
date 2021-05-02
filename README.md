@@ -33,16 +33,28 @@ RISC-V CPU & System software implementation written in С
 - [Somewhat WIP] Flash, RV64 CPU, JIT prototype
 
 ## Usage
-Currently builds on *nix systems using GNU Make. Actual code however is cross-platform and more build targets are going to be supported, including Windows, or even embedded systems.
-The bootrom.bin file is a user-provided raw binary, loaded at 0x80000000 address where it starts execution, and device.dtb is a DTB file containing description of the machine.
-You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
+Currently builds using GNU Make and tested on Linux and Windows systems. Actual code however is cross-platform and more build targets are going to be supported.
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
 make
 cd release.linux.x86_64
+```
+To cross-compile, pass CC=target-gcc and OS=target-os if the target OS differs from your host to make. You can configure the build with use flags
+
+Examples:
+```
+make CC=x86_64-w64-mingw32-gcc OS=windows
+make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0
+```
+
+Running:
+```
 ./rvvm_x86_64 bootrom.bin -dtb=device.dtb -image=rootfs.img
 ```
+The bootrom.bin file is a user-provided raw binary, loaded at 0x80000000 address where it starts execution, and device.dtb is a DTB file containing description of the machine.
+You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
+
 
 ## Our team
 - **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32/64ICMA ISA, interrupts & timer, privileged ISA, JIT, lots of fixes
@@ -52,6 +64,8 @@ cd release.linux.x86_64
 
 ## TODO
 - Debug the available functionality and make sure it's conforming to the specs
+- Proper MMU atomicity, fence, native AMO
+- Multicore support (already works but the kernel races and crashes sometimes)
 - Improve MMU & TLB, allow their usage from JIT'ed code
 - Floating-point extensions
 - RV64-only instructions & MMU
