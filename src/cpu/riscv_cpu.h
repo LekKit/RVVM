@@ -61,8 +61,6 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, 
 #define HIDDEN
 #endif
 
-typedef uint8_t regid_t;
-
 #ifdef RV64
     typedef uint64_t xlen_t;
     typedef int64_t sxlen_t;
