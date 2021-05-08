@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void riscv32_mmu_dump(riscv32_vm_state_t *vm)
 {
-	printf("root page table at: 0x%"PRIx32"\n", vm->root_page_table);
+	printf("root page table at: 0x%"PRIxXLEN"\n", vm->root_page_table);
 
 	if (!vm->root_page_table || vm->root_page_table < vm->mem.begin || vm->root_page_table >= vm->mem.begin + vm->mem.size)
 	{
