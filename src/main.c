@@ -103,7 +103,7 @@ void parse_args(int argc, char** argv, vm_args_t* args)
         } else if (strcmp(argv[i], "--linux") == 0) {
     		args->is_linux = true;
         } else {
-            args->bootrom = argv[i];
+             args->bootrom = argv[i];
         }
     }
 }
