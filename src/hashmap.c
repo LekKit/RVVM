@@ -30,6 +30,10 @@ void hashmap_init(hashmap_t* map, size_t size)
 void hashmap_destroy(hashmap_t* map)
 {
     free(map->buckets);
+    /*
+    
+    ВНДРЕЙ ГДЕ АВА С ВАРВИКОМ??
+    */
 }
 
 void hashmap_realloc(hashmap_t* map, size_t key, size_t val)
