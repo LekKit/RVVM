@@ -138,11 +138,21 @@ else
 ifeq ($(USE_XCB),1)
 SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xcb.c
 override CFLAGS += -DUSE_X11 -DUSE_XCB
+ifeq ($(OS),darwin)
+override CFLAGS += $(shell pkg-config xcb --cflags)
+override LDFLAGS += $(shell pkg-config xcb --libs)
+else
 override LDFLAGS += -lxcb
+endif
 else
 SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_X11
+ifeq ($(OS),darwin)
+override CFLAGS += $(shell pkg-config x11 --cflags)
+override LDFLAGS += $(shell pkg-config x11 --libs)
+else
 override LDFLAGS += -lX11
+endif
 endif
 endif
 endif
