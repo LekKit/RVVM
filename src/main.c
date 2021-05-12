@@ -245,7 +245,7 @@ int main(int argc, char** argv)
 #ifdef USE_FLASH
 	    init_flash(vm, 0x40000000, args.flash_image);
 #else
-	    FILE *fp = fopen(args.flash_image, "rw+");
+	    FILE *fp = fopen(args.flash_image, "rb+");
 	    if (fp == NULL) {
 		    printf("Unable to open image file %s\n", args.flash_image);
 	    } else {
