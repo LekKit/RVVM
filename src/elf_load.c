@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 
-#ifndef _WIN32
+#if !defined _WIN32 && !defined __APPLE__
 
 #include <elf.h>
 

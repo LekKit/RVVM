@@ -16,10 +16,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <stdio.h>
-#include <malloc.h>
-#include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
 
@@ -249,7 +245,7 @@ int main(int argc, char** argv)
 #ifdef USE_FLASH
 	    init_flash(vm, 0x40000000, args.flash_image);
 #else
-	    FILE *fp = fopen(args.flash_image, "rw+");
+	    FILE *fp = fopen(args.flash_image, "rb+");
 	    if (fp == NULL) {
 		    printf("Unable to open image file %s\n", args.flash_image);
 	    } else {

@@ -27,7 +27,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <string.h>
 #include <xcb/xcb.h>
+/* No xcb-icccm in libxcb homebrew package */
+#ifndef __APPLE__
 #include <xcb/xcb_icccm.h>
+#endif
 #ifdef USE_XSHM
 #include <xcb/shm.h>
 #include <errno.h>
@@ -223,6 +226,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 			XCB_CW_EVENT_MASK,
 			crwin_values);
 	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, xdata->win, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, strlen(name), name);
+#ifndef __APPLE__
 	xcb_size_hints_t hints = {
 		.flags = XCB_ICCCM_SIZE_HINT_P_MAX_SIZE | XCB_ICCCM_SIZE_HINT_P_MIN_SIZE,
 		.min_width = width, .min_height = height,
@@ -230,6 +234,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	};
 	//xcb_icccm_set_wm_normal_hints(connection, xdata->win, &hints);
 	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, xdata->win, XCB_ATOM_WM_NORMAL_HINTS, XCB_ATOM_WM_SIZE_HINTS, 32, sizeof(hints) >> 2, &hints);
+#endif
 	xcb_map_window(connection, xdata->win);
 
 	/* create graphics context */
