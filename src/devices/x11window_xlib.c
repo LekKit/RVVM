@@ -142,6 +142,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	data->winsys_data = xdata;
 	if (dsp == NULL)
 	{
+		init_keycodes();
 		dsp = XOpenDisplay(NULL);
 		if (dsp == NULL) {
 			printf("Could not open a connection to the X server\n");
@@ -393,7 +394,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					if (data == NULL) break;
 
 					KeySym keysym = keycodemap[(ev.xkey.keycode - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym pressed: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)
@@ -427,7 +428,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					}
 
 					KeySym keysym = keycodemap[(ev.xkey.keycode - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym released: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)

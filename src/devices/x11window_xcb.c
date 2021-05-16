@@ -27,10 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <string.h>
 #include <xcb/xcb.h>
-/* No xcb-icccm in libxcb homebrew package */
-#ifndef __APPLE__
 #include <xcb/xcb_icccm.h>
-#endif
 #ifdef USE_XSHM
 #include <xcb/shm.h>
 #include <errno.h>
@@ -157,6 +154,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	/* connect to the X server */
 	if (connection == NULL)
 	{
+		init_keycodes();
 		int prefscreen;
 		connection = xcb_connect(NULL, &prefscreen);
 		if (connection == NULL)
@@ -226,7 +224,6 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 			XCB_CW_EVENT_MASK,
 			crwin_values);
 	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, xdata->win, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, strlen(name), name);
-#ifndef __APPLE__
 	xcb_size_hints_t hints = {
 		.flags = XCB_ICCCM_SIZE_HINT_P_MAX_SIZE | XCB_ICCCM_SIZE_HINT_P_MIN_SIZE,
 		.min_width = width, .min_height = height,
@@ -234,7 +231,6 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	};
 	//xcb_icccm_set_wm_normal_hints(connection, xdata->win, &hints);
 	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, xdata->win, XCB_ATOM_WM_NORMAL_HINTS, XCB_ATOM_WM_SIZE_HINTS, 32, sizeof(hints) >> 2, &hints);
-#endif
 	xcb_map_window(connection, xdata->win);
 
 	/* create graphics context */
@@ -449,7 +445,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					if (data == NULL) break;
 
 					xcb_keysym_t keysym = keycodemap[(xkey->detail - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym pressed: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)
@@ -480,7 +476,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					}
 
 					xcb_keysym_t keysym = keycodemap[(xkey->detail - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym released: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)

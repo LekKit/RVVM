@@ -121,7 +121,7 @@ endif
 $(info RVVM $(VERSION))
 
 # Target-dependant sources
-SRC_deplist := $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c
+SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c
 
 # Default build configuration
 USE_FB ?= 1
@@ -136,23 +136,13 @@ SRC_depbuild += $(SRCDIR)/devices/win32window.c
 override LDFLAGS += -lgdi32
 else
 ifeq ($(USE_XCB),1)
-SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xcb.c
+SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
 override CFLAGS += -DUSE_X11 -DUSE_XCB
-ifeq ($(OS),darwin)
-override CFLAGS += $(shell pkg-config xcb --cflags)
-override LDFLAGS += $(shell pkg-config xcb --libs)
-else
 override LDFLAGS += -lxcb
-endif
 else
-SRC_depbuild += $(SRCDIR)/devices/x11keymap.c $(SRCDIR)/devices/x11window_xlib.c
+SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_X11
-ifeq ($(OS),darwin)
-override CFLAGS += $(shell pkg-config x11 --cflags)
-override LDFLAGS += $(shell pkg-config x11 --libs)
-else
 override LDFLAGS += -lX11
-endif
 endif
 endif
 endif
