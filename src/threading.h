@@ -20,8 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define THREADING_H
 
 typedef void* thread_handle_t;
+typedef void* (*thread_func_t)(void*);
 
-thread_handle_t thread_create(void*(*func_name)(void*));
+thread_handle_t thread_create(thread_func_t func, void *arg);
 void* thread_join(thread_handle_t handle);
 void thread_kill(thread_handle_t handle);
 
