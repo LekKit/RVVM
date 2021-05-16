@@ -15,6 +15,7 @@
 #include <linux/sockios.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
+#include <linux/if_arp.h>
 #include <poll.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -183,6 +184,30 @@ static bool tap_set_up(struct tap_dev *td, bool up) {
     return ioctl(td->_sockfd, SIOCSIFFLAGS, &ifr) >= 0;
 }
 
+static bool tap_get_mac(struct tap_dev *td, uint8_t mac[6]) {
+    struct ifreq ifr;
+    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
+    int err = ioctl(td->_fd, SIOCGIFHWADDR, &ifr);
+    if (err < 0) {
+        return false;
+    }
+
+    if (ifr.ifr_ifru.ifru_hwaddr.sa_family != ARPHRD_ETHER) {
+        return false;
+    }
+
+    memcpy(mac, ifr.ifr_ifru.ifru_hwaddr.sa_data, 6);
+    return true;
+}
+
+static bool tap_set_mac(struct tap_dev *td, uint8_t mac[6]) {
+    struct ifreq ifr;
+    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
+    ifr.ifr_ifru.ifru_hwaddr.sa_family = ARPHRD_ETHER;
+    memcpy(ifr.ifr_ifru.ifru_hwaddr.sa_data, mac, 6);
+    return ioctl(td->_fd, SIOCSIFHWADDR, &ifr) >= 0;
+}
+
 static int tap_open(const char* dev, struct tap_dev *ret)
 {
     int err;
@@ -229,12 +254,10 @@ err:
 }
 
 static ptrdiff_t tap_send(struct tap_dev *td, void *buf, size_t len) {
-    fflush(stdout);
     return write(td->_fd, buf, len);
 }
 
 static ptrdiff_t tap_recv(struct tap_dev *td, void *buf, size_t len) {
-    fflush(stdout);
     return read(td->_fd, buf, len);
 }
 
@@ -459,6 +482,10 @@ static bool ethoc_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_
             if (access == MMU_WRITE) {
                 /* Bits are cleared by writing 1 to them */
                 eth->int_src &= ~*data;
+
+                if ((eth->int_src & eth->int_mask) != 0) {
+                    plic_send_irq(eth->hart, eth->intc_data, eth->irq);
+                }
             } else {
                 *data = eth->int_src;
             }
@@ -466,6 +493,10 @@ static bool ethoc_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_
         case ETHOC_INT_MASK:
             if (access == MMU_WRITE) {
                 eth->int_mask = *data;
+
+                if ((eth->int_src & eth->int_mask) != 0) {
+                    plic_send_irq(eth->hart, eth->intc_data, eth->irq);
+                }
             } else {
                 *data = eth->int_mask;
             }
@@ -560,7 +591,9 @@ static bool ethoc_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_
                 eth->macaddr[4] = (*data >> 8) & 0xff;
                 eth->macaddr[3] = (*data >> 16) & 0xff;
                 eth->macaddr[2] = (*data >> 24) & 0xff;
+                tap_set_mac(&eth->pollev.dev, eth->macaddr);
             } else {
+                tap_get_mac(&eth->pollev.dev, eth->macaddr);
                 *data = eth->macaddr[5]
                     | eth->macaddr[4] << 8
                     | eth->macaddr[3] << 16
@@ -571,7 +604,9 @@ static bool ethoc_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_
             if (access == MMU_WRITE) {
                 eth->macaddr[1] = *data & 0xff;
                 eth->macaddr[0] = (*data >> 8) & 0xff;
+                tap_set_mac(&eth->pollev.dev, eth->macaddr);
             } else {
+                tap_get_mac(&eth->pollev.dev, eth->macaddr);
                 *data = eth->macaddr[1] | eth->macaddr[0] << 8;
             }
             break;
@@ -630,23 +665,22 @@ static void ethoc_pollevent(int poll_status, void *arg)
     if (poll_status & TAPPOLL_IN && eth->moder & ETHOC_MODER_RXEN) {
         /* Some data arrived */
         uint32_t prevbd = eth->cur_rxbd;
-        struct bd *bd = &eth->bdbuf[eth->cur_rxbd];
-        while (!(bd->data & ETHOC_RXBD_E))
-        {
+        struct bd *bd;
+        do {
+            bd = &eth->bdbuf[eth->cur_rxbd];
+
             if (bd->data & ETHOC_BD_WR || eth->cur_rxbd == ETHOC_BD_BUFSIZ / sizeof(struct bd)) {
                 eth->cur_rxbd = eth->tx_bd_num;
             } else {
                 ++eth->cur_rxbd;
             }
 
-            bd = &eth->bdbuf[eth->cur_rxbd];
-
             if (prevbd == eth->cur_rxbd) {
                 /* No free buffers when receiving a frame - ignore it.
                  * Hopefully it will be read later... */
                 goto err_read;
             }
-        }
+        } while (!(bd->data & ETHOC_RXBD_E));
 
         bd->data &= ~ETHOC_RXBD_E;
 
@@ -670,18 +704,13 @@ static void ethoc_pollevent(int poll_status, void *arg)
 
         //printf("rx bd: %d read: %zd\n", eth->cur_rxbd, read);
 
-	/* Certain packets (e.g. ARP) are less than MINFL value (64 bytes), so
-	 * linux kernel gets confused by this. Possibly we need to pad them? */
-
-#if 0
         if (read > (eth->packetlen & 0xffff)) {
             bd->data |= ETHOC_RXBD_TL;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
-        } else if (read < ((eth->packetlen >> 16) & 0xffff)) {
+        } else if (!(eth->moder & ETHOC_MODER_PAD) && !(eth->moder & ETHOC_MODER_RECSMALL) && read < ((eth->packetlen >> 16) & 0xffff)) {
             bd->data |= ETHOC_RXBD_SF;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
         }
-#endif
 
         if (bd->data & ETHOC_BD_IRQ) {
             ethoc_interrupt(eth, ETHOC_INT_RXB);
