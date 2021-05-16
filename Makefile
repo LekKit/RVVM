@@ -126,6 +126,7 @@ SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xli
 # Default build configuration
 USE_FB ?= 1
 USE_XCB ?= 0
+USE_XSHM ?= 1
 USE_RV64 ?= 0
 USE_JIT ?= 0
 
@@ -139,19 +140,33 @@ ifeq ($(USE_XCB),1)
 SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
 override CFLAGS += -DUSE_X11 -DUSE_XCB
 ifeq ($(OS),darwin)
-override CFLAGS += $(shell pkg-config xcb --cflags)
-override LDFLAGS += $(shell pkg-config xcb --libs)
+PKGCFG_LIST += xcb
 else
 override LDFLAGS += -lxcb
+endif
+ifeq ($(USE_XSHM),1)
+override CFLAGS += -DUSE_XSHM
+ifeq ($(OS),darwin)
+PKGCFG_LIST += xcb-shm
+else
+override LDFLAGS += -lxcb-shm
+endif
 endif
 else
 SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_X11
 ifeq ($(OS),darwin)
-override CFLAGS += $(shell pkg-config x11 --cflags)
-override LDFLAGS += $(shell pkg-config x11 --libs)
+PKGCFG_LIST += x11
 else
 override LDFLAGS += -lX11
+endif
+ifeq ($(USE_XSHM),1)
+override CFLAGS += -DUSE_XSHM
+ifeq ($(OS),darwin)
+PKGCFG_LIST += xext
+else
+override LDFLAGS += -lXext
+endif
 endif
 endif
 endif
@@ -174,6 +189,11 @@ override CFLAGS += -DUSE_RVJIT
 else
 USE_JIT = 0
 endif
+endif
+
+ifeq ($(OS),darwin)
+override CFLAGS += $(shell pkg-config $(PKGCFG_LIST) --cflags)
+override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
 endif
 
 # Generic compiler flags
