@@ -33,7 +33,7 @@ RISC-V CPU & System software implementation written in С
 - [Somewhat WIP] Flash, RV64 CPU, JIT prototype
 
 ## Usage
-Currently builds using GNU Make and tested on Linux and Windows systems. Actual code however is cross-platform and more build targets are going to be supported.
+Currently builds using GNU Make and tested on Linux, Windows and MacOS systems. More build targets are going to be supported.
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
