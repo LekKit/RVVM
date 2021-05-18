@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "riscv32_mmu.h"
 #include "riscv_cpu.h"
+#include "compiler.h"
 
 static inline uint32_t riscv_funcid(const uint32_t instr)
 {
