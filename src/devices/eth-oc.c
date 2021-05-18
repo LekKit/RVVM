@@ -1,3 +1,5 @@
+#ifdef USE_NET
+
 #include "bit_ops.h"
 #include "mem_ops.h"
 #include "riscv32.h"
@@ -6,20 +8,10 @@
 #include "plic.h"
 #include "threading.h"
 #include "spinlock.h"
+#include "tap.h"
 
 #include <string.h>
 #include <inttypes.h>
-
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/sockios.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
-#include <linux/if_arp.h>
-#include <poll.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 /* Device registers */
 #define ETHOC_MODER 0x00
@@ -130,209 +122,6 @@ struct bd
 
 /* BD register start address */
 #define ETHOC_BD_ADDR 0x400
-
-struct tap_dev {
-    int _fd;
-    int _sockfd; /* For stuff like setting the interface up */
-    char _ifname[IFNAMSIZ];
-};
-
-struct tap_pollevent_cb
-{
-    spinlock_t lock;
-    int (*pollevent_check)(void *arg);
-    void (*pollevent)(int poll_status, void *arg);
-    void *pollevent_arg;
-    struct tap_dev dev;
-
-    /* Private; used to wake up the poll thread for tx operation */
-    int _wakefds[2];
-};
-
-enum tap_poll_result
-{
-    TAPPOLL_IN = (1 << 0), /* New data available */
-    TAPPOLL_OUT = (1 << 1), /* Data can be sent again, or needs to be sent */
-    TAPPOLL_ERR = -1 /* Error occured */
-};
-
-static bool tap_is_up(struct tap_dev *td) {
-    struct ifreq ifr = { };
-    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
-    int err = ioctl(td->_sockfd, SIOCGIFFLAGS, &ifr);
-    if (err < 0) {
-        return false;
-    }
-
-    return !!(ifr.ifr_ifru.ifru_flags & IFF_UP);
-}
-
-static bool tap_set_up(struct tap_dev *td, bool up) {
-    struct ifreq ifr;
-    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
-    int err = ioctl(td->_sockfd, SIOCGIFFLAGS, &ifr);
-    if (err < 0) {
-        return false;
-    }
-
-    if (up) {
-        ifr.ifr_ifru.ifru_flags |= IFF_UP;
-    } else {
-        ifr.ifr_ifru.ifru_flags &= ~IFF_UP;
-    }
-
-    return ioctl(td->_sockfd, SIOCSIFFLAGS, &ifr) >= 0;
-}
-
-static bool tap_get_mac(struct tap_dev *td, uint8_t mac[6]) {
-    struct ifreq ifr;
-    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
-    int err = ioctl(td->_fd, SIOCGIFHWADDR, &ifr);
-    if (err < 0) {
-        return false;
-    }
-
-    if (ifr.ifr_ifru.ifru_hwaddr.sa_family != ARPHRD_ETHER) {
-        return false;
-    }
-
-    memcpy(mac, ifr.ifr_ifru.ifru_hwaddr.sa_data, 6);
-    return true;
-}
-
-static bool tap_set_mac(struct tap_dev *td, uint8_t mac[6]) {
-    struct ifreq ifr;
-    strncpy(ifr.ifr_ifrn.ifrn_name, td->_ifname, sizeof(ifr.ifr_ifrn.ifrn_name));
-    ifr.ifr_ifru.ifru_hwaddr.sa_family = ARPHRD_ETHER;
-    memcpy(ifr.ifr_ifru.ifru_hwaddr.sa_data, mac, 6);
-    return ioctl(td->_fd, SIOCSIFHWADDR, &ifr) >= 0;
-}
-
-static int tap_open(const char* dev, struct tap_dev *ret)
-{
-    int err;
-    if (dev == NULL) {
-        strncpy(ret->_ifname, "tap0", IFNAMSIZ);
-    } else {
-        strncpy(ret->_ifname, dev, IFNAMSIZ);
-    }
-
-    ret->_fd = open("/dev/net/tun", O_RDWR);
-    if (ret->_fd < 0) {
-        printf("/dev/net/tun open error\n");
-        err = ret->_fd;
-        goto err;
-    }
-
-    struct ifreq ifr = { };
-    strncpy(ifr.ifr_ifrn.ifrn_name, dev ? dev : "tap0", IFNAMSIZ);
-    ifr.ifr_ifru.ifru_flags = IFF_TAP | IFF_NO_PI;
-    err = ioctl(ret->_fd, TUNSETIFF, &ifr);
-    if (err < 0) {
-        printf("ioctl(TUNSETIFF) error %d\n", err);
-        goto err_close;
-    }
-
-    /* fd now describes the virtual interface */
-
-    /* Note: the device name may be different after the call above */
-    strncpy(ret->_ifname, ifr.ifr_ifrn.ifrn_name, sizeof(ret->_ifname));
-
-    /* Get the socket */
-    ret->_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (ret->_sockfd < 0) {
-        goto err_close;
-    }
-
-    /* Up the interface. Ignore errors since this is a privilleged operation */
-    tap_set_up(ret, true);
-    return 0;
-err_close:
-    close(ret->_fd);
-err:
-    return err;
-}
-
-static ptrdiff_t tap_send(struct tap_dev *td, void *buf, size_t len) {
-    return write(td->_fd, buf, len);
-}
-
-static ptrdiff_t tap_recv(struct tap_dev *td, void *buf, size_t len) {
-    return read(td->_fd, buf, len);
-}
-
-static int tap_poll(int fd, int wakefd, int req, int timeout)
-{
-    struct pollfd tapfd[2] = {
-        {
-            .fd = fd,
-        },
-        {
-            .fd = wakefd,
-            .events = POLLIN,
-        }
-    };
-
-    if (req & TAPPOLL_IN) {
-        tapfd[0].events |= POLLIN;
-    }
-
-    if (req & TAPPOLL_OUT) {
-        tapfd[0].events |= POLLOUT;
-    }
-
-    int pollret = poll(tapfd, 2, timeout);
-    if (pollret < 0) {
-        printf("poll error %d\n", pollret);
-        return TAPPOLL_ERR;
-    }
-
-    int ret = 0;
-    if (tapfd[0].revents & POLLIN) {
-        ret |= TAPPOLL_IN;
-    }
-
-    if (tapfd[0].revents & POLLOUT) {
-        ret |= TAPPOLL_OUT;
-    }
-
-    if (tapfd[1].revents & POLLIN) {
-        /* Clear the kernel FIFO */
-        char x;
-        read(tapfd[1].fd, &x, 1);
-
-        /* Actually we want to send something. Do not care if we'll block */
-        ret |= TAPPOLL_OUT;
-    }
-
-    if (ret == 0) {
-        /* timeout, possibly */
-        return pollret == 0 ? 0 : TAPPOLL_ERR;
-    }
-
-    return ret;
-}
-
-static void tap_wake(struct tap_pollevent_cb *pollev)
-{
-    char x = '\0';
-    write(pollev->_wakefds[1], &x, 1);
-}
-
-static void* tap_workthread(void *arg)
-{
-    struct tap_pollevent_cb *pollev = (struct tap_pollevent_cb *) arg;
-    while (1) {
-        int req = pollev->pollevent_check(pollev->pollevent_arg);
-        if (req == TAPPOLL_ERR) {
-            continue;
-        }
-
-        pollev->pollevent(tap_poll(pollev->dev._fd, pollev->_wakefds[0], req, 5000), pollev->pollevent_arg);
-    }
-
-    return NULL;
-}
 
 #define MII_REG_BMCR 0
 #define MII_REG_BMSR 1
@@ -803,13 +592,7 @@ void ethoc_init(riscv32_vm_state_t *vm, const char *tap_name, paddr_t regs_base_
     eth->irq = irq;
     eth->hart = vm;
 
-    struct tap_pollevent_cb *pollcb = &eth->pollev;
-    pollcb->pollevent_arg = (void*) eth;
-    pollcb->pollevent_check = ethoc_pollevent_check;
-    pollcb->pollevent = ethoc_pollevent;
-    if (pipe(pollcb->_wakefds) < 0)
-    {
-        printf("pipe failed\n");
+    if (!tap_pollevent_init(&eth->pollev, eth, ethoc_pollevent_check, ethoc_pollevent)) {
         goto err;
     }
 
@@ -818,8 +601,10 @@ void ethoc_init(riscv32_vm_state_t *vm, const char *tap_name, paddr_t regs_base_
 
     riscv32_mmio_add_device(vm, regs_base_addr, regs_base_addr + 0x800, ethoc_data_mmio_handler, eth);
 
-    thread_create(tap_workthread, pollcb);
+    thread_create(tap_workthread, &eth->pollev);
     return;
 err:
     free(eth);
 }
+
+#endif
