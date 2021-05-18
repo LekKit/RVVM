@@ -210,7 +210,12 @@ void* tap_workthread(void *arg)
             continue;
         }
 
-        pollev->pollevent(tap_poll(pollev->dev._fd, pollev->_wakefds[0], req, 5000), pollev->pollevent_arg);
+        req = tap_poll(pollev->dev._fd, pollev->_wakefds[0], req, -1);
+        if (req == TAPPOLL_ERR) {
+            continue;
+        }
+
+        pollev->pollevent(req, pollev->pollevent_arg);
     }
 
     return NULL;
