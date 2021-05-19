@@ -28,8 +28,6 @@ void r5g6b5_to_a8r8g8b8(const void* _in, void* _out, size_t length)
         uint8_t r5 = in[i*2] & 31;
         uint8_t g6 = ((in[i*2] >> 5) | (in[i*2 + 1] << 3)) & 63;
         uint8_t b5 = in[i*2 + 1] >> 3;
-	if (r5 || g6 || b5)
-		printf("OK SCREEN\n");
 
         out[i*4] = (r5 << 3) | (r5 >> 2);
         out[i*4 + 1] = (g6 << 2) | (g6 >> 4);
