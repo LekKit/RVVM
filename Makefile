@@ -129,6 +129,7 @@ USE_XCB ?= 0
 USE_XSHM ?= 1
 USE_RV64 ?= 0
 USE_JIT ?= 0
+USE_NET ?= 0
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB
@@ -189,6 +190,10 @@ override CFLAGS += -DUSE_RVJIT
 else
 USE_JIT = 0
 endif
+endif
+
+ifeq ($(USE_NET),1)
+override CFLAGS += -DUSE_NET
 endif
 
 ifeq ($(OS),darwin)

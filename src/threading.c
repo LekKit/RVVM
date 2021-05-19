@@ -25,15 +25,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <pthread.h>
 #endif
 
-thread_handle_t thread_create(void*(*func_name)(void*))
+thread_handle_t thread_create(thread_func_t func_name, void *arg)
 {
     thread_handle_t handle;
 #ifdef _WIN32
     handle = malloc(sizeof(HANDLE));
-    if (handle) *(HANDLE*)handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func_name, NULL, 0, NULL);
+    if (handle) *(HANDLE*)handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func_name, arg, 0, NULL);
 #else
     handle = malloc(sizeof(pthread_t));
-    if (handle) pthread_create((pthread_t*)handle, NULL, func_name, NULL);
+    if (handle) pthread_create((pthread_t*)handle, NULL, func_name, arg);
 #endif
     return handle;
 }

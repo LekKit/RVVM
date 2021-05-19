@@ -65,9 +65,23 @@ static void x11_update_keymap()
 			&keysyms_per_keycode);
 }
 
+#ifdef USE_XSHM
+static bool xerror = false;
+static int dummy_error_handler(Display *display, XErrorEvent *error)
+{
+	UNUSED(display);
+	UNUSED(error);
+	xerror = true;
+	return 0;
+}
+#endif
+
 static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned height)
 {
 #ifdef USE_XSHM
+	/* Workaround of ugliness of Xlib API */
+	int (*old_handler)(Display*, XErrorEvent*) = XSetErrorHandler(dummy_error_handler);
+
 	if (!XShmQueryExtension(dsp))
 	{
 		/* extension is not supported, quit silently */
@@ -111,6 +125,14 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 		goto err_shmat;
 	}
 
+	XSync(dsp, False);
+	if (xerror)
+	{
+		goto err_shmat;
+	}
+
+	XSetErrorHandler(old_handler);
+
 	if (bpp != 32)
 	{
 		return calloc(4, (size_t)width * height);
@@ -125,6 +147,7 @@ err_image:
 	XDestroyImage(xdata->ximage);
 err:
 	xdata->seginfo.shmaddr = NULL;
+	XSetErrorHandler(old_handler);
 	return NULL;
 #else
 	UNUSED(xdata);
@@ -136,16 +159,22 @@ err:
 
 void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
 {
-	++window_count;
-
 	struct x11_data *xdata = calloc(1, sizeof(struct x11_data));
+	if (xdata == NULL)
+	{
+		return;
+	}
+
 	data->winsys_data = xdata;
+	++window_count;
 	if (dsp == NULL)
 	{
 		init_keycodes();
 		dsp = XOpenDisplay(NULL);
 		if (dsp == NULL) {
 			printf("Could not open a connection to the X server\n");
+			free(data->winsys_data);
+			data->winsys_data = NULL;
 			return;
 		}
 
@@ -178,7 +207,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		if (bpp != 16 && bpp != 32)
 		{
 			printf("Error, depth %d is not supported\n", bpp);
-			return;
+			goto err;
 		}
 	}
 
@@ -208,14 +237,27 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
 			NULL, width, height, 8, 0);
 		xdata->ximage->data = calloc(xdata->ximage->bytes_per_line, xdata->ximage->height);
-        if (bpp != 32) {
-            data->framebuffer = calloc(4, (size_t)width * height);
-        } else {
-            data->framebuffer = xdata->ximage->data;
-        }
+		if (xdata->ximage->data == NULL)
+		{
+			goto err;
+		}
+
+		if (bpp != 32) {
+			data->framebuffer = calloc(4, (size_t)width * height);
+			if (data->framebuffer == NULL)
+			{
+				goto err;
+			}
+		} else {
+			data->framebuffer = xdata->ximage->data;
+		}
 	}
 
 	XSync(dsp, False);
+	return;
+err:
+	fb_close_window(data);
+	return;
 }
 
 void fb_close_window(struct fb_data *data)
@@ -227,9 +269,15 @@ void fb_close_window(struct fb_data *data)
 		keycodemap = NULL;
 	}
 
-	if (bpp != 32)
+	if (bpp != 32 && data->framebuffer != NULL)
 	{
 		free(data->framebuffer);
+		data->framebuffer = NULL;
+	}
+
+	if (dsp == NULL)
+	{
+		goto free_xdata;
 	}
 
 #ifdef USE_XSHM
@@ -239,12 +287,18 @@ void fb_close_window(struct fb_data *data)
 		shmdt(xdata->seginfo.shmaddr);
 		shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
 		XDestroyImage(xdata->ximage);
+		xdata->seginfo.shmaddr = NULL;
+		data->framebuffer = NULL;
 	}
 	else
 #endif
 	{
-		free(xdata->ximage->data);
-		xdata->ximage->data = NULL;
+		if (xdata->ximage->data != NULL)
+		{
+			free(xdata->ximage->data);
+			xdata->ximage->data = NULL;
+			data->framebuffer = NULL;
+		}
 		XDestroyImage(xdata->ximage);
 	}
 
@@ -253,8 +307,12 @@ void fb_close_window(struct fb_data *data)
 	if (--window_count == 0)
 	{
 		XCloseDisplay(dsp);
+		dsp = NULL;
 	}
 
+free_xdata:
+	free(data->winsys_data);
+	data->winsys_data = NULL;
 }
 
 #define GET_DATA_FOR_WINDOW(data, all_data, nfbs, event) \
@@ -288,8 +346,8 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 
 		if (bpp != 32)
 		{
-			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->ximage->data,
-					(size_t)xdata->ximage->width * xdata->ximage->height);
+			a8r8g8b8_to_r5g6b5(all_data[i].framebuffer, xdata->ximage->data,
+					   (size_t)xdata->ximage->width * xdata->ximage->height);
 		}
 
 #ifdef USE_XSHM
