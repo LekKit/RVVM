@@ -15,8 +15,10 @@ $(info Detected OS: Windows)
 ifndef ARCH
 ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
 ARCH := x86_64
-else ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+else
+ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
 ARCH := x86_64
+endif
 endif
 
 ifeq ($(PROCESSOR_ARCHITECTURE),x86)
@@ -35,21 +37,27 @@ OS_UNAME := $(shell uname -s)
 ifeq ($(OS_UNAME),Linux)
 OS := linux
 $(info Detected OS: Linux)
-else ifneq (,$(findstring BSD,$(OS_UNAME)))
+else
+ifneq (,$(findstring BSD,$(OS_UNAME)))
 OS := bsd
 $(info Detected OS: BSD)
-else ifeq ($(OS_UNAME),Darwin)
+else
+ifeq ($(OS_UNAME),Darwin)
 OS := darwin
 $(info Detected OS: Darwin/MacOS)
 else
 OS := unknown
 $(warning [WARN] Unknown OS)
 endif
+endif
+endif
 
-else ifneq ($(WIN_SET),1)
+else
+ifneq ($(WIN_SET),1)
 $(info Chosen OS: $(OS))
 endif
 
+endif
 
 # Set up OS options
 ifeq ($(OS),windows)
@@ -65,12 +73,14 @@ CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
 ifneq (,$(findstring clang,$(CC_HELP)))
 CC_TYPE := clang
 $(info Detected compiler: LLVM Clang)
-else ifneq (,$(findstring gcc,$(CC_HELP)))
+else
+ifneq (,$(findstring gcc,$(CC_HELP)))
 CC_TYPE := gcc
 $(info Detected compiler: GCC)
 else
 CC_TYPE := unknown
 $(warning [WARN] Unknown compiler)
+endif
 endif
 
 
@@ -78,8 +88,10 @@ endif
 ifndef ARCH
 ifeq ($(CC_TYPE),gcc)
 ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))))
-else ifeq ($(CC_TYPE),clang)
+else
+ifeq ($(CC_TYPE),clang)
 ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))))
+endif
 endif
 
 
@@ -104,11 +116,13 @@ BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
 override CFLAGS += -O3 -flto
-else ifeq ($(CC_TYPE),clang)
+else
+ifeq ($(CC_TYPE),clang)
 override CFLAGS += -Ofast -flto
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
+endif
 endif
 
 endif
@@ -130,6 +144,10 @@ USE_XSHM ?= 1
 USE_RV64 ?= 0
 USE_JIT ?= 0
 USE_NET ?= 0
+
+ifeq ($(OS),linux)
+override LDFLAGS += -lrt
+endif
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB
