@@ -30,6 +30,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <elf.h>
 
+#ifndef PN_XNUM
+#define PN_XNUM 0xffff
+#endif
 
 bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset)
 {
