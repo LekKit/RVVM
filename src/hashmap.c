@@ -20,10 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void hashmap_init(hashmap_t* map, size_t size)
 {
+    if (!size) size = 16;
     map->size = 0;
+    map->entries = 0;
     while (map->size < size)
         map->size = (map->size << 1) | 0x1;
-    map->zkval = 0;
     map->buckets = (hashmap_bucket_t*)calloc(map->size+1, sizeof(hashmap_bucket_t));
 }
 
@@ -32,18 +33,30 @@ void hashmap_destroy(hashmap_t* map)
     free(map->buckets);
 }
 
-void hashmap_realloc(hashmap_t* map, size_t key, size_t val)
+void hashmap_resize(hashmap_t* map, size_t size)
 {
     hashmap_t tmp;
-    tmp.size = (map->size << 1) | 0x1;
-    tmp.buckets = (hashmap_bucket_t*)calloc(tmp.size+1, sizeof(hashmap_bucket_t));
-    for (size_t i=0; i<map->size+1; ++i) {
-        if (map->buckets[i].key) {
-            hashmap_put(&tmp, map->buckets[i].key, map->buckets[i].val);
-        }
-    }
+    hashmap_init(&tmp, size);
+    hasmap_foreach(map, k, v)
+        hashmap_put(&tmp, k, v);
     free(map->buckets);
     map->buckets = tmp.buckets;
     map->size = tmp.size;
+}
+
+void hashmap_grow(hashmap_t* map, size_t key, size_t val)
+{
+    hashmap_resize(map, map->size << 1);
     hashmap_put(map, key, val);
+}
+
+void hashmap_shrink(hashmap_t* map)
+{
+    hashmap_resize(map, map->size >> 2);
+}
+
+void hashmap_clear(hashmap_t* map)
+{
+    hashmap_destroy(map);
+    hashmap_init(map, 16);
 }

@@ -16,10 +16,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <stdio.h>
-#include <malloc.h>
-#include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
 
@@ -30,6 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_mmu.h"
 #include "riscv32_csr.h"
 #include "elf_load.h"
+#include "devices/ata.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -108,6 +105,8 @@ void parse_args(int argc, char** argv, vm_args_t* args)
     }
 }
 
+// Temporary implementation, we probably need some kind of abstraction over mmap/MapViewOfFile/VirtualAlloc
+#ifdef USE_FLASH
 static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
 {
     uint8_t* devptr = ((uint8_t*)device->data) + offset;
@@ -121,7 +120,6 @@ static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
     return true;
 }
 
-// Temporary implementation, we probably need some kind of abstraction over mmap/MapViewOfFile/VirtualAlloc
 #ifdef _WIN32
 static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
 {
@@ -148,6 +146,7 @@ static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filena
     void* tmp = mmap(NULL, filesize, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     riscv32_mmio_add_device(vm, addr, addr + filesize - 1, flash_mmio_handler, tmp);
 }
+#endif
 #endif
 
 int main(int argc, char** argv)
@@ -242,7 +241,18 @@ int main(int argc, char** argv)
 	    }
     }
 
-    if (args.flash_image) init_flash(vm, 0x40000000, args.flash_image);
+    if (args.flash_image) {
+#ifdef USE_FLASH
+	    init_flash(vm, 0x40000000, args.flash_image);
+#else
+	    FILE *fp = fopen(args.flash_image, "rb+");
+	    if (fp == NULL) {
+		    printf("Unable to open image file %s\n", args.flash_image);
+	    } else {
+		    ata_init(vm, 0x40000000, 0x40001000, fp, NULL);
+	    }
+#endif
+    }
 
     riscv32_run(vm);
 

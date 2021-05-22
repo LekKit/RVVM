@@ -95,6 +95,16 @@ static void x11_update_keymap()
 static void* x11_xshm_init(struct x11_data *xdata)
 {
 #ifdef USE_XSHM
+	const char mitshm[] = "MIT-SHM";
+	xcb_query_extension_reply_t * query_ext_reply = xcb_query_extension_reply(connection, xcb_query_extension(connection, sizeof(mitshm) - 1, mitshm), NULL);
+	if (query_ext_reply == NULL || !query_ext_reply->present)
+	{
+		/* extension is not supported, quit silently */
+		goto err;
+	}
+
+	free(query_ext_reply);
+
 	xcb_shm_query_version_reply_t * query_ver_reply = xcb_shm_query_version_reply(connection, xcb_shm_query_version(connection), NULL);
 	if (query_ver_reply == NULL)
 	{
@@ -154,11 +164,14 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	/* connect to the X server */
 	if (connection == NULL)
 	{
+		init_keycodes();
 		int prefscreen;
 		connection = xcb_connect(NULL, &prefscreen);
 		if (connection == NULL)
 		{
 			printf("Could not open a connection to the X server\n");
+			free(data->winsys_data);
+			data->winsys_data = NULL;
 			return;
 		}
 
@@ -248,11 +261,15 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	{
 		/* create pixmap */
 		xdata->local_data = calloc((bpp / 8), (size_t)width * height);
+		if (xdata->local_data == NULL)
+		{
+			goto err;
+		}
+
 		xdata->ximage = xcb_generate_id(connection);
 		if ((err = xcb_request_check(connection, xcb_create_pixmap_checked(connection, xdata->depth, xdata->ximage, xdata->win, width, height))))
 		{
 			printf("Error in xcb_create_pixmap, code: %d\n", err->error_code);
-			free(xdata->local_data);
 			goto err;
 		}
 	}
@@ -268,6 +285,10 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	if (bpp != 32)
 	{
 		data->framebuffer = calloc(4, (size_t)width * height);
+		if (data->framebuffer == NULL)
+		{
+			goto err;
+		}
 	}
 	else
 	{
@@ -276,13 +297,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 
 	return;
 err:
-	if (keycodemap != NULL)
-	{
-		free(keycodemap);
-		keycodemap = NULL;
-	}
-
-	connection = NULL;
+	fb_close_window(data);
 	return;
 }
 
@@ -295,9 +310,15 @@ void fb_close_window(struct fb_data *data)
 		keycodemap = NULL;
 	}
 
-	if (bpp != 32)
+	if (bpp != 32 && data->framebuffer != NULL)
 	{
 		free(data->framebuffer);
+		data->framebuffer = NULL;
+	}
+
+	if (connection == NULL)
+	{
+		goto free_xdata;
 	}
 
 #ifdef USE_XSHM
@@ -306,11 +327,18 @@ void fb_close_window(struct fb_data *data)
 		shmdt(xdata->seginfo.shmaddr);
 		shmctl(xdata->seginfo.shmid, IPC_RMID, NULL);
 		xcb_shm_detach(connection, xdata->seginfo.shmseg);
+		xdata->seginfo.shmaddr = NULL;
+		data->framebuffer = NULL;
 	}
 	else
 #endif
 	{
-		free(xdata->local_data);
+		if (xdata->local_data != NULL)
+		{
+			free(xdata->local_data);
+			xdata->local_data = NULL;
+			data->framebuffer = NULL;
+		}
 		xcb_free_pixmap(connection, xdata->ximage);
 	}
 	xcb_free_gc(connection, xdata->gc);
@@ -318,7 +346,12 @@ void fb_close_window(struct fb_data *data)
 	if (--window_count == 0)
 	{
 		xcb_disconnect(connection);
+		connection = NULL;
 	}
+
+free_xdata:
+	free(data->winsys_data);
+	data->winsys_data = NULL;
 }
 
 struct ev_queue
@@ -384,7 +417,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 
 		if (bpp != 32)
 		{
-			r5g6b5_to_r8g8b8(all_data[i].framebuffer, xdata->local_data, xdata->width * xdata->height);
+			a8r8g8b8_to_r5g6b5(all_data[i].framebuffer, xdata->local_data, xdata->width * xdata->height);
 		}
 
 #ifdef USE_XSHM
@@ -422,10 +455,11 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 							0, /* dst_y */
 							0, /* left_pad */
 							xdata->depth,
-							4 * xdata->width * xdata->height,
+							(bpp / 8) * xdata->width * xdata->height,
 							xdata->local_data))))
 		{
 			printf("err in put_image, code: %d\n", err->error_code);
+			XCB_ACCESS;
 		}
 	}
 	xcb_flush(connection);
@@ -444,7 +478,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					if (data == NULL) break;
 
 					xcb_keysym_t keysym = keycodemap[(xkey->detail - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym pressed: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)
@@ -475,7 +509,7 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 					}
 
 					xcb_keysym_t keysym = keycodemap[(xkey->detail - min_keycode) * keysyms_per_keycode];
-					struct key k = x11keysym2makecode(keysym);
+					struct key k = keysym2makecode(keysym);
 #if 0
 					printf("keysym released: %04x code ", (uint16_t)keysym);
 					for (size_t i = 0; i < k.len; ++i)

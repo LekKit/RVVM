@@ -16,22 +16,21 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-/*
-* This is intended to speed up some parts of the VM,
-* for example MMU regions -> MMU handlers mapping, etc.
-* Open-addressing is used because i want the hashmap to be a single
-* memory block, preferably allocated at startup - reduces memory fragmentation.
-* Also, this allows usage on systems without a memory allocator,
-* which may help in the future for code executing in VM.
-*/
-
 #ifndef HASHMAP_H
 #define HASHMAP_H
 
 #include <stdlib.h>
 #include <stdint.h>
 
-#define HASHMAP_MAX_PROBES 8
+/*
+ * This is the worst-case scenario lookup complexity,
+ * only 1/256 of entries may reach this point at all.
+ * Setting the value lower may improve worst-case scenario
+ * by a slight margin, but increases memory consumption
+ * by orders of magnitude.
+ */
+#define HASHMAP_MAX_PROBES 256
+// ((map->size >> 1) & 255)
 
 typedef struct {
     size_t key;
@@ -39,36 +38,52 @@ typedef struct {
 } hashmap_bucket_t;
 
 /*
-* key=0 is treated as unused bucket to reduce memory usage
-* (no additional flag), so hashmap stores map[0] values in zkval instead.
-* size is actually a bitmask holding lowest 1s to represent encoding space
+* val=0 is treated as unused bucket to reduce memory usage
+* (no additional flag), size is actually a bitmask holding
+* lowest 1s to represent encoding space
 */
 typedef struct {
     hashmap_bucket_t* buckets;
-    size_t zkval;
     size_t size;
+    size_t entries;
 } hashmap_t;
 
-void hashmap_init(hashmap_t* map, size_t bits);
-void hashmap_destroy(hashmap_t* map);
-void hashmap_realloc(hashmap_t* map, size_t key, size_t val);
+// Hint the expected amount of entries on map creation
+void hashmap_init(hashmap_t* map, size_t size);
 
-inline size_t hashmap_hash(size_t key, size_t size)
+void hashmap_destroy(hashmap_t* map);
+void hashmap_resize(hashmap_t* map, size_t size);
+void hashmap_grow(hashmap_t* map, size_t key, size_t val);
+void hashmap_shrink(hashmap_t* map);
+void hashmap_clear(hashmap_t* map);
+
+static inline size_t hashmap_used_mem(hashmap_t* map)
 {
-    return (key + (key >> 12) + (key >> 24)) & size;
+    return (map->size + 1) * sizeof(hashmap_bucket_t);
 }
 
-inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
+#define hasmap_foreach(map, k, v) \
+    for (size_t _i=0, k, v; k=(map)->buckets[_i].key, v=(map)->buckets[_i].val, _i<(map)->size+1; ++_i) if (v)
+
+static inline size_t hashmap_hash(size_t k)
 {
-    if (!key) {
-        map->zkval = val;
-        return;
-    }
-    size_t hash = hashmap_hash(key, map->size);
+    k ^= k << 21;
+    k ^= k >> 17;
+#if (SIZE_MAX > 0xFFFFFFFF)
+    k ^= k >> 35;
+    k ^= k >> 51;
+#endif
+    return k;
+}
+
+static inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
+{
+    size_t hash = hashmap_hash(key);
     size_t index;
     for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
         index = (hash + i) & map->size;
-        if (!map->buckets[index].key || map->buckets[index].key == key) {
+        if (!map->buckets[index].val || map->buckets[index].key == key) {
+            if (!map->buckets[index].val) map->entries++;
             map->buckets[index].key = key;
             map->buckets[index].val = val;
             return;
@@ -76,13 +91,12 @@ inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
     }
     // Near-key space is polluted with colliding entries, reallocate and rehash
     // Puts the new entry as well to simplify the inlined function
-    hashmap_realloc(map, key, val);
+    hashmap_grow(map, key, val);
 }
 
-inline size_t hashmap_get(const hashmap_t* map, size_t key)
+static inline size_t hashmap_get(const hashmap_t* map, size_t key)
 {
-    if (!key) return map->zkval;
-    size_t hash = hashmap_hash(key, map->size);
+    size_t hash = hashmap_hash(key);
     size_t index;
     for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
         index = (hash + i) & map->size;
@@ -93,20 +107,19 @@ inline size_t hashmap_get(const hashmap_t* map, size_t key)
     return 0;
 }
 
-inline void hashmap_remove(hashmap_t* map, size_t key)
+static inline void hashmap_remove(hashmap_t* map, size_t key)
 {
-    if (!key) {
-        map->zkval = 0;
-        return;
-    }
-    size_t hash = hashmap_hash(key, map->size);
+    size_t hash = hashmap_hash(key);
     size_t index;
     for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
         index = (hash + i) & map->size;
         if (map->buckets[index].key == key) {
-            map->buckets[index].key = 0;
-            return;
+            map->buckets[index].val = 0;
+            map->entries--;
         }
+    }
+    if (map->entries < (map->size >> 2)) {
+        hashmap_shrink(map);
     }
 }
 

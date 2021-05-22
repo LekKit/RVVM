@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include "riscv.h"
+#include "rvvm_types.h"
 #include "rvtimer.h"
 
 enum
@@ -100,14 +101,14 @@ enum
 
 // Address translation cache
 typedef struct {
-    uint32_t pte;    // Upper 20 bits of virtual address + access bits
-    uint8_t* ptr;    // Page address in emulator memory
+    vaddr_t pte;    // Upper 20 bits of virtual address + access bits
+    vmptr_t ptr;    // Page address in emulator memory
 } riscv32_tlb_t;
 
 typedef struct {
-    uint8_t* data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
-    uint32_t begin;  // First usable address in physical memory
-    uint32_t size;   // Amount of usable memory after mem_begin
+    vmptr_t data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
+    paddr_t begin;  // First usable address in physical memory
+    paddr_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
 typedef struct riscv32_vm_state_t riscv32_vm_state_t;
@@ -117,8 +118,8 @@ typedef struct riscv32_mmio_device_t riscv32_mmio_device_t;
 typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
 
 struct riscv32_mmio_device_t {
-    uint32_t base_addr;
-    uint32_t end_addr;
+    paddr_t base_addr;
+    paddr_t end_addr;
     riscv32_mmio_handler_t handler;
     void* data;
 };
@@ -130,7 +131,7 @@ typedef struct {
 
 struct riscv32_vm_state_t {
     size_t wait_event;
-    size_t registers[REGISTERS_MAX];
+    maxlen_t registers[REGISTERS_MAX];
     riscv32_tlb_t tlb[TLB_SIZE];
     riscv32_phys_mem_t mem;
     riscv32_mmio_regions_t mmio;
@@ -148,7 +149,7 @@ struct riscv32_vm_state_t {
         uint32_t tval[4];
         uint32_t ip;
     } csr;
-    uint32_t root_page_table;
+    paddr_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;
     rvtimer_t timer;

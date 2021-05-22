@@ -41,6 +41,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/ps2-altera.h"
 #include "devices/ps2-mouse.h"
 #include "devices/ps2-keyboard.h"
+#include "devices/eth-oc.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
 void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
@@ -102,7 +103,7 @@ static void register_vm(riscv32_vm_state_t *vm)
 {
     spin_lock(&global_lock);
     if (global_vm_count == 0) {
-        global_irq_thread = thread_create(global_irq_handler);
+        global_irq_thread = thread_create(global_irq_handler, NULL);
     }
     if (global_vm_count >= MAX_VMS - 1) {
         printf("ERROR: Too much VMs created!\n");
@@ -168,6 +169,8 @@ riscv32_vm_state_t *riscv32_create_vm()
     static struct ps2_device ps2_keyboard;
     ps2_keyboard = ps2_keyboard_create();
     altps2_init(vm, 0x20001000, plic_data, 2, &ps2_keyboard);
+
+    ethoc_init(vm, NULL, 0x21000000, plic_data, 3);
 
     init_fb(vm, &global_screens[global_screen_count++], 640, 480, 0x30000000, &ps2_mouse, &ps2_keyboard);
     rvtimer_init(&vm->timer, 0x989680); // 10 MHz timer

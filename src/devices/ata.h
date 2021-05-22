@@ -1,6 +1,6 @@
 /*
-threading.h - Threads
-Copyright (C) 2021  LekKit <github.com/LekKit>
+ata.h - ATA disk controller
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,14 +16,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef THREADING_H
-#define THREADING_H
+#ifndef ATA_H
+#define ATA_H
 
-typedef void* thread_handle_t;
-typedef void* (*thread_func_t)(void*);
-
-thread_handle_t thread_create(thread_func_t func, void *arg);
-void* thread_join(thread_handle_t handle);
-void thread_kill(thread_handle_t handle);
+#include "riscv32.h"
+#include "rvvm_types.h"
+void ata_init(riscv32_vm_state_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE *fp0, FILE *fp1);
 
 #endif

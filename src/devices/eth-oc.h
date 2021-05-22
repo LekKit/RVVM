@@ -1,6 +1,6 @@
 /*
-threading.h - Threads
-Copyright (C) 2021  LekKit <github.com/LekKit>
+eth-oc.h - OpenCores Ethernet MAC controller
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,14 +16,23 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef THREADING_H
-#define THREADING_H
+#ifndef ETH_OC_H
+#define ETH_OC_H
 
-typedef void* thread_handle_t;
-typedef void* (*thread_func_t)(void*);
+#include "riscv32.h"
+#include "rvvm_types.h"
 
-thread_handle_t thread_create(thread_func_t func, void *arg);
-void* thread_join(thread_handle_t handle);
-void thread_kill(thread_handle_t handle);
+#ifdef USE_NET
+void ethoc_init(riscv32_vm_state_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq);
+#else
+static inline void ethoc_init(riscv32_vm_state_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq)
+{
+    UNUSED(vm);
+    UNUSED(tap_name);
+    UNUSED(regs_base_addr);
+    UNUSED(intc_data);
+    UNUSED(irq);
+}
+#endif
 
 #endif

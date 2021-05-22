@@ -26,10 +26,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
 
-#ifndef _WIN32
+#if !defined _WIN32 && !defined __APPLE__
 
 #include <elf.h>
 
+#ifndef PN_XNUM
+#define PN_XNUM 0xffff
+#endif
 
 bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset)
 {
@@ -97,7 +100,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 	{
 		if (fseek(fp, phdr_start, SEEK_SET))
 		{
-			printf("Unable to load ELF program header of %s - unable to seek to header offset 0x%lx\n", path, phdr_start);
+			printf("Unable to load ELF program header of %s - unable to seek to header offset 0x%zx\n", path, phdr_start);
 			status = false;
 			goto err_fclose;
 		}
@@ -105,7 +108,7 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 		Elf32_Phdr phdr;
 		if (1 != fread(&phdr, sizeof(phdr), 1, fp))
 		{
-			printf("Unable to load ELF program header of %s - unable to read header offset 0x%lx\n", path, phdr_start);
+			printf("Unable to load ELF program header of %s - unable to read header offset 0x%zx\n", path, phdr_start);
 			status = false;
 			goto err_fclose;
 		}
@@ -118,23 +121,23 @@ bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use
 		size_t dest_addr = load_addr + phdr.p_vaddr;
 		if (dest_addr < vm->mem.begin || dest_addr + phdr.p_memsz >= vm->mem.begin + vm->mem.size)
 		{
-			printf("Unable to load ELF segment at offset 0x%lx of file %s - segment doesnt't fit in memory\n", phdr_start, path);
-			printf("load addr: 0x%lx p_memsz: 0x%x end: 0x%lx\n", dest_addr, phdr.p_memsz, dest_addr + phdr.p_memsz);
-			printf("mem begin: 0x%x size: 0x%x end: 0x%x\n", vm->mem.begin, vm->mem.size, vm->mem.begin + vm->mem.size);
+			printf("Unable to load ELF segment at offset 0x%zx of file %s - segment doesnt't fit in memory\n", phdr_start, path);
+			printf("load addr: 0x%zx p_memsz: 0x%x end: 0x%zx\n", dest_addr, phdr.p_memsz, dest_addr + phdr.p_memsz);
+			printf("mem begin: 0x%"PRIxXLEN" size: 0x%"PRIxXLEN" end: 0x%"PRIxXLEN"\n", vm->mem.begin, vm->mem.size, vm->mem.begin + vm->mem.size);
 			status = false;
 			goto err_fclose;
 		}
 
 		if (fseek(fp, phdr.p_offset, SEEK_SET))
 		{
-			printf("Unable to load ELF segment at offset 0x%lx of file %s - unable to seek to start of the segment\n", phdr_start, path);
+			printf("Unable to load ELF segment at offset 0x%zx of file %s - unable to seek to start of the segment\n", phdr_start, path);
 			status = false;
 			goto err_fclose;
 		}
 
 		if (1 != fread(vm->mem.data + dest_addr, phdr.p_filesz, 1, fp))
 		{
-			printf("Unable to read ELF segment at offset 0x%lx of file %s\n", phdr_start, path);
+			printf("Unable to read ELF segment at offset 0x%zx of file %s\n", phdr_start, path);
 			status = false;
 			goto err_fclose;
 		}

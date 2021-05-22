@@ -49,7 +49,7 @@ struct ns16550a_data {
 
 #define NS16550A_IER_MASK    0xF
 
-#ifdef __linux__
+#if defined __linux__ || defined __APPLE__
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>

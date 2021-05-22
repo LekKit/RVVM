@@ -30,7 +30,8 @@ struct fb_data
 	void *winsys_data; // private window system data
 };
 
-void r5g6b5_to_r8g8b8(const void* _in, void* _out, size_t length);
+void r5g6b5_to_a8r8b8g8(const void* _in, void* _out, size_t length);
+void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length);
 void init_fb(riscv32_vm_state_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard);
 
 #if defined(USE_FB)

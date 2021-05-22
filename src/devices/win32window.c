@@ -16,12 +16,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "hashmap.h"
 #include "fb_window.h"
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"
 
 #include <windows.h>
+
+#define KEYMAP_PAUSE VK_PAUSE
+#define KEYMAP_PRINT VK_PRINT
+
+#include "keymap.h"
 
 typedef struct {
     HWND hwnd;
@@ -42,146 +46,116 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 }
 
 static ATOM winclass_atom = 0;
-static hashmap_t keymap;
-
-static void w32initkeycode(uint16_t wkeysym, uint16_t keycode, uint8_t len)
-{
-    hashmap_put(&keymap, wkeysym, (keycode << 8) | len);
-}
-
-static struct key w32keymakecode(uint16_t wkeysym)
-{
-    if (wkeysym == VK_PAUSE)
-	{
-		struct key k = {
-			{ 0xE1, 0x14, 0x77, 0xE1, 0xF0, 0x14, 0xF0, 0x77 },
-			8,
-		};
-		return k;
-	} else if (wkeysym == VK_PRINT) {
-		struct key k = {
-			{ 0xE0, 0x12, 0xE0, 0x7C },
-			4,
-		};
-		return k;
-	}
-    size_t val = hashmap_get(&keymap, wkeysym);
-    struct key k = {};
-    k.keycode[0] = (val >> 8) & 0xFF;
-    k.keycode[1] = (val >> 16) & 0xFF;
-    k.len = val & 0xFF;
-    return k;
-}
 
 static void init_keycodes()
 {
-    hashmap_init(&keymap, 5);
+    init_keymap();
     
-    w32initkeycode(0x41, 0x1C, 1);
-    w32initkeycode(0x42, 0x32, 1);
-    w32initkeycode(0x43, 0x21, 1);
-    w32initkeycode(0x44, 0x23, 1);
-    w32initkeycode(0x45, 0x24, 1);
-    w32initkeycode(0x46, 0x2B, 1);
-    w32initkeycode(0x47, 0x34, 1);
-    w32initkeycode(0x48, 0x33, 1);
-    w32initkeycode(0x49, 0x43, 1);
-    w32initkeycode(0x4A, 0x3B, 1);
-    w32initkeycode(0x4B, 0x42, 1);
-    w32initkeycode(0x4C, 0x4B, 1);
-    w32initkeycode(0x4D, 0x3A, 1);
-    w32initkeycode(0x4E, 0x31, 1);
-    w32initkeycode(0x4F, 0x44, 1);
-    w32initkeycode(0x50, 0x4D, 1);
-    w32initkeycode(0x51, 0x15, 1);
-    w32initkeycode(0x52, 0x2D, 1);
-    w32initkeycode(0x53, 0x1B, 1);
-    w32initkeycode(0x54, 0x2C, 1);
-    w32initkeycode(0x55, 0x3C, 1);
-    w32initkeycode(0x56, 0x2A, 1);
-    w32initkeycode(0x57, 0x1D, 1);
-    w32initkeycode(0x58, 0x22, 1);
-    w32initkeycode(0x59, 0x35, 1);
-    w32initkeycode(0x5A, 0x1A, 1);
-    w32initkeycode(0x30, 0x45, 1);
-    w32initkeycode(0x31, 0x16, 1);
-    w32initkeycode(0x32, 0x1E, 1);
-    w32initkeycode(0x33, 0x26, 1);
-    w32initkeycode(0x34, 0x25, 1);
-    w32initkeycode(0x35, 0x2E, 1);
-    w32initkeycode(0x36, 0x36, 1);
-    w32initkeycode(0x37, 0x3D, 1);
-    w32initkeycode(0x38, 0x3E, 1);
-    w32initkeycode(0x39, 0x46, 1);
-    w32initkeycode(VK_OEM_3, 0x0E, 1);
-    w32initkeycode(VK_OEM_MINUS, 0x4E, 1);
-    w32initkeycode(VK_OEM_PLUS, 0x55, 1);
-    w32initkeycode(VK_OEM_5, 0x5D, 1);
-    w32initkeycode(VK_BACK, 0x66, 1);
-    w32initkeycode(VK_SPACE, 0x29, 1);
-    w32initkeycode(VK_TAB, 0x0D, 1);
-    w32initkeycode(VK_CAPITAL, 0x58, 1);
-    w32initkeycode(VK_SHIFT, 0x12, 1);
-    w32initkeycode(VK_CONTROL, 0x14, 1);
-    w32initkeycode(VK_LWIN, 0xE01F, 2);
-    w32initkeycode(VK_MENU, 0x11, 1);
-    w32initkeycode(VK_RSHIFT, 0x59, 1);
-    w32initkeycode(VK_RCONTROL, 0x14E0, 2);
-    w32initkeycode(VK_RWIN, 0x27E0, 2);
-    w32initkeycode(VK_RMENU, 0x11E0, 2);
-    w32initkeycode(VK_APPS, 0x2FE0, 2); // APPS)
-    w32initkeycode(VK_RETURN, 0x5A, 1);
-    w32initkeycode(VK_ESCAPE, 0x76, 1);
-    w32initkeycode(VK_F1, 0x05, 1);
-    w32initkeycode(VK_F2, 0x06, 1);
-    w32initkeycode(VK_F3, 0x04, 1);
-    w32initkeycode(VK_F4, 0x0C, 1);
-    w32initkeycode(VK_F5, 0x03, 1);
-    w32initkeycode(VK_F6, 0x0B, 1);
-    w32initkeycode(VK_F7, 0x83, 1);
-    w32initkeycode(VK_F8, 0x0A, 1);
-    w32initkeycode(VK_F9, 0x01, 1);
-    w32initkeycode(VK_F10, 0x09, 1);
-    w32initkeycode(VK_F11, 0x78, 1);
-    w32initkeycode(VK_F12, 0x07, 1);
+    init_keycode(0x41, 0x1C, 1);
+    init_keycode(0x42, 0x32, 1);
+    init_keycode(0x43, 0x21, 1);
+    init_keycode(0x44, 0x23, 1);
+    init_keycode(0x45, 0x24, 1);
+    init_keycode(0x46, 0x2B, 1);
+    init_keycode(0x47, 0x34, 1);
+    init_keycode(0x48, 0x33, 1);
+    init_keycode(0x49, 0x43, 1);
+    init_keycode(0x4A, 0x3B, 1);
+    init_keycode(0x4B, 0x42, 1);
+    init_keycode(0x4C, 0x4B, 1);
+    init_keycode(0x4D, 0x3A, 1);
+    init_keycode(0x4E, 0x31, 1);
+    init_keycode(0x4F, 0x44, 1);
+    init_keycode(0x50, 0x4D, 1);
+    init_keycode(0x51, 0x15, 1);
+    init_keycode(0x52, 0x2D, 1);
+    init_keycode(0x53, 0x1B, 1);
+    init_keycode(0x54, 0x2C, 1);
+    init_keycode(0x55, 0x3C, 1);
+    init_keycode(0x56, 0x2A, 1);
+    init_keycode(0x57, 0x1D, 1);
+    init_keycode(0x58, 0x22, 1);
+    init_keycode(0x59, 0x35, 1);
+    init_keycode(0x5A, 0x1A, 1);
+    init_keycode(0x30, 0x45, 1);
+    init_keycode(0x31, 0x16, 1);
+    init_keycode(0x32, 0x1E, 1);
+    init_keycode(0x33, 0x26, 1);
+    init_keycode(0x34, 0x25, 1);
+    init_keycode(0x35, 0x2E, 1);
+    init_keycode(0x36, 0x36, 1);
+    init_keycode(0x37, 0x3D, 1);
+    init_keycode(0x38, 0x3E, 1);
+    init_keycode(0x39, 0x46, 1);
+    init_keycode(VK_OEM_3, 0x0E, 1);
+    init_keycode(VK_OEM_MINUS, 0x4E, 1);
+    init_keycode(VK_OEM_PLUS, 0x55, 1);
+    init_keycode(VK_OEM_5, 0x5D, 1);
+    init_keycode(VK_BACK, 0x66, 1);
+    init_keycode(VK_SPACE, 0x29, 1);
+    init_keycode(VK_TAB, 0x0D, 1);
+    init_keycode(VK_CAPITAL, 0x58, 1);
+    init_keycode(VK_SHIFT, 0x12, 1);
+    init_keycode(VK_CONTROL, 0x14, 1);
+    init_keycode(VK_LWIN, 0xE01F, 2);
+    init_keycode(VK_MENU, 0x11, 1);
+    init_keycode(VK_RSHIFT, 0x59, 1);
+    init_keycode(VK_RCONTROL, 0x14E0, 2);
+    init_keycode(VK_RWIN, 0x27E0, 2);
+    init_keycode(VK_RMENU, 0x11E0, 2);
+    init_keycode(VK_APPS, 0x2FE0, 2); // APPS)
+    init_keycode(VK_RETURN, 0x5A, 1);
+    init_keycode(VK_ESCAPE, 0x76, 1);
+    init_keycode(VK_F1, 0x05, 1);
+    init_keycode(VK_F2, 0x06, 1);
+    init_keycode(VK_F3, 0x04, 1);
+    init_keycode(VK_F4, 0x0C, 1);
+    init_keycode(VK_F5, 0x03, 1);
+    init_keycode(VK_F6, 0x0B, 1);
+    init_keycode(VK_F7, 0x83, 1);
+    init_keycode(VK_F8, 0x0A, 1);
+    init_keycode(VK_F9, 0x01, 1);
+    init_keycode(VK_F10, 0x09, 1);
+    init_keycode(VK_F11, 0x78, 1);
+    init_keycode(VK_F12, 0x07, 1);
     /* VK_PRINT is too big, handled separately */
-    w32initkeycode(VK_SCROLL, 0x7E, 1);
+    init_keycode(VK_SCROLL, 0x7E, 1);
     /* VK_PAUSE is too big, handled separately */
-    w32initkeycode(VK_OEM_4, 0x54, 1);
-    w32initkeycode(VK_INSERT, 0x70E0, 2);
-    w32initkeycode(VK_HOME, 0x6CE0, 2);
-    w32initkeycode(VK_PRIOR, 0x7DE0, 2);
-    w32initkeycode(VK_DELETE, 0x71E0, 2);
-    w32initkeycode(VK_END, 0x69E0, 2);
-    w32initkeycode(VK_NEXT, 0x7AE0, 2);
-    w32initkeycode(VK_UP, 0x75E0, 2);
-    w32initkeycode(VK_LEFT, 0x6BE0, 2);
-    w32initkeycode(VK_DOWN, 0x72E0, 2);
-    w32initkeycode(VK_RIGHT, 0x74E0, 2);
-    w32initkeycode(VK_NUMLOCK, 0x77, 1);
-    w32initkeycode(VK_DIVIDE, 0x4AE0, 2);
-    w32initkeycode(VK_MULTIPLY, 0x7C, 1);
-    w32initkeycode(VK_SUBTRACT, 0x7B, 1);
-    w32initkeycode(VK_ADD, 0x79, 1);
+    init_keycode(VK_OEM_4, 0x54, 1);
+    init_keycode(VK_INSERT, 0x70E0, 2);
+    init_keycode(VK_HOME, 0x6CE0, 2);
+    init_keycode(VK_PRIOR, 0x7DE0, 2);
+    init_keycode(VK_DELETE, 0x71E0, 2);
+    init_keycode(VK_END, 0x69E0, 2);
+    init_keycode(VK_NEXT, 0x7AE0, 2);
+    init_keycode(VK_UP, 0x75E0, 2);
+    init_keycode(VK_LEFT, 0x6BE0, 2);
+    init_keycode(VK_DOWN, 0x72E0, 2);
+    init_keycode(VK_RIGHT, 0x74E0, 2);
+    init_keycode(VK_NUMLOCK, 0x77, 1);
+    init_keycode(VK_DIVIDE, 0x4AE0, 2);
+    init_keycode(VK_MULTIPLY, 0x7C, 1);
+    init_keycode(VK_SUBTRACT, 0x7B, 1);
+    init_keycode(VK_ADD, 0x79, 1);
     // need to handle disabled numlock somehow...
-    //w32initkeycode(VK_RETURN, 0x5AE0, 2);
-    w32initkeycode(VK_DECIMAL, 0x71, 1); //w32initkeycode(XK_KP_Delete, 0x71, 1);
-    w32initkeycode(VK_NUMPAD0, 0x70, 1); //w32initkeycode(XK_KP_Insert, 0x70, 1);
-    w32initkeycode(VK_NUMPAD1, 0x69, 1); //w32initkeycode(XK_KP_End, 0x69, 1);
-    w32initkeycode(VK_NUMPAD2, 0x72, 1); //w32initkeycode(XK_KP_Down, 0x72, 1);
-    w32initkeycode(VK_NUMPAD3, 0x7A, 1); //w32initkeycode(XK_KP_Page_Down, 0x7A, 1);
-    w32initkeycode(VK_NUMPAD4, 0x6B, 1); //w32initkeycode(XK_KP_Left, 0x6B, 1);
-    w32initkeycode(VK_NUMPAD5, 0x73, 1); //w32initkeycode(XK_KP_Begin, 0x73, 1);
-    w32initkeycode(VK_NUMPAD6, 0x74, 1); //w32initkeycode(XK_KP_Right, 0x74, 1);
-    w32initkeycode(VK_NUMPAD7, 0x6C, 1); //w32initkeycode(XK_KP_Home, 0x6C, 1);
-    w32initkeycode(VK_NUMPAD8, 0x75, 1); //w32initkeycode(XK_KP_Up, 0x75, 1);
-    w32initkeycode(VK_NUMPAD9, 0x7D, 1); //w32initkeycode(XK_KP_Page_Up, 0x7D, 1);
-    w32initkeycode(VK_OEM_6, 0x5B, 1);
-    w32initkeycode(VK_OEM_1, 0x4C, 1);
-    w32initkeycode(VK_OEM_7, 0x52, 1);
-    w32initkeycode(VK_OEM_COMMA, 0x41, 1);
-    w32initkeycode(VK_OEM_PERIOD, 0x49, 1);
-    w32initkeycode(VK_OEM_2, 0x4A, 1);
+    //init_keycode(VK_RETURN, 0x5AE0, 2);
+    init_keycode(VK_DECIMAL, 0x71, 1); //init_keycode(XK_KP_Delete, 0x71, 1);
+    init_keycode(VK_NUMPAD0, 0x70, 1); //init_keycode(XK_KP_Insert, 0x70, 1);
+    init_keycode(VK_NUMPAD1, 0x69, 1); //init_keycode(XK_KP_End, 0x69, 1);
+    init_keycode(VK_NUMPAD2, 0x72, 1); //init_keycode(XK_KP_Down, 0x72, 1);
+    init_keycode(VK_NUMPAD3, 0x7A, 1); //init_keycode(XK_KP_Page_Down, 0x7A, 1);
+    init_keycode(VK_NUMPAD4, 0x6B, 1); //init_keycode(XK_KP_Left, 0x6B, 1);
+    init_keycode(VK_NUMPAD5, 0x73, 1); //init_keycode(XK_KP_Begin, 0x73, 1);
+    init_keycode(VK_NUMPAD6, 0x74, 1); //init_keycode(XK_KP_Right, 0x74, 1);
+    init_keycode(VK_NUMPAD7, 0x6C, 1); //init_keycode(XK_KP_Home, 0x6C, 1);
+    init_keycode(VK_NUMPAD8, 0x75, 1); //init_keycode(XK_KP_Up, 0x75, 1);
+    init_keycode(VK_NUMPAD9, 0x7D, 1); //init_keycode(XK_KP_Page_Up, 0x7D, 1);
+    init_keycode(VK_OEM_6, 0x5B, 1);
+    init_keycode(VK_OEM_1, 0x4C, 1);
+    init_keycode(VK_OEM_7, 0x52, 1);
+    init_keycode(VK_OEM_COMMA, 0x41, 1);
+    init_keycode(VK_OEM_PERIOD, 0x49, 1);
+    init_keycode(VK_OEM_2, 0x4A, 1);
 }
 
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name)
@@ -259,12 +233,12 @@ void fb_update(struct fb_data *data, size_t nfbs)
             case WM_KEYDOWN:
                 // Disable autorepeat keypresses
                 if ((Msg.lParam & KF_REPEAT) == 0) {
-                    struct key k = w32keymakecode(Msg.wParam);
+                    struct key k = keysym2makecode(Msg.wParam);
                     if (k.len) ps2_handle_keyboard(data->keyboard, &k, true);
                 }
                 break;
             case WM_KEYUP: {
-                    struct key k = w32keymakecode(Msg.wParam);
+                    struct key k = keysym2makecode(Msg.wParam);
                     if (k.len) ps2_handle_keyboard(data->keyboard, &k, false);
                 }
                 break;
