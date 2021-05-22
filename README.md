@@ -30,6 +30,8 @@ RISC-V CPU & System software implementation written in С
 - PLIC/CLIC, timers
 - PS2 Altera Controller, PS2 keyboard & mouse
 - Graphical framebuffer
+- ATA PIO hard drive
+- OpenCores Ethernet
 - [Somewhat WIP] Flash, RV64 CPU, JIT prototype
 
 ## Usage
@@ -45,7 +47,7 @@ To cross-compile, pass CC=target-gcc and OS=target-os if the target OS differs f
 Examples:
 ```
 make CC=x86_64-w64-mingw32-gcc OS=windows
-make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0
+make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0 USE_NET=1
 ```
 
 Running:
@@ -59,7 +61,7 @@ You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
 ## Our team
 - **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32/64ICMA ISA, interrupts & timer, privileged ISA, JIT, lots of fixes
 - **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
-- **cerg2010cerg2010**: ELF loading, important fixes and refactoring, initial RV64 work, PLIC, PS2 controller & devices, XCB window backend
+- **cerg2010cerg2010**: ELF loading, important fixes, initial RV64 work, PLIC, PS2, ATA, Ethernet, XCB window backend
 - *Hoping to see more contributors here*
 
 ## TODO
