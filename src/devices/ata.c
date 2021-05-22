@@ -249,7 +249,7 @@ static void ata_handle_cmd(struct ata_dev *ata, uint8_t cmd)
     }
 }
 
-static bool ata_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ata_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
     UNUSED(vm);
     struct ata_dev *ata = (struct ata_dev *) device->data;
@@ -389,7 +389,7 @@ static bool ata_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t*
     return true;
 }
 
-static bool ata_ctl_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ata_ctl_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
     UNUSED(vm);
     struct ata_dev *ata = (struct ata_dev *) device->data;
@@ -458,7 +458,7 @@ static size_t get_img_size(FILE *fp)
     return size;
 }
 
-void ata_init(riscv32_vm_state_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE *master, FILE *slave)
+void ata_init(rvvm_hart_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE *master, FILE *slave)
 {
     assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev *) calloc(1, sizeof(struct ata_dev));

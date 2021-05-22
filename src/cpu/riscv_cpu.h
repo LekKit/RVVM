@@ -28,7 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV_A_VERSION 2.0
 
 // Temporary compatibility with legacy riscv32_
-#define rvvm_hart_state_t riscv32_vm_state_t
 #define riscv_mem_op riscv32_mem_op
 #define riscv_mmu_op riscv32_mmu_op
 #define riscv_illegal_insn riscv32_illegal_insn
@@ -36,17 +35,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define riscv_trap riscv32_trap
 
 void riscv32_cpu_init();
-void riscv32_run_till_event(rvvm_hart_state_t *vm);
-void riscv32_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv32_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv32_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv32_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t));
+void riscv32_run_till_event(rvvm_hart_t *vm);
+void riscv32_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv32_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv32_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv32_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t));
 void riscv64_cpu_init();
-void riscv64_run_till_event(rvvm_hart_state_t *vm);
-void riscv64_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv64_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv64_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t));
-void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t));
+void riscv64_run_till_event(rvvm_hart_t *vm);
+void riscv64_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv64_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv64_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
+void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t));
 
 // Private CPU implementation definitions
 #ifdef RISCV_CPU_SOURCE
@@ -90,17 +89,17 @@ void riscv_c_init();
 void riscv_m_init();
 void riscv_a_init();
 
-static inline xlen_t riscv_read_register(rvvm_hart_state_t *vm, regid_t reg)
+static inline xlen_t riscv_read_register(rvvm_hart_t *vm, regid_t reg)
 {
     return vm->registers[reg];
 }
 
-static inline sxlen_t riscv_read_register_s(rvvm_hart_state_t *vm, regid_t reg)
+static inline sxlen_t riscv_read_register_s(rvvm_hart_t *vm, regid_t reg)
 {
     return vm->registers[reg];
 }
 
-static inline void riscv_write_register(rvvm_hart_state_t *vm, regid_t reg, xlen_t data)
+static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t data)
 {
     vm->registers[reg] = data;
 }

@@ -43,8 +43,8 @@ static inline uint32_t riscv_c_funcid(const uint16_t instr)
  * This is very similar to C++ templates, lol
  */
 
-static void (*riscv_opcodes[512])(rvvm_hart_state_t *vm, const uint32_t instruction);
-static void (*riscv_c_opcodes[32])(rvvm_hart_state_t *vm, const uint16_t instruction);
+static void (*riscv_opcodes[512])(rvvm_hart_t *vm, const uint32_t instruction);
+static void (*riscv_c_opcodes[32])(rvvm_hart_t *vm, const uint16_t instruction);
 
 
 // Sanity check that our installed instructions do not overlap
@@ -65,13 +65,13 @@ static void check_opcode_c(uint32_t opcode)
 }
 
 // Install instruction implementations to the jumptable
-void riscv_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t))
+void riscv_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
     check_opcode(opcode);
     riscv_opcodes[opcode] = func;
 }
 
-void riscv_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t))
+void riscv_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
     for (uint32_t f3=0; f3<0x10; ++f3) {
         check_opcode(opcode | (f3 << 5));
@@ -79,7 +79,7 @@ void riscv_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_state_t*, c
     }
 }
 
-void riscv_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint32_t))
+void riscv_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
     check_opcode(opcode);
     check_opcode(opcode | 0x100);
@@ -87,13 +87,13 @@ void riscv_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_state_t*, 
     riscv_opcodes[opcode | 0x100] = func;
 }
 
-void riscv_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_state_t*, const uint16_t))
+void riscv_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t))
 {
     check_opcode_c(opcode);
     riscv_c_opcodes[opcode] = func;
 }
 
-static inline void riscv_emulate(rvvm_hart_state_t *vm, uint32_t instruction)
+static inline void riscv_emulate(rvvm_hart_t *vm, uint32_t instruction)
 {
     if ((instruction & RV_OPCODE_MASK) != RV_OPCODE_MASK) {
         // 16-bit opcode
@@ -122,7 +122,7 @@ void riscv_cpu_init()
 
 #if 0
 // Old dispatch loop in case new one has issues
-void riscv_run_till_event(rvvm_hart_state_t *vm)
+void riscv_run_till_event(rvvm_hart_t *vm)
 {
     uint8_t instruction[4];
     xlen_t tlb_key, inst_addr;
@@ -149,7 +149,7 @@ void riscv_run_till_event(rvvm_hart_state_t *vm)
  * Attention: Any TLB flush must clear vm->wait_event to
  * restart dispatch loop, otherwise it will continue executing current page
  */
-void riscv_run_till_event(rvvm_hart_state_t *vm)
+void riscv_run_till_event(rvvm_hart_t *vm)
 {
     uint8_t instruction[4];
     const void* inst_ptr = NULL;  // Updated before any read

@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "riscv32.h"
 
-void flash_emulate(riscv32_vm_state_t *vm, uint32_t operation, uint32_t addr, uint32_t *data)
+void flash_emulate(rvvm_hart_t *vm, uint32_t operation, uint32_t addr, uint32_t *data)
 {
         printf("%u %u %u\n", operation, addr, *data);
 }
@@ -196,7 +196,7 @@ static memory_map_t map[] =
 };
 
 
-void gd32_prepare_memory_map(riscv32_vm_state_t *vm)
+void gd32_prepare_memory_map(rvvm_hart_t *vm)
 {
     vm->memory_map = map;
 }

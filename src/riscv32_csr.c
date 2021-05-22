@@ -29,7 +29,7 @@ void riscv32_csr_init(uint32_t csr_id, const char *name, riscv32_csr_handler_t h
     riscv32_csr_list[csr_id].handler = handler;
 }
 
-bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+bool riscv32_csr_unimp(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(csr_id);
@@ -39,7 +39,7 @@ bool riscv32_csr_unimp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, 
     return false;
 }
 
-bool riscv32_csr_illegal(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+bool riscv32_csr_illegal(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(csr_id);

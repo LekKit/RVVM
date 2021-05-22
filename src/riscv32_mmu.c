@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "riscv32_mmu.h"
 
-void riscv32_mmu_dump(riscv32_vm_state_t *vm)
+void riscv32_mmu_dump(rvvm_hart_t *vm)
 {
 	printf("root page table at: 0x%"PRIxXLEN"\n", vm->root_page_table);
 
@@ -83,7 +83,7 @@ inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
 }
 
 // Put address translation into TLB
-static void tlb_put(riscv32_vm_state_t* vm, uint32_t addr, uint32_t page_addr, uint8_t access)
+static void tlb_put(rvvm_hart_t* vm, uint32_t addr, uint32_t page_addr, uint8_t access)
 {
     if (phys_addr_in_mem(vm->mem, page_addr)) {
         addr &= 0xFFFFF000;
@@ -103,7 +103,7 @@ static void tlb_put(riscv32_vm_state_t* vm, uint32_t addr, uint32_t page_addr, u
 }
 
 // Virtual memory addressing mode (SV32)
-static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+static bool riscv32_mmu_translate_sv32(rvvm_hart_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
 {
     uint32_t pte_addr = vm->root_page_table | ((addr >> 20) & 0xFFC);
     uint32_t pte;
@@ -148,7 +148,7 @@ static bool riscv32_mmu_translate_sv32(riscv32_vm_state_t* vm, uint32_t addr, ui
 }
 
 // Flat 32-bit physical addressing mode (Mbare)
-static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+static bool riscv32_mmu_translate_bare(rvvm_hart_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
 {
     tlb_put(vm, addr, addr, access);
     *dest_addr = addr;
@@ -156,7 +156,7 @@ static bool riscv32_mmu_translate_bare(riscv32_vm_state_t* vm, uint32_t addr, ui
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv32_mmio_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+static bool riscv32_mmio_op(rvvm_hart_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
     riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
@@ -187,7 +187,7 @@ void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem)
     mem->size = 0;
 }
 
-void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data)
+void riscv32_mmio_add_device(rvvm_hart_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data)
 {
     if (vm->mmio.count > 255) {
         printf("ERROR: Too much MMIO zones!\n");
@@ -201,7 +201,7 @@ void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_
     vm->mmio.count++;
 }
 
-void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr)
+void riscv32_mmio_remove_device(rvvm_hart_t* vm, uint32_t addr)
 {
     riscv32_mmio_device_t* device;
     for (uint32_t i=0; i<vm->mmio.count; ++i) {
@@ -217,7 +217,7 @@ void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr)
     }
 }
 
-void riscv32_tlb_flush(riscv32_vm_state_t* vm)
+void riscv32_tlb_flush(rvvm_hart_t* vm)
 {
     // No ASID support as of now (TLB is quite small, there are no benefits)
     memset(vm->tlb, 0, sizeof(vm->tlb));
@@ -225,7 +225,7 @@ void riscv32_tlb_flush(riscv32_vm_state_t* vm)
 	vm->wait_event = 0;
 }
 
-bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
+bool riscv32_mmu_translate(rvvm_hart_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr)
 {
     if (vm->mmu_virtual && vm->priv_mode <= PRIVILEGE_SUPERVISOR)
         return riscv32_mmu_translate_sv32(vm, addr, access, dest_addr);
@@ -233,7 +233,7 @@ bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access
         return riscv32_mmu_translate_bare(vm, addr, access, dest_addr);
 }
 
-bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+bool riscv32_mmu_op(rvvm_hart_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
     if (!block_inside_page(addr, size)) {
         // Handle misalign between 2 pages

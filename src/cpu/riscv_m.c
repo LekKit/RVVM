@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "riscv_cpu.h"
 
-static void riscv_m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_mul(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -33,7 +33,7 @@ static void riscv_m_mul(riscv32_vm_state_t *vm, const uint32_t instruction)
     riscv_write_register(vm, rds, (int64_t)reg1 * (int64_t)reg2);
 }
 
-static void riscv_m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_mulh(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -52,7 +52,7 @@ static void riscv_m_mulh(riscv32_vm_state_t *vm, const uint32_t instruction)
 #endif
 }
 
-static void riscv_m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_mulhsu(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -71,7 +71,7 @@ static void riscv_m_mulhsu(riscv32_vm_state_t *vm, const uint32_t instruction)
 #endif
 }
 
-static void riscv_m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_mulhu(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -90,7 +90,7 @@ static void riscv_m_mulhu(riscv32_vm_state_t *vm, const uint32_t instruction)
 #endif
 }
 
-static void riscv_m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_div(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -110,7 +110,7 @@ static void riscv_m_div(riscv32_vm_state_t *vm, const uint32_t instruction)
     riscv_write_register(vm, rds, result);
 }
 
-static void riscv_m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_divu(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -127,7 +127,7 @@ static void riscv_m_divu(riscv32_vm_state_t *vm, const uint32_t instruction)
     riscv_write_register(vm, rds, result);
 }
 
-static void riscv_m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_rem(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -147,7 +147,7 @@ static void riscv_m_rem(riscv32_vm_state_t *vm, const uint32_t instruction)
     riscv_write_register(vm, rds, result);
 }
 
-static void riscv_m_remu(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv_m_remu(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);

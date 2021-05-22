@@ -21,6 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
-bool clint_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t access);
+bool clint_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t access);
 
 #endif

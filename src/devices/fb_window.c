@@ -50,7 +50,7 @@ void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length)
     }
 }
 
-static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
+static bool fb_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
 {
     char* devptr = ((char*)device->data) + offset;
     char* dataptr = (char*)data;
@@ -71,7 +71,7 @@ static bool fb_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* devic
     return true;
 }
 
-void init_fb(riscv32_vm_state_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard)
+void init_fb(rvvm_hart_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard)
 {
     uint32_t fb_size = width * height * 4;
     data->mouse = mouse;

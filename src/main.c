@@ -44,7 +44,7 @@ typedef struct {
     bool is_linux;
 } vm_args_t;
 
-size_t load_file_to_ram(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+size_t load_file_to_ram(rvvm_hart_t* vm, uint32_t addr, const char* filename)
 {
     FILE* file = fopen(filename, "rb");
     size_t ret = 0;
@@ -107,7 +107,7 @@ void parse_args(int argc, char** argv, vm_args_t* args)
 
 // Temporary implementation, we probably need some kind of abstraction over mmap/MapViewOfFile/VirtualAlloc
 #ifdef USE_FLASH
-static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
+static bool flash_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
 {
     uint8_t* devptr = ((uint8_t*)device->data) + offset;
     uint8_t* dataptr = (uint8_t*)data;
@@ -121,7 +121,7 @@ static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* de
 }
 
 #ifdef _WIN32
-static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+static void init_flash(rvvm_hart_t* vm, uint32_t addr, const char* filename)
 {
     HANDLE hf = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, 3, FILE_ATTRIBUTE_NORMAL, NULL);
     if (!hf) {
@@ -133,7 +133,7 @@ static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filena
     riscv32_mmio_add_device(vm, addr, addr + GetFileSize(hf, NULL) - 1, flash_mmio_handler, tmp);
 }
 #else
-static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+static void init_flash(rvvm_hart_t* vm, uint32_t addr, const char* filename)
 {
     int fd = open(filename, O_RDWR);
     if (fd == -1) {
@@ -165,7 +165,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    riscv32_vm_state_t* vm = riscv32_create_vm();
+    rvvm_hart_t* vm = riscv32_create_vm();
     if (vm == NULL)
     {
         printf("ERROR: VM creation failed.\n");

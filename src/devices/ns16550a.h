@@ -22,6 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
-void ns16550a_init(riscv32_vm_state_t *vm, uint32_t base_addr);
+void ns16550a_init(rvvm_hart_t *vm, uint32_t base_addr);
 
 #endif // NS16550A_H

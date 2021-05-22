@@ -44,7 +44,7 @@ static inline sxlen_t decode_jal_imm(uint16_t imm)
     return sign_extend(imm, 12);
 }
 
-static void riscv_c_addi4spn(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_addi4spn(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Add imm*4 to stack pointer (X2), store into rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
@@ -57,7 +57,7 @@ static void riscv_c_addi4spn(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_write_register(vm, rds, rsp + imm);
 }
 
-static void riscv_c_addi(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_addi(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Add 6-bit signed immediate to rds (this also serves as NOP for X0 reg)
     regid_t rds = bit_cut(instruction, 7, 5);
@@ -68,7 +68,7 @@ static void riscv_c_addi(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_write_register(vm, rds, src_reg + imm);
 }
 
-static void riscv_c_slli(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_slli(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Left shift rds by imm, store into rds
     regid_t rds = bit_cut(instruction, 7, 5);
@@ -78,13 +78,13 @@ static void riscv_c_slli(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_write_register(vm, rds, src_reg << shamt);
 }
 
-static void riscv_c_fld(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
 #ifndef RV64
-static void riscv_c_jal(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_jal(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Save PC+2 into X1 (return addr), jump to PC+offset
     xlen_t pc = riscv_read_register(vm, REGISTER_PC);
@@ -95,12 +95,12 @@ static void riscv_c_jal(rvvm_hart_state_t *vm, const uint16_t instruction)
 }
 #endif
 
-static void riscv_c_fldsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_lw(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_lw(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Read 32-bit integer from address rs1+offset to rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
@@ -117,7 +117,7 @@ static void riscv_c_lw(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_li(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_li(rvvm_hart_t *vm, const uint16_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     sxlen_t imm = sign_extend((bit_cut(instruction, 12, 1) << 5) |
@@ -126,7 +126,7 @@ static void riscv_c_li(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_write_register(vm, rds, imm);
 }
 
-static void riscv_c_lwsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_lwsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Read 32-bit integer from address sp+offset to rds
     regid_t rds = bit_cut(instruction, 7, 5);
@@ -142,12 +142,12 @@ static void riscv_c_lwsp(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_flw(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_addi16sp_lui(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_addi16sp_lui(rvvm_hart_t *vm, const uint16_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     uint32_t imm;
@@ -169,12 +169,12 @@ static void riscv_c_addi16sp_lui(rvvm_hart_state_t *vm, const uint16_t instructi
     }
 }
 
-static void riscv_c_flwsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_alops1(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_alops1(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // goddamn glue opcode
     regid_t rds = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -215,7 +215,7 @@ static void riscv_c_alops1(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_alops2(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_alops2(rvvm_hart_t *vm, const uint16_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs2 = bit_cut(instruction, 2, 5);
@@ -251,12 +251,12 @@ static void riscv_c_alops2(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_fsd(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_j(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_j(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Jump to PC+offset
     xlen_t pc = riscv_read_register(vm, REGISTER_PC);
@@ -265,12 +265,12 @@ static void riscv_c_j(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_write_register(vm, REGISTER_PC, pc + offset - 2);
 }
 
-static void riscv_c_fsdsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_sw(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_sw(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Write 32-bit integer rs2 to address rs1+offset
     regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
@@ -295,7 +295,7 @@ static inline sxlen_t decode_branch_imm(const uint16_t instruction)
     return sign_extend(imm, 9);
 }
 
-static void riscv_c_beqz(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_beqz(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Conditional jump if rds == 0
     regid_t rds = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -308,7 +308,7 @@ static void riscv_c_beqz(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_swsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_swsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Write 32-bit integer rs2 to address sp+offset
     regid_t rs2 = bit_cut(instruction, 2, 5);
@@ -321,12 +321,12 @@ static void riscv_c_swsp(rvvm_hart_state_t *vm, const uint16_t instruction)
     riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
 }
 
-static void riscv_c_fsw(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }
 
-static void riscv_c_bnez(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Conditional jump if rds != 0
     regid_t rds = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -339,7 +339,7 @@ static void riscv_c_bnez(rvvm_hart_state_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_fswsp(rvvm_hart_state_t *vm, const uint16_t instruction)
+static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv_c_illegal_insn(vm, instruction);
 }

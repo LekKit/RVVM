@@ -111,11 +111,11 @@ typedef struct {
     paddr_t size;   // Amount of usable memory after mem_begin
 } riscv32_phys_mem_t;
 
-typedef struct riscv32_vm_state_t riscv32_vm_state_t;
+typedef struct rvvm_hart_t rvvm_hart_t;
 typedef struct riscv32_csr_t riscv32_csr_t;
 typedef struct riscv32_mmio_device_t riscv32_mmio_device_t;
 
-typedef bool (*riscv32_mmio_handler_t)(struct riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+typedef bool (*riscv32_mmio_handler_t)(struct rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t addr, void* dest, uint32_t size, uint8_t access);
 
 struct riscv32_mmio_device_t {
     paddr_t base_addr;
@@ -129,7 +129,7 @@ typedef struct {
     riscv32_mmio_device_t regions[256];
 } riscv32_mmio_regions_t;
 
-struct riscv32_vm_state_t {
+struct rvvm_hart_t {
     size_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
     riscv32_tlb_t tlb[TLB_SIZE];
@@ -164,7 +164,7 @@ struct riscv32_vm_state_t {
 //#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
 
-void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...);
+void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);
 
 #ifdef RV_DEBUG
 #define riscv32_debug_always riscv32_debug_func
@@ -180,13 +180,13 @@ void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...);
 
 #define UNUSED(x) (void)x
 
-riscv32_vm_state_t *riscv32_create_vm();
-void riscv32_run(riscv32_vm_state_t *vm);
-void riscv32_destroy_vm(riscv32_vm_state_t *vm);
-void riscv32_dump_registers(riscv32_vm_state_t *vm);
-void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction);
-void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction);
+rvvm_hart_t *riscv32_create_vm();
+void riscv32_run(rvvm_hart_t *vm);
+void riscv32_destroy_vm(rvvm_hart_t *vm);
+void riscv32_dump_registers(rvvm_hart_t *vm);
+void riscv32_illegal_insn(rvvm_hart_t *vm, const uint32_t instruction);
+void riscv32c_illegal_insn(rvvm_hart_t *vm, const uint16_t instruction);
 void riscv32_priv_init();
-bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi);
-void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause);
-void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval);
+bool riscv32_handle_ip(rvvm_hart_t *vm, bool wfi);
+void riscv32_interrupt(rvvm_hart_t *vm, uint32_t cause);
+void riscv32_trap(rvvm_hart_t *vm, uint32_t cause, uint32_t tval);

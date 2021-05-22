@@ -25,14 +25,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CSR_SSTATUS_MASK 0x800DE122
 #define CSR_SEIP_MASK    0x222
 
-static bool riscv32_csr_sstatus(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK);
     return true;
 }
 
-static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sie(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.ie, dest, op, CSR_SEIP_MASK);
@@ -41,49 +41,49 @@ static bool riscv32_csr_sie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* d
     return true;
 }
 
-static bool riscv32_csr_stvec(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_stvec(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tvec[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sscratch(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sscratch(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.scratch[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sepc(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sepc(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.epc[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_scause(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_scause(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.cause[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_stval(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_stval(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tval[PRIVILEGE_SUPERVISOR], dest, op);
     return true;
 }
 
-static bool riscv32_csr_sip(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_sip(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.ip, dest, op, CSR_SEIP_MASK);
     return true;
 }
 
-static bool riscv32_csr_satp(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_satp(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     uint32_t satp = (vm->mmu_virtual ? 0x80000000 : 0) | (vm->root_page_table >> 12);

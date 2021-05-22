@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 extern uint64_t clint_mtimecmp;
 extern uint64_t clint_mtime;
 
-static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32i_system(rvvm_hart_t *vm, const uint32_t instruction)
 {
     switch (instruction) {
     case RV32_S_ECALL:
@@ -119,21 +119,21 @@ static void riscv32i_system(riscv32_vm_state_t *vm, const uint32_t instruction)
     riscv32_illegal_insn(vm, instruction);
 }
 
-static void riscv32i_fence(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32i_fence(rvvm_hart_t *vm, const uint32_t instruction)
 {
     UNUSED(vm);
     UNUSED(instruction);
     riscv32_debug(vm, "RV32I: unimplemented fence %h", instruction);
 }
 
-static void riscv32zifence_i(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zifence_i(rvvm_hart_t *vm, const uint32_t instruction)
 {
     UNUSED(vm);
     UNUSED(instruction);
     riscv32_debug(vm, "RV32I: unimplemented zifence.i %h", instruction);
 }
 
-static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrw(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t rs1 = bit_cut(instruction, 15, 5);
@@ -149,7 +149,7 @@ static void riscv32zicsr_csrrw(riscv32_vm_state_t *vm, const uint32_t instructio
     riscv32_debug(vm, "RV32I: csrrw %r, %c, %r", rds, csr, rs1);
 }
 
-static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrs(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t rs1 = bit_cut(instruction, 15, 5);
@@ -165,7 +165,7 @@ static void riscv32zicsr_csrrs(riscv32_vm_state_t *vm, const uint32_t instructio
     riscv32_debug(vm, "RV32I: csrrs %r, %c, %r", rds, csr, rs1);
 }
 
-static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrc(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t rs1 = bit_cut(instruction, 15, 5);
@@ -181,7 +181,7 @@ static void riscv32zicsr_csrrc(riscv32_vm_state_t *vm, const uint32_t instructio
     riscv32_debug(vm, "RV32I: csrrc %r, %c, %r", rds, csr, rs1);
 }
 
-static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrwi(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t val = bit_cut(instruction, 15, 5);
@@ -196,7 +196,7 @@ static void riscv32zicsr_csrrwi(riscv32_vm_state_t *vm, const uint32_t instructi
     riscv32_debug(vm, "RV32I: csrrwi %r, %c, %h", rds, csr, bit_cut(instruction, 15, 5));
 }
 
-static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrsi(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t val = bit_cut(instruction, 15, 5);
@@ -211,7 +211,7 @@ static void riscv32zicsr_csrrsi(riscv32_vm_state_t *vm, const uint32_t instructi
     riscv32_debug(vm, "RV32I: csrrsi %r, %c, %h", rds, csr, bit_cut(instruction, 15, 5));
 }
 
-static void riscv32zicsr_csrrci(riscv32_vm_state_t *vm, const uint32_t instruction)
+static void riscv32zicsr_csrrci(rvvm_hart_t *vm, const uint32_t instruction)
 {
     uint32_t rds = bit_cut(instruction, 7, 5);
     uint32_t val = bit_cut(instruction, 15, 5);

@@ -76,20 +76,20 @@ bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pag
 void riscv32_destroy_phys_mem(riscv32_phys_mem_t* mem);
 
 // Register MMIO device in the physical address space
-void riscv32_mmio_add_device(riscv32_vm_state_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data);
+void riscv32_mmio_add_device(rvvm_hart_t* vm, uint32_t base_addr, uint32_t end_addr, riscv32_mmio_handler_t handler, void* data);
 
 // Remove MMIO device (whatever addr in the range will do)
 // Frees device->data as well if not NULL
-void riscv32_mmio_remove_device(riscv32_vm_state_t* vm, uint32_t addr);
+void riscv32_mmio_remove_device(rvvm_hart_t* vm, uint32_t addr);
 
 // Flush the TLB (on context switch, SFENCE.VMA, etc)
-void riscv32_tlb_flush(riscv32_vm_state_t* vm);
+void riscv32_tlb_flush(rvvm_hart_t* vm);
 
 // Performs translation corresponding to current CSR satp[MODE]
-bool riscv32_mmu_translate(riscv32_vm_state_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr);
+bool riscv32_mmu_translate(rvvm_hart_t* vm, uint32_t addr, uint8_t access, uint32_t* dest_addr);
 
 // Parse the MMU, perform memory operation and cache address translation in TLB
-bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
+bool riscv32_mmu_op(rvvm_hart_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access);
 
 /*
 * Inlined TLB-cached function (used for performance)
@@ -100,7 +100,7 @@ bool riscv32_mmu_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t 
 *     MMIO is accessed
 * Why is static used? GCC prevents inlining otherwise, i assume it's a bug
 */
-inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
+inline static bool riscv32_mem_op(rvvm_hart_t* vm, uint32_t addr, void* dest, uint32_t size, uint8_t access)
 {
     // Check for TLB cached address translation and cross-page alignment
     uint32_t key = tlb_hash(addr);
@@ -117,6 +117,6 @@ inline static bool riscv32_mem_op(riscv32_vm_state_t* vm, uint32_t addr, void* d
     return riscv32_mmu_op(vm, addr, dest, size, access);
 }
 
-void riscv32_mmu_dump(riscv32_vm_state_t *vm);
+void riscv32_mmu_dump(rvvm_hart_t *vm);
 
 #endif

@@ -44,13 +44,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/eth-oc.h"
 
 // This should redirect the VM to the trap handlers when they are implemented
-void riscv32c_illegal_insn(riscv32_vm_state_t *vm, const uint16_t instruction)
+void riscv32c_illegal_insn(rvvm_hart_t *vm, const uint16_t instruction)
 {
     riscv32_debug_always(vm, "RV32C: illegal instruction %h", instruction);
     riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
 }
 
-void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
+void riscv32_illegal_insn(rvvm_hart_t *vm, const uint32_t instruction)
 {
     riscv32_debug_always(vm, "RV32I: illegal instruction %h", instruction);
     riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
@@ -60,7 +60,7 @@ void riscv32_illegal_insn(riscv32_vm_state_t *vm, const uint32_t instruction)
 #define MAX_SCREENS 2
 
 static spinlock_t global_lock;
-static riscv32_vm_state_t* global_vm_list[MAX_VMS] = {NULL};
+static rvvm_hart_t* global_vm_list[MAX_VMS] = {NULL};
 static size_t global_vm_count = 0;
 static thread_handle_t global_irq_thread;
 static struct fb_data global_screens[MAX_SCREENS];
@@ -68,7 +68,7 @@ static size_t global_screen_count = 0;
 
 static void* global_irq_handler(void* arg)
 {
-    riscv32_vm_state_t* vm;
+    rvvm_hart_t* vm;
     while (true) {
         sleep_ms(10);
         spin_lock(&global_lock);
@@ -90,7 +90,7 @@ static void* global_irq_handler(void* arg)
     return arg;
 }
 
-void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
+void riscv32_interrupt(rvvm_hart_t *vm, uint32_t cause)
 {
     spin_lock(&global_lock);
     vm->ev_int_mask |= (1 << cause);
@@ -99,7 +99,7 @@ void riscv32_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
     spin_unlock(&global_lock);
 }
 
-static void register_vm(riscv32_vm_state_t *vm)
+static void register_vm(rvvm_hart_t *vm)
 {
     spin_lock(&global_lock);
     if (global_vm_count == 0) {
@@ -114,7 +114,7 @@ static void register_vm(riscv32_vm_state_t *vm)
     spin_unlock(&global_lock);
 }
 
-static void deregister_vm(riscv32_vm_state_t *vm)
+static void deregister_vm(rvvm_hart_t *vm)
 {
     spin_lock(&global_lock);
     for (size_t i=0; i<global_vm_count; ++i) {
@@ -132,7 +132,7 @@ static void deregister_vm(riscv32_vm_state_t *vm)
     spin_unlock(&global_lock);
 }
 
-riscv32_vm_state_t *riscv32_create_vm()
+rvvm_hart_t *riscv32_create_vm()
 {
     static bool global_init = false;
     if (!global_init) {
@@ -147,8 +147,8 @@ riscv32_vm_state_t *riscv32_create_vm()
         global_init = true;
     }
 
-    riscv32_vm_state_t *vm = (riscv32_vm_state_t*)malloc(sizeof(riscv32_vm_state_t));
-    memset(vm, 0, sizeof(riscv32_vm_state_t));
+    rvvm_hart_t *vm = (rvvm_hart_t*)malloc(sizeof(rvvm_hart_t));
+    memset(vm, 0, sizeof(rvvm_hart_t));
 
     // 0x10000 pages = 256M
     if (!riscv32_init_phys_mem(&vm->mem, 0x80000000, 0x10000)) {
@@ -184,7 +184,7 @@ riscv32_vm_state_t *riscv32_create_vm()
     return vm;
 }
 
-void riscv32_destroy_vm(riscv32_vm_state_t *vm)
+void riscv32_destroy_vm(rvvm_hart_t *vm)
 {
     deregister_vm(vm);
     for (size_t i=0; i<vm->mmio.count; ++i) {
@@ -194,7 +194,7 @@ void riscv32_destroy_vm(riscv32_vm_state_t *vm)
     free(vm);
 }
 
-static void riscv32_perform_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
+static void riscv32_perform_interrupt(rvvm_hart_t *vm, uint32_t cause)
 {
     uint8_t priv;
     for (priv=PRIVILEGE_MACHINE; priv>(cause & 0x3); --priv) {
@@ -220,7 +220,7 @@ static void riscv32_perform_interrupt(riscv32_vm_state_t *vm, uint32_t cause)
     vm->wait_event = 0;
 }
 
-void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
+void riscv32_trap(rvvm_hart_t *vm, uint32_t cause, uint32_t tval)
 {
     uint8_t priv;
     // Delegate to lower privilege mode if needed
@@ -247,7 +247,7 @@ void riscv32_trap(riscv32_vm_state_t *vm, uint32_t cause, uint32_t tval)
     vm->wait_event = 0;
 }
 
-bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi)
+bool riscv32_handle_ip(rvvm_hart_t *vm, bool wfi)
 {
     // Check if we have any pending interrupts
     if (vm->csr.ip) {
@@ -277,7 +277,7 @@ bool riscv32_handle_ip(riscv32_vm_state_t *vm, bool wfi)
     return false;
 }
 
-void riscv32_debug_func(const riscv32_vm_state_t *vm, const char* fmt, ...)
+void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -356,7 +356,7 @@ const char *riscv32i_translate_register(uint32_t reg)
     }
 }
 
-void riscv32_dump_registers(riscv32_vm_state_t *vm)
+void riscv32_dump_registers(rvvm_hart_t *vm)
 {
     for ( int i = 0; i < REGISTERS_MAX - 1; i++ ) {
         printf("%-5s: 0x%08"PRIX32"  ", riscv32i_translate_register(i), riscv32i_read_register_u(vm, i));
@@ -367,14 +367,14 @@ void riscv32_dump_registers(riscv32_vm_state_t *vm)
     printf("%-5s: 0x%08"PRIX32"\n", riscv32i_translate_register(32), riscv32i_read_register_u(vm, 32));
 }
 
-static void riscv32_trap_jump(riscv32_vm_state_t *vm)
+static void riscv32_trap_jump(rvvm_hart_t *vm)
 {
     size_t pc = vm->csr.tvec[vm->priv_mode] & (~3);
     if (vm->csr.tvec[vm->priv_mode] & 1) pc += vm->csr.cause[vm->priv_mode] << 2;
     riscv32i_write_register_u(vm, REGISTER_PC, pc);
 }
 
-void riscv32_run(riscv32_vm_state_t *vm)
+void riscv32_run(rvvm_hart_t *vm)
 {
     assert(vm);
 
