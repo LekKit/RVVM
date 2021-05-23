@@ -102,7 +102,7 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 		goto err;
 	}
 
-	xdata->seginfo.shmid = shmget(IPC_PRIVATE, (bpp / 8) * width * height, IPC_CREAT | 0777);
+	xdata->seginfo.shmid = shmget(IPC_PRIVATE, (size_t)((bpp / 8) * width * height), IPC_CREAT | 0777);
 	if (xdata->seginfo.shmid < 0)
 	{
 
