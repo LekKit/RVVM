@@ -33,7 +33,7 @@ struct ps2_device
 	void *port_data; // private PS/2 port data - used to send IRQ
 };
 
-void altps2_init(riscv32_vm_state_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child);
+void altps2_init(rvvm_hart_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child);
 void altps2_interrupt(struct ps2_device *dev);
 void altps2_interrupt_unlocked(struct ps2_device *dev);
 #endif

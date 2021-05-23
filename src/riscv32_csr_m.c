@@ -40,7 +40,7 @@ static uint32_t riscv32_mkmisa(const char* str)
     return ret;
 }
 
-static bool riscv32_csr_mhartid(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mhartid(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(csr_id);
@@ -49,14 +49,14 @@ static bool riscv32_csr_mhartid(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_
     return true;
 }
 
-static bool riscv32_csr_mstatus(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.status, dest, op, CSR_MSTATUS_MASK);
     return true;
 }
 
-static bool riscv32_csr_misa(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_misa(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(csr_id);
@@ -65,21 +65,21 @@ static bool riscv32_csr_misa(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* 
     return true;
 }
 
-static bool riscv32_csr_medeleg(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_medeleg(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.edeleg[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mideleg(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mideleg(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.ideleg[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mie(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.ie, dest, op, CSR_MEIP_MASK);
@@ -88,42 +88,42 @@ static bool riscv32_csr_mie(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* d
     return true;
 }
 
-static bool riscv32_csr_mtvec(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mtvec(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tvec[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mscratch(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mscratch(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.scratch[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mepc(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mepc(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.epc[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mcause(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mcause(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.cause[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mtval(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mtval(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper(&vm->csr.tval[PRIVILEGE_MACHINE], dest, op);
     return true;
 }
 
-static bool riscv32_csr_mip(riscv32_vm_state_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
+static bool riscv32_csr_mip(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
     csr_helper_masked(&vm->csr.ip, dest, op, CSR_MEIP_MASK);

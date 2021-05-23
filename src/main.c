@@ -28,23 +28,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "elf_load.h"
 #include "devices/ata.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-#endif
-
 typedef struct {
     const char* bootrom;
     const char* dtb;
-    const char* flash_image;
+    const char* image;
     bool is_linux;
 } vm_args_t;
 
-size_t load_file_to_ram(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
+size_t load_file_to_ram(rvvm_hart_t* vm, uint32_t addr, const char* filename)
 {
     FILE* file = fopen(filename, "rb");
     size_t ret = 0;
@@ -96,7 +87,7 @@ void parse_args(int argc, char** argv, vm_args_t* args)
         if (strncmp(argv[i], "-dtb=", 5) == 0) {
     		args->dtb = argv[i] + 5;
     	} else if (strncmp(argv[i], "-image=", 7) == 0) {
-    		args->flash_image = argv[i] + 7;
+    		args->image = argv[i] + 7;
         } else if (strcmp(argv[i], "--linux") == 0) {
     		args->is_linux = true;
         } else {
@@ -105,50 +96,6 @@ void parse_args(int argc, char** argv, vm_args_t* args)
     }
 }
 
-// Temporary implementation, we probably need some kind of abstraction over mmap/MapViewOfFile/VirtualAlloc
-#ifdef USE_FLASH
-static bool flash_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
-{
-    uint8_t* devptr = ((uint8_t*)device->data) + offset;
-    uint8_t* dataptr = (uint8_t*)data;
-    UNUSED(vm);
-    if (op == MMU_WRITE) {
-        for (size_t i=0; i<size; ++i) devptr[i] = dataptr[i];
-    } else {
-        for (size_t i=0; i<size; ++i) dataptr[i] = devptr[i];
-    }
-    return true;
-}
-
-#ifdef _WIN32
-static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
-{
-    HANDLE hf = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, 3, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (!hf) {
-        printf("ERROR: Failed to open image %s\n", filename);
-        return;
-    }
-    HANDLE hm = CreateFileMappingA(hf, NULL, PAGE_READWRITE, 0, 0, NULL);
-    void* tmp = MapViewOfFile(hm, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
-    riscv32_mmio_add_device(vm, addr, addr + GetFileSize(hf, NULL) - 1, flash_mmio_handler, tmp);
-}
-#else
-static void init_flash(riscv32_vm_state_t* vm, uint32_t addr, const char* filename)
-{
-    int fd = open(filename, O_RDWR);
-    if (fd == -1) {
-        printf("ERROR: Failed to open image %s\n", filename);
-        return;
-    }
-    struct stat filestat;
-    fstat(fd, &filestat);
-    size_t filesize = filestat.st_size & ~(sysconf(_SC_PAGE_SIZE) - 1);
-    void* tmp = mmap(NULL, filesize, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
-    riscv32_mmio_add_device(vm, addr, addr + filesize - 1, flash_mmio_handler, tmp);
-}
-#endif
-#endif
-
 int main(int argc, char** argv)
 {
     vm_args_t args = {0};
@@ -156,7 +103,7 @@ int main(int argc, char** argv)
     // let the vm be run by simple double-click, heh
     args.dtb = "rvvm.dtb";
     args.bootrom = "fw_payload.bin";
-    args.flash_image = "rootfs.img";
+    args.image = "rootfs.img";
 #endif
     parse_args(argc, argv, &args);
     if (args.bootrom == NULL)
@@ -165,7 +112,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    riscv32_vm_state_t* vm = riscv32_create_vm();
+    rvvm_hart_t* vm = riscv32_create_vm();
     if (vm == NULL)
     {
         printf("ERROR: VM creation failed.\n");
@@ -241,17 +188,13 @@ int main(int argc, char** argv)
 	    }
     }
 
-    if (args.flash_image) {
-#ifdef USE_FLASH
-	    init_flash(vm, 0x40000000, args.flash_image);
-#else
-	    FILE *fp = fopen(args.flash_image, "rb+");
+    if (args.image) {
+	    FILE *fp = fopen(args.image, "rb+");
 	    if (fp == NULL) {
-		    printf("Unable to open image file %s\n", args.flash_image);
+		    printf("Unable to open image file %s\n", args.image);
 	    } else {
 		    ata_init(vm, 0x40000000, 0x40001000, fp, NULL);
 	    }
-#endif
     }
 
     riscv32_run(vm);

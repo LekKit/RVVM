@@ -45,7 +45,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static spinlock_t global_amo_lock;
 static bool lr_reserved = false;
 
-static void riscv_a_atomic_w(rvvm_hart_state_t *vm, const uint32_t instruction)
+static void riscv_a_atomic_w(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
@@ -120,7 +120,7 @@ static void riscv_a_atomic_w(rvvm_hart_state_t *vm, const uint32_t instruction)
 }
 
 #ifdef RV64
-static void riscv_a_atomic_d(rvvm_hart_state_t *vm, const uint32_t instruction)
+static void riscv_a_atomic_d(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);

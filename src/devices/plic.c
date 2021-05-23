@@ -192,7 +192,7 @@ static bool plic_ie_handler(struct plic *dev, uint32_t offset, uint32_t *data, u
 	return true;
 }
 
-static bool plic_ctxflag_handler(riscv32_vm_state_t *vm, struct plic *dev, uint32_t offset, uint32_t *data, uint8_t access)
+static bool plic_ctxflag_handler(rvvm_hart_t *vm, struct plic *dev, uint32_t offset, uint32_t *data, uint8_t access)
 {
 	uint32_t idx = offset & 1023;
 	uint32_t ctx = offset / 1024;
@@ -258,7 +258,7 @@ static bool plic_ctxflag_handler(riscv32_vm_state_t *vm, struct plic *dev, uint3
 	return true;
 }
 
-static bool plic_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool plic_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
 	struct plic *dev = (struct plic*)device->data;
 	UNUSED(vm);
@@ -346,7 +346,7 @@ out:
 	return ret;
 }
 
-void* plic_init(riscv32_vm_state_t *vm, uint32_t base_addr)
+void* plic_init(rvvm_hart_t *vm, uint32_t base_addr)
 {
 	struct plic *ptr = calloc(1, sizeof (struct plic));
 	spin_init(&ptr->lock);
@@ -359,7 +359,7 @@ void* plic_init(riscv32_vm_state_t *vm, uint32_t base_addr)
 // vm - hart context
 // data - PLIC private data from mmio_device_t->data
 // id - irq number
-bool plic_send_irq(riscv32_vm_state_t *vm, void *data, uint32_t id)
+bool plic_send_irq(rvvm_hart_t *vm, void *data, uint32_t id)
 {
 	struct plic *dev = (struct plic*)data;
 	spin_lock(&dev->lock);

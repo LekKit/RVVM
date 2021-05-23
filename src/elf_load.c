@@ -34,7 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PN_XNUM 0xffff
 #endif
 
-bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset)
+bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ssize_t offset)
 {
 	FILE *fp = fopen(path, "rb");
 	if (!fp)
@@ -223,6 +223,6 @@ err_fclose:
 
 #else
 
-bool riscv32_elf_load_by_path(riscv32_vm_state_t *vm, const char *path, bool use_mmu, ssize_t offset){}
+bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ssize_t offset){}
 
 #endif

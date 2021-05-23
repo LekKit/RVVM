@@ -38,7 +38,7 @@ struct altps2
 	spinlock_t lock;
 
 	// IRQ data
-	riscv32_vm_state_t *hart; // hart to send IRQ to
+	rvvm_hart_t *hart; // hart to send IRQ to
 	void *intc_data; // private interrupt controller data
 	uint32_t irq;
 
@@ -48,7 +48,7 @@ struct altps2
 
 };
 
-static bool altps2_mmio_handler_impl(riscv32_vm_state_t* vm, struct altps2* ps2port, uint32_t offset, uint32_t* data, uint8_t access)
+static bool altps2_mmio_handler_impl(rvvm_hart_t* vm, struct altps2* ps2port, uint32_t offset, uint32_t* data, uint8_t access)
 {
 	UNUSED(vm);
 	if (access == MMU_READ) {
@@ -105,7 +105,7 @@ static bool altps2_mmio_handler_impl(riscv32_vm_state_t* vm, struct altps2* ps2p
 	return false;
 }
 
-static bool altps2_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool altps2_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
 	struct altps2 *ps2port = device->data;
 	spin_lock(&ps2port->lock);
@@ -130,7 +130,7 @@ out:
 	return ret;
 }
 
-void altps2_init(riscv32_vm_state_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
+void altps2_init(rvvm_hart_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
 {
 	struct altps2 *ptr = calloc(1, sizeof (struct altps2));
 

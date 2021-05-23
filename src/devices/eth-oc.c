@@ -187,7 +187,7 @@ struct ethoc_dev
     struct bd bdbuf[ETHOC_BD_BUFSIZ / sizeof(struct bd)];
     struct mdio mdio;
     struct tap_pollevent_cb pollev;
-    riscv32_vm_state_t *hart; /* Hart to send IRQ to, also used as memory to send/recv packets */
+    rvvm_hart_t *hart; /* Hart to send IRQ to, also used as memory to send/recv packets */
     void *intc_data;
     uint32_t irq;
     uint32_t cur_txbd;
@@ -243,7 +243,7 @@ static void ethoc_reset(struct ethoc_dev *eth)
     eth->txctrl = 0;
 }
 
-static bool ethoc_data_mmio_handler(riscv32_vm_state_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
 {
     UNUSED(vm);
     if (offset < 0x400 && (offset % 4 != 0 || size != 4))
@@ -591,7 +591,7 @@ static int ethoc_pollevent_check(void *arg) {
     return ret;
 }
 
-void ethoc_init(riscv32_vm_state_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq)
+void ethoc_init(rvvm_hart_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq)
 {
     struct ethoc_dev *eth = (struct ethoc_dev *) malloc(sizeof(struct ethoc_dev));
     if (eth == NULL) {
