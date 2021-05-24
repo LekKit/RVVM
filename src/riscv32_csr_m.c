@@ -61,7 +61,7 @@ static bool riscv32_csr_misa(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, u
     UNUSED(vm);
     UNUSED(csr_id);
     UNUSED(op);
-    *dest = riscv32_mkmisa("IMACSU");
+    *dest = riscv32_mkmisa("IMAFDCSU");
     return true;
 }
 

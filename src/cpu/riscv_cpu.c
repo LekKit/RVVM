@@ -118,6 +118,8 @@ void riscv_cpu_init()
     riscv_c_init();
     riscv_m_init();
     riscv_a_init();
+    riscv_f_init();
+    riscv_d_init();
 }
 
 #if 0

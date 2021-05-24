@@ -148,6 +148,8 @@ USE_NET ?= 0
 ifeq ($(OS),linux)
 override LDFLAGS += -lrt
 endif
+# Needed for floating-point functions like fetestexcept/feraiseexcept
+override LDFLAGS += -lm
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB

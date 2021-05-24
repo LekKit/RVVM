@@ -62,6 +62,8 @@ enum
     REGISTERS_MAX
 };
 
+#define FPU_REGISTERS_MAX 32
+
 enum
 {
     PRIVILEGE_USER,
@@ -148,7 +150,9 @@ struct rvvm_hart_t {
         uint32_t cause[4];
         uint32_t tval[4];
         uint32_t ip;
+        uint32_t fcsr;
     } csr;
+    fmaxlen_t fpu_registers[FPU_REGISTERS_MAX];
     paddr_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;

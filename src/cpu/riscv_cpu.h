@@ -88,6 +88,8 @@ void riscv_i_init();
 void riscv_c_init();
 void riscv_m_init();
 void riscv_a_init();
+void riscv_f_init();
+void riscv_d_init();
 
 static inline xlen_t riscv_read_register(rvvm_hart_t *vm, regid_t reg)
 {
@@ -233,6 +235,29 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
 // I/S/B type instructions
 #define RVA_ATOMIC_W     0x4B
 #define RV64A_ATOMIC_D   0x6B
+
+/*
+ * RV32F instructions
+ */
+#define RVF_FLW          0x41 /* ISB */
+#define RVF_FSW          0x49 /* ISB */
+#define RVF_FMADD        0x10 /* R + funct3 */
+#define RVF_FMSUB        0x11 /* R + funct3 */
+#define RVF_FNMSUB       0x12 /* R + funct3 */
+#define RVF_FNMADD       0x13 /* R + funct3 */
+#define RVF_OTHER        0x14 /* R + funct3 + funct7 a bunch */
+
+/*
+ * RV32D instructions
+ */
+#define RVD_FLW          0x61 /* ISB */
+#define RVD_FSW          0x69 /* ISB */
+#define RVD_FMADD        0x110 /* R + funct3 */
+#define RVD_FMSUB        0x111 /* R + funct3 */
+#define RVD_FNMSUB       0x112 /* R + funct3 */
+#define RVD_FNMADD       0x113 /* R + funct3 */
+/* except FCVT.S.D */
+#define RVD_OTHER        0x114 /* R + funct3 + funct7 a bunch */
 
 #endif
 #endif

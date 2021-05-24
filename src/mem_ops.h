@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdint.h>
 #include "compiler.h"
+#include <string.h>
 
 /*
  * Simple memory operations (write, read integers) for internal usage,
@@ -137,6 +138,26 @@ static inline uint8_t read_uint8(const void* addr) {
 
 static inline void write_uint8(void* addr, uint8_t val) {
     *(uint8_t*)addr = val;
+}
+
+static inline float read_fp32(const void *addr) {
+    float ret;
+    memcpy(&ret, addr, sizeof(ret));
+    return ret;
+}
+
+static inline void write_fp32(void *addr, float val) {
+    memcpy(addr, &val, sizeof(val));
+}
+
+static inline void write_fp64(void *addr, double val) {
+    memcpy(addr, &val, sizeof(val));
+}
+
+static inline double read_fp64(const void *addr) {
+    double ret;
+    memcpy(&ret, addr, sizeof(ret));
+    return ret;
 }
 
 #endif
