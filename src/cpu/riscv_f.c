@@ -403,13 +403,13 @@ static inline void riscv_f_fmv_w_x(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 
 static inline void riscv_f_fcvt_s_d(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    double val = read_fp64(&vm->registers[rs1]);
+    double val = read_fp64(&vm->fpu_registers[rs1]);
     fpu_write_register(vm, rd, fpu_fp2fp(fnative_t, val));
 }
 #else
 static inline void riscv_f_fcvt_d_s(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    float val = read_fp32(&vm->registers[rs1]);
+    float val = read_fp32(&vm->fpu_registers[rs1]);
     fpu_write_register(vm, rd, fpu_fp2fp(fnative_t, val));
 }
 #endif
@@ -648,8 +648,8 @@ void riscv_d_init()
         riscv_install_opcode_R(RVD_FMSUB | (i << 5), riscv_f_fmsub);
         riscv_install_opcode_R(RVD_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVD_FNMSUB | (i << 5), riscv_f_fnmsub);
+        riscv_install_opcode_R(RVD_OTHER | (i << 5), riscv_f_other);
     }
-    riscv_install_opcode_R(RVD_OTHER, riscv_f_other);
 }
 #else
 void riscv_f_init()
@@ -661,7 +661,7 @@ void riscv_f_init()
         riscv_install_opcode_R(RVF_FMSUB | (i << 5), riscv_f_fmsub);
         riscv_install_opcode_R(RVF_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVF_FNMSUB | (i << 5), riscv_f_fnmsub);
+        riscv_install_opcode_R(RVF_OTHER | (i << 5), riscv_f_other);
     }
-    riscv_install_opcode_R(RVF_OTHER, riscv_f_other);
 }
 #endif
