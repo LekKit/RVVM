@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  * RVD macro is defined for D extension, uses F otherwise
  */
 
+#include "riscv32.h"
 #define RISCV_CPU_SOURCE
 
 #include "compiler.h"
@@ -34,41 +35,47 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <tgmath.h>
 
 #ifdef RVD
+    #define SIGNIFICAND_SIZE DBL_MANT_DIG /* used for sNaN/qNaN classification */
+    /* current native float type, might be replaced with softfloat later */
+    typedef double fnative_t;
+    /* bit 26 of opcode instruction */
+    #define BIT26 0
 
-#define SIGNIFICAND_SIZE DBL_MANT_DIG /* used for sNaN/qNaN classification */
-/* current native float type, might be replaced with softfloat later */
-typedef double fnative_t;
-/* bit 26 of opcode instruction */
-#define BIT26 0
-
+    #define read_float(x) read_fp64(x)
+    #define write_float(p, x) write_fp64(p, x)
+    #define fpu_read_register fpu_read_register64
+    #define fpu_write_register fpu_write_register64
 #else
+    #define SIGNIFICAND_SIZE FLT_MANT_DIG /* used for sNaN/qNaN classification */
+    /* current native float type, might be replaced with softfloat later */
+    typedef float fnative_t;
+    /* bit 26 of opcode instruction */
+    #define BIT26 0
 
-#define SIGNIFICAND_SIZE FLT_MANT_DIG /* used for sNaN/qNaN classification */
-/* current native float type, might be replaced with softfloat later */
-typedef float fnative_t;
-/* bit 26 of opcode instruction */
-#define BIT26 0
-
+    #define read_float(x) read_fp32(x)
+    #define write_float(p, x) write_fp32(p, x)
+    #define fpu_read_register fpu_read_register32
+    #define fpu_write_register fpu_write_register32
 #endif
 
 /* handlers for FPU operations, to be replaced with JIT or softfpu? */
-#define fpu_add(x, y) ((x) + (y))
-#define fpu_sub(x, y) ((x) - (y))
-#define fpu_mul(x, y) ((x) * (y))
-#define fpu_div(x, y) ((x) / (y))
-#define fpu_neg(x) (-(x))
-#define fpu_sqrt(x) sqrt(x)
-#define fpu_min(x, y) fmin(x, y)
-#define fpu_max(x, y) fmax(x, y)
-#define fpu_eq(x, y) ((x) == (y))
-#define fpu_lt(x, y) ((x) < (y))
-#define fpu_le(x, y) ((x) <= (y))
-#define fpu_sign_check(x) (signbit(x))
-#define fpu_sign_set(x, s) ((s) ? -fabs(x) : fabs(x))
-#define fpu_fp2int(t, x) ((t) (x))
-#define fpu_int2fp(t, i) ((fnative_t) (t) (i))
-#define fpu_fp2fp(t, x) ((t) (x))
-#define fpu_fclass(x) fpu_fclass_impl(x)
+#define fpu_add(x, y)      (fnative_t)((fnative_t)(x) + (fnative_t)(y))
+#define fpu_sub(x, y)      (fnative_t)((fnative_t)(x) - (fnative_t)(y))
+#define fpu_mul(x, y)      (fnative_t)((fnative_t)(x) * (fnative_t)(y))
+#define fpu_div(x, y)      (fnative_t)((fnative_t)(x) / (fnative_t)(y))
+#define fpu_neg(x)         (fnative_t)(-(fnative_t)(x))
+#define fpu_sqrt(x)        (fnative_t)sqrt((fnative_t)(x))
+#define fpu_min(x, y)      (fnative_t)fmin((fnative_t)(x), (fnative_t)(y))
+#define fpu_max(x, y)      (fnative_t)fmax((fnative_t)(x), (fnative_t)(y))
+#define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
+#define fpu_lt(x, y)                  ((fnative_t)(x) <  (fnative_t)(y))
+#define fpu_le(x, y)                  ((fnative_t)(x) <= (fnative_t)(y))
+#define fpu_sign_check(x)             (signbit(x))
+#define fpu_sign_set(x, s) (fnative_t)((s) ? copysign((fnative_t)(x), (fnative_t)(-1.0)) : copysign((fnative_t)(x), (fnative_t)(1.0)))
+#define fpu_fp2int(t, x)   (t)        (rint((fnative_t)(x)))
+#define fpu_int2fp(t, i)   (fnative_t)((t) (i))
+#define fpu_fp2fp(t, x)    (t)        ((fnative_t)(x))
+#define fpu_fclass(x)                 fpu_fclass_impl(x)
 
 enum {
     FCL_NEG_INF,
@@ -108,18 +115,6 @@ typedef uint8_t rm_t;
 #define FT7_FCLASS 0x1c /* rs2 == 0, funct3 == 0 (fmv) or 1 (fclass) */
 #endif
 
-static fnative_t read_float(const void *addr)
-{
-    fnative_t ret;
-    memcpy(&ret, addr, sizeof(ret));
-    return ret;
-}
-
-static inline void write_float(void *addr, fnative_t val)
-{
-    memcpy(addr, &val, sizeof(val));
-}
-
 static inline uint8_t fpu_fclass_impl(fnative_t x)
 {
     switch (fpclassify(x)) {
@@ -143,35 +138,9 @@ static inline uint8_t fpu_fclass_impl(fnative_t x)
     return FCL_NAN_SIG;
 }
 
-static fnative_t fpu_read_register(rvvm_hart_t *vm, regid_t reg)
-{
-    assert(reg < FPU_REGISTERS_MAX);
-    return read_float(&vm->fpu_registers[reg]);
-}
-
-static void fpu_write_register(rvvm_hart_t *vm, regid_t reg, fnative_t val)
-{
-    assert(reg < FPU_REGISTERS_MAX);
-    write_float(&vm->fpu_registers[reg], val);
-    /* NaN boxing */
-    memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(fnative_t),
-            0xff,
-            sizeof(vm->fpu_registers[reg]) - sizeof(fnative_t));
-}
-
-enum
-{
-    RM_RNE = 0, /* round to nearest, ties to even */
-    RM_RTZ = 1, /* round to zero */
-    RM_RDN = 2, /* round down - towards -inf */
-    RM_RUP = 3, /* round up - towards +inf */
-    RM_RMM = 4, /* round to nearest, ties to max magnitude */
-    RM_DYN = 7, /* round to instruction's rm field */
-    RM_INVALID = 255, /* invalid rounding mode was specified - should cause a trap */
-};
-
+#ifndef RVD
 /* Sets rounding mode, returns previous value */
-static rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm)
+rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm)
 {
     if (likely(newrm == RM_DYN)) {
         /* do nothing - rounding mode should be already set with csr */
@@ -199,11 +168,35 @@ static rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm)
             return RM_INVALID;
     }
 
-    return bit_cut(vm->csr.fcsr, 5, 3);
+    rm_t oldrm = bit_cut(vm->csr.fcsr, 5, 3);
+    if (oldrm > RM_RMM) {
+        return RM_INVALID;
+    }
+    return oldrm;
+}
+
+void fpu_set_fs(rvvm_hart_t *vm, uint8_t value)
+{
+    vm->csr.status = bit_replace(vm->csr.status, 13, 2, value);
+
+    /* Also update the SD bit */
+    vm->csr.status = bit_replace(vm->csr.status, (1 << SHAMT_BITS) - 1, 1,
+            value == S_DIRTY || bit_cut(vm->csr.status, 15, 2) == S_DIRTY);
+}
+#endif
+
+static bool fpu_is_enabled(rvvm_hart_t *vm)
+{
+    return bit_cut(vm->csr.status, 13, 2) != S_OFF;
 }
 
 static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     regid_t rds = bit_cut(insn, 7, 5);
     regid_t rs1 = bit_cut(insn, 15, 5);
     sxlen_t offset = sign_extend(bit_cut(insn, 20, 12), 12);
@@ -218,6 +211,11 @@ static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fsw(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     regid_t rs1 = bit_cut(insn, 15, 5);
     regid_t rs2 = bit_cut(insn, 20, 5);
     sxlen_t offset = sign_extend(bit_cut(insn, 7, 5) |
@@ -232,6 +230,11 @@ static void riscv_f_fsw(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fmadd(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -254,6 +257,11 @@ static void riscv_f_fmadd(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fmsub(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -276,6 +284,11 @@ static void riscv_f_fmsub(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fnmadd(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -298,6 +311,11 @@ static void riscv_f_fnmadd(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fnmsub(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -345,7 +363,7 @@ static inline void riscv_f_fsqrt(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 
 static inline void riscv_f_fsgnj(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid_t rd)
 {
-    fpu_write_register(vm, rd, fpu_sign_set(fpu_read_register(vm, rs1), fpu_sign_check(fpu_read_register(vm, rs2))));
+    fpu_write_register(vm, rd, fpu_sign_set(fpu_read_register(vm, rs1), !!fpu_sign_check(fpu_read_register(vm, rs2))));
 }
 
 static inline void riscv_f_fsgnjn(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid_t rd)
@@ -372,18 +390,18 @@ static inline void riscv_f_fmax(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid
 static inline void riscv_f_fcvt_w_s(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
 {
     if (is_unsigned) {
-        riscv_write_register(vm, rd, fpu_fp2int(uint32_t, fpu_read_register(vm, rs1)));
+        riscv_write_register(vm, rd, fpu_fp2int(xlen_t, fpu_read_register(vm, rs1)));
     } else {
-        riscv_write_register(vm, rd, fpu_fp2int(int32_t, fpu_read_register(vm, rs1)));
+        riscv_write_register(vm, rd, fpu_fp2int(sxlen_t, fpu_read_register(vm, rs1)));
     }
 }
 
 static inline void riscv_f_fcvt_s_w(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
 {
     if (is_unsigned) {
-        fpu_write_register(vm, rd, fpu_int2fp(uint32_t, riscv_read_register(vm, rs1)));
+        fpu_write_register(vm, rd, fpu_int2fp(xlen_t, riscv_read_register(vm, rs1)));
     } else {
-        fpu_write_register(vm, rd, fpu_int2fp(int32_t, riscv_read_register(vm, rs1)));
+        fpu_write_register(vm, rd, fpu_int2fp(sxlen_t, riscv_read_register(vm, rs1)));
     }
 }
 
@@ -435,6 +453,11 @@ static inline void riscv_f_fle(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid_
 
 static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -646,8 +669,8 @@ void riscv_d_init()
     for (uint8_t i = 0; i < 8; ++i) {
         riscv_install_opcode_R(RVD_FMADD | (i << 5), riscv_f_fmadd);
         riscv_install_opcode_R(RVD_FMSUB | (i << 5), riscv_f_fmsub);
-        riscv_install_opcode_R(RVD_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVD_FNMSUB | (i << 5), riscv_f_fnmsub);
+        riscv_install_opcode_R(RVD_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVD_OTHER | (i << 5), riscv_f_other);
     }
 }
@@ -659,8 +682,8 @@ void riscv_f_init()
     for (uint8_t i = 0; i < 8; ++i) {
         riscv_install_opcode_R(RVF_FMADD | (i << 5), riscv_f_fmadd);
         riscv_install_opcode_R(RVF_FMSUB | (i << 5), riscv_f_fmsub);
-        riscv_install_opcode_R(RVF_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVF_FNMSUB | (i << 5), riscv_f_fnmsub);
+        riscv_install_opcode_R(RVF_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVF_OTHER | (i << 5), riscv_f_other);
     }
 }

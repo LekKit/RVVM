@@ -83,19 +83,14 @@ static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
     // Read double-precision floating point value from address rs1+offset to rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
-    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2) |
-                      (bit_cut(instruction, 10, 3) << 3) |
-                      (bit_cut(instruction, 5, 1)  << 6);
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 2)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(double)];
 
     if (riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ)) {
-        write_fp64(&vm->fpu_registers[rds], read_fp64(val));
-        /* NaN boxing */
-        memset((uint8_t*)&vm->fpu_registers[rds] + sizeof(val),
-                0xff,
-                sizeof(vm->fpu_registers[rds]) - sizeof(val));
+        fpu_write_register64(vm, rds, read_fp64(val));
     }
 }
 
@@ -115,19 +110,15 @@ static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Read double-precision floating point value from address sp+offset to rds
     regid_t rds = bit_cut(instruction, 7, 5);
-    uint32_t offset = (bit_cut(instruction, 4, 3)  << 2)
-		    | (bit_cut(instruction, 12, 1) << 5)
-		    | (bit_cut(instruction, 2, 2)  << 6);
+    uint32_t offset = (bit_cut(instruction, 5, 2)  << 3)
+                    | (bit_cut(instruction, 12, 1) << 5)
+                    | (bit_cut(instruction, 2, 3)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(double)];
 
     if (riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ)) {
-        write_fp64(&vm->fpu_registers[rds], read_fp64(val));
-        /* NaN boxing */
-        memset((uint8_t*)&vm->fpu_registers[rds] + sizeof(val),
-                0xff,
-                sizeof(vm->fpu_registers[rds]) - sizeof(val));
+        fpu_write_register64(vm, rds, read_fp64(val));
     }
 }
 
@@ -178,19 +169,15 @@ static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
     // Read single-precision floating point value from address rs1+offset to rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
-    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2) |
-                      (bit_cut(instruction, 10, 3) << 3) |
-                      (bit_cut(instruction, 5, 1)  << 6);
+    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2)
+                    | (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 1)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(float)];
 
     if (riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ)) {
-        write_fp32(&vm->fpu_registers[rds], read_fp32(val));
-        /* NaN boxing */
-        memset((uint8_t*)&vm->fpu_registers[rds] + sizeof(val),
-                0xff,
-                sizeof(vm->fpu_registers[rds]) - sizeof(val));
+        fpu_write_register32(vm, rds, read_fp32(val));
     }
 }
 
@@ -220,19 +207,15 @@ static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Read single-precision floating point value from address sp+offset to rds
     regid_t rds = bit_cut(instruction, 7, 5);
-    uint32_t offset = (bit_cut(instruction, 4, 3)  << 2) |
-                      (bit_cut(instruction, 12, 1) << 5) |
-                      (bit_cut(instruction, 2, 2)  << 6);
+    uint32_t offset = (bit_cut(instruction, 4, 3)  << 2)
+                    | (bit_cut(instruction, 12, 1) << 5)
+                    | (bit_cut(instruction, 2, 2)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(float)];
 
     if (riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ)) {
-        write_fp32(&vm->fpu_registers[rds], read_fp32(val));
-        /* NaN boxing */
-        memset((uint8_t*)&vm->fpu_registers[rds] + sizeof(val),
-                0xff,
-                sizeof(vm->fpu_registers[rds]) - sizeof(val));
+        fpu_write_register32(vm, rds, read_fp32(val));
     }
 }
 
@@ -318,13 +301,12 @@ static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
     // Write double-precision floating point value rs2 to address rs1+offset
     regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
-    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2)
-                    | (bit_cut(instruction, 10, 3) << 3)
-                    | (bit_cut(instruction, 5, 1)  << 6);
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 2)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(double)];
-    write_fp64(val, read_fp64(&vm->fpu_registers[rs2]));
+    write_fp64(val, fpu_read_register64(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -341,12 +323,12 @@ static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Write double-precision floating point value rs2 to address sp+offset
     regid_t rs2 = bit_cut(instruction, 2, 5);
-    uint32_t offset = (bit_cut(instruction, 9, 4) << 2)
-                    | (bit_cut(instruction, 7, 2) << 6);
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 7, 3) << 6);
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(double)];
-    write_fp64(val, read_fp64(&vm->fpu_registers[rs2]));
+    write_fp64(val, fpu_read_register64(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -412,7 +394,7 @@ static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(float)];
-    write_fp32(val, read_fp32(&vm->fpu_registers[rs2]));
+    write_fp32(val, fpu_read_register32(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -438,7 +420,7 @@ static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(float)];
-    write_fp32(val, read_fp32(&vm->fpu_registers[rs2]));
+    write_fp32(val, fpu_read_register32(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 

@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_CPU_H
 #define RISCV_CPU_H
 
+#include "mem_ops.h"
 #include "riscv32.h"
 
 #define RISCV_I_VERSION 2.1
@@ -104,6 +105,42 @@ static inline sxlen_t riscv_read_register_s(rvvm_hart_t *vm, regid_t reg)
 static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t data)
 {
     vm->registers[reg] = data;
+}
+
+static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    return read_fp32(&vm->fpu_registers[reg]);
+}
+
+static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    fpu_set_fs(vm, S_DIRTY);
+    write_fp32(&vm->fpu_registers[reg], val);
+
+    /* NaN boxing */
+    memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(val),
+            0xff,
+            sizeof(vm->fpu_registers[reg]) - sizeof(val));
+}
+
+static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    return read_fp64(&vm->fpu_registers[reg]);
+}
+
+static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    fpu_set_fs(vm, S_DIRTY);
+    write_fp64(&vm->fpu_registers[reg], val);
+
+    /* NaN boxing */
+    memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(val),
+            0xff,
+            sizeof(vm->fpu_registers[reg]) - sizeof(val));
 }
 
 /*

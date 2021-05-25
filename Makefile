@@ -222,7 +222,7 @@ override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
 endif
 
 # Generic compiler flags
-override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
+override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) -frounding-math
 
 DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 

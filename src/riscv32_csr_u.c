@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "bit_ops.h"
 #include "riscv32.h"
 #include "riscv32_csr.h"
 
@@ -58,10 +59,12 @@ static bool riscv32_csr_fflags(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest,
 {
     UNUSED(csr_id);
     uint32_t val = fpu_get_exceptions();
+    uint32_t oldval = val;
     csr_helper(&val, dest, op);
+    if (val != oldval) fpu_set_fs(vm, S_DIRTY);
+    fpu_set_exceptions(val);
     vm->csr.fcsr &= ~((1 << 5) - 1);
     vm->csr.fcsr |= val;
-    fpu_set_exceptions(val);
     return true;
 }
 
@@ -69,7 +72,10 @@ static bool riscv32_csr_frm(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, ui
 {
     UNUSED(csr_id);
     uint32_t val = vm->csr.fcsr >> 5;
+    uint32_t oldval = val;
     csr_helper(&val, dest, op);
+    if (val != oldval) fpu_set_fs(vm, S_DIRTY);
+    fpu_set_rm(vm, val & ((1 << 3) - 1));
     vm->csr.fcsr = (vm->csr.fcsr & ((1 << 5) - 1)) | (val << 5);
     return true;
 }
@@ -78,8 +84,12 @@ static bool riscv32_csr_fcsr(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, u
 {
     UNUSED(csr_id);
     uint32_t val = vm->csr.fcsr | fpu_get_exceptions();
+    uint32_t oldval = val;
     csr_helper(&val, dest, op);
+    if (val != oldval) fpu_set_fs(vm, S_DIRTY);
+    fpu_set_rm(vm, bit_cut(val, 5, 3));
     fpu_set_exceptions(val);
+    vm->csr.fcsr = val;
     return true;
 }
 

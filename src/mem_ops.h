@@ -150,14 +150,14 @@ static inline void write_fp32(void *addr, float val) {
     memcpy(addr, &val, sizeof(val));
 }
 
-static inline void write_fp64(void *addr, double val) {
-    memcpy(addr, &val, sizeof(val));
-}
-
 static inline double read_fp64(const void *addr) {
     double ret;
     memcpy(&ret, addr, sizeof(ret));
     return ret;
+}
+
+static inline void write_fp64(void *addr, double val) {
+    memcpy(addr, &val, sizeof(val));
 }
 
 #endif

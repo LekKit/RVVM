@@ -160,6 +160,7 @@ struct rvvm_hart_t {
     bool ev_trap;
     bool ev_int; // delivered from IRQ thread
     uint32_t ev_int_mask;
+    uint32_t old_fcsr; // used to set proper FS value
 };
 
 #define RISCV32I_OPCODE_MASK 0x3
@@ -167,6 +168,33 @@ struct rvvm_hart_t {
 //#define RV_DEBUG
 //#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
+
+enum reg_status
+{
+    S_OFF,
+    S_INITIAL,
+    S_CLEAN,
+    S_DIRTY
+};
+
+/* Sets the FS and SD fields of mstatus CSR */
+void fpu_set_fs(rvvm_hart_t *vm, uint8_t value);
+
+enum
+{
+    RM_RNE = 0, /* round to nearest, ties to even */
+    RM_RTZ = 1, /* round to zero */
+    RM_RDN = 2, /* round down - towards -inf */
+    RM_RUP = 3, /* round up - towards +inf */
+    RM_RMM = 4, /* round to nearest, ties to max magnitude */
+    RM_DYN = 7, /* round to instruction's rm field */
+    RM_INVALID = 255, /* invalid rounding mode was specified - should cause a trap */
+};
+
+/* type for rounding mode */
+typedef uint8_t rm_t;
+/* Sets rounding mode, returns previous value */
+rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm);
 
 void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);
 
