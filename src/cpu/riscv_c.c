@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "riscv_cpu.h"
 #include "riscv32_mmu.h"
+#include "compiler.h"
 
 // translate compressed register encoding into normal
 static inline regid_t riscv_c_reg(regid_t reg)
@@ -80,6 +81,11 @@ static void riscv_c_slli(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Read double-precision floating point value from address rs1+offset to rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -108,6 +114,11 @@ static void riscv_c_jal(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Read double-precision floating point value from address sp+offset to rds
     regid_t rds = bit_cut(instruction, 7, 5);
     uint32_t offset = (bit_cut(instruction, 5, 2)  << 3)
@@ -166,6 +177,11 @@ static void riscv_c_lwsp(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Read single-precision floating point value from address rs1+offset to rds
     regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -205,6 +221,11 @@ static void riscv_c_addi16sp_lui(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Read single-precision floating point value from address sp+offset to rds
     regid_t rds = bit_cut(instruction, 7, 5);
     uint32_t offset = (bit_cut(instruction, 4, 3)  << 2)
@@ -298,6 +319,11 @@ static void riscv_c_alops2(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Write double-precision floating point value rs2 to address rs1+offset
     regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -321,6 +347,11 @@ static void riscv_c_j(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Write double-precision floating point value rs2 to address sp+offset
     regid_t rs2 = bit_cut(instruction, 2, 5);
     uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
@@ -385,6 +416,11 @@ static void riscv_c_swsp(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Write single-precision floating point value rs2 to address rs1+offset
     regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
     regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
@@ -413,6 +449,11 @@ static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
 
 static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
 {
+    if (unlikely(!fpu_is_enabled(vm))) {
+        riscv_c_illegal_insn(vm, instruction);
+        return;
+    }
+
     // Write single-precision floating point value rs2 to address sp+offset
     regid_t rs2 = bit_cut(instruction, 2, 5);
     uint32_t offset = (bit_cut(instruction, 9, 4) << 2)

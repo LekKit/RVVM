@@ -183,12 +183,13 @@ void fpu_set_fs(rvvm_hart_t *vm, uint8_t value)
     vm->csr.status = bit_replace(vm->csr.status, (1 << SHAMT_BITS) - 1, 1,
             value == S_DIRTY || bit_cut(vm->csr.status, 15, 2) == S_DIRTY);
 }
-#endif
 
-static bool fpu_is_enabled(rvvm_hart_t *vm)
+bool fpu_is_enabled(rvvm_hart_t *vm)
 {
     return bit_cut(vm->csr.status, 13, 2) != S_OFF;
 }
+
+#endif
 
 static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
 {

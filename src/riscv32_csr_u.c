@@ -58,6 +58,9 @@ static void fpu_set_exceptions(uint32_t flags)
 static bool riscv32_csr_fflags(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
+    if (!fpu_is_enabled(vm)) {
+        return false;
+    }
     uint32_t val = fpu_get_exceptions();
     uint32_t oldval = val;
     csr_helper(&val, dest, op);
@@ -71,6 +74,9 @@ static bool riscv32_csr_fflags(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest,
 static bool riscv32_csr_frm(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
+    if (!fpu_is_enabled(vm)) {
+        return false;
+    }
     uint32_t val = vm->csr.fcsr >> 5;
     uint32_t oldval = val;
     csr_helper(&val, dest, op);
@@ -83,6 +89,9 @@ static bool riscv32_csr_frm(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, ui
 static bool riscv32_csr_fcsr(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
+    if (!fpu_is_enabled(vm)) {
+        return false;
+    }
     uint32_t val = vm->csr.fcsr | fpu_get_exceptions();
     uint32_t oldval = val;
     csr_helper(&val, dest, op);

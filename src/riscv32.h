@@ -180,6 +180,9 @@ enum reg_status
 /* Sets the FS and SD fields of mstatus CSR */
 void fpu_set_fs(rvvm_hart_t *vm, uint8_t value);
 
+/* Checks that FS is not set to S_OFF */
+bool fpu_is_enabled(rvvm_hart_t *vm);
+
 enum
 {
     RM_RNE = 0, /* round to nearest, ties to even */
