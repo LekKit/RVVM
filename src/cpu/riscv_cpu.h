@@ -65,6 +65,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv64c_init
     #define riscv_m_init riscv64m_init
     #define riscv_a_init riscv64a_init
+    #define riscv_f_init riscv64f_init
+    #define riscv_d_init riscv64d_init
     #define riscv_cpu_init riscv64_cpu_init
     #define riscv_run_till_event riscv64_run_till_event
 #else
@@ -81,6 +83,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv32c_init
     #define riscv_m_init riscv32m_init
     #define riscv_a_init riscv32a_init
+    #define riscv_f_init riscv32f_init
+    #define riscv_d_init riscv32d_init
     #define riscv_cpu_init riscv32_cpu_init
     #define riscv_run_till_event riscv32_run_till_event
 #endif

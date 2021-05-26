@@ -138,7 +138,7 @@ static inline uint8_t fpu_fclass_impl(fnative_t x)
     return FCL_NAN_SIG;
 }
 
-#ifndef RVD
+#if !defined(RVD) && !defined(RV64)
 /* Sets rounding mode, returns previous value */
 rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm)
 {
@@ -188,7 +188,6 @@ bool fpu_is_enabled(rvvm_hart_t *vm)
 {
     return bit_cut(vm->csr.status, 13, 2) != S_OFF;
 }
-
 #endif
 
 static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
