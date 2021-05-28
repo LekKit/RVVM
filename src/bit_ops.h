@@ -74,4 +74,24 @@ static inline maxlen_t bit_reverse(maxlen_t val, bitcnt_t bits)
     return ret;
 }
 
+static inline uint32_t byteswap_uint32(uint32_t val)
+{
+    return (((val & 0xFF000000) >> 24) |
+            ((val & 0x00FF0000) >> 8)  |
+            ((val & 0x0000FF00) << 8)  |
+            ((val & 0x000000FF) << 24));
+}
+
+static inline uint64_t byteswap_uint64(uint64_t val)
+{
+    return (((val & 0xFF00000000000000) >> 56) |
+            ((val & 0x00FF000000000000) >> 40) |
+            ((val & 0x0000FF0000000000) >> 24) |
+            ((val & 0x000000FF00000000) >> 8)  |
+            ((val & 0x00000000FF000000) << 8)  |
+            ((val & 0x0000000000FF0000) << 24) |
+            ((val & 0x000000000000FF00) << 40) |
+            ((val & 0x00000000000000FF) << 56));
+}
+
 #endif

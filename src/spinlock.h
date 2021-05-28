@@ -16,35 +16,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_SPINLOCK_H
-#define RISCV_SPINLOCK_H
+#ifndef SPINLOCK_H
+#define SPINLOCK_H
 
-#include <stdint.h>
-
-#if __STDC_VERSION__ >= 201112LL
-#ifndef __STDC_NO_ATOMICS__
-#include <stdatomic.h>
-#define C11_ATOMICS
-#endif
-#endif
-
-#ifndef C11_ATOMICS
-
-typedef int atomic_int;
-
-#ifdef __GNUC__
-#define atomic_exchange(A, C) __atomic_exchange_n(A, C, __ATOMIC_SEQ_CST)
-#define atomic_store(A, C) __atomic_store_n(A, C, __ATOMIC_SEQ_CST)
-#else
-#warning No atomics support for current build target!
-#define atomic_exchange(A, C) ((*A + C) - (*A = C))
-#define atomic_store(A, C) (*A = C)
-#endif
-
-#endif
+#include "atomics.h"
 
 typedef struct {
-    atomic_int flag;
+    uint32_t flag;
 } spinlock_t;
 
 static inline void spin_init(spinlock_t* lock)
@@ -54,12 +32,12 @@ static inline void spin_init(spinlock_t* lock)
 
 static inline void spin_lock(spinlock_t* lock)
 {
-    while (atomic_exchange(&lock->flag, 1));
+    while (atomic_swap_uint32(&lock->flag, 1));
 }
 
 static inline void spin_unlock(spinlock_t* lock)
 {
-    atomic_store(&lock->flag, 0);
+    atomic_store_uint32(&lock->flag, 0);
 }
 
 #endif
