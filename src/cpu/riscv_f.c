@@ -169,7 +169,7 @@ rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm)
     }
 
     rm_t oldrm = bit_cut(vm->csr.fcsr, 5, 3);
-    if (oldrm > RM_RMM) {
+    if (unlikely(oldrm > RM_RMM)) {
         return RM_INVALID;
     }
     return oldrm;
@@ -192,11 +192,6 @@ bool fpu_is_enabled(rvvm_hart_t *vm)
 
 static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     regid_t rds = bit_cut(insn, 7, 5);
     regid_t rs1 = bit_cut(insn, 15, 5);
     sxlen_t offset = sign_extend(bit_cut(insn, 20, 12), 12);
@@ -211,11 +206,6 @@ static void riscv_f_flw(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fsw(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     regid_t rs1 = bit_cut(insn, 15, 5);
     regid_t rs2 = bit_cut(insn, 20, 5);
     sxlen_t offset = sign_extend(bit_cut(insn, 7, 5) |
@@ -230,11 +220,6 @@ static void riscv_f_fsw(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fmadd(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -257,11 +242,6 @@ static void riscv_f_fmadd(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fmsub(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -284,11 +264,6 @@ static void riscv_f_fmsub(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fnmadd(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -311,11 +286,6 @@ static void riscv_f_fnmadd(rvvm_hart_t *vm, const uint32_t insn)
 
 static void riscv_f_fnmsub(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -453,11 +423,6 @@ static inline void riscv_f_fle(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid_
 
 static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
 {
-    if (unlikely(!fpu_is_enabled(vm))) {
-        riscv_illegal_insn(vm, insn);
-        return;
-    }
-
     if (unlikely(bit_check(insn, 26) != BIT26)) {
         riscv_illegal_insn(vm, insn);
         return;
@@ -507,7 +472,7 @@ static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
             fpu_set_rm(vm, rm);
             break;
         case FT7_FSQRT:
-            if (rs2 != 0) {
+            if (unlikely(rs2 != 0)) {
                 riscv_illegal_insn(vm, insn);
                 return;
             }
@@ -580,7 +545,7 @@ static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
                 riscv_illegal_insn(vm, insn);
                 return;
 #endif
-            } else if (rm == 1) {
+            } else if (likely(rm == 1)) {
                 riscv_f_fclass(vm, rs1, rd);
             } else {
                 riscv_illegal_insn(vm, insn);
@@ -619,7 +584,7 @@ static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
             break;
 #ifndef RVD
         case FT7_FMV_W_X:
-            if (rs2 != 0 || rm != 0) {
+            if (unlikely(rs2 != 0 || rm != 0)) {
                 riscv_illegal_insn(vm, insn);
                 return;
             }
@@ -662,7 +627,66 @@ static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
 }
 
 #ifdef RVD
-void riscv_d_init()
+static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Read double-precision floating point value from address rs1+offset to rds
+    regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
+    regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 2)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    uint8_t val[sizeof(double)];
+
+    if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
+        fpu_write_register64(vm, rds, read_fp64(val));
+    }
+}
+
+static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Write double-precision floating point value rs2 to address rs1+offset
+    regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
+    regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 2)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    uint8_t val[sizeof(double)];
+    write_fp64(val, fpu_read_register64(vm, rs2));
+    riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
+}
+
+static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Read double-precision floating point value from address sp+offset to rds
+    regid_t rds = bit_cut(instruction, 7, 5);
+    uint32_t offset = (bit_cut(instruction, 5, 2)  << 3)
+                    | (bit_cut(instruction, 12, 1) << 5)
+                    | (bit_cut(instruction, 2, 3)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(double)];
+
+    if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
+        fpu_write_register64(vm, rds, read_fp64(val));
+    }
+}
+
+static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Write double-precision floating point value rs2 to address sp+offset
+    regid_t rs2 = bit_cut(instruction, 2, 5);
+    uint32_t offset = (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 7, 3) << 6);
+
+    xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(double)];
+    write_fp64(val, fpu_read_register64(vm, rs2));
+    riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
+}
+
+static void riscv_d_init()
 {
     riscv_install_opcode_ISB(RVD_FLW, riscv_f_flw);
     riscv_install_opcode_ISB(RVD_FSW, riscv_f_fsw);
@@ -673,9 +697,98 @@ void riscv_d_init()
         riscv_install_opcode_R(RVD_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVD_OTHER | (i << 5), riscv_f_other);
     }
+
+    riscv_install_opcode_C(RVC_FLD, riscv_c_fld);
+    riscv_install_opcode_C(RVC_FSD, riscv_c_fsd);
+    riscv_install_opcode_C(RVC_FLDSP, riscv_c_fldsp);
+    riscv_install_opcode_C(RVC_FSDSP, riscv_c_fsdsp);
+}
+
+void riscv_d_enable(bool enable)
+{
+    if (enable) {
+        riscv_d_init();
+        return;
+    }
+
+    riscv_install_opcode_ISB(RVD_FLW, riscv_illegal_insn);
+    riscv_install_opcode_ISB(RVD_FSW, riscv_illegal_insn);
+    for (uint8_t i = 0; i < 8; ++i) {
+        riscv_install_opcode_R(RVD_FMADD | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVD_FMSUB | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVD_FNMSUB | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVD_FNMADD | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVD_OTHER | (i << 5), riscv_illegal_insn);
+    }
+
+    riscv_install_opcode_C(RVC_FLD, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FSD, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FLDSP, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FSDSP, riscv_c_illegal_insn);
 }
 #else
-void riscv_f_init()
+static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Read single-precision floating point value from address rs1+offset to rds
+    regid_t rds = riscv_c_reg(bit_cut(instruction, 2, 3));
+    regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
+    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2)
+                    | (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 1)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    uint8_t val[sizeof(float)];
+
+    if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
+        fpu_write_register32(vm, rds, read_fp32(val));
+    }
+}
+
+static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Write single-precision floating point value rs2 to address rs1+offset
+    regid_t rs2 = riscv_c_reg(bit_cut(instruction, 2, 3));
+    regid_t rs1 = riscv_c_reg(bit_cut(instruction, 7, 3));
+    uint32_t offset = (bit_cut(instruction, 6, 1)  << 2)
+                    | (bit_cut(instruction, 10, 3) << 3)
+                    | (bit_cut(instruction, 5, 1)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    uint8_t val[sizeof(float)];
+    write_fp32(val, fpu_read_register32(vm, rs2));
+    riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
+}
+
+static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Read single-precision floating point value from address sp+offset to rds
+    regid_t rds = bit_cut(instruction, 7, 5);
+    uint32_t offset = (bit_cut(instruction, 4, 3)  << 2)
+                    | (bit_cut(instruction, 12, 1) << 5)
+                    | (bit_cut(instruction, 2, 2)  << 6);
+
+    xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(float)];
+
+    if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
+        fpu_write_register32(vm, rds, read_fp32(val));
+    }
+}
+
+static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
+{
+    // Write single-precision floating point value rs2 to address sp+offset
+    regid_t rs2 = bit_cut(instruction, 2, 5);
+    uint32_t offset = (bit_cut(instruction, 9, 4) << 2)
+                    | (bit_cut(instruction, 7, 2) << 6);
+
+    xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
+    uint8_t val[sizeof(float)];
+    write_fp32(val, fpu_read_register32(vm, rs2));
+    riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
+}
+
+static void riscv_f_init()
 {
     riscv_install_opcode_ISB(RVF_FLW, riscv_f_flw);
     riscv_install_opcode_ISB(RVF_FSW, riscv_f_fsw);
@@ -686,5 +799,37 @@ void riscv_f_init()
         riscv_install_opcode_R(RVF_FNMADD | (i << 5), riscv_f_fnmadd);
         riscv_install_opcode_R(RVF_OTHER | (i << 5), riscv_f_other);
     }
+
+#ifndef RV64
+    riscv_install_opcode_C(RVC_FLW, riscv_c_flw);
+    riscv_install_opcode_C(RVC_FSW, riscv_c_fsw);
+    riscv_install_opcode_C(RVC_FLWSP, riscv_c_flwsp);
+    riscv_install_opcode_C(RVC_FSWSP, riscv_c_fswsp);
+#endif
+}
+
+void riscv_f_enable(bool enable)
+{
+    if (enable) {
+        riscv_f_init();
+        return;
+    }
+
+    riscv_install_opcode_ISB(RVF_FLW, riscv_illegal_insn);
+    riscv_install_opcode_ISB(RVF_FSW, riscv_illegal_insn);
+    for (uint8_t i = 0; i < 8; ++i) {
+        riscv_install_opcode_R(RVF_FMADD | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVF_FMSUB | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVF_FNMSUB | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVF_FNMADD | (i << 5), riscv_illegal_insn);
+        riscv_install_opcode_R(RVF_OTHER | (i << 5), riscv_illegal_insn);
+    }
+
+#ifndef RV64
+    riscv_install_opcode_C(RVC_FLW, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FSW, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FLWSP, riscv_c_illegal_insn);
+    riscv_install_opcode_C(RVC_FSWSP, riscv_c_illegal_insn);
+#endif
 }
 #endif

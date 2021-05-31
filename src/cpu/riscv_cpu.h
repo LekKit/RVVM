@@ -65,8 +65,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv64c_init
     #define riscv_m_init riscv64m_init
     #define riscv_a_init riscv64a_init
-    #define riscv_f_init riscv64f_init
-    #define riscv_d_init riscv64d_init
+    #define riscv_f_enable riscv64f_enable
+    #define riscv_d_enable riscv64d_enable
     #define riscv_cpu_init riscv64_cpu_init
     #define riscv_run_till_event riscv64_run_till_event
 #else
@@ -83,8 +83,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv32c_init
     #define riscv_m_init riscv32m_init
     #define riscv_a_init riscv32a_init
-    #define riscv_f_init riscv32f_init
-    #define riscv_d_init riscv32d_init
+    #define riscv_f_enable riscv32f_enable
+    #define riscv_d_enable riscv32d_enable
     #define riscv_cpu_init riscv32_cpu_init
     #define riscv_run_till_event riscv32_run_till_event
 #endif
@@ -93,8 +93,6 @@ void riscv_i_init();
 void riscv_c_init();
 void riscv_m_init();
 void riscv_a_init();
-void riscv_f_init();
-void riscv_d_init();
 
 static inline xlen_t riscv_read_register(rvvm_hart_t *vm, regid_t reg)
 {
@@ -145,6 +143,13 @@ static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val
     memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(val),
             0xff,
             sizeof(vm->fpu_registers[reg]) - sizeof(val));
+}
+
+/* translate compressed register encoding into normal */
+static inline regid_t riscv_c_reg(regid_t reg)
+{
+    //NOTE: register index is hard limited to 8, since encoding is 3 bits
+    return REGISTER_X8 + reg;
 }
 
 /*

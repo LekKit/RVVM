@@ -160,7 +160,6 @@ struct rvvm_hart_t {
     bool ev_trap;
     bool ev_int; // delivered from IRQ thread
     uint32_t ev_int_mask;
-    uint32_t old_fcsr; // used to set proper FS value
 };
 
 #define RISCV32I_OPCODE_MASK 0x3
@@ -198,6 +197,13 @@ enum
 typedef uint8_t rm_t;
 /* Sets rounding mode, returns previous value */
 rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm);
+/* Enables/disables FPU instructions */
+extern void riscv32f_enable(bool enable);
+extern void riscv32d_enable(bool enable);
+#if MAX_XLEN > 32
+extern void riscv64f_enable(bool enable);
+extern void riscv64d_enable(bool enable);
+#endif
 
 void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);
 

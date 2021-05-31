@@ -29,22 +29,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static bool riscv32_csr_sstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
-
-    uint8_t prev_fs = bit_cut(vm->csr.status, 13, 2);
-    if (prev_fs != S_DIRTY && vm->old_fcsr != vm->csr.fcsr) {
-        /* fcsr is changed, so we need to set FS to dirty */
-        vm->csr.status = bit_replace(vm->csr.status, ((1 << MAX_SHAMT_BITS) - 1), 1, 1);
-        vm->csr.status = bit_replace(vm->csr.status, 13, 2, S_DIRTY);
-        prev_fs = S_DIRTY;
-    }
-
+    bool was_enabled = bit_cut(vm->csr.status, 13, 2) != S_OFF;
     csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK);
-
     uint8_t new_fs = bit_cut(vm->csr.status, 13, 2);
-    if (new_fs != S_DIRTY && prev_fs == S_DIRTY) {
-        /* FS is cleared, that means that the fcsr is saved.
-         * Do not update fcsr with new exceptions because we need the old value */
-        vm->old_fcsr = vm->csr.fcsr;
+    bool enabled = new_fs != S_OFF;
+    if (was_enabled != enabled)
+    {
+        riscv32f_enable(enabled);
+        riscv32d_enable(enabled);
     }
     bool sdbit = new_fs == S_DIRTY
               || bit_cut(vm->csr.status, 15, 2) == S_DIRTY;
