@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "rvtimer.h"
 #include "compiler.h"
+#include "utils.h"
 
 #ifdef USE_SJLJ
 // Useful for unwinding from JITed code, can be disabled for interpreter
@@ -31,6 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 #define RVVM_ABI_VERSION 2
+#define TLB_SIZE         256  // Always nonzero, power of 2 (32, 64..)
 
 enum
 {
@@ -90,6 +92,10 @@ enum
 #define INTERRUPT_SEXTERNAL    0x9
 #define INTERRUPT_MEXTERNAL    0xB
 
+// Internal events delivered to the hart
+#define EXT_EVENT_TIMER        0x0 // Check timecmp for irq
+#define EXT_EVENT_PAUSE        0x1 // Pause the hart in a consistent state
+
 #define TRAP_INSTR_MISALIGN    0x0
 #define TRAP_INSTR_FETCH       0x1
 #define TRAP_ILL_INSTR         0x2
@@ -105,7 +111,18 @@ enum
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
 
-#define TLB_SIZE 256  // Always nonzero, power of 2 (32, 64..)
+typedef struct rvvm_hart_t rvvm_hart_t;
+typedef struct rvvm_machine_t rvvm_machine_t;
+typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
+
+typedef void (*riscv_inst_t)(rvvm_hart_t *vm, const uint32_t instruction);
+typedef void (*riscv_inst_c_t)(rvvm_hart_t *vm, const uint16_t instruction);
+
+// Decoder moved to hart struct, allows to switch extensions per-hart
+typedef struct {
+    riscv_inst_t opcodes[512];
+    riscv_inst_c_t opcodes_c[32];
+} rvvm_decoder_t;
 
 // Address translation cache
 typedef struct {
@@ -119,36 +136,58 @@ typedef struct {
     tlb_entry_t e[TLB_SIZE];
 } rvvm_tlb_t;
 
-typedef void (*rvvm_mmio_handler_t)(void* dev_data, void* dest, uint8_t size, paddr_t offset);
+typedef struct {
+    void (*init)(rvvm_mmio_dev_t* dev, bool reset);
+    void (*remove)(rvvm_mmio_dev_t* dev);
+    void (*update)(rvvm_mmio_dev_t* dev);
+    /* TODO
+     * void (*suspend)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
+     * void (*resume)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
+     */
+    const char* name;
+} rvvm_mmio_type_t;
+
+typedef bool (*rvvm_mmio_handler_t)(rvvm_mmio_dev_t* dev, void* dest, paddr_t offset, uint8_t size);
+
+struct rvvm_mmio_dev_t {
+    paddr_t begin;  // First usable address in physical memory
+    paddr_t end;    // Last usable address in physical memory
+    void* data;     // Pointer to memory (for native memory regions) or device-specific data
+    rvvm_machine_t* machine;  // Parent machine
+    rvvm_mmio_type_t* type;   // Device-specific operations & info
+    // MMIO operations handlers, if these aren't NULL then this is a MMIO device
+    // Hint: setting read to NULL and write to rvvm_mmio_none makes memory mapping read-only
+    rvvm_mmio_handler_t read;
+    rvvm_mmio_handler_t write;
+    // MMIO operations attributes (alignment & min op size, max op size), always power of 2
+    // Any non-conforming operation is fixed on the fly before the handlers are invoked.
+    uint8_t min_op_size; // Dictates alignment as well
+    uint8_t max_op_size;
+};
 
 typedef struct {
     paddr_t begin;  // First usable address in physical memory
     paddr_t end;    // Last usable address in physical memory
-    vmptr_t data;   // Pointer to region (for native memory regions) or MMIO device-specific data
-    // MMIO operations handlers, if any of these aren't NULL then this is a MMIO device
-    rvvm_mmio_handler_t read;
-    rvvm_mmio_handler_t write;
-    /*
-     * MMIO operations attributes (alignment & min op size, max op size), always power of 2
-     * Any non-conforming operation is fixed on the fly before the handlers are invoked.
-     */
-    uint8_t min_op_size; // Dictates alignment as well
-    uint8_t max_op_size;
-} rvvm_mem_region_t;
+    vmptr_t data;   // Pointer to memory data
+} rvvm_ram_t;
 
-typedef struct rvvm_machine_t rvvm_machine_t;
-
-typedef struct {
+struct rvvm_hart_t {
     size_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
-    //double fpu_registers[REGISTERS_MAX];
+#ifdef USE_FPU
+    double fpu_registers[REGISTERS_MAX];
+#endif
+    
+    rvvm_decoder_t decoder;
     rvvm_tlb_t tlb;
-    rvvm_mem_region_t mem;
+    rvvm_ram_t mem;
     paddr_t root_page_table;
     rvvm_machine_t* machine;
+    uint32_t irq_mask;
     uint32_t ev_mask;
     uint8_t mmu_mode;
     uint8_t priv_mode;
+    bool rv64;
 
     struct {
         maxlen_t status;
@@ -168,13 +207,16 @@ typedef struct {
 #ifdef USE_SJLJ
     jmp_buf unwind;
 #endif
-} rvvm_hart_t;
+};
 
 struct rvvm_machine_t {
+    rvvm_ram_t mem;
     rvvm_hart_t* harts;
+    thread_handle_t* hart_threads;
     size_t hart_count;
     rvvm_mem_region_t* mmio;
     size_t mmio_count;
+    bool rv64;
     bool running;
 };
 
