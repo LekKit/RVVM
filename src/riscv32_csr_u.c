@@ -36,23 +36,25 @@ extern uint64_t clint_mtime;
 static int fpu_get_exceptions()
 {
     int ret = 0;
-    if (fetestexcept(FE_INEXACT)) ret |= FFLAG_NX;
-    if (fetestexcept(FE_UNDERFLOW)) ret |= FFLAG_UF;
-    if (fetestexcept(FE_OVERFLOW)) ret |= FE_OVERFLOW;
-    if (fetestexcept(FE_DIVBYZERO)) ret |= FE_DIVBYZERO;
-    if (fetestexcept(FE_INVALID)) ret |= FE_INVALID;
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    if (exc & FE_INEXACT)   ret |= FFLAG_NX;
+    if (exc & FE_UNDERFLOW) ret |= FFLAG_UF;
+    if (exc & FE_OVERFLOW)  ret |= FFLAG_OF;
+    if (exc & FE_DIVBYZERO) ret |= FFLAG_DZ;
+    if (exc & FE_INVALID)   ret |= FFLAG_NV;
     return ret;
 }
 
 static void fpu_set_exceptions(uint32_t flags)
 {
     int exc = 0;
+    feclearexcept(FE_ALL_EXCEPT);
     if (flags & FFLAG_NX) exc |= FE_INEXACT;
     if (flags & FFLAG_UF) exc |= FE_UNDERFLOW;
     if (flags & FFLAG_OF) exc |= FE_OVERFLOW;
     if (flags & FFLAG_DZ) exc |= FE_DIVBYZERO;
     if (flags & FFLAG_NV) exc |= FE_INVALID;
-    feraiseexcept(exc);
+    if (exc != 0) feraiseexcept(exc);
 }
 
 static bool riscv32_csr_fflags(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
@@ -68,6 +70,8 @@ static bool riscv32_csr_fflags(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest,
     fpu_set_exceptions(val);
     vm->csr.fcsr &= ~((1 << 5) - 1);
     vm->csr.fcsr |= val;
+    vm->csr.fcsr &= 0xff;
+    *dest &= 0x1f;
     return true;
 }
 
@@ -83,6 +87,8 @@ static bool riscv32_csr_frm(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, ui
     if (val != oldval) fpu_set_fs(vm, S_DIRTY);
     fpu_set_rm(vm, val & ((1 << 3) - 1));
     vm->csr.fcsr = (vm->csr.fcsr & ((1 << 5) - 1)) | (val << 5);
+    vm->csr.fcsr &= 0xff;
+    *dest &= 0x7;
     return true;
 }
 
@@ -99,6 +105,8 @@ static bool riscv32_csr_fcsr(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, u
     fpu_set_rm(vm, bit_cut(val, 5, 3));
     fpu_set_exceptions(val);
     vm->csr.fcsr = val;
+    vm->csr.fcsr &= 0xff;
+    *dest &= 0xff;
     return true;
 }
 

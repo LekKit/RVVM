@@ -65,14 +65,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define fpu_div(x, y)      (fnative_t)((fnative_t)(x) / (fnative_t)(y))
 #define fpu_neg(x)         (fnative_t)(-(fnative_t)(x))
 #define fpu_sqrt(x)        (fnative_t)sqrt((fnative_t)(x))
-#define fpu_min(x, y)      (fnative_t)fmin((fnative_t)(x), (fnative_t)(y))
-#define fpu_max(x, y)      (fnative_t)fmax((fnative_t)(x), (fnative_t)(y))
+//#define fpu_min(x, y)      (fnative_t)fmin((fnative_t)(x), (fnative_t)(y))
+//#define fpu_max(x, y)      (fnative_t)fmax((fnative_t)(x), (fnative_t)(y))
+#define fpu_min(x, y)      fpu_min_impl(x, y)
+#define fpu_max(x, y)      fpu_max_impl(x, y)
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
 #define fpu_lt(x, y)                  ((fnative_t)(x) <  (fnative_t)(y))
 #define fpu_le(x, y)                  ((fnative_t)(x) <= (fnative_t)(y))
 #define fpu_sign_check(x)             (signbit(x))
 #define fpu_sign_set(x, s) (fnative_t)((s) ? copysign((fnative_t)(x), (fnative_t)(-1.0)) : copysign((fnative_t)(x), (fnative_t)(1.0)))
-#define fpu_fp2int(t, x)   (t)        (rint((fnative_t)(x)))
+//#define fpu_fp2int(t, x)   (t)        (rint((fnative_t)(x)))
+//#define fpu_fp2int(t, x)   (t)        (llrint((fnative_t)(x)))
+#define fpu_fp2int(t, x)   fpu_fp2int_##t(x)
 #define fpu_int2fp(t, i)   (fnative_t)((t) (i))
 #define fpu_fp2fp(t, x)    (t)        ((fnative_t)(x))
 #define fpu_fclass(x)                 fpu_fclass_impl(x)
@@ -89,6 +93,119 @@ enum {
     FCL_NAN_SIG,
     FCL_NAN_QUIET
 };
+
+static inline uint8_t fpu_fclass_impl(fnative_t x)
+{
+    switch (fpclassify(x)) {
+        case FP_INFINITE: return fpu_sign_check(x) ? FCL_NEG_INF : FCL_POS_INF;
+        case FP_NORMAL: return fpu_sign_check(x) ? FCL_NEG_NORMAL : FCL_POS_NORMAL;
+        case FP_SUBNORMAL: return fpu_sign_check(x) ? FCL_NEG_SUBNORMAL : FCL_POS_SUBNORMAL;
+        case FP_ZERO: return fpu_sign_check(x) ? FCL_NEG_ZERO : FCL_POS_ZERO;
+        case FP_NAN: {
+                         /* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
+                         uint8_t tmp[sizeof(fnative_t)];
+                         write_float(tmp, x);
+                         if (bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8)) {
+                             return FCL_NAN_QUIET;
+                         } else {
+                             return FCL_NAN_SIG;
+                         }
+                     }
+    }
+
+    /* never reached */
+    return FCL_NAN_SIG;
+}
+static inline xlen_t fpu_fp2int_xlen_t(fnative_t x)
+{
+    long long ret = llrint(x);
+    bool isinvalid = fetestexcept(FE_INVALID);
+    if (!isinvalid) {
+        isinvalid = ret < 0 || ret > (~(xlen_t)0);
+        if (isinvalid) feraiseexcept(FE_INVALID);
+    }
+
+    if (isinvalid) {
+        if (isinf(x) && fpu_sign_check(x)) {
+            return 0;
+        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
+            return ~(xlen_t)0;
+        } else if (!fpu_sign_check(x)) {
+            return ~(xlen_t)0;
+        } else {
+            return 0;
+        }
+    }
+
+    return ret;
+}
+
+static inline sxlen_t fpu_fp2int_sxlen_t(fnative_t x)
+{
+    long long ret = llrint(x);
+    bool isinvalid = fetestexcept(FE_INVALID);
+    if (!isinvalid) {
+        isinvalid = ret < (sxlen_t)~(~(xlen_t)0 >> 1)
+                 || ret > (sxlen_t)(~(xlen_t)0 >> 1);
+        if (isinvalid) feraiseexcept(FE_INVALID);
+    }
+
+    if (isinvalid) {
+        if (isinf(x) && fpu_sign_check(x)) {
+            return ~(~(xlen_t)0 >> 1);
+        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
+            return ~(xlen_t)0 >> 1;
+        } else if (!fpu_sign_check(x)) {
+            return ~(xlen_t)0 >> 1;
+        } else {
+            return ~(~(xlen_t)0 >> 1);
+        }
+    }
+
+    return ret;
+}
+
+static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
+{
+    if (fabs(x) == 0.0 || fabs(y) == 0.0) {
+        return fpu_sign_check(x) ? x : y;
+    }
+
+    fnative_t res = fmin(x, y);
+
+    if (isnan(res)) {
+        if (!isnan(x)) {
+            return x;
+        } else if (!isnan(y)) {
+            return y;
+        } else if (fpu_fclass(x) == FCL_NAN_QUIET && fpu_fclass(y) == FCL_NAN_QUIET) {
+            return NAN;
+        }
+    }
+
+    return res;
+}
+
+static inline fnative_t fpu_max_impl(fnative_t x, fnative_t y)
+{
+    if (fabs(x) == 0.0 || fabs(y) == 0.0) {
+        return fpu_sign_check(x) ? y : x;
+    }
+
+    fnative_t res = fmax(x, y);
+
+    if (isnan(res)) {
+        if (!isnan(x)) {
+            return x;
+        } else if (!isnan(y)) {
+            return y;
+        } else if (fpu_fclass(x) == FCL_NAN_QUIET && fpu_fclass(y) == FCL_NAN_QUIET) {
+            return NAN;
+        }
+    }
+
+    return res;
+}
 
 /* type for rounding mode */
 typedef uint8_t rm_t;
@@ -114,29 +231,6 @@ typedef uint8_t rm_t;
 #define FT7_FCVT_D_S 0x8 /* rs2 == 0 */
 #define FT7_FCLASS 0x1c /* rs2 == 0, funct3 == 0 (fmv) or 1 (fclass) */
 #endif
-
-static inline uint8_t fpu_fclass_impl(fnative_t x)
-{
-    switch (fpclassify(x)) {
-        case FP_INFINITE: return fpu_sign_check(x) ? FCL_NEG_INF : FCL_POS_INF;
-        case FP_NORMAL: return fpu_sign_check(x) ? FCL_NEG_NORMAL : FCL_POS_NORMAL;
-        case FP_SUBNORMAL: return fpu_sign_check(x) ? FCL_NEG_SUBNORMAL : FCL_POS_SUBNORMAL;
-        case FP_ZERO: return fpu_sign_check(x) ? FCL_NEG_ZERO : FCL_POS_ZERO;
-        case FP_NAN: {
-                         /* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
-                         uint8_t tmp[sizeof(fnative_t)];
-                         write_float(tmp, x);
-                         if (bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8)) {
-                             return FCL_NAN_QUIET;
-                         } else {
-                             return FCL_NAN_SIG;
-                         }
-                     }
-    }
-
-    /* never reached */
-    return FCL_NAN_SIG;
-}
 
 #if !defined(RVD) && !defined(RV64)
 /* Sets rounding mode, returns previous value */
