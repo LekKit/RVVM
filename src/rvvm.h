@@ -24,6 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "rvtimer.h"
 #include "compiler.h"
+#include "threading.h"
+#include "vector.h"
 #include "utils.h"
 
 #ifdef USE_SJLJ
@@ -181,8 +183,10 @@ struct rvvm_hart_t {
     rvvm_decoder_t decoder;
     rvvm_tlb_t tlb;
     rvvm_ram_t mem;
-    paddr_t root_page_table;
     rvvm_machine_t* machine;
+    thread_handle_t thread;
+    rvvm_mmio_dev_t* recent_mmio; // cache recently used MMIO device
+    paddr_t root_page_table;
     uint32_t irq_mask;
     uint32_t ev_mask;
     uint8_t mmu_mode;
@@ -211,12 +215,8 @@ struct rvvm_hart_t {
 
 struct rvvm_machine_t {
     rvvm_ram_t mem;
-    rvvm_hart_t* harts;
-    thread_handle_t* hart_threads;
-    size_t hart_count;
-    rvvm_mem_region_t* mmio;
-    size_t mmio_count;
-    bool rv64;
+    vector_t(rvvm_hart_t) harts;
+    vector_t(rvvm_mmio_dev_t) mmio;
     bool running;
 };
 
@@ -235,7 +235,7 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine);
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
 
 // Connect devices to the machine (only when it's stopped!)
-PUBLIC void rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mem_region_t* mmio);
+PUBLIC void rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr);
 
 /*
