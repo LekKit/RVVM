@@ -46,8 +46,7 @@ typedef int32_t smaxlen_t;
 #define PRIxXLEN PRIx32
 #endif
 
-/* not float or double to make bit-pattern operations easier */
-typedef uint64_t fmaxlen_t;
+typedef double fmaxlen_t;
 
 typedef maxlen_t addr_t;  // XLEN addr
 

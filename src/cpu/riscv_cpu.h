@@ -112,37 +112,81 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
 static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
 {
     assert(reg < FPU_REGISTERS_MAX);
-    return read_fp32(&vm->fpu_registers[reg]);
+    float ret;
+#ifdef HOST_LITTLE_ENDIAN
+    memcpy(&ret, &vm->fpu_registers[reg], sizeof(ret));
+#else
+    memcpy(&ret,
+            (uint8_t*)&vm->fpu_registers[reg] + sizeof(vm->fpu_registers[reg]) - sizeof(ret),
+            sizeof(ret));
+#endif
+    return ret;
 }
 
 static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
 {
     assert(reg < FPU_REGISTERS_MAX);
+
     fpu_set_fs(vm, S_DIRTY);
-    write_fp32(&vm->fpu_registers[reg], val);
+
+#ifdef HOST_LITTLE_ENDIAN
+    memcpy(&vm->fpu_registers[reg], &val, sizeof(val));
+#else
+    memcpy((uint8_t*)&vm->fpu_registers[reg] + sizeof(vm->fpu_registers[reg]) - sizeof(val),
+            &val,
+            sizeof(val));
+#endif
 
     /* NaN boxing */
+#ifdef HOST_LITTLE_ENDIAN
     memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(val),
             0xff,
             sizeof(vm->fpu_registers[reg]) - sizeof(val));
+#else
+    memset(&vm->fpu_registers[reg],
+            0xff,
+            sizeof(vm->fpu_registers[reg]) - sizeof(val));
+#endif
 }
 
 static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
 {
     assert(reg < FPU_REGISTERS_MAX);
-    return read_fp64(&vm->fpu_registers[reg]);
+    double ret;
+#ifdef HOST_LITTLE_ENDIAN
+    memcpy(&ret, &vm->fpu_registers[reg], sizeof(ret));
+#else
+    memcpy(&ret,
+            (uint8_t*)&vm->fpu_registers[reg] + sizeof(vm->fpu_registers[reg]) - sizeof(ret),
+            sizeof(ret));
+#endif
+    return ret;
 }
 
 static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
 {
     assert(reg < FPU_REGISTERS_MAX);
+
     fpu_set_fs(vm, S_DIRTY);
-    write_fp64(&vm->fpu_registers[reg], val);
+
+#ifdef HOST_LITTLE_ENDIAN
+    memcpy(&vm->fpu_registers[reg], &val, sizeof(val));
+#else
+    memcpy((uint8_t*)&vm->fpu_registers[reg] + sizeof(vm->fpu_registers[reg]) - sizeof(val),
+            &val,
+            sizeof(val));
+#endif
 
     /* NaN boxing */
+#ifdef HOST_LITTLE_ENDIAN
     memset((uint8_t*)&vm->fpu_registers[reg] + sizeof(val),
             0xff,
             sizeof(vm->fpu_registers[reg]) - sizeof(val));
+#else
+    memset(&vm->fpu_registers[reg],
+            0xff,
+            sizeof(vm->fpu_registers[reg]) - sizeof(val));
+#endif
 }
 
 /* translate compressed register encoding into normal */
