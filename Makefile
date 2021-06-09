@@ -118,7 +118,7 @@ ifeq ($(CC_TYPE),gcc)
 override CFLAGS += -O3 -flto
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -Ofast -flto
+override CFLAGS += -O3 -flto
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
