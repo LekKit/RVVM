@@ -21,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  * RVD macro is defined for D extension, uses F otherwise
  */
 
-#include "riscv32.h"
 #define RISCV_CPU_SOURCE
 
 #include "compiler.h"
@@ -59,14 +58,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 /* handlers for FPU operations, to be replaced with JIT or softfpu? */
-#define fpu_add(x, y)      (fnative_t)((fnative_t)(x) + (fnative_t)(y))
-#define fpu_sub(x, y)      (fnative_t)((fnative_t)(x) - (fnative_t)(y))
-#define fpu_mul(x, y)      (fnative_t)((fnative_t)(x) * (fnative_t)(y))
-#define fpu_div(x, y)      (fnative_t)((fnative_t)(x) / (fnative_t)(y))
-#define fpu_neg(x)         (fnative_t)(-(fnative_t)(x))
-#define fpu_sqrt(x)        (fnative_t)sqrt((fnative_t)(x))
-//#define fpu_min(x, y)      (fnative_t)fmin((fnative_t)(x), (fnative_t)(y))
-//#define fpu_max(x, y)      (fnative_t)fmax((fnative_t)(x), (fnative_t)(y))
+#define fpu_add(x, y)      canonize_nan((fnative_t)(x) + (fnative_t)(y))
+#define fpu_sub(x, y)      canonize_nan((fnative_t)(x) - (fnative_t)(y))
+#define fpu_mul(x, y)      canonize_nan((fnative_t)(x) * (fnative_t)(y))
+#define fpu_div(x, y)      canonize_nan((fnative_t)(x) / (fnative_t)(y))
+#define fpu_neg(x)         canonize_nan(-(fnative_t)(x))
+#define fpu_sqrt(x)        canonize_nan(sqrt((fnative_t)(x)))
 #define fpu_min(x, y)      fpu_min_impl(x, y)
 #define fpu_max(x, y)      fpu_max_impl(x, y)
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
@@ -74,11 +71,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define fpu_le(x, y)                  ((fnative_t)(x) <= (fnative_t)(y))
 #define fpu_sign_check(x)             (signbit(x))
 #define fpu_sign_set(x, s) (fnative_t)((s) ? copysign((fnative_t)(x), (fnative_t)(-1.0)) : copysign((fnative_t)(x), (fnative_t)(1.0)))
-//#define fpu_fp2int(t, x)   (t)        (rint((fnative_t)(x)))
-//#define fpu_fp2int(t, x)   (t)        (llrint((fnative_t)(x)))
 #define fpu_fp2int(t, x)   fpu_fp2int_##t(x)
-#define fpu_int2fp(t, i)   (fnative_t)((t) (i))
-#define fpu_fp2fp(t, x)    (t)        ((fnative_t)(x))
+#define fpu_int2fp(t, i)   canonize_nan((t) (i))
+#define fpu_fp2fp(t, x)    canonize_nan((t)(x))
 #define fpu_fclass(x)                 fpu_fclass_impl(x)
 
 enum {
@@ -116,6 +111,23 @@ static inline uint8_t fpu_fclass_impl(fnative_t x)
     /* never reached */
     return FCL_NAN_SIG;
 }
+
+static inline fnative_t canonize_nan(fnative_t x)
+{
+    if (!isnan(x)) {
+        return x;
+    }
+
+#ifndef RVD
+    uint32_t nan = 0x7fc00000;
+#else
+    uint64_t nan = 0x7ff8000000000000;
+#endif
+
+    memcpy(&x, &nan, sizeof(fnative_t));
+    return x;
+}
+
 static inline xlen_t fpu_fp2int_xlen_t(fnative_t x)
 {
     long long ret = llrint(x);
@@ -178,8 +190,8 @@ static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
             return x;
         } else if (!isnan(y)) {
             return y;
-        } else if (fpu_fclass(x) == FCL_NAN_QUIET && fpu_fclass(y) == FCL_NAN_QUIET) {
-            return NAN;
+        } else {
+            return canonize_nan(res);
         }
     }
 
@@ -199,8 +211,8 @@ static inline fnative_t fpu_max_impl(fnative_t x, fnative_t y)
             return x;
         } else if (!isnan(y)) {
             return y;
-        } else if (fpu_fclass(x) == FCL_NAN_QUIET && fpu_fclass(y) == FCL_NAN_QUIET) {
-            return NAN;
+        } else {
+            return canonize_nan(res);
         }
     }
 
