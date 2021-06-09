@@ -68,6 +68,7 @@ static void riscv32i_system(rvvm_hart_t *vm, const uint32_t instruction)
             vm->csr.status = bit_replace(vm->csr.status, 3, 1, bit_cut(vm->csr.status, 7, 1));
             // Set PC to csr.mepc
             riscv32i_write_register_u(vm, REGISTER_PC, vm->csr.epc[PRIVILEGE_MACHINE] - 4);
+            riscv32_tlb_flush(vm);
         } else {
             riscv32_trap(vm, TRAP_ILL_INSTR, instruction);
         }
