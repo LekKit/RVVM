@@ -409,7 +409,9 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	}
 
 	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
+	spin_unlock(&dev->lock);
 	altps2_interrupt(ps2keyboard);
+	return;
 out:
 	spin_unlock(&dev->lock);
 }

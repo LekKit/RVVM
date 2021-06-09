@@ -17,8 +17,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "bit_ops.h"
 #include "riscv32.h"
 #include "riscv32_csr.h"
+#include "rvvm_types.h"
 
 #define CSR_MARCHID 0x5256564D // 'RVVM'
 
@@ -52,7 +54,18 @@ static bool riscv32_csr_mhartid(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest
 static bool riscv32_csr_mstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
+    bool was_enabled = bit_cut(vm->csr.status, 13, 2) != S_OFF;
     csr_helper_masked(&vm->csr.status, dest, op, CSR_MSTATUS_MASK);
+    uint8_t new_fs = bit_cut(vm->csr.status, 13, 2);
+    bool enabled = new_fs != S_OFF;
+    if (was_enabled != enabled)
+    {
+        riscv32f_enable(enabled);
+        riscv32d_enable(enabled);
+    }
+    bool sdbit = new_fs == S_DIRTY
+              || bit_cut(vm->csr.status, 15, 2) == S_DIRTY;
+    vm->csr.status = bit_replace(vm->csr.status, ((1 << MAX_SHAMT_BITS) - 1), 1, sdbit);
     return true;
 }
 
@@ -61,7 +74,7 @@ static bool riscv32_csr_misa(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, u
     UNUSED(vm);
     UNUSED(csr_id);
     UNUSED(op);
-    *dest = riscv32_mkmisa("IMACSU");
+    *dest = riscv32_mkmisa("IMAFDCSU");
     return true;
 }
 

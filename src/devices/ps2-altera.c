@@ -118,7 +118,7 @@ static bool altps2_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, 
 	}
 
 	for (size_t i = 0; i < size; i += 4) {
-		if (!altps2_mmio_handler_impl(vm, ps2port, offset + i, (uint32_t*)memory_data, access)) {
+		if (!altps2_mmio_handler_impl(vm, ps2port, offset + i, (uint32_t*)((char*)memory_data + i), access)) {
 			ps2port->error = 1;
 			goto out;
 		}

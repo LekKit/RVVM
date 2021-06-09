@@ -46,6 +46,8 @@ typedef int32_t smaxlen_t;
 #define PRIxXLEN PRIx32
 #endif
 
+typedef double fmaxlen_t;
+
 typedef maxlen_t addr_t;  // XLEN addr
 
 // Distinguish between virtual and physical addresses

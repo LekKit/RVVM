@@ -118,7 +118,7 @@ ifeq ($(CC_TYPE),gcc)
 override CFLAGS += -O3 -flto
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -Ofast -flto
+override CFLAGS += -O3 -flto
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
@@ -148,6 +148,8 @@ USE_NET ?= 0
 ifeq ($(OS),linux)
 override LDFLAGS += -lrt
 endif
+# Needed for floating-point functions like fetestexcept/feraiseexcept
+override LDFLAGS += -lm
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB
@@ -220,7 +222,7 @@ override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
 endif
 
 # Generic compiler flags
-override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
+override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) -frounding-math
 
 DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 

@@ -464,7 +464,9 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);
+	spin_unlock(&dev->lock);
 	altps2_interrupt(ps2mouse);
+	return;
 out:
 	spin_unlock(&dev->lock);
 }

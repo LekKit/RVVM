@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "riscv32.h"
 #define RISCV_CPU_SOURCE
 
 #include "mem_ops.h"
@@ -48,17 +49,17 @@ static void (*riscv_c_opcodes[32])(rvvm_hart_t *vm, const uint16_t instruction);
 
 
 // Sanity check that our installed instructions do not overlap
-static void check_opcode(uint32_t opcode)
+static void check_opcode(uint32_t opcode, void (*func)(rvvm_hart_t *vm, const uint32_t insn))
 {
-    if (riscv_opcodes[opcode] != riscv_illegal_insn) {
+    if (riscv_opcodes[opcode] != riscv_illegal_insn && func != riscv_illegal_insn) {
         printf("ERROR: RV opcode %x overlaps at CPU init!\n", opcode);
         exit(-1);
     }
 }
 
-static void check_opcode_c(uint32_t opcode)
+static void check_opcode_c(uint32_t opcode, void (*func)(rvvm_hart_t *vm, const uint16_t insn))
 {
-    if (riscv_c_opcodes[opcode] != riscv_c_illegal_insn) {
+    if (riscv_c_opcodes[opcode] != riscv_c_illegal_insn && func != riscv_c_illegal_insn) {
         printf("ERROR: RVC opcode %x overlaps at CPU init!\n", opcode);
         exit(-1);
     }
@@ -67,29 +68,29 @@ static void check_opcode_c(uint32_t opcode)
 // Install instruction implementations to the jumptable
 void riscv_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
-    check_opcode(opcode);
+    check_opcode(opcode, func);
     riscv_opcodes[opcode] = func;
 }
 
 void riscv_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
     for (uint32_t f3=0; f3<0x10; ++f3) {
-        check_opcode(opcode | (f3 << 5));
+        check_opcode(opcode | (f3 << 5), func);
         riscv_opcodes[opcode | (f3 << 5)] = func;
     }
 }
 
 void riscv_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t))
 {
-    check_opcode(opcode);
-    check_opcode(opcode | 0x100);
+    check_opcode(opcode, func);
+    check_opcode(opcode | 0x100, func);
     riscv_opcodes[opcode] = func;
     riscv_opcodes[opcode | 0x100] = func;
 }
 
 void riscv_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t))
 {
-    check_opcode_c(opcode);
+    check_opcode_c(opcode, func);
     riscv_c_opcodes[opcode] = func;
 }
 
