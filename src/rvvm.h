@@ -126,17 +126,23 @@ typedef struct {
     riscv_inst_c_t opcodes_c[32];
 } rvvm_decoder_t;
 
-// Address translation cache
+/* 
+ * Address translation cache
+ * In future, it would be nice to verify if cache-line alignment
+ * gives any profit (entries scattered between cachelines waste L1)
+ */
 typedef struct {
-    vaddr_t vpn;    // Shifted 20 bits of virtual address
-    vmptr_t ppa;    // Pointer to page
-} tlb_entry_t;
-
-typedef struct {
-    tlb_entry_t r[TLB_SIZE];
-    tlb_entry_t w[TLB_SIZE];
-    tlb_entry_t e[TLB_SIZE];
-} rvvm_tlb_t;
+    // Pointer to page (with vaddr subtracted? faster tlb translation)
+    vmptr_t ptr;
+    // Virtual page number per each op type (vaddr >> 12)
+    vaddr_t r;
+    vaddr_t w;
+    vaddr_t e;
+    // Make entry size a power of 2 (32 or 16 bytes)
+#if defined(HOST_64BIT) && !defined(USE_RV64)
+    vaddr_t align[3];
+#endif
+} rvvm_tlb_entry_t;
 
 typedef struct {
     void (*init)(rvvm_mmio_dev_t* dev, bool reset);
@@ -180,8 +186,9 @@ struct rvvm_hart_t {
     double fpu_registers[REGISTERS_MAX];
 #endif
     
+    // We want short offsets from vmptr to tlb
+    rvvm_tlb_entry_t tlb[TLB_SIZE];
     rvvm_decoder_t decoder;
-    rvvm_tlb_t tlb;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
     thread_handle_t thread;

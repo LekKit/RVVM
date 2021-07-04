@@ -19,6 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef COMPILER_H
 #define COMPILER_H
 
+#include <stdint.h>
+
 #if defined(__GNUC__) || defined(__llvm__) || defined(__INTEL_COMPILER)
 #define GNU_EXTS 1
 #endif
@@ -76,5 +78,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 #define UNUSED(x) (void)x
+
+#if UINTPTR_MAX == UINT64_MAX
+#define HOST_64BIT 1
+#endif
 
 #endif
