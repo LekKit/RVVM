@@ -140,24 +140,70 @@ static inline void write_uint8(void* addr, uint8_t val) {
     *(uint8_t*)addr = val;
 }
 
-static inline float read_fp32(const void *addr) {
+/*
+ * Floating-point memory operations (misaligned)
+ */
+
+static inline float read_float_m(const void *addr) {
+    uint32_t i_v = read_uint32_le_m(addr);
     float ret;
-    memcpy(&ret, addr, sizeof(ret));
+    memcpy(&ret, &i_v, sizeof(float));
     return ret;
 }
 
-static inline void write_fp32(void *addr, float val) {
-    memcpy(addr, &val, sizeof(val));
-}
-
-static inline double read_fp64(const void *addr) {
+static inline double read_double_m(const void *addr) {
+    uint64_t i_v = read_uint64_le_m(addr);
     double ret;
-    memcpy(&ret, addr, sizeof(ret));
+    memcpy(&ret, &i_v, sizeof(double));
     return ret;
 }
 
-static inline void write_fp64(void *addr, double val) {
-    memcpy(addr, &val, sizeof(val));
+static inline void write_float_m(void* addr, float val) {
+    uint32_t i_v;
+    memcpy(&i_v, &val, sizeof(i_v));
+    write_uint32_le_m(addr, i_v);
+}
+
+static inline void write_double_m(void* addr, double val) {
+    uint64_t i_v;
+    memcpy(&i_v, &val, sizeof(i_v));
+    write_uint64_le_m(addr, i_v);
+}
+
+/*
+ * Floating-point memory operations (aligned)
+ */
+
+static inline float read_float(const void *addr) {
+#ifdef HOST_LITTLE_ENDIAN
+    return *(const float*)addr;
+#else
+    return read_float_m(addr);
+#endif
+}
+
+static inline double read_double(const void *addr) {
+#ifdef HOST_LITTLE_ENDIAN
+    return *(const double*)addr;
+#else
+    return read_double_m(addr);
+#endif
+}
+
+static inline void write_float(void *addr, float val) {
+#ifdef HOST_LITTLE_ENDIAN
+    *(float*)addr = val;
+#else
+    write_float_m(addr, val);
+#endif
+}
+
+static inline void write_double(void *addr, double val) {
+#ifdef HOST_LITTLE_ENDIAN
+    *(double*)addr = val;
+#else
+    write_double_m(addr, val);
+#endif
 }
 
 #endif
