@@ -31,9 +31,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-static inline smaxlen_t sign_extend(smaxlen_t val, bitcnt_t bits)
+static inline smaxlen_t sign_extend(maxlen_t val, bitcnt_t bits)
 {
-    return (val << (MAX_XLEN - bits)) >> (MAX_XLEN - bits);
+    return ((smaxlen_t)(val << (MAX_XLEN - bits))) >> (MAX_XLEN - bits);
 }
 
 // Generate bitmask of given size
