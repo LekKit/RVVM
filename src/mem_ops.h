@@ -1,7 +1,6 @@
 /*
 mem_ops.h - memory operations functions
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -144,27 +143,27 @@ static inline void write_uint8(void* addr, uint8_t val) {
  * Floating-point memory operations (misaligned)
  */
 
-static inline float read_float_m(const void *addr) {
+static inline float read_float_le_m(const void *addr) {
     uint32_t i_v = read_uint32_le_m(addr);
     float ret;
     memcpy(&ret, &i_v, sizeof(float));
     return ret;
 }
 
-static inline double read_double_m(const void *addr) {
+static inline double read_double_le_m(const void *addr) {
     uint64_t i_v = read_uint64_le_m(addr);
     double ret;
     memcpy(&ret, &i_v, sizeof(double));
     return ret;
 }
 
-static inline void write_float_m(void* addr, float val) {
+static inline void write_float_le_m(void* addr, float val) {
     uint32_t i_v;
     memcpy(&i_v, &val, sizeof(i_v));
     write_uint32_le_m(addr, i_v);
 }
 
-static inline void write_double_m(void* addr, double val) {
+static inline void write_double_le_m(void* addr, double val) {
     uint64_t i_v;
     memcpy(&i_v, &val, sizeof(i_v));
     write_uint64_le_m(addr, i_v);
@@ -174,35 +173,55 @@ static inline void write_double_m(void* addr, double val) {
  * Floating-point memory operations (aligned)
  */
 
-static inline float read_float(const void *addr) {
+static inline float read_float_le(const void *addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const float*)addr;
 #else
-    return read_float_m(addr);
+    return read_float_le_m(addr);
 #endif
 }
 
-static inline double read_double(const void *addr) {
+static inline double read_double_le(const void *addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const double*)addr;
 #else
-    return read_double_m(addr);
+    return read_double_le_m(addr);
 #endif
 }
 
-static inline void write_float(void *addr, float val) {
+static inline void write_float_le(void *addr, float val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(float*)addr = val;
 #else
-    write_float_m(addr, val);
+    write_float_le_m(addr, val);
 #endif
 }
 
-static inline void write_double(void *addr, double val) {
+static inline void write_double_le(void *addr, double val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(double*)addr = val;
 #else
-    write_double_m(addr, val);
+    write_double_le_m(addr, val);
+#endif
+}
+
+// Writes a host-endian double consisting of float + nan-boxing as in RISC-V spec
+static inline void write_float_nanbox(void* addr, float val) {
+#ifdef HOST_LITTLE_ENDIAN
+    ((float*)addr)[0] = val;
+    ((uint32_t*)addr)[1] = 0xFFFFFFFF;
+#else
+    ((uint32_t*)addr)[0] = 0xFFFFFFFF;
+    ((float*)addr)[1] = val;
+#endif
+}
+
+// Reads a host-endian double as a nan-boxed float
+static inline float read_float_nanbox(const void* addr) {
+#ifdef HOST_LITTLE_ENDIAN
+    return ((const float*)addr)[0];
+#else
+    return ((const float*)addr)[1];
 #endif
 }
 

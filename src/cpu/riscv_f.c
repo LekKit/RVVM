@@ -40,8 +40,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     /* bit 26 of opcode instruction */
     #define BIT26 0
 
-    #define read_fpu(x) read_double(x)
-    #define write_fpu(p, x) write_double(p, x)
+    #define read_fpu(x) read_double_le(x)
+    #define write_fpu(p, x) write_double_le(p, x)
     #define fpu_read_register fpu_read_register64
     #define fpu_write_register fpu_write_register64
 #else
@@ -51,8 +51,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     /* bit 26 of opcode instruction */
     #define BIT26 0
 
-    #define read_fpu(x) read_float(x)
-    #define write_fpu(p, x) write_float(p, x)
+    #define read_fpu(x) read_float_le(x)
+    #define write_fpu(p, x) write_float_le(p, x)
     #define fpu_read_register fpu_read_register32
     #define fpu_write_register fpu_write_register32
 #endif
@@ -497,13 +497,13 @@ static inline void riscv_f_fmv_w_x(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 
 static inline void riscv_f_fcvt_s_d(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    double val = read_double(&vm->fpu_registers[rs1]);
+    double val = read_double_le(&vm->fpu_registers[rs1]);
     fpu_write_register(vm, rd, fpu_fp2fp(fnative_t, val));
 }
 #else
 static inline void riscv_f_fcvt_d_s(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    float val = read_float(&vm->fpu_registers[rs1]);
+    float val = read_float_le(&vm->fpu_registers[rs1]);
     fpu_write_register(vm, rd, fpu_fp2fp(fnative_t, val));
 }
 #endif
@@ -745,7 +745,7 @@ static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
     uint8_t val[sizeof(double)];
 
     if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
-        fpu_write_register64(vm, rds, read_double(val));
+        fpu_write_register64(vm, rds, read_double_le(val));
     }
 }
 
@@ -759,7 +759,7 @@ static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(double)];
-    write_double(val, fpu_read_register64(vm, rs2));
+    write_double_le(val, fpu_read_register64(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -775,7 +775,7 @@ static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
     uint8_t val[sizeof(double)];
 
     if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
-        fpu_write_register64(vm, rds, read_double(val));
+        fpu_write_register64(vm, rds, read_double_le(val));
     }
 }
 
@@ -788,7 +788,7 @@ static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(double)];
-    write_double(val, fpu_read_register64(vm, rs2));
+    write_double_le(val, fpu_read_register64(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -846,7 +846,7 @@ static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
     uint8_t val[sizeof(float)];
 
     if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
-        fpu_write_register32(vm, rds, read_float(val));
+        fpu_write_register32(vm, rds, read_float_le(val));
     }
 }
 
@@ -861,7 +861,7 @@ static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     uint8_t val[sizeof(float)];
-    write_float(val, fpu_read_register32(vm, rs2));
+    write_float_le(val, fpu_read_register32(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
@@ -877,7 +877,7 @@ static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
     uint8_t val[sizeof(float)];
 
     if (likely(riscv_mem_op(vm, addr, val, sizeof(val), MMU_READ))) {
-        fpu_write_register32(vm, rds, read_float(val));
+        fpu_write_register32(vm, rds, read_float_le(val));
     }
 }
 
@@ -890,7 +890,7 @@ static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
     uint8_t val[sizeof(float)];
-    write_float(val, fpu_read_register32(vm, rs2));
+    write_float_le(val, fpu_read_register32(vm, rs2));
     riscv_mem_op(vm, addr, val, sizeof(val), MMU_WRITE);
 }
 
