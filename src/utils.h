@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 #define LOG_ERROR 1
 #define LOG_WARN  2
@@ -36,15 +37,19 @@ void rvvm_error(const char* str, ...);
 void rvvm_fatal(const char* str); // Aborts the process
 
 #ifdef GNU_EXTS
-#define SAFE_ALLOC __attribute__((malloc, returns_nonnull))
+#define SAFE_MALLOC  __attribute__((returns_nonnull, warn_unused_result, copy(malloc)))
+#define SAFE_CALLOC  __attribute__((returns_nonnull, warn_unused_result, copy(calloc)))
+#define SAFE_REALLOC __attribute__((returns_nonnull, warn_unused_result, copy(realloc)))
 #else
-#define SAFE_ALLOC
+#define SAFE_MALLOC
+#define SAFE_CALLOC
+#define SAFE_REALLOC
 #endif
 
 // These never return NULL
 
-SAFE_ALLOC void* safe_malloc(size_t size);
-SAFE_ALLOC void* safe_calloc(size_t size, size_t n);
-SAFE_ALLOC void* safe_realloc(void* ptr, size_t size);
+SAFE_MALLOC void* safe_malloc(size_t size);
+SAFE_CALLOC void* safe_calloc(size_t size, size_t n);
+SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 
 #endif

@@ -67,7 +67,7 @@ void rvvm_fatal(const char* str)
     abort();
 }
 
-SAFE_ALLOC void* safe_malloc(size_t size)
+SAFE_MALLOC void* safe_malloc(size_t size)
 {
     void* ret = malloc(size);
     if (unlikely(ret == NULL)) {
@@ -76,7 +76,7 @@ SAFE_ALLOC void* safe_malloc(size_t size)
     return ret;
 }
 
-SAFE_ALLOC void* safe_calloc(size_t size, size_t n)
+SAFE_CALLOC void* safe_calloc(size_t size, size_t n)
 {
     void* ret = calloc(size, n);
     if (unlikely(ret == NULL)) {
@@ -85,7 +85,7 @@ SAFE_ALLOC void* safe_calloc(size_t size, size_t n)
     return ret;
 }
 
-SAFE_ALLOC void* safe_realloc(void* ptr, size_t size)
+SAFE_REALLOC void* safe_realloc(void* ptr, size_t size)
 {
     void* ret = realloc(ptr, size);
     if (unlikely(ret == NULL)) {
