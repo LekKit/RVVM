@@ -37,9 +37,9 @@ void rvvm_error(const char* str, ...);
 void rvvm_fatal(const char* str); // Aborts the process
 
 #ifdef GNU_EXTS
-#define SAFE_MALLOC  __attribute__((returns_nonnull, warn_unused_result, copy(malloc)))
-#define SAFE_CALLOC  __attribute__((returns_nonnull, warn_unused_result, copy(calloc)))
-#define SAFE_REALLOC __attribute__((returns_nonnull, warn_unused_result, copy(realloc)))
+#define SAFE_MALLOC  __attribute__((returns_nonnull, warn_unused_result, malloc, alloc_size(1)))
+#define SAFE_CALLOC  __attribute__((returns_nonnull, warn_unused_result, malloc, alloc_size(1, 2)))
+#define SAFE_REALLOC __attribute__((returns_nonnull, warn_unused_result, alloc_size(2)))
 #else
 #define SAFE_MALLOC
 #define SAFE_CALLOC
