@@ -1,7 +1,7 @@
 # Makefile :)
 NAME     := rvvm
 SRCDIR   := src
-VERSION := 0.2-release
+#VERSION := 0.2-release
 
 
 # Passed by mingw make
