@@ -135,7 +135,7 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 
 	if (bpp != 32)
 	{
-		return calloc(4, (size_t)width * height);
+		return safe_calloc(4, (size_t)width * height);
 	}
 	return xdata->seginfo.shmaddr;
 
@@ -159,7 +159,7 @@ err:
 
 void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
 {
-	struct x11_data *xdata = calloc(1, sizeof(struct x11_data));
+	struct x11_data *xdata = safe_calloc(1, sizeof(struct x11_data));
 	if (xdata == NULL)
 	{
 		return;
@@ -236,14 +236,14 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		xdata->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
 			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
 			NULL, width, height, 8, 0);
-		xdata->ximage->data = calloc(xdata->ximage->bytes_per_line, xdata->ximage->height);
+		xdata->ximage->data = safe_calloc(xdata->ximage->bytes_per_line, xdata->ximage->height);
 		if (xdata->ximage->data == NULL)
 		{
 			goto err;
 		}
 
 		if (bpp != 32) {
-			data->framebuffer = calloc(4, (size_t)width * height);
+			data->framebuffer = safe_calloc(4, (size_t)width * height);
 			if (data->framebuffer == NULL)
 			{
 				goto err;

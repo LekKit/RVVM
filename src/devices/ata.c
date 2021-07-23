@@ -461,7 +461,7 @@ static size_t get_img_size(FILE *fp)
 void ata_init(rvvm_hart_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE *master, FILE *slave)
 {
     assert(master != NULL || slave != NULL);
-    struct ata_dev *ata = (struct ata_dev *) calloc(1, sizeof(struct ata_dev));
+    struct ata_dev *ata = (struct ata_dev *) safe_calloc(1, sizeof(struct ata_dev));
     ata->drive[0].fp = master;
     ata->drive[0].size = DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {

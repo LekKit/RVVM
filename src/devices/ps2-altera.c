@@ -132,7 +132,7 @@ out:
 
 void altps2_init(rvvm_hart_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
 {
-	struct altps2 *ptr = calloc(1, sizeof (struct altps2));
+	struct altps2 *ptr = safe_calloc(1, sizeof (struct altps2));
 
 	ptr->child = child;
 	ptr->hart = vm;

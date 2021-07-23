@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "rvvm_types.h"
 #include "rvtimer.h"
+#include "utils.h"
 
 enum
 {

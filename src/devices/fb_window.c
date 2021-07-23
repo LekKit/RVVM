@@ -79,7 +79,7 @@ void init_fb(rvvm_hart_t* vm, struct fb_data *data, unsigned width, unsigned hei
     fb_create_window(data, width, height, "RVVM");
     if (data->framebuffer == NULL) {
         /* Initialize empty buffer so that the MMIO handler would not crash */
-        data->framebuffer = calloc(1, fb_size);
+        data->framebuffer = safe_calloc(1, fb_size);
     }
     riscv32_mmio_add_device(vm, addr, addr + fb_size, fb_mmio_handler, data->framebuffer);
 }

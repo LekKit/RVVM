@@ -147,8 +147,7 @@ rvvm_hart_t *riscv32_create_vm()
         global_init = true;
     }
 
-    rvvm_hart_t *vm = (rvvm_hart_t*)malloc(sizeof(rvvm_hart_t));
-    memset(vm, 0, sizeof(rvvm_hart_t));
+    rvvm_hart_t *vm = (rvvm_hart_t*)safe_calloc(1, sizeof(rvvm_hart_t));
 
     // 0x10000 pages = 256M
     if (!riscv32_init_phys_mem(&vm->mem, 0x80000000, 0x10000)) {

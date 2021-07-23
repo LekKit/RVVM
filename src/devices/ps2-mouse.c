@@ -378,7 +378,7 @@ out2:
 
 struct ps2_device ps2_mouse_create()
 {
-	struct ps2_mouse *ptr = calloc(1, sizeof(struct ps2_mouse));
+	struct ps2_mouse *ptr = safe_calloc(1, sizeof(struct ps2_mouse));
 	struct ps2_device dev;
 	dev.ps2_op = ps2_mouse_op;
 	dev.data = ptr;
