@@ -7,6 +7,7 @@
 RISC-V CPU & System software implementation written in С
 
 ## What's working
+- Passes RISC-V compliance tests
 - OpenSBI, custom firmwares boot and execute properly
 - Linux kernel boots!
 - Linux userspace works, interactive shell through UART
@@ -14,8 +15,7 @@ RISC-V CPU & System software implementation written in С
 - Raw image mounted as rootfs
 
 ## What's done so far
-- Feature-complete RV32I instruction set
-- C, M, A instruction extensions
+- Feature-complete RV32ICMAFD instruction set
 - Extendable and fast instruction decoder
 - Physical memory
 - Memory mapping unit (MMU) with SV32 virtual addressing
@@ -32,7 +32,7 @@ RISC-V CPU & System software implementation written in С
 - Graphical framebuffer
 - ATA PIO hard drive
 - OpenCores Ethernet
-- [Somewhat WIP] Flash, RV64 CPU, JIT prototype
+- [Somewhat WIP] RV64 CPU, JIT prototype, Lib API
 
 ## Usage
 Currently builds using GNU Make and tested on Linux, Windows and MacOS systems. More build targets are going to be supported.
@@ -60,8 +60,8 @@ You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
 
 ## Our team
 - **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32/64ICMA ISA, interrupts & timer, privileged ISA, JIT, lots of fixes
+- **cerg2010cerg2010**: ELF loading, important fixes, initial RV64 work, PLIC, PS2, ATA, Ethernet, XCB window backend, FPU extensions
 - **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
-- **cerg2010cerg2010**: ELF loading, important fixes, initial RV64 work, PLIC, PS2, ATA, Ethernet, XCB window backend
 - *Hoping to see more contributors here*
 
 ## TODO
@@ -72,7 +72,7 @@ You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
 - Floating-point extensions
 - RV64-only instructions & MMU
 - Integrate JIT into the VM
-- Networking, sound?
+- Userspace networking, sound?
 - Other peripherals
 - DTB generation
 - *A lot more...*

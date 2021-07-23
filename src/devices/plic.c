@@ -348,7 +348,7 @@ out:
 
 void* plic_init(rvvm_hart_t *vm, uint32_t base_addr)
 {
-	struct plic *ptr = calloc(1, sizeof (struct plic));
+	struct plic *ptr = safe_calloc(1, sizeof (struct plic));
 	spin_init(&ptr->lock);
 	riscv32_mmio_add_device(vm, base_addr, base_addr + 0x4000000, plic_mmio_handler, ptr);
 	return ptr;

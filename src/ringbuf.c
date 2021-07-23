@@ -17,11 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include <ringbuf.h>
+#include <utils.h>
+#include <string.h>
 
 void ringbuf_create(struct ringbuf *rb, size_t size)
 {
 	rb->size = size;
-	rb->data = malloc(size);
+	rb->data = safe_malloc(size);
 	rb->start = 0;
 	rb->consumed = 0;
 }
@@ -36,9 +38,15 @@ size_t ringbuf_get_free_spc(struct ringbuf *rb)
 	return rb->size - rb->consumed;
 }
 
+bool ringbuf_is_empty(struct ringbuf *rb)
+{
+    return rb->consumed == 0;
+}
+
 bool ringbuf_put(struct ringbuf *rb, void *data, size_t len)
 {
 	if (ringbuf_get_free_spc(rb) < len) {
+		rvvm_warn("Overflow in ringbuf %p! size=%d, consumed=%d, len=%d", rb, rb->size, rb->consumed, len);
 		return false;
 	}
 
@@ -87,4 +95,14 @@ bool ringbuf_get(struct ringbuf *rb, void *data, size_t len)
 
 	rb->consumed -= len;
 	return true;
+}
+
+bool ringbuf_skip(struct ringbuf *rb, size_t len)
+{
+    if (rb->consumed < len) {
+        return false;
+    }
+
+    rb->consumed -= len;
+    return true;
 }

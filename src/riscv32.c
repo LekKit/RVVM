@@ -147,8 +147,7 @@ rvvm_hart_t *riscv32_create_vm()
         global_init = true;
     }
 
-    rvvm_hart_t *vm = (rvvm_hart_t*)malloc(sizeof(rvvm_hart_t));
-    memset(vm, 0, sizeof(rvvm_hart_t));
+    rvvm_hart_t *vm = (rvvm_hart_t*)safe_calloc(1, sizeof(rvvm_hart_t));
 
     // 0x10000 pages = 256M
     if (!riscv32_init_phys_mem(&vm->mem, 0x80000000, 0x10000)) {
@@ -218,6 +217,7 @@ static void riscv32_perform_interrupt(rvvm_hart_t *vm, uint32_t cause)
     }
     vm->priv_mode = priv;
     vm->wait_event = 0;
+    riscv32_tlb_flush(vm);
 }
 
 void riscv32_trap(rvvm_hart_t *vm, uint32_t cause, uint32_t tval)
@@ -245,6 +245,7 @@ void riscv32_trap(rvvm_hart_t *vm, uint32_t cause, uint32_t tval)
     vm->priv_mode = priv;
     vm->ev_trap = true;
     vm->wait_event = 0;
+    riscv32_tlb_flush(vm);
 }
 
 bool riscv32_handle_ip(rvvm_hart_t *vm, bool wfi)

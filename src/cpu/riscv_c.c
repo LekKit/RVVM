@@ -22,13 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "riscv_cpu.h"
 #include "riscv32_mmu.h"
-
-// translate compressed register encoding into normal
-static inline regid_t riscv_c_reg(regid_t reg)
-{
-    //NOTE: register index is hard limited to 8, since encoding is 3 bits
-    return REGISTER_X8 + reg;
-}
+#include "compiler.h"
 
 // Decode c.j / c.jal offset
 static inline sxlen_t decode_jal_imm(uint16_t imm)
@@ -78,11 +72,6 @@ static void riscv_c_slli(rvvm_hart_t *vm, const uint16_t instruction)
     riscv_write_register(vm, rds, src_reg << shamt);
 }
 
-static void riscv_c_fld(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
-
 #ifndef RV64
 static void riscv_c_jal(rvvm_hart_t *vm, const uint16_t instruction)
 {
@@ -94,11 +83,6 @@ static void riscv_c_jal(rvvm_hart_t *vm, const uint16_t instruction)
     riscv_write_register(vm, REGISTER_PC, pc + offset - 2);
 }
 #endif
-
-static void riscv_c_fldsp(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
 
 static void riscv_c_lw(rvvm_hart_t *vm, const uint16_t instruction)
 {
@@ -142,11 +126,6 @@ static void riscv_c_lwsp(rvvm_hart_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_flw(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
-
 static void riscv_c_addi16sp_lui(rvvm_hart_t *vm, const uint16_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
@@ -167,11 +146,6 @@ static void riscv_c_addi16sp_lui(rvvm_hart_t *vm, const uint16_t instruction)
 
         riscv_write_register(vm, rds, sign_extend(imm, 18));
     }
-}
-
-static void riscv_c_flwsp(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
 }
 
 static void riscv_c_alops1(rvvm_hart_t *vm, const uint16_t instruction)
@@ -251,11 +225,6 @@ static void riscv_c_alops2(rvvm_hart_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_fsd(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
-
 static void riscv_c_j(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Jump to PC+offset
@@ -263,11 +232,6 @@ static void riscv_c_j(rvvm_hart_t *vm, const uint16_t instruction)
     sxlen_t offset = decode_jal_imm(bit_cut(instruction, 2, 11));
 
     riscv_write_register(vm, REGISTER_PC, pc + offset - 2);
-}
-
-static void riscv_c_fsdsp(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
 }
 
 static void riscv_c_sw(rvvm_hart_t *vm, const uint16_t instruction)
@@ -321,11 +285,6 @@ static void riscv_c_swsp(rvvm_hart_t *vm, const uint16_t instruction)
     riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
 }
 
-static void riscv_c_fsw(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
-
 static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
 {
     // Conditional jump if rds != 0
@@ -339,40 +298,33 @@ static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
     }
 }
 
-static void riscv_c_fswsp(rvvm_hart_t *vm, const uint16_t instruction)
-{
-    riscv_c_illegal_insn(vm, instruction);
-}
-
 void riscv_c_init()
 {
     riscv_install_opcode_C(RVC_ADDI4SPN, riscv_c_addi4spn);
     riscv_install_opcode_C(RVC_ADDI, riscv_c_addi);
     riscv_install_opcode_C(RVC_SLLI, riscv_c_slli);
-    riscv_install_opcode_C(RVC_FLD, riscv_c_fld);
 #ifndef RV64
     riscv_install_opcode_C(RVC_JAL, riscv_c_jal);
 #endif
-    riscv_install_opcode_C(RVC_FLDSP, riscv_c_fldsp);
+    // riscv_install_opcode_C(RVC_FLDSP, riscv_c_fldsp);
     riscv_install_opcode_C(RVC_LW, riscv_c_lw);
     riscv_install_opcode_C(RVC_LI, riscv_c_li);
     riscv_install_opcode_C(RVC_LWSP, riscv_c_lwsp);
-    riscv_install_opcode_C(RVC_FLW, riscv_c_flw);
     riscv_install_opcode_C(RVC_ADDI16SP_LUI, riscv_c_addi16sp_lui);
-    riscv_install_opcode_C(RVC_FLWSP, riscv_c_flwsp);
+    // riscv_install_opcode_C(RVC_FLWSP, riscv_c_flwsp);
 
     // Those are tricky fuckers and need additional decoding
     // basically a glue instruction for CR and CA instructions
     riscv_install_opcode_C(RVC_ALOPS1, riscv_c_alops1);
     riscv_install_opcode_C(RVC_ALOPS2, riscv_c_alops2);
 
-    riscv_install_opcode_C(RVC_FSD, riscv_c_fsd);
+    // riscv_install_opcode_C(RVC_FSD, riscv_c_fsd);
     riscv_install_opcode_C(RVC_J, riscv_c_j);
-    riscv_install_opcode_C(RVC_FSDSP, riscv_c_fsdsp);
+    // riscv_install_opcode_C(RVC_FSDSP, riscv_c_fsdsp);
     riscv_install_opcode_C(RVC_SW, riscv_c_sw);
     riscv_install_opcode_C(RVC_BEQZ, riscv_c_beqz);
     riscv_install_opcode_C(RVC_SWSP, riscv_c_swsp);
-    riscv_install_opcode_C(RVC_FSW, riscv_c_fsw);
+    // riscv_install_opcode_C(RVC_FSW, riscv_c_fsw);
     riscv_install_opcode_C(RVC_BNEZ, riscv_c_bnez);
-    riscv_install_opcode_C(RVC_FSWSP, riscv_c_fswsp);
+    // riscv_install_opcode_C(RVC_FSWSP, riscv_c_fswsp);
 }

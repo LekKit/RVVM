@@ -19,8 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef COMPILER_H
 #define COMPILER_H
 
+#include <stdint.h>
+
 #if defined(__GNUC__) || defined(__llvm__) || defined(__INTEL_COMPILER)
-#define GNU_EXTS
+#define GNU_EXTS 1
 #endif
 
 #ifdef GNU_EXTS
@@ -65,6 +67,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HOST_LITTLE_ENDIAN 1
 #endif
 
+#endif
+
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_AMD64)
+#define HOST_MISALIGN_SUPPORT 1
+#else
+// Not sure about other arches, misaligns may be very slow
+// Safer this way
+#define HOST_STRICT_ALIGNMENT 1
+#endif
+
+#define UNUSED(x) (void)x
+
+#if UINTPTR_MAX == UINT64_MAX
+#define HOST_64BIT 1
 #endif
 
 #endif

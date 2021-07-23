@@ -48,7 +48,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SET_PHYS_ADDR(pte, addr) SET_PHYS_PAGE(pte, (addr) >> 12)
 
 // Hash-function for the TLB, this is subject to further optimisations
-inline uint32_t tlb_hash(uint32_t addr)
+static inline uint32_t tlb_hash(uint32_t addr)
 {
     #ifdef RISCV_TLB_DIRECT_MAP
         return (addr >> 12) & (TLB_SIZE - 1); // direct-mapped
@@ -58,13 +58,13 @@ inline uint32_t tlb_hash(uint32_t addr)
 }
 
 // Validate TLB entry
-inline bool tlb_check(riscv32_tlb_t tlb, uint32_t addr, uint8_t access)
+static inline bool tlb_check(riscv32_tlb_t tlb, uint32_t addr, uint8_t access)
 {
     return (tlb.pte & 0xFFFFF000) == (addr & 0xFFFFF000) && (tlb.pte & access) && tlb.ptr;
 }
 
 // Check that memory block doesn't cross page boundaries
-inline bool block_inside_page(uint32_t addr, uint32_t size)
+static inline bool block_inside_page(uint32_t addr, uint32_t size)
 {
     return (addr & 0xFFF) + size <= 4096;
 }

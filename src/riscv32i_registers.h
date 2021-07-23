@@ -21,25 +21,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
-inline uint32_t riscv32i_read_register_u(rvvm_hart_t *vm, uint32_t reg)
+static inline uint32_t riscv32i_read_register_u(rvvm_hart_t *vm, uint32_t reg)
 {
     assert(reg < REGISTERS_MAX);
     return vm->registers[reg];
 }
 
-inline void riscv32i_write_register_u(rvvm_hart_t *vm, uint32_t reg, uint32_t data)
+static inline void riscv32i_write_register_u(rvvm_hart_t *vm, uint32_t reg, uint32_t data)
 {
     assert(reg < REGISTERS_MAX);
     vm->registers[reg] = data;
 }
 
-inline int32_t riscv32i_read_register_s(rvvm_hart_t *vm, uint32_t reg)
+static inline int32_t riscv32i_read_register_s(rvvm_hart_t *vm, uint32_t reg)
 {
     assert(reg < REGISTERS_MAX);
     return vm->registers[reg];
 }
 
-inline void riscv32i_write_register_s(rvvm_hart_t *vm, uint32_t reg, int32_t data)
+static inline void riscv32i_write_register_s(rvvm_hart_t *vm, uint32_t reg, int32_t data)
 {
     assert(reg < REGISTERS_MAX);
     vm->registers[reg] = data;

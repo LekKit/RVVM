@@ -160,9 +160,9 @@ static void init_keycodes()
 
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name)
 {
-    win32fb_data* wdata = calloc(1, sizeof(win32fb_data));
+    win32fb_data* wdata = safe_calloc(1, sizeof(win32fb_data));
 	data->winsys_data = (void*)wdata;
-    data->framebuffer = calloc((size_t)width * height, 4);
+    data->framebuffer = safe_calloc((size_t)width * height, 4);
     
     wdata->hwnd = NULL;
     wdata->x = width;

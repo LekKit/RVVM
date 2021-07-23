@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_CPU_H
 #define RISCV_CPU_H
 
+#include "mem_ops.h"
 #include "riscv32.h"
 
 #define RISCV_I_VERSION 2.1
@@ -64,6 +65,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv64c_init
     #define riscv_m_init riscv64m_init
     #define riscv_a_init riscv64a_init
+    #define riscv_f_enable riscv64f_enable
+    #define riscv_d_enable riscv64d_enable
     #define riscv_cpu_init riscv64_cpu_init
     #define riscv_run_till_event riscv64_run_till_event
 #else
@@ -80,6 +83,8 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     #define riscv_c_init riscv32c_init
     #define riscv_m_init riscv32m_init
     #define riscv_a_init riscv32a_init
+    #define riscv_f_enable riscv32f_enable
+    #define riscv_d_enable riscv32d_enable
     #define riscv_cpu_init riscv32_cpu_init
     #define riscv_run_till_event riscv32_run_till_event
 #endif
@@ -102,6 +107,41 @@ static inline sxlen_t riscv_read_register_s(rvvm_hart_t *vm, regid_t reg)
 static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t data)
 {
     vm->registers[reg] = data;
+}
+
+static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    return read_float_nanbox(&vm->fpu_registers[reg]);
+}
+
+static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    // NOTE: for performance reasons/smaller JIT footprint, maybe
+    // we should hardcode the FPU state to dirty?
+    fpu_set_fs(vm, S_DIRTY);
+    write_float_nanbox(&vm->fpu_registers[reg], val);
+}
+
+static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    return vm->fpu_registers[reg];
+}
+
+static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
+{
+    assert(reg < FPU_REGISTERS_MAX);
+    fpu_set_fs(vm, S_DIRTY);
+    vm->fpu_registers[reg] = val;
+}
+
+/* translate compressed register encoding into normal */
+static inline regid_t riscv_c_reg(regid_t reg)
+{
+    //NOTE: register index is hard limited to 8, since encoding is 3 bits
+    return REGISTER_X8 + reg;
 }
 
 /*
@@ -233,6 +273,29 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
 // I/S/B type instructions
 #define RVA_ATOMIC_W     0x4B
 #define RV64A_ATOMIC_D   0x6B
+
+/*
+ * RV32F instructions
+ */
+#define RVF_FLW          0x41 /* ISB */
+#define RVF_FSW          0x49 /* ISB */
+#define RVF_FMADD        0x10 /* R + funct3 */
+#define RVF_FMSUB        0x11 /* R + funct3 */
+#define RVF_FNMSUB       0x12 /* R + funct3 */
+#define RVF_FNMADD       0x13 /* R + funct3 */
+#define RVF_OTHER        0x14 /* R + funct3 + funct7 a bunch */
+
+/*
+ * RV32D instructions
+ */
+#define RVD_FLW          0x61 /* ISB */
+#define RVD_FSW          0x69 /* ISB */
+#define RVD_FMADD        0x110 /* R + funct3 */
+#define RVD_FMSUB        0x111 /* R + funct3 */
+#define RVD_FNMSUB       0x112 /* R + funct3 */
+#define RVD_FNMADD       0x113 /* R + funct3 */
+/* except FCVT.S.D */
+#define RVD_OTHER        0x114 /* R + funct3 + funct7 a bunch */
 
 #endif
 #endif

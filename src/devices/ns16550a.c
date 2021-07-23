@@ -257,7 +257,7 @@ static bool ns16550a_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device
 
 void ns16550a_init(rvvm_hart_t *vm, uint32_t base_addr)
 {
-    struct ns16550a_data *ptr = calloc(1, sizeof (struct ns16550a_data));
+    struct ns16550a_data *ptr = safe_calloc(1, sizeof (struct ns16550a_data));
     terminal_rawmode();
     ptr->regs[NS16550A_REG_LSR] = 0x60;
 

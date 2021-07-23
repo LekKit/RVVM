@@ -378,7 +378,7 @@ out2:
 
 struct ps2_device ps2_mouse_create()
 {
-	struct ps2_mouse *ptr = calloc(1, sizeof(struct ps2_mouse));
+	struct ps2_mouse *ptr = safe_calloc(1, sizeof(struct ps2_mouse));
 	struct ps2_device dev;
 	dev.ps2_op = ps2_mouse_op;
 	dev.data = ptr;
@@ -464,7 +464,9 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);
+	spin_unlock(&dev->lock);
 	altps2_interrupt(ps2mouse);
+	return;
 out:
 	spin_unlock(&dev->lock);
 }

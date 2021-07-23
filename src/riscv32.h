@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv.h"
 #include "rvvm_types.h"
 #include "rvtimer.h"
+#include "utils.h"
 
 enum
 {
@@ -61,6 +62,8 @@ enum
     REGISTER_PC,
     REGISTERS_MAX
 };
+
+#define FPU_REGISTERS_MAX 32
 
 enum
 {
@@ -148,7 +151,9 @@ struct rvvm_hart_t {
         uint32_t cause[4];
         uint32_t tval[4];
         uint32_t ip;
+        uint32_t fcsr;
     } csr;
+    fmaxlen_t fpu_registers[FPU_REGISTERS_MAX];
     paddr_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;
@@ -163,6 +168,43 @@ struct rvvm_hart_t {
 //#define RV_DEBUG
 //#define RV_DEBUG_FULL
 //#define RV_DEBUG_SINGLESTEP
+
+enum reg_status
+{
+    S_OFF,
+    S_INITIAL,
+    S_CLEAN,
+    S_DIRTY
+};
+
+/* Sets the FS and SD fields of mstatus CSR */
+void fpu_set_fs(rvvm_hart_t *vm, uint8_t value);
+
+/* Checks that FS is not set to S_OFF */
+bool fpu_is_enabled(rvvm_hart_t *vm);
+
+enum
+{
+    RM_RNE = 0, /* round to nearest, ties to even */
+    RM_RTZ = 1, /* round to zero */
+    RM_RDN = 2, /* round down - towards -inf */
+    RM_RUP = 3, /* round up - towards +inf */
+    RM_RMM = 4, /* round to nearest, ties to max magnitude */
+    RM_DYN = 7, /* round to instruction's rm field */
+    RM_INVALID = 255, /* invalid rounding mode was specified - should cause a trap */
+};
+
+/* type for rounding mode */
+typedef uint8_t rm_t;
+/* Sets rounding mode, returns previous value */
+rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm);
+/* Enables/disables FPU instructions */
+extern void riscv32f_enable(bool enable);
+extern void riscv32d_enable(bool enable);
+#if MAX_XLEN > 32
+extern void riscv64f_enable(bool enable);
+extern void riscv64d_enable(bool enable);
+#endif
 
 void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);
 

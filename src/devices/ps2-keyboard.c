@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "ps2-keyboard.h"
 #include "spinlock.h"
+#include <string.h>
 
 /* Based on the ps2-mouse.c */
 /* TODO: locking? */
@@ -235,7 +236,7 @@ out2:
 
 struct ps2_device ps2_keyboard_create()
 {
-	struct ps2_keyboard *ptr = calloc(1, sizeof(struct ps2_keyboard));
+	struct ps2_keyboard *ptr = safe_calloc(1, sizeof(struct ps2_keyboard));
 	struct ps2_device dev;
 	dev.ps2_op = ps2_keyboard_op;
 	dev.data = ptr;
@@ -409,7 +410,9 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	}
 
 	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
+	spin_unlock(&dev->lock);
 	altps2_interrupt(ps2keyboard);
+	return;
 out:
 	spin_unlock(&dev->lock);
 }

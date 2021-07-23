@@ -87,7 +87,7 @@ static void x11_update_keymap()
 	{
 		free(keycodemap);
 	}
-	keycodemap = calloc(sizeof(xcb_keysym_t), keycodemap_len);
+	keycodemap = safe_calloc(sizeof(xcb_keysym_t), keycodemap_len);
 	memcpy(keycodemap, keycodemap_ret, sizeof(xcb_keysym_t) * keycodemap_len);
 	free(kbmap_ret);
 }
@@ -157,7 +157,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 {
 	++window_count;
 
-	struct x11_data *xdata = calloc(1, sizeof(struct x11_data));
+	struct x11_data *xdata = safe_calloc(1, sizeof(struct x11_data));
 	xcb_generic_error_t *err;
 	data->winsys_data = xdata;
 
@@ -260,7 +260,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	if (xdata->local_data == NULL)
 	{
 		/* create pixmap */
-		xdata->local_data = calloc((bpp / 8), (size_t)width * height);
+		xdata->local_data = safe_calloc((bpp / 8), (size_t)width * height);
 		if (xdata->local_data == NULL)
 		{
 			goto err;
@@ -284,7 +284,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 	/* allocate buffer for 32-bit image */
 	if (bpp != 32)
 	{
-		data->framebuffer = calloc(4, (size_t)width * height);
+		data->framebuffer = safe_calloc(4, (size_t)width * height);
 		if (data->framebuffer == NULL)
 		{
 			goto err;

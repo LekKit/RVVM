@@ -1,6 +1,6 @@
 /*
-spinlock.h - Atomic spinlock
-Copyright (C) 2021  LekKit <github.com/LekKit>
+riscv_d.c - RISC-V D extension stub
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,28 +16,5 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef SPINLOCK_H
-#define SPINLOCK_H
-
-#include "atomics.h"
-
-typedef struct {
-    uint32_t flag;
-} spinlock_t;
-
-static inline void spin_init(spinlock_t* lock)
-{
-    lock->flag = 0;
-}
-
-static inline void spin_lock(spinlock_t* lock)
-{
-    while (atomic_swap_uint32(&lock->flag, 1));
-}
-
-static inline void spin_unlock(spinlock_t* lock)
-{
-    atomic_store_uint32(&lock->flag, 0);
-}
-
-#endif
+#define RVD
+#include "riscv_f.c"

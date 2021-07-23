@@ -77,7 +77,7 @@ void riscv32_mmu_dump(rvvm_hart_t *vm)
 }
 
 // Check that specific physical address belongs to RAM
-inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
+static inline bool phys_addr_in_mem(riscv32_phys_mem_t mem, uint32_t page_addr)
 {
     return page_addr >= mem.begin && (page_addr - mem.begin) < mem.size;
 }
