@@ -28,23 +28,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define LOG_WARN  2
 #define LOG_INFO  3
 
-void rvvm_set_loglevel(int level);
-
-// Logging functions (controlled by loglevel)
-void rvvm_info(const char* str, ...);
-void rvvm_warn(const char* str, ...);
-void rvvm_error(const char* str, ...);
-void rvvm_fatal(const char* str); // Aborts the process
-
 #ifdef GNU_EXTS
+#define PRINT_FORMAT __attribute__((format(printf, 1, 2)))
 #define SAFE_MALLOC  __attribute__((returns_nonnull, warn_unused_result, malloc, alloc_size(1)))
 #define SAFE_CALLOC  __attribute__((returns_nonnull, warn_unused_result, malloc, alloc_size(1, 2)))
 #define SAFE_REALLOC __attribute__((returns_nonnull, warn_unused_result, alloc_size(2)))
 #else
+#define PRINT_FORMAT
 #define SAFE_MALLOC
 #define SAFE_CALLOC
 #define SAFE_REALLOC
 #endif
+
+void rvvm_set_loglevel(int level);
+
+// Logging functions (controlled by loglevel)
+PRINT_FORMAT void rvvm_info(const char* str, ...);
+PRINT_FORMAT void rvvm_warn(const char* str, ...);
+PRINT_FORMAT void rvvm_error(const char* str, ...);
+void rvvm_fatal(const char* str); // Aborts the process
 
 // These never return NULL
 

@@ -27,7 +27,7 @@ void rvvm_set_loglevel(int level)
     loglevel = level;
 }
 
-void rvvm_info(const char* str, ...)
+PRINT_FORMAT void rvvm_info(const char* str, ...)
 {
     if (loglevel < LOG_INFO) return;
     fputs("INFO: ", stdout);
@@ -38,7 +38,7 @@ void rvvm_info(const char* str, ...)
     putchar('\n');
 }
 
-void rvvm_warn(const char* str, ...)
+PRINT_FORMAT void rvvm_warn(const char* str, ...)
 {
     if (loglevel < LOG_WARN) return;
     fputs("WARN: ", stdout);
@@ -49,7 +49,7 @@ void rvvm_warn(const char* str, ...)
     putchar('\n');
 }
 
-void rvvm_error(const char* str, ...)
+PRINT_FORMAT void rvvm_error(const char* str, ...)
 {
     if (loglevel < LOG_ERROR) return;
     fputs("ERROR: ", stdout);
