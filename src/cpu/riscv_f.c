@@ -132,11 +132,12 @@ static inline xlen_t fpu_fp2int_xlen_t(fnative_t x)
 {
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
+#ifdef RVD
     if (!isinvalid) {
         isinvalid = ret < 0 || ret > (~(xlen_t)0);
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
-
+#endif
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return 0;
@@ -156,12 +157,13 @@ static inline sxlen_t fpu_fp2int_sxlen_t(fnative_t x)
 {
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
+#ifdef RVD
     if (!isinvalid) {
         isinvalid = ret < (sxlen_t)~(~(xlen_t)0 >> 1)
                  || ret > (sxlen_t)(~(xlen_t)0 >> 1);
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
-
+#endif
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return ~(~(xlen_t)0 >> 1);
