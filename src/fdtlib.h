@@ -41,7 +41,7 @@ struct fdt_node_list
 
 /* all values are stored in big-endian format */
 #ifdef HOST_LITTLE_ENDIAN
-static uint32_t fdt_host2u32(uint32_t value)
+static inline uint32_t fdt_host2u32(uint32_t value)
 {
     const uint8_t* arr = (const uint8_t*)&value;
     return ((uint32_t)arr[0] << 24)
@@ -50,7 +50,7 @@ static uint32_t fdt_host2u32(uint32_t value)
         | ((uint32_t)arr[3]);
 }
 
-static uint64_t fdt_host2u64(uint64_t value)
+static inline uint64_t fdt_host2u64(uint64_t value)
 {
     const uint8_t* arr = (const uint8_t*)&value;
     return ((uint64_t)arr[0] << 56)

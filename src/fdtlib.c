@@ -1,11 +1,7 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdbool.h>
-#include <assert.h>
-#include <malloc.h>
-
+#include "riscv.h"
 #include "fdtlib.h"
+#include <stdio.h>
+#include <string.h>
 
 #define FDT_MAGIC 0xd00dfeed
 #define FDT_VERSION 17
