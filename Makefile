@@ -3,7 +3,6 @@ NAME     := rvvm
 SRCDIR   := src
 #VERSION := 0.2-release
 
-
 # Passed by mingw make
 ifeq ($(OS),Windows_NT)
 WIN_SET := 1
@@ -145,6 +144,8 @@ USE_RV64 ?= 0
 USE_JIT ?= 0
 USE_NET ?= 0
 USE_FPU ?= 1
+USE_VMSWAP ?= 0
+USE_VMSWAP_SPLIT ?= 0
 
 ifeq ($(OS),linux)
 override LDFLAGS += -lrt
@@ -218,6 +219,15 @@ endif
 
 ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
+endif
+
+ifeq ($(USE_VMSWAP_SPLIT),1)
+override CFLAGS += -DUSE_VMSWAP_SPLIT
+USE_VMSWAP := 1
+endif
+
+ifeq ($(USE_VMSWAP),1)
+override CFLAGS += -DUSE_VMSWAP
 endif
 
 ifeq ($(OS),darwin)

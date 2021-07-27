@@ -20,10 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_MMU_H
 #define RISCV_MMU_H
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <string.h>
 #include "mem_ops.h"
 #include "bit_ops.h"
 #include "riscv32.h"
@@ -119,4 +115,9 @@ inline static bool riscv32_mem_op(rvvm_hart_t* vm, uint32_t addr, void* dest, ui
 
 void riscv32_mmu_dump(rvvm_hart_t *vm);
 
+// Perform memory operation on physical RAM
+void riscv32_physmem_op(rvvm_hart_t *vm, paddr_t addr, vmptr_t dest, size_t size, uint8_t access);
+
+// Gets physical page pointer in RAM, useful for DMA
+vmptr_t riscv32_get_physmem_page(riscv32_phys_mem_t *mem, riscv32_tlb_t *tlb, paddr_t ppn);
 #endif

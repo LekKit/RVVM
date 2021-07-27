@@ -493,8 +493,17 @@ static void ethoc_pollevent(int poll_status, void *arg)
 
         ptrdiff_t read = 0;
         if (bd->ptr >= eth->hart->mem.begin && bd->ptr < eth->hart->mem.begin + eth->hart->mem.size) {
+#ifndef USE_VMSWAP
             void *buf = eth->hart->mem.data + bd->ptr;
             read = tap_recv(&eth->pollev.dev, buf, 1536);
+#else
+            void *buf = malloc(1536);
+            if (buf) {
+                read = tap_recv(&eth->pollev.dev, buf, 1536);
+                riscv32_physmem_op(eth->hart, bd->ptr, buf, read, MMU_WRITE);
+                free(buf);
+            }
+#endif
             if (read < 0) {
                 /* Set Invalid Symbol flag on error - there's no generic error flag, but
                  * this is close enough */
@@ -543,9 +552,18 @@ err_read:
 
         ptrdiff_t written = 0;
         if (bd->ptr >= eth->hart->mem.begin && bd->ptr < eth->hart->mem.begin + eth->hart->mem.size) {
-            void *buf = eth->hart->mem.data + bd->ptr;
             uint16_t to_write = (bd->data >> 16) & 0xffff;
+#ifndef USE_VMSWAP
+            void *buf = eth->hart->mem.data + bd->ptr;
             written = tap_send(&eth->pollev.dev, buf, to_write);
+#else
+            void *buf = malloc(to_write);
+            if (buf) {
+                riscv32_physmem_op(eth->hart, bd->ptr, buf, to_write, MMU_READ);
+                written = tap_send(&eth->pollev.dev, buf, to_write);
+                free(buf);
+            }
+#endif
             /* Need to set the flag after transmission. Should we insert barrier? */
             bd->data &= ~ETHOC_TXBD_RD;
             if (written < 0) {

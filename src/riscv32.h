@@ -23,6 +23,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "rvtimer.h"
 #include "utils.h"
+#ifdef USE_VMSWAP
+#include "ringbuf.h"
+#include "spinlock.h"
+#endif
 
 enum
 {
@@ -108,10 +112,30 @@ typedef struct {
     vmptr_t ptr;    // Page address in emulator memory
 } riscv32_tlb_t;
 
+//#define USE_VMSWAP_SPLIT
+#ifdef USE_VMSWAP
 typedef struct {
+    vmptr_t ptr; // Pointer to the memory of this page
+#ifdef USE_VMSWAP_SPLIT
+    char *fpath; // File which owns this page entry
+#endif
+} vmswap_entry_t;
+#endif
+
+typedef struct {
+#ifndef USE_VMSWAP
     vmptr_t data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
+#endif
     paddr_t begin;  // First usable address in physical memory
     paddr_t size;   // Amount of usable memory after mem_begin
+#ifdef USE_VMSWAP
+    vmswap_entry_t *ptrmap; // Pointer mapping for physical pages
+    struct ringbuf ptrbuf; // FIFO cache for allocated pages
+#ifndef USE_VMSWAP_SPLIT
+    FILE *fp;        // File which owns all pages
+#endif
+    spinlock_t lock; // needed for DMA memory operations
+#endif
 } riscv32_phys_mem_t;
 
 typedef struct rvvm_hart_t rvvm_hart_t;
