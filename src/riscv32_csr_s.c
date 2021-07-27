@@ -29,8 +29,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static bool riscv32_csr_sstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
     UNUSED(csr_id);
+#ifdef USE_FPU
     bool was_enabled = bit_cut(vm->csr.status, 13, 2) != S_OFF;
+#endif
     csr_helper_masked(&vm->csr.status, dest, op, CSR_SSTATUS_MASK);
+#ifdef USE_FPU
     uint8_t new_fs = bit_cut(vm->csr.status, 13, 2);
     bool enabled = new_fs != S_OFF;
     if (was_enabled != enabled)
@@ -41,6 +44,7 @@ static bool riscv32_csr_sstatus(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest
     bool sdbit = new_fs == S_DIRTY
               || bit_cut(vm->csr.status, 15, 2) == S_DIRTY;
     vm->csr.status = bit_replace(vm->csr.status, ((1 << MAX_SHAMT_BITS) - 1), 1, sdbit);
+#endif
     return true;
 }
 

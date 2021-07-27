@@ -144,12 +144,16 @@ USE_XSHM ?= 1
 USE_RV64 ?= 0
 USE_JIT ?= 0
 USE_NET ?= 0
+USE_FPU ?= 1
 
 ifeq ($(OS),linux)
 override LDFLAGS += -lrt
 endif
 # Needed for floating-point functions like fetestexcept/feraiseexcept
+ifeq ($(USE_FPU),1)
 override LDFLAGS += -lm
+override CFLAGS += -DUSE_FPU
+endif
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB

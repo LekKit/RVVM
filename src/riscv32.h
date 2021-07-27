@@ -153,7 +153,9 @@ struct rvvm_hart_t {
         uint32_t ip;
         uint32_t fcsr;
     } csr;
+#ifdef USE_FPU
     fmaxlen_t fpu_registers[FPU_REGISTERS_MAX];
+#endif
     paddr_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;
@@ -177,11 +179,13 @@ enum reg_status
     S_DIRTY
 };
 
+#ifdef USE_FPU
 /* Sets the FS and SD fields of mstatus CSR */
 void fpu_set_fs(rvvm_hart_t *vm, uint8_t value);
 
 /* Checks that FS is not set to S_OFF */
 bool fpu_is_enabled(rvvm_hart_t *vm);
+#endif
 
 enum
 {
@@ -199,11 +203,13 @@ typedef uint8_t rm_t;
 /* Sets rounding mode, returns previous value */
 rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm);
 /* Enables/disables FPU instructions */
+#ifdef USE_FPU
 extern void riscv32f_enable(bool enable);
 extern void riscv32d_enable(bool enable);
 #if MAX_XLEN > 32
 extern void riscv64f_enable(bool enable);
 extern void riscv64d_enable(bool enable);
+#endif
 #endif
 
 void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);
