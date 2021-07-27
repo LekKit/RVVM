@@ -450,7 +450,7 @@ static size_t get_img_size(FILE *fp)
         printf("Unable to get ATA disk size\n");
         return 0;
     } else if (size == 0) {
-        printf("ATA disk is empty");
+        printf("ATA disk is empty\n");
         return 0;
     }
 
@@ -463,12 +463,12 @@ void ata_init(rvvm_hart_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FI
     assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev *) safe_calloc(1, sizeof(struct ata_dev));
     ata->drive[0].fp = master;
-    ata->drive[0].size = DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
         ata->drive[0].fp = NULL;
     }
     ata->drive[1].fp = slave;
-    ata->drive[1].size = DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
         ata->drive[1].fp = NULL;
     }
