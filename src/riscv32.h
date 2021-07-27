@@ -23,6 +23,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "rvtimer.h"
 #include "utils.h"
+#ifdef USE_VMSWAP
+#include "ringbuf.h"
+#include "spinlock.h"
+#endif
 
 enum
 {
@@ -108,10 +112,30 @@ typedef struct {
     vmptr_t ptr;    // Page address in emulator memory
 } riscv32_tlb_t;
 
+//#define USE_VMSWAP_SPLIT
+#ifdef USE_VMSWAP
 typedef struct {
+    vmptr_t ptr; // Pointer to the memory of this page
+#ifdef USE_VMSWAP_SPLIT
+    char *fpath; // File which owns this page entry
+#endif
+} vmswap_entry_t;
+#endif
+
+typedef struct {
+#ifndef USE_VMSWAP
     vmptr_t data;   // Pointer to 0x0 physical address (Do not use out of physical memory boundaries!)
+#endif
     paddr_t begin;  // First usable address in physical memory
     paddr_t size;   // Amount of usable memory after mem_begin
+#ifdef USE_VMSWAP
+    vmswap_entry_t *ptrmap; // Pointer mapping for physical pages
+    struct ringbuf ptrbuf; // FIFO cache for allocated pages
+#ifndef USE_VMSWAP_SPLIT
+    FILE *fp;        // File which owns all pages
+#endif
+    spinlock_t lock; // needed for DMA memory operations
+#endif
 } riscv32_phys_mem_t;
 
 typedef struct rvvm_hart_t rvvm_hart_t;
@@ -153,7 +177,9 @@ struct rvvm_hart_t {
         uint32_t ip;
         uint32_t fcsr;
     } csr;
+#ifdef USE_FPU
     fmaxlen_t fpu_registers[FPU_REGISTERS_MAX];
+#endif
     paddr_t root_page_table;
     bool mmu_virtual;
     uint8_t priv_mode;
@@ -177,11 +203,13 @@ enum reg_status
     S_DIRTY
 };
 
+#ifdef USE_FPU
 /* Sets the FS and SD fields of mstatus CSR */
 void fpu_set_fs(rvvm_hart_t *vm, uint8_t value);
 
 /* Checks that FS is not set to S_OFF */
 bool fpu_is_enabled(rvvm_hart_t *vm);
+#endif
 
 enum
 {
@@ -199,11 +227,13 @@ typedef uint8_t rm_t;
 /* Sets rounding mode, returns previous value */
 rm_t fpu_set_rm(rvvm_hart_t *vm, rm_t newrm);
 /* Enables/disables FPU instructions */
+#ifdef USE_FPU
 extern void riscv32f_enable(bool enable);
 extern void riscv32d_enable(bool enable);
 #if MAX_XLEN > 32
 extern void riscv64f_enable(bool enable);
 extern void riscv64d_enable(bool enable);
+#endif
 #endif
 
 void riscv32_debug_func(const rvvm_hart_t *vm, const char* fmt, ...);

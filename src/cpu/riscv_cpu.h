@@ -109,6 +109,7 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
     vm->registers[reg] = data;
 }
 
+#ifdef USE_FPU
 static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
 {
     assert(reg < FPU_REGISTERS_MAX);
@@ -136,6 +137,7 @@ static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val
     fpu_set_fs(vm, S_DIRTY);
     vm->fpu_registers[reg] = val;
 }
+#endif
 
 /* translate compressed register encoding into normal */
 static inline regid_t riscv_c_reg(regid_t reg)

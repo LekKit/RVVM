@@ -21,12 +21,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv32.h"
 #include "riscv32_csr.h"
 
+#ifdef USE_FPU
 #include <fenv.h>
+#endif
 
 #define CSR_USTATUS_MASK 0x11
 
 extern uint64_t clint_mtime;
 
+#ifdef USE_FPU
 #define FFLAG_NX (1 << 0) /* inexact */
 #define FFLAG_UF (1 << 1) /* undeflow */
 #define FFLAG_OF (1 << 2) /* overflow */
@@ -109,6 +112,7 @@ static bool riscv32_csr_fcsr(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, u
     *dest &= 0xff;
     return true;
 }
+#endif
 
 static bool riscv32_csr_time(rvvm_hart_t *vm, uint32_t csr_id, uint32_t* dest, uint8_t op)
 {
@@ -142,9 +146,11 @@ void riscv32_csr_u_init()
     riscv32_csr_init(0x044, "uip", riscv32_csr_unimp);
 
     // User Floating-Point CSRs
+#ifdef USE_FPU
     riscv32_csr_init(0x001, "fflags", riscv32_csr_fflags);
     riscv32_csr_init(0x002, "frm", riscv32_csr_frm);
     riscv32_csr_init(0x003, "fcsr", riscv32_csr_fcsr);
+#endif
 
     // User Counter/Timers
     riscv32_csr_init(0xC00, "cycle", riscv32_csr_unimp);

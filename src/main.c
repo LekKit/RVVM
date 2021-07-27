@@ -16,8 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "compiler.h"
 #include <string.h>
-#include <inttypes.h>
 
 #include "mem_ops.h"
 #include "riscv.h"
@@ -45,19 +45,26 @@ size_t load_file_to_ram(rvvm_hart_t* vm, uint32_t addr, const char* filename)
         return ret;
     }
 
+#ifdef USE_VMSWAP
     char *buf = malloc(BUFSIZ);
     if (!buf)
     {
 	    printf("ERROR: Unable to allocate buffer for file %s\n", filename);
 	    goto err_fclose;
     }
+#endif
 
     size_t to_end = vm->mem.begin + vm->mem.size - addr;
     size_t buffer_size = to_end < BUFSIZ ? to_end : BUFSIZ;
 
     while (addr >= vm->mem.begin && addr + buffer_size <= vm->mem.begin + vm->mem.size)
     {
+#ifdef USE_VMSWAP
+	    size_t bytes_read = fread(buf, 1, buffer_size, file);
+	    riscv32_physmem_op(vm, addr, (vmptr_t)buf, buffer_size, MMU_WRITE);
+#else
 	    size_t bytes_read = fread(vm->mem.data + addr, 1, buffer_size, file);
+#endif
 	    ret += bytes_read;
 	    addr += bytes_read;
 
@@ -70,13 +77,15 @@ size_t load_file_to_ram(rvvm_hart_t* vm, uint32_t addr, const char* filename)
     if (!feof(file))
     {
         printf("ERROR: File %s does not fit in VM RAM. Bytes read: 0x%zx\n", filename, ret);
-	ret = 0;
-	goto err_free;
+        ret = 0;
+        goto err_free;
     }
 
 err_free:
+#ifdef USE_VMSWAP
     free(buf);
 err_fclose:
+#endif
     fclose(file);
     return ret;
 }
@@ -96,22 +105,8 @@ void parse_args(int argc, char** argv, vm_args_t* args)
     }
 }
 
-int main(int argc, char** argv)
+int rvvm_run_with_args(vm_args_t args)
 {
-    vm_args_t args = {0};
-#ifdef _WIN32
-    // let the vm be run by simple double-click, heh
-    args.dtb = "rvvm.dtb";
-    args.bootrom = "fw_payload.bin";
-    args.image = "rootfs.img";
-#endif
-    parse_args(argc, argv, &args);
-    if (args.bootrom == NULL)
-    {
-        printf("Usage: %s <bootrom> [--linux] [-dtb=<device.dtb>]\n", argv[0]);
-        return 0;
-    }
-
     rvvm_hart_t* vm = riscv32_create_vm();
     if (vm == NULL)
     {
@@ -165,14 +160,22 @@ int main(int argc, char** argv)
 		    // OpenSBI FW_DYNAMIC struct passed in a2 register
 		    if (vm->mem.size - dtb_addr + dts >= 24)
 		    {
-			    void* addr = vm->mem.data + vm->mem.begin + vm->mem.size - 0x200000 + dts;
+			    paddr_t paddr = vm->mem.begin + vm->mem.size - 0x200000 + dts;
+#ifdef USE_VMSWAP
+			    uint32_t addr[24];
+#else
+			    void* addr = vm->mem.data + paddr;
+#endif
 			    write_uint32_le(addr, 0x4942534F); // magic
 			    write_uint32_le(addr+4, 0x2); // version
 			    write_uint32_le(addr+8, 0x0); // next_addr
 			    write_uint32_le(addr+12, 0x1); // next_mode
 			    write_uint32_le(addr+16, 0x1); // options
 			    write_uint32_le(addr+20, 0x0); // boot_hart
-			    riscv32i_write_register_u(vm, REGISTER_X12, vm->mem.begin + vm->mem.size - 0x200000 + dts);
+#ifdef USE_VMSWAP
+			    riscv32_physmem_op(vm, paddr, (vmptr_t)addr, sizeof(addr), MMU_WRITE);
+#endif
+			    riscv32i_write_register_u(vm, REGISTER_X12, paddr);
 		    }
 		    else
 		    {
@@ -197,8 +200,30 @@ int main(int argc, char** argv)
 	    }
     }
 
+
     riscv32_run(vm);
 
     riscv32_destroy_vm(vm);
     return 0;
 }
+
+int main(int argc, char** argv)
+{
+    vm_args_t args = {0};
+#ifdef _WIN32
+    // let the vm be run by simple double-click, heh
+    args.dtb = "rvvm.dtb";
+    args.bootrom = "fw_payload.bin";
+    args.image = "rootfs.img";
+#endif
+    parse_args(argc, argv, &args);
+    if (args.bootrom == NULL)
+    {
+        printf("Usage: %s <bootrom> [--linux] [-dtb=<device.dtb>]\n", argv[0]);
+        return 0;
+    }
+
+    rvvm_run_with_args(args);
+    return 0;
+}
+

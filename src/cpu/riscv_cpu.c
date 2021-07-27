@@ -121,24 +121,36 @@ void riscv_cpu_init()
     riscv_a_init();
 }
 
-#if 0
+#ifdef USE_VMSWAP
 // Old dispatch loop in case new one has issues
+
+// Execute N instructions and leave. Can be used
+// for debugging purposes.
+//#define USE_LIMIT
+
 void riscv_run_till_event(rvvm_hart_t *vm)
 {
     uint8_t instruction[4];
     xlen_t tlb_key, inst_addr;
     // Execute instructions loop until some event occurs (interrupt, trap)
+#ifdef USE_LIMIT
+    uint32_t counter = 0;
+#endif
     while (vm->wait_event) {
         vm->registers[REGISTER_ZERO] = 0;
         inst_addr = vm->registers[REGISTER_PC];
         tlb_key = tlb_hash(inst_addr);
         if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
-            riscv_emulate(vm, read_uint32_le(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
+            riscv_emulate(vm, read_uint32_le_m(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
         } else {
             if (riscv_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC)) {
-                riscv_emulate(vm, read_uint32_le(instruction));
+                riscv_emulate(vm, read_uint32_le_m(instruction));
             }
         }
+
+#ifdef USE_LIMIT
+	if (++counter == 100000) break;
+#endif
     }
 }
 

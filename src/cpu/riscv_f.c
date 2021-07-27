@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define RISCV_CPU_SOURCE
 
+#ifdef USE_FPU
 #include "compiler.h"
 #include "bit_ops.h"
 #include "riscv_cpu.h"
@@ -940,4 +941,15 @@ void riscv_f_enable(bool enable)
     riscv_install_opcode_C(RVC_FSWSP, riscv_c_illegal_insn);
 #endif
 }
+#endif
+
+#else
+
+#include <stdbool.h>
+
+#ifdef RVD
+void riscv_d_enable(bool enable) { (void) enable; }
+#else
+void riscv_f_enable(bool enable) { (void) enable; }
+#endif
 #endif

@@ -20,4 +20,4 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv32.h"
 
-bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ssize_t offset);
+bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ptrdiff_t offset);

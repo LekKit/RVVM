@@ -58,7 +58,12 @@ static void riscv_a_atomic_w(rvvm_hart_t *vm, const uint32_t instruction)
 
     spin_lock(&global_amo_lock);
 
-    riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_READ);
+    if (!riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_READ))
+    {
+        spin_unlock(&global_amo_lock);
+        return;
+    }
+
     mval = sign_extend(read_uint32_le(tmp), 32);
     riscv_write_register(vm, rds, mval);
 
@@ -133,7 +138,12 @@ static void riscv_a_atomic_d(rvvm_hart_t *vm, const uint32_t instruction)
 
     spin_lock(&global_amo_lock);
 
-    riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_READ);
+    if (!riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_READ))
+    {
+        spin_unlock(&global_amo_lock);
+        return;
+    }
+
     mval = read_uint64_le(tmp);
     riscv_write_register(vm, rds, mval);
 
