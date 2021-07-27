@@ -141,10 +141,10 @@ void riscv_run_till_event(rvvm_hart_t *vm)
         inst_addr = vm->registers[REGISTER_PC];
         tlb_key = tlb_hash(inst_addr);
         if (tlb_check(vm->tlb[tlb_key], inst_addr, MMU_EXEC) && block_inside_page(inst_addr, 4)) {
-            riscv_emulate(vm, read_uint32_le(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
+            riscv_emulate(vm, read_uint32_le_m(vm->tlb[tlb_key].ptr + (inst_addr & 0xFFF)));
         } else {
             if (riscv_mmu_op(vm, inst_addr, instruction, 4, MMU_EXEC)) {
-                riscv_emulate(vm, read_uint32_le(instruction));
+                riscv_emulate(vm, read_uint32_le_m(instruction));
             }
         }
 
