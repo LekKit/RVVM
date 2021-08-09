@@ -113,6 +113,8 @@ enum
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
 
+#define RVVM_DEFAULT_MEMBASE   0x80000000
+
 typedef struct rvvm_hart_t rvvm_hart_t;
 typedef struct rvvm_machine_t rvvm_machine_t;
 typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
@@ -175,9 +177,20 @@ struct rvvm_mmio_dev_t {
 
 typedef struct {
     paddr_t begin;  // First usable address in physical memory
-    paddr_t end;    // Last usable address in physical memory
+    paddr_t size;   // Memory amount (since the region may be empty)
     vmptr_t data;   // Pointer to memory data
 } rvvm_ram_t;
+
+typedef struct {
+    // Virtual page number per each op type (vaddr >> 12)
+    vaddr_t r;
+    vaddr_t w;
+    vaddr_t e;
+    // Physical address of the page mapped to the device
+    paddr_t phys;
+    // The device itself
+    const rvvm_mmio_dev_t* mmio;
+} rvvm_mmio_tlb_t;
 
 struct rvvm_hart_t {
     size_t wait_event;
@@ -191,8 +204,6 @@ struct rvvm_hart_t {
     rvvm_decoder_t decoder;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
-    thread_handle_t thread;
-    rvvm_mmio_dev_t* recent_mmio; // cache recently used MMIO device
     paddr_t root_page_table;
     uint32_t irq_mask;
     uint32_t ev_mask;
@@ -214,6 +225,7 @@ struct rvvm_hart_t {
         maxlen_t ip;
     } csr;
     
+    thread_handle_t thread;
     rvtimer_t timer;
 #ifdef USE_SJLJ
     jmp_buf unwind;
@@ -228,7 +240,7 @@ struct rvvm_machine_t {
 };
 
 // Memory starts at 0x80000000 by default, machine boots from there as well
-PUBLIC rvvm_machine_t* rvvm_create_machine(size_t mem_size, size_t hart_count, bool rv64);
+PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
 // Directly access physical memory (returns true on success)
 PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* src, size_t size);
