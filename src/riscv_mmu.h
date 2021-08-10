@@ -55,7 +55,7 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr);
  * call MMIO handlers if needed.
  */
 
-// Translate virtual address into VM pointer
+// Translate virtual address into VM pointer (only for physical memory)
 NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access);
 
 // Fetch instruction from virtual address

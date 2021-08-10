@@ -443,3 +443,207 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
     return false;
 }
 
+/*
+ * Non-inlined slow memory operations, perform MMU translation,
+ * call MMIO handlers if needed.
+ */
+
+NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
+{
+    paddr_t paddr;
+    vmptr_t ptr;
+    uint32_t trap_cause;
+    
+    if (riscv_mmu_translate(vm, addr, &paddr, access)) {
+        ptr = riscv_phys_translate(vm, paddr);
+        if (ptr) {
+            // Physical address in main memory, cache address translation
+            riscv_tlb_put(vm, addr, ptr, access);
+            return ptr;
+        }
+        // Physical memory access fault (bad physical address)
+        switch (access) {
+            case MMU_WRITE:
+                trap_cause = TRAP_STORE_FAULT;
+                break;
+            case MMU_READ:
+                trap_cause = TRAP_LOAD_FAULT;
+                break;
+            case MMU_EXEC:
+                trap_cause = TRAP_INSTR_FETCH;
+                break;
+            default:
+                rvvm_error("Unknown MMU op in riscv_mmu_op (phys)");
+                trap_cause = 0;
+                break;
+        }
+    } else {
+        // Pagefault (no translation for address or protection fault)
+        switch (access) {
+            case MMU_WRITE:
+                trap_cause = TRAP_STORE_PAGEFAULT;
+                break;
+            case MMU_READ:
+                trap_cause = TRAP_LOAD_PAGEFAULT;
+                break;
+            case MMU_EXEC:
+                trap_cause = TRAP_INSTR_PAGEFAULT;
+                break;
+            default:
+                rvvm_error("Unknown MMU op in riscv_mmu_op (page)");
+                trap_cause = 0;
+                break;
+        }
+    }
+    // Trap the CPU & instruct the caller to discard operation
+    riscv_trap(vm, trap_cause, addr);
+    return NULL;
+}
+
+NOINLINE bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
+{
+    uint8_t buff[4] = {0};
+    if (!riscv_block_in_page(addr, 4)) {
+        if (!riscv_mmu_op(vm, addr, buff, 2, MMU_EXEC)) return false;
+        if ((buff[0] & 0x3) == 0x3) {
+            // This is a 4-byte instruction scattered between pages
+            // Fetch second part (may trigger a pagefault, that's the point)
+            if (!riscv_mmu_op(vm, addr, buff + 2, 2, MMU_EXEC)) return false;
+        }
+        *inst = read_uint32_le_m(buff);
+        return true;
+    }
+    
+    if (riscv_mmu_op(vm, addr, buff, 4, MMU_EXEC)) {
+        *inst = read_uint32_le_m(buff);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+
+
+NOINLINE void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[8];
+    if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
+        vm->registers[reg] = read_uint64_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[4];
+    if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
+        vm->registers[reg] = read_uint32_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[4];
+    if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
+        vm->registers[reg] = (int32_t)read_uint32_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[2];
+    if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
+        vm->registers[reg] = read_uint16_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[2];
+    if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
+        vm->registers[reg] = (int16_t)read_uint16_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[1];
+    if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
+        vm->registers[reg] = buff[0];
+    }
+}
+
+NOINLINE void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[1];
+    if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
+        vm->registers[reg] = (int8_t)buff[0];
+    }
+}
+
+
+
+NOINLINE void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[8];
+    write_uint64_le_m(buff, vm->registers[reg]);
+    riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
+}
+
+NOINLINE void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[4];
+    write_uint32_le_m(buff, vm->registers[reg]);
+    riscv_mmu_op(vm, addr, buff, 4, MMU_WRITE);
+}
+
+NOINLINE void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[2];
+    write_uint16_le_m(buff, vm->registers[reg]);
+    riscv_mmu_op(vm, addr, buff, 2, MMU_WRITE);
+}
+
+NOINLINE void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[1];
+    buff[0] = vm->registers[reg];
+    riscv_mmu_op(vm, addr, buff, 1, MMU_WRITE);
+}
+
+
+
+#ifdef USE_FPU
+
+NOINLINE void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[8];
+    if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
+        vm->fpu_registers[reg] = read_double_le_m(buff);
+    }
+}
+
+NOINLINE void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[4];
+    if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
+        write_float_nanbox(&vm->fpu_registers[reg], read_float_le_m(buff));
+    }
+}
+
+
+
+NOINLINE void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[8];
+    write_double_le_m(buff, vm->fpu_registers[reg]);
+    riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
+}
+
+NOINLINE void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+{
+    uint8_t buff[4];
+    write_float_le_m(buff, read_float_nanbox(&vm->fpu_registers[reg]));
+    riscv_mmu_op(vm, addr, buff, 4, MMU_WRITE);
+}
+
+#endif
