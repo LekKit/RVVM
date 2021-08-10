@@ -100,49 +100,44 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
     vm->tlb[vpn & TLB_MASK].e = vpn - 1;
 }
 
-static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, uint8_t op)
+static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t op)
 {
     vaddr_t vpn = vaddr >> PAGE_SHIFT;
-    vaddr &= PAGE_PNMASK;
-    paddr &= PAGE_PNMASK;
-    vmptr_t ptr = riscv_phys_translate(vm, paddr);
+    rvvm_tlb_entry_t* entry = &vm->tlb[vpn & TLB_MASK];
     
-    if (ptr) {
-        rvvm_tlb_entry_t* entry = &vm->tlb[vpn & TLB_MASK];
-        /*
-        * Add only requested access bits for correct access/dirty flags
-        * implementation. Assume the software does not clear A/D bits without
-        * calling SFENCE.VMA
-        */
-        switch (op) {
-            case MMU_READ:
-                entry->r = vpn;
-                // If same tlb entry contains different VPNs,
-                // they should be invalidated
-                if (entry->w != vpn) entry->w = vpn - 1;
-                if (entry->e != vpn) entry->e = vpn - 1;
-                break;
-            case MMU_WRITE:
-                entry->r = vpn;
-                entry->w = vpn;
-                if (entry->e != vpn) entry->e = vpn - 1;
-                break;
-            case MMU_EXEC:
-                if (entry->r != vpn) entry->r = vpn - 1;
-                if (entry->w != vpn) entry->w = vpn - 1;
-                entry->e = vpn;
-                break;
-            default:
-                // (???) lets just complain and flush the entry
-                rvvm_error("Unknown MMU op in riscv_tlb_put");
-                entry->r = vpn - 1;
-                entry->w = vpn - 1;
-                entry->e = vpn - 1;
-                break;
-        }
-
-        entry->ptr = ptr - TLB_VADDR(vaddr);
+    /*
+    * Add only requested access bits for correct access/dirty flags
+    * implementation. Assume the software does not clear A/D bits without
+    * calling SFENCE.VMA
+    */
+    switch (op) {
+        case MMU_READ:
+            entry->r = vpn;
+            // If same tlb entry contains different VPNs,
+            // they should be invalidated
+            if (entry->w != vpn) entry->w = vpn - 1;
+            if (entry->e != vpn) entry->e = vpn - 1;
+            break;
+        case MMU_WRITE:
+            entry->r = vpn;
+            entry->w = vpn;
+            if (entry->e != vpn) entry->e = vpn - 1;
+            break;
+        case MMU_EXEC:
+            if (entry->r != vpn) entry->r = vpn - 1;
+            if (entry->w != vpn) entry->w = vpn - 1;
+            entry->e = vpn;
+            break;
+        default:
+            // (???) lets just complain and flush the entry
+            rvvm_error("Unknown MMU op in riscv_tlb_put");
+            entry->r = vpn - 1;
+            entry->w = vpn - 1;
+            entry->e = vpn - 1;
+            break;
     }
+
+    entry->ptr = ptr - TLB_VADDR(vaddr);
 }
 
 // Virtual memory addressing mode (SV32)
@@ -241,7 +236,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         if (unlikely(pte_shift & (vmask & pmask)))
                             return false;
                         // Atomically update A/D flags
-                        atomic_cas_uint64_le(pte_addr, pte, pte_flags);
+                        if (pte != pte_flags) atomic_cas_uint64_le(pte_addr, pte, pte_flags);
                         // Combine ppn & vpn & pgoff
                         *paddr = (pte_shift & pmask) | (vaddr & vmask);
                         return true;
@@ -262,6 +257,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
 
 #endif
 
+// Translate virtual address to physical with respect to current CPU mode
 static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access)
 {
     uint8_t priv = vm->priv_mode;
@@ -300,55 +296,69 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     }
 }
 
-void riscv_mmio_read_unaligned(const rvvm_mmio_dev_t* mmio, void* dest, uint8_t size, paddr_t offset)
+static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, uint8_t size, paddr_t offset)
 {
-    assert(mmio->max_op_size >= mmio->min_op_size);
-    if (size < mmio->min_op_size || (offset & (mmio->min_op_size - 1))) {
+    assert(dev->max_op_size >= dev->min_op_size);
+    if (size < dev->min_op_size || (offset & (dev->min_op_size - 1))) {
         // Operation size smaller than possible or address misaligned
         // Read bigger chunk, then use only part of it
-        paddr_t aligned_offset = offset & ~(paddr_t)(mmio->min_op_size - 1);
+        paddr_t aligned_offset = offset & ~(paddr_t)(dev->min_op_size - 1);
         uint8_t offset_diff = offset - aligned_offset;
-        uint8_t new_size = mmio->min_op_size;
+        uint8_t new_size = dev->min_op_size;
         uint8_t tmp[16];
         while (new_size < size + offset_diff) new_size <<= 1;
-        riscv_mmio_read_unaligned(mmio, tmp, mmio->min_op_size, aligned_offset);
-        memcpy(dest, tmp + offset_diff, size);
-        return;
+        bool ret = riscv_mmio_unaligned_op(dev, rwfunc, tmp, dev->min_op_size, aligned_offset);
+        if (ret) memcpy(dest, tmp + offset_diff, size);
+        return ret;
     }
-    if (size > mmio->max_op_size) {
+    if (size > dev->max_op_size) {
         // Max operation size exceeded, cut into smaller parts
         uint8_t size_half = size >> 1;
-        riscv_mmio_read_unaligned(mmio, dest, size_half, offset);
-        riscv_mmio_read_unaligned(mmio, ((vmptr_t)dest) + size_half, size_half, offset + size_half);
-        return;
+        return riscv_mmio_unaligned_op(dev, rwfunc, dest, size_half, offset) &&
+               riscv_mmio_unaligned_op(dev, rwfunc, ((vmptr_t)dest) + size_half, size_half, offset + size_half);
     }
-    mmio->read(mmio->data, dest, size, offset);
-}
-
-static inline void riscv_mmio_read(const rvvm_mmio_dev_t* mmio, void* dest, uint8_t size, paddr_t offset)
-{
-    if (unlikely(size > mmio->max_op_size || size < mmio->min_op_size || (offset & (mmio->min_op_size-1)))) {
-        riscv_mmio_read_unaligned(mmio, dest, size, offset);
-        return;
-    }
-    mmio->read(mmio->data, dest, size, offset);
+    return rwfunc(dev, dest, size, offset);
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv_mmio_op(rvvm_hart_t* vm, paddr_t addr, void* dest, size_t size, uint8_t access)
+static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void* dest, size_t size, uint8_t access)
 {
-    /*rvvm_mmio_dev_t* dev;
+    rvvm_mmio_dev_t* dev;
+    rvvm_mmio_handler_t rwfunc;
+    paddr_t offset;
     
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
-        if (addr >= dev->begin && addr <= dev->end) {
+        if (paddr >= dev->begin && paddr <= dev->end) {
+            // Found the device
+            offset = paddr - dev->begin;
             if (access == MMU_WRITE) {
-                if (dev->write) dev->write(dev, dest, addr - dev->begin);
+                rwfunc = dev->write;
             } else {
-                
+                rwfunc = dev->read;
             }
+            
+            if (rwfunc == NULL) {
+                // Missing handler, this is a direct memory region
+                // Copy the data, cache translation in TLB if possible
+                if (access == MMU_WRITE) {
+                    memcpy(((vmptr_t)dev->data) + offset, dest, size);
+                } else {
+                    memcpy(dest, ((vmptr_t)dev->data) + offset, size);
+                }
+                if ((offset >= PAGE_SIZE || riscv_block_aligned(dev->begin, PAGE_SIZE)) && 
+                    (dev->end - paddr >= PAGE_SIZE || riscv_block_aligned(dev->end + 1, PAGE_SIZE))) {
+                    riscv_tlb_put(vm, vaddr, ((vmptr_t)dev->data) + offset, access);
+                }
+                return true;
+            }
+            
+            if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (dev->min_op_size-1)))) {
+                return riscv_mmio_unaligned_op(dev, rwfunc, dest, size, offset);
+            }
+            return rwfunc(dev, dest, size, offset);
         }
-    }*/
+    }
     
     return false;
 }
@@ -380,7 +390,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
         ptr = riscv_phys_translate(vm, paddr);
         if (ptr) {
             // Physical address in main memory, cache address translation
-            riscv_tlb_put(vm, addr, paddr, access);
+            riscv_tlb_put(vm, addr, ptr, access);
             if (access == MMU_WRITE) {
                 // Clear JITted blocks & flush trace cache if necessary
                 riscv_jit_flush(vm, addr, paddr, size);
@@ -391,7 +401,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
             return true;
         }
         // Physical address not in memory region, check MMIO
-        if (riscv_mmio_op(vm, paddr, dest, size, access)) {
+        if (riscv_mmio_scan(vm, addr, paddr, dest, size, access)) {
             return true;
         }
         // Physical memory access fault (bad physical address)
