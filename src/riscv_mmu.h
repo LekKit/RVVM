@@ -173,6 +173,9 @@ static inline vmptr_t riscv_vma_translate_e(rvvm_hart_t* vm, vaddr_t addr)
     return riscv_mmu_vma_translate(vm, addr, MMU_EXEC);
 }
 
+#ifdef USE_VMSWAP
+vmptr_t riscv_phys_translate(rvvm_hart_t* vm, paddr_t addr)
+#else
 static inline vmptr_t riscv_phys_translate(rvvm_hart_t* vm, paddr_t addr)
 {
     if (likely(addr >= vm->mem.begin && (addr - vm->mem.begin) < vm->mem.size)) {
@@ -180,6 +183,7 @@ static inline vmptr_t riscv_phys_translate(rvvm_hart_t* vm, paddr_t addr)
     }
     return NULL;
 }
+#endif
 
 // Integer load operations
 

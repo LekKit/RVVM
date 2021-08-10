@@ -40,6 +40,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Should be moved to riscv_csr.h
 #define CSR_STATUS_MPRV_BIT  17
 #define CSR_STATUS_MPRV_MASK (1 << CSR_STATUS_MPRV_BIT)
+#define CSR_STATUS_SUM_BIT   18
+#define CSR_STATUS_SUM_MASK  (1 << CSR_STATUS_SUM_BIT)
 #define CSR_STATUS_MXR_BIT   19
 #define CSR_STATUS_MXR_MASK  (1 << CSR_STATUS_MXR_BIT)
 
@@ -144,7 +146,7 @@ static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, uint8_t
 }
 
 // Virtual memory addressing mode (SV32)
-static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access)
+static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t priv, uint8_t access)
 {
     // Pagetable is always aligned to PAGE_SIZE
     paddr_t pagetable = vm->root_page_table;
@@ -159,7 +161,17 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
             pte = read_uint32_le(pte_addr);
             if (pte & MMU_VALID_PTE) {
                 if (pte & MMU_LEAF_PTE) {
-                    // PGT entry is a leaf, check access bits & translate
+                    // PGT entry is a leaf, check permissions
+                    // Check U bit != priv mode, otherwise do extended check
+                    if (!!(pte & MMU_USER_USABLE) == !!priv) {
+                        // If we are supervisor with SUM bit set, rw operations are allowed
+                        // MXR sets access to MMU_READ | MMU_EXEC
+                        if (access == MMU_EXEC ||
+                            priv != PRIVILEGE_SUPERVISOR || 
+                            (vm->csr.status & CSR_STATUS_SUM_MASK) == 0)
+                            return false;
+                    }
+                    // Check access bits & translate
                     if (pte & access) {
                         vaddr_t vmask = bit_mask(bit_off);
                         paddr_t pmask = bit_mask(SV32_PHYS_BITS - bit_off) << bit_off;
@@ -191,7 +203,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
 #ifdef USE_RV64
 
 // Virtual memory addressing mode (RV64 MMU template)
-static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access, uint8_t sv_levels)
+static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t priv, uint8_t access, uint8_t sv_levels)
 {
     // Pagetable is always aligned to PAGE_SIZE
     paddr_t pagetable = vm->root_page_table;
@@ -209,7 +221,17 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
             pte = read_uint64_le(pte_addr);
             if (pte & MMU_VALID_PTE) {
                 if (pte & MMU_LEAF_PTE) {
-                    // PGT entry is a leaf, check access bits & translate
+                    // PGT entry is a leaf, check permissions
+                    // Check U bit != priv mode, otherwise do extended check
+                    if (!!(pte & MMU_USER_USABLE) == !!priv) {
+                        // If we are supervisor with SUM bit set, rw operations are allowed
+                        // MXR sets access to MMU_READ | MMU_EXEC
+                        if (access == MMU_EXEC ||
+                            priv != PRIVILEGE_SUPERVISOR || 
+                            (vm->csr.status & CSR_STATUS_SUM_MASK) == 0)
+                            return false;
+                    }
+                    // Check access bits & translate
                     if (pte & access) {
                         vaddr_t vmask = bit_mask(bit_off);
                         paddr_t pmask = bit_mask(SV64_PHYS_BITS - bit_off) << bit_off;
@@ -250,7 +272,7 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     }
     // If MXR is enabled, reads from pages marked as executable-only should succeed
     if ((vm->csr.status & CSR_STATUS_MXR_MASK) && (access == MMU_READ)) {
-        access = MMU_EXEC;
+        access |= MMU_EXEC;
     }
     if (priv <= PRIVILEGE_SUPERVISOR) {
         switch (vm->mmu_mode) {
@@ -258,14 +280,14 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
                 *paddr = vaddr;
                 return true;
             case CSR_SATP_MODE_SV32:
-                return riscv_mmu_translate_sv32(vm, vaddr, paddr, access);
+                return riscv_mmu_translate_sv32(vm, vaddr, paddr, priv, access);
 #ifdef USE_RV64
             case CSR_SATP_MODE_SV39:
-                return riscv_mmu_translate_rv64(vm, vaddr, paddr, access, SV39_LEVELS);
+                return riscv_mmu_translate_rv64(vm, vaddr, paddr, priv, access, SV39_LEVELS);
             case CSR_SATP_MODE_SV48:
-                return riscv_mmu_translate_rv64(vm, vaddr, paddr, access, SV48_LEVELS);
+                return riscv_mmu_translate_rv64(vm, vaddr, paddr, priv, access, SV48_LEVELS);
             case CSR_SATP_MODE_SV57:
-                return riscv_mmu_translate_rv64(vm, vaddr, paddr, access, SV57_LEVELS);
+                return riscv_mmu_translate_rv64(vm, vaddr, paddr, priv, access, SV57_LEVELS);
 #endif
             default:
                 // satp is a WARL field
