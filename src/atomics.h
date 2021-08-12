@@ -39,6 +39,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #endif
 
+static inline void atomic_fence()
+{
+#ifdef C11_ATOMICS
+    atomic_thread_fence(memory_order_seq_cst);
+#elif GNU_EXTS
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
 /*
  * Host-endian 32-bit operations
  */
