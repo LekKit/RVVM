@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "riscv_mmu.h"
+#include "riscv_hart.h"
 #include "bit_ops.h"
 #include "atomics.h"
 #include "utils.h"

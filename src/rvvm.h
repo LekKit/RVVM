@@ -193,7 +193,7 @@ typedef struct {
 } rvvm_mmio_tlb_t;
 
 struct rvvm_hart_t {
-    size_t wait_event;
+    uint32_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
 #ifdef USE_FPU
     double fpu_registers[REGISTERS_MAX];
@@ -205,11 +205,10 @@ struct rvvm_hart_t {
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
     paddr_t root_page_table;
-    uint32_t irq_mask;
-    uint32_t ev_mask;
     uint8_t mmu_mode;
     uint8_t priv_mode;
     bool rv64;
+    bool trap;
 
     struct {
         maxlen_t status;
@@ -227,6 +226,8 @@ struct rvvm_hart_t {
     
     thread_handle_t thread;
     rvtimer_t timer;
+    uint32_t pending_irqs;
+    uint32_t pending_events;
 #ifdef USE_SJLJ
     jmp_buf unwind;
 #endif
