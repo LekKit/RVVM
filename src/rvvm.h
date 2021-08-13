@@ -211,6 +211,7 @@ struct rvvm_hart_t {
     bool trap;
 
     struct {
+        maxlen_t isa;
         maxlen_t status;
         maxlen_t edeleg[PRIVILEGES_MAX];
         maxlen_t ideleg[PRIVILEGES_MAX];
