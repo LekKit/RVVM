@@ -25,7 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HART_RUNNING 1
 
 // Set up initial hart context
-void riscv_hart_init(rvvm_hart_t* vm);
+void riscv_hart_init(rvvm_hart_t* vm, bool rv64);
 
 /* Hart-thread routines */
 
@@ -37,6 +37,9 @@ void riscv_hart_run(rvvm_hart_t* vm);
 
 // Correctly applies side-effects of switching privileges
 void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode);
+
+// Correctly applies side-effects of switching XLEN
+void riscv_update_xlen(rvvm_hart_t* vm);
 
 /*
  * Traps the hart

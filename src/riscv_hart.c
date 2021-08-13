@@ -22,7 +22,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "atomics.h"
 #include "bit_ops.h"
 
-void riscv_hart_init(rvvm_hart_t* vm)
+// Stubs
+static inline void riscv_run_till_event(rvvm_hart_t* vm)
+{
+    UNUSED(vm);
+}
+
+static inline void riscv_decoder_init_rv64(rvvm_hart_t* vm)
+{
+    UNUSED(vm);
+}
+
+static inline void riscv_decoder_init_rv32(rvvm_hart_t* vm)
+{
+    UNUSED(vm);
+}
+
+void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 {
     memset(vm, 0, sizeof(rvvm_hart_t));
     riscv_tlb_flush(vm);
@@ -30,13 +46,18 @@ void riscv_hart_init(rvvm_hart_t* vm)
     vm->priv_mode = PRIVILEGE_MACHINE;
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
-    
-}
-
-// Stub
-static void riscv_run_till_event(rvvm_hart_t* vm)
-{
-    UNUSED(vm);
+#ifdef USE_RV64
+    vm->rv64 = rv64;
+    if (rv64) {
+        vm->csr.isa = (1ULL << 63);
+        riscv_decoder_init_rv64(vm);
+    } else {
+        riscv_decoder_init_rv32(vm);
+    }
+#else
+    UNUSED(rv64);
+    riscv_decoder_init_rv32(vm);
+#endif
 }
 
 void riscv_hart_run(rvvm_hart_t* vm)
@@ -72,11 +93,48 @@ void riscv_hart_run(rvvm_hart_t* vm)
     }
 }
 
+#ifdef USE_RV64
+void riscv_update_xlen(rvvm_hart_t* vm)
+{
+    bool rv64 = false;
+    switch (vm->priv_mode) {
+        case PRIVILEGE_MACHINE:
+            rv64 = bit_cut(vm->csr.isa, 63, 1);
+            break;
+        case PRIVILEGE_HYPERVISOR:
+            rv64 = bit_cut(vm->csr.status, 37, 1);
+            break;
+        case PRIVILEGE_SUPERVISOR:
+            rv64 = bit_cut(vm->csr.status, 35, 1);
+            break;
+        case PRIVILEGE_USER:
+            rv64 = bit_cut(vm->csr.status, 33, 1);
+            break;
+    }
+    
+    if (vm->rv64 != rv64) {
+        for (size_t i=0; i<REGISTERS_MAX; ++i) {
+            vm->registers[i] = (int32_t)vm->registers[i];
+        }
+        if (rv64) {
+            riscv_decoder_init_rv64(vm);
+        } else {
+            riscv_decoder_init_rv32(vm);
+        }
+        vm->rv64 = rv64;
+    }
+}
+#endif
+
 void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode)
 {
     // true if one is S/U, other is M/H
     bool mmu_toggle = (vm->priv_mode & 2) != (priv_mode & 2);
     vm->priv_mode = priv_mode;
+#ifdef USE_RV64
+    riscv_update_xlen(vm);
+#endif
+    
     // May unwind to dispatch
     if (mmu_toggle) riscv_tlb_flush(vm);
 }
@@ -142,11 +200,16 @@ static inline uint32_t riscv_irq_mask(rvvm_hart_t* vm, bool wfi) {
 
 static inline maxlen_t riscv_cause_irq_mask(rvvm_hart_t* vm)
 {
+#ifdef USE_RV64
     if (vm->rv64) {
         return 0x8000000000000000ULL;
     } else {
         return 0x80000000U;
     }
+#else
+    UNUSED(vm);
+    return 0x80000000U;
+#endif
 }
 
 bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
