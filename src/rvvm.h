@@ -217,7 +217,6 @@ struct rvvm_hart_t {
         maxlen_t ideleg[PRIVILEGES_MAX];
         maxlen_t ie;
         maxlen_t tvec[PRIVILEGES_MAX];
-        maxlen_t counteren[PRIVILEGES_MAX];
         maxlen_t scratch[PRIVILEGES_MAX];
         maxlen_t epc[PRIVILEGES_MAX];
         maxlen_t cause[PRIVILEGES_MAX];
@@ -232,6 +231,8 @@ struct rvvm_hart_t {
 #ifdef USE_SJLJ
     jmp_buf unwind;
 #endif
+    // Cacheline alignment
+    uint8_t align[64];
 };
 
 struct rvvm_machine_t {
