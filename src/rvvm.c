@@ -55,6 +55,9 @@ static void* builtin_eventloop(void* arg)
 static void register_machine(rvvm_machine_t* machine)
 {
     spin_lock(&global_lock);
+    if (vector_size(global_machines) == 0) {
+        vector_init(global_machines);
+    }
     vector_push_back(global_machines, machine);
     if (builtin_eventloop_enabled && vector_size(global_machines) == 1) {
         builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
@@ -71,9 +74,10 @@ static void deregister_machine(rvvm_machine_t* machine)
             vector_erase(global_machines, i);
         }
     }
-    if (builtin_eventloop_enabled && vector_size(global_machines) == 0) {
+    if (vector_size(global_machines) == 0) {
+        vector_free(global_machines);
         // prevent deadlock
-        stop_thread = true;
+        stop_thread = builtin_eventloop_enabled;
     }
     spin_unlock(&global_lock);
     
@@ -179,16 +183,21 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr)
 
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
 {
+    bool stop_thread = false;
     spin_lock(&global_lock);
-    if (builtin_eventloop_enabled && !enabled) {
+    if (builtin_eventloop_enabled && !enabled && vector_size(global_machines)) {
         builtin_eventloop_enabled = false;
-        thread_signal_membarrier(builtin_eventloop_thread);
-        thread_join(builtin_eventloop_thread);
+        stop_thread = true;
     } else if (!builtin_eventloop_enabled && enabled && vector_size(global_machines)) {
         builtin_eventloop_enabled = true;
         builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
     }
     spin_unlock(&global_lock);
+    
+    if (stop_thread) {
+        thread_signal_membarrier(builtin_eventloop_thread);
+        thread_join(builtin_eventloop_thread);
+    }
 }
 
 PUBLIC void rvvm_run_eventloop()
