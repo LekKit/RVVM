@@ -23,7 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdbool.h>
 #include "compiler.h"
 
-#ifndef GNU_EXTS
+#ifdef GNU_EXTS
+/* do nothing */
 #elif __STDC_VERSION__ >= 201112LL && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define C11_ATOMICS

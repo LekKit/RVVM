@@ -171,7 +171,7 @@ void fb_create_window(struct fb_data *data, unsigned width, unsigned height, con
     wdata->name[sizeof(wdata->name) - 1] = 0;
     
     if (winclass_atom == 0) {
-        WNDCLASS wc = {};
+        WNDCLASS wc = { 0 };
         wc.lpfnWndProc   = WindowProc;
         wc.hInstance     = GetModuleHandle(NULL);
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);

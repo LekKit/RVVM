@@ -183,7 +183,7 @@ void riscv_run_till_event(rvvm_hart_t *vm)
                 upper_addr = vm->tlb[tlb_key].pte & ~0xFFF;
                 riscv_emulate(vm, read_uint32_le(instruction));
             } else break;
-        } else riscv_emulate(vm, read_uint32_le(inst_ptr + (inst_addr & 0xFFF)));
+        } else riscv_emulate(vm, read_uint32_le((vmptr_t)inst_ptr + (inst_addr & 0xFFF)));
 #ifndef DISABLE_DISPATCH_UNROLL
         // Gains about 10% more performance with -O3
         if (unlikely(!vm->wait_event)) break;
@@ -199,7 +199,7 @@ void riscv_run_till_event(rvvm_hart_t *vm)
                 upper_addr = vm->tlb[tlb_key].pte & ~0xFFF;
                 riscv_emulate(vm, read_uint32_le(instruction));
             } else break;
-        } else riscv_emulate(vm, read_uint32_le(inst_ptr + (inst_addr & 0xFFF)));
+        } else riscv_emulate(vm, read_uint32_le((vmptr_t)inst_ptr + (inst_addr & 0xFFF)));
 #endif
     }
 }

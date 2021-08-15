@@ -43,7 +43,7 @@ static struct key keysym2makecode(size_t keysym)
         struct key k = {{0xE0, 0x12, 0xE0, 0x7C}, 4};
         return k;
     }
-    struct key k = {};
+    struct key k = { 0 };
     size_t val = hashmap_get(&keymap, keysym);
     k.len = val & 0xFF;
     k.keycode[0] = (val >> 8) & 0xFF;

@@ -166,12 +166,12 @@ int rvvm_run_with_args(vm_args_t args)
 #else
 			    void* addr = vm->mem.data + paddr;
 #endif
-			    write_uint32_le(addr, 0x4942534F); // magic
-			    write_uint32_le(addr+4, 0x2); // version
-			    write_uint32_le(addr+8, 0x0); // next_addr
-			    write_uint32_le(addr+12, 0x1); // next_mode
-			    write_uint32_le(addr+16, 0x1); // options
-			    write_uint32_le(addr+20, 0x0); // boot_hart
+			    write_uint32_le((vmptr_t)addr, 0x4942534F); // magic
+			    write_uint32_le((vmptr_t)addr+4, 0x2); // version
+			    write_uint32_le((vmptr_t)addr+8, 0x0); // next_addr
+			    write_uint32_le((vmptr_t)addr+12, 0x1); // next_mode
+			    write_uint32_le((vmptr_t)addr+16, 0x1); // options
+			    write_uint32_le((vmptr_t)addr+20, 0x0); // boot_hart
 #ifdef USE_VMSWAP
 			    riscv32_physmem_op(vm, paddr, (vmptr_t)addr, sizeof(addr), MMU_WRITE);
 #endif
