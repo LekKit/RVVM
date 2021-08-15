@@ -46,7 +46,7 @@ bool ringbuf_is_empty(struct ringbuf *rb)
 bool ringbuf_put(struct ringbuf *rb, void *data, size_t len)
 {
 	if (ringbuf_get_free_spc(rb) < len) {
-		rvvm_warn("Overflow in ringbuf %p! size=%lu, consumed=%lu, len=%lu", rb, rb->size, rb->consumed, len);
+		rvvm_warn("Overflow in ringbuf %p! size=%zu, consumed=%zu, len=%zu", rb, rb->size, rb->consumed, len);
 		return false;
 	}
 

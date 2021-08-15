@@ -345,7 +345,7 @@ bool riscv32_init_phys_mem(riscv32_phys_mem_t* mem, uint32_t begin, uint32_t pag
     mem->size = pages * 4096;
 
 #ifndef USE_VMSWAP
-    void* tmp = calloc(pages, 4096);
+    vmptr_t tmp = (vmptr_t) calloc(pages, 4096);
     mem->data = tmp - begin;
     if (!tmp) return false;
 #else
@@ -487,7 +487,7 @@ bool riscv32_mmu_op(rvvm_hart_t* vm, uint32_t addr, void* dest, uint32_t size, u
         }
         uint8_t part_size = 4096 - (addr & 0xFFF);
         return riscv32_mmu_op(vm, addr, dest, part_size, access) &&
-               riscv32_mmu_op(vm, addr + part_size, dest + part_size, size - part_size, access);
+               riscv32_mmu_op(vm, addr + part_size, (vmptr_t)dest + part_size, size - part_size, access);
     }
     uint32_t phys_addr;
     uint32_t trap_cause = 0;
