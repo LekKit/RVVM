@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
+#include "riscv_csr.h"
 #include "threading.h"
 #include "atomics.h"
 #include "bit_ops.h"
@@ -49,13 +50,15 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 #ifdef USE_RV64
     vm->rv64 = rv64;
     if (rv64) {
-        vm->csr.isa = (1ULL << 63);
+        vm->csr.isa = CSR_MISA_RV64;
         riscv_decoder_init_rv64(vm);
     } else {
+        vm->csr.isa = CSR_MISA_RV32;
         riscv_decoder_init_rv32(vm);
     }
 #else
     UNUSED(rv64);
+    vm->csr.isa = CSR_MISA_RV32;
     riscv_decoder_init_rv32(vm);
 #endif
 }
@@ -99,7 +102,7 @@ void riscv_update_xlen(rvvm_hart_t* vm)
     bool rv64 = false;
     switch (vm->priv_mode) {
         case PRIVILEGE_MACHINE:
-            rv64 = bit_cut(vm->csr.isa, 63, 1);
+            rv64 = !!(vm->csr.isa & CSR_MISA_RV64);
             break;
         case PRIVILEGE_HYPERVISOR:
             rv64 = bit_cut(vm->csr.status, 37, 1);

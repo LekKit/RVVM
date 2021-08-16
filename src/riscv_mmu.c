@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "riscv_mmu.h"
+#include "riscv_csr.h"
 #include "riscv_hart.h"
 #include "bit_ops.h"
 #include "atomics.h"
@@ -37,23 +38,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SV39_LEVELS       3
 #define SV48_LEVELS       4
 #define SV57_LEVELS       5
-
-// Should be moved to riscv_csr.h
-#define CSR_STATUS_MPRV_BIT  17
-#define CSR_STATUS_MPRV_MASK (1 << CSR_STATUS_MPRV_BIT)
-#define CSR_STATUS_SUM_BIT   18
-#define CSR_STATUS_SUM_MASK  (1 << CSR_STATUS_SUM_BIT)
-#define CSR_STATUS_MXR_BIT   19
-#define CSR_STATUS_MXR_MASK  (1 << CSR_STATUS_MXR_BIT)
-
-#define CSR_STATUS_MPP(x) bit_cut(x, 11, 2)
-
-#define CSR_SATP_MODE_PHYS   0
-#define CSR_SATP_MODE_SV32   1
-#define CSR_SATP_MODE_SV39   8
-#define CSR_SATP_MODE_SV48   9
-#define CSR_SATP_MODE_SV57   10
-
 
 bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
 {
@@ -90,6 +74,7 @@ void riscv_tlb_flush(rvvm_hart_t* vm)
     vm->tlb[0].r = -1;
     vm->tlb[0].w = -1;
     vm->tlb[0].e = -1;
+    riscv_restart_dispatch(vm);
 }
 
 void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
@@ -99,6 +84,7 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
     vm->tlb[vpn & TLB_MASK].r = vpn - 1;
     vm->tlb[vpn & TLB_MASK].w = vpn - 1;
     vm->tlb[vpn & TLB_MASK].e = vpn - 1;
+    riscv_restart_dispatch(vm);
 }
 
 static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t op)
@@ -164,7 +150,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         // MXR sets access to MMU_READ | MMU_EXEC
                         if (access == MMU_EXEC ||
                             priv != PRIVILEGE_SUPERVISOR || 
-                            (vm->csr.status & CSR_STATUS_SUM_MASK) == 0)
+                            (vm->csr.status & CSR_STATUS_SUM) == 0)
                             return false;
                     }
                     // Check access bits & translate
@@ -224,7 +210,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         // MXR sets access to MMU_READ | MMU_EXEC
                         if (access == MMU_EXEC ||
                             priv != PRIVILEGE_SUPERVISOR || 
-                            (vm->csr.status & CSR_STATUS_SUM_MASK) == 0)
+                            (vm->csr.status & CSR_STATUS_SUM) == 0)
                             return false;
                     }
                     // Check access bits & translate
@@ -264,11 +250,11 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     uint8_t priv = vm->priv_mode;
     // If MPRV is enabled, and we aren't fetching an instruction,
     // change effective privilege mode to STATUS.MPP
-    if ((vm->csr.status & CSR_STATUS_MPRV_MASK) && (access != MMU_EXEC)) {
-        priv = CSR_STATUS_MPP(vm->csr.status);
+    if ((vm->csr.status & CSR_STATUS_MPRV) && (access != MMU_EXEC)) {
+        priv = bit_cut(vm->csr.status, 11, 2);
     }
     // If MXR is enabled, reads from pages marked as executable-only should succeed
-    if ((vm->csr.status & CSR_STATUS_MXR_MASK) && (access == MMU_READ)) {
+    if ((vm->csr.status & CSR_STATUS_MXR) && (access == MMU_READ)) {
         access |= MMU_EXEC;
     }
     if (priv <= PRIVILEGE_SUPERVISOR) {
