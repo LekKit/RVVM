@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
 #include "riscv_csr.h"
+#include "riscv_priv.h"
 #include "threading.h"
 #include "atomics.h"
 #include "bit_ops.h"
@@ -61,6 +62,7 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     vm->csr.isa = CSR_MISA_RV32;
     riscv_decoder_init_rv32(vm);
 #endif
+    riscv_priv_init(vm);
 }
 
 void riscv_hart_run(rvvm_hart_t* vm)
