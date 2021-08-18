@@ -482,21 +482,21 @@ static inline uint32_t atomic_sub_uint32_le(void* addr, uint32_t val)
 #endif
 }
 
-static inline uint32_t atomic_max_int32_le(void* addr, int32_t val)
+static inline int32_t atomic_max_int32_le(void* addr, int32_t val)
 {
     int32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline uint32_t atomic_min_int32_le(void* addr, int32_t val)
+static inline int32_t atomic_min_int32_le(void* addr, int32_t val)
 {
     int32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -505,7 +505,7 @@ static inline uint32_t atomic_maxu_uint32_le(void* addr, uint32_t val)
     uint32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
@@ -514,7 +514,7 @@ static inline uint32_t atomic_minu_uint32_le(void* addr, uint32_t val)
     uint32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -544,21 +544,21 @@ static inline uint64_t atomic_sub_uint64_le(void* addr, uint64_t val)
 #endif
 }
 
-static inline uint64_t atomic_max_int64_le(void* addr, int64_t val)
+static inline int64_t atomic_max_int64_le(void* addr, int64_t val)
 {
     int64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline uint64_t atomic_min_int64_le(void* addr, int64_t val)
+static inline int64_t atomic_min_int64_le(void* addr, int64_t val)
 {
     int64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -567,7 +567,7 @@ static inline uint64_t atomic_maxu_uint64_le(void* addr, uint64_t val)
     uint64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
@@ -576,7 +576,7 @@ static inline uint64_t atomic_minu_uint64_le(void* addr, uint64_t val)
     uint64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 

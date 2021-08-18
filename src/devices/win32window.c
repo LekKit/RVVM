@@ -198,9 +198,8 @@ void fb_close_window(struct fb_data *data)
     free(wdata);
 }
 
-void fb_update(struct fb_data *data, size_t nfbs)
+void fb_update(struct fb_data *data)
 {
-    UNUSED(nfbs);
     if (winclass_atom == 0) return;
     win32fb_data* wdata = (win32fb_data*)data->winsys_data;
     

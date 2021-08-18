@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef CLINT_H
 #define CLINT_H
 
-#include "riscv32.h"
+#include "rvvm.h"
 
-bool clint_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t access);
+void clint_init(rvvm_machine_t* machine, paddr_t addr);
 
 #endif

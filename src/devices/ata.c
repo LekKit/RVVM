@@ -18,12 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "bit_ops.h"
 #include "mem_ops.h"
-#include "riscv32.h"
-#include "riscv32_mmu.h"
+#include "riscv.h"
+#include "rvvm.h"
 #include "ata.h"
 #include "rvvm_types.h"
-#include <string.h>
-#include <inttypes.h>
 
 /* Data registers */
 #define ATA_REG_DATA 0x00
@@ -249,9 +247,8 @@ static void ata_handle_cmd(struct ata_dev *ata, uint8_t cmd)
     }
 }
 
-static bool ata_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ata_data_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    UNUSED(vm);
     struct ata_dev *ata = (struct ata_dev *) device->data;
 
     if ((offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
@@ -261,10 +258,7 @@ static bool ata_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device
 
     offset >>= ATA_REG_SHIFT;
 #if 0
-    if (access == MMU_WRITE)
-        printf("ATA DATA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
-    else
-        printf("ATA DATA MMIO offset: %d size: %d read\n", offset, size);
+    printf("ATA DATA MMIO offset: %d size: %d read\n", offset, size);
 #endif
 
     /* DATA register is of any size, others are 1 byte r/w */
@@ -275,7 +269,86 @@ static bool ata_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device
 
     switch (offset) {
         case ATA_REG_DATA:
-            if (access == MMU_WRITE) {
+            if (ata->drive[ata->curdrive].bytes_to_rw != 0) {
+                uint8_t *addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
+#if 0
+                if (size == 4) {
+                    write_uint32_le(memory_data, read_uint32_le(addr));
+                } else if (size == 2) {
+                    write_uint16_le(memory_data, read_uint16_le(addr));
+                }
+#endif
+                memcpy(memory_data, addr, size);
+
+                ata->drive[ata->curdrive].bytes_to_rw -= size;
+                if (ata->drive[ata->curdrive].bytes_to_rw == 0) {
+                    ata->drive[ata->curdrive].status &= ~ATA_STATUS_DRQ;
+                    if (--ata->drive[ata->curdrive].sectcount != 0) {
+                        ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ;
+                        if (!ata_read_buf(ata)) {
+                            ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
+                            ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
+                        }
+                    }
+                }
+            } else {
+                memset(memory_data, '\0', size);
+            }
+            break;
+        case ATA_REG_ERR:
+            /* ERROR */
+
+            /* OSDev says that this register is 16-bit,
+             * but there's no address stored so this seems wrong */
+            memcpy(memory_data, &ata->drive[ata->curdrive].error, size);
+            break;
+        case ATA_REG_NSECT:
+            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].sectcount >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            break;
+        case ATA_REG_LBAL:
+            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbal >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            break;
+        case ATA_REG_LBAM:
+            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbam >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            break;
+        case ATA_REG_LBAH:
+            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbah >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            break;
+        case ATA_REG_DEVICE:
+            *(uint8_t*) memory_data = ata->drive[ata->curdrive].drive | (1 << 5) | (1 << 7);
+            break;
+        case ATA_REG_STATUS:
+            /* STATUS */
+            *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
+            break;
+    }
+
+    return true;
+}
+
+static bool ata_data_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+{
+    struct ata_dev *ata = (struct ata_dev *) device->data;
+
+    if ((offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
+        /* TODO: misalign */
+        return false;
+    }
+
+    offset >>= ATA_REG_SHIFT;
+#if 0
+    printf("ATA DATA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
+#endif
+
+    /* DATA register is of any size, others are 1 byte r/w */
+    if (size != 1 && offset != ATA_REG_DATA) {
+        /* TODO: misalign */
+        return false;
+    }
+
+    switch (offset) {
+        case ATA_REG_DATA:
+            {
                 uint8_t *addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
                 memcpy(addr, memory_data, size);
 
@@ -291,107 +364,47 @@ static bool ata_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device
                         ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
                     }
                 }
-            } else {
-                if (ata->drive[ata->curdrive].bytes_to_rw != 0) {
-                    uint8_t *addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
-#if 0
-                    if (size == 4) {
-                        write_uint32_le(memory_data, read_uint32_le(addr));
-                    } else if (size == 2) {
-                        write_uint16_le(memory_data, read_uint16_le(addr));
-                    }
-#endif
-                    memcpy(memory_data, addr, size);
-
-                    ata->drive[ata->curdrive].bytes_to_rw -= size;
-                    if (ata->drive[ata->curdrive].bytes_to_rw == 0) {
-                        ata->drive[ata->curdrive].status &= ~ATA_STATUS_DRQ;
-                        if (--ata->drive[ata->curdrive].sectcount != 0) {
-                            ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ;
-                            if (!ata_read_buf(ata)) {
-                                ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
-                                ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
-                            }
-                        }
-                    }
-                } else {
-                    memset(memory_data, '\0', size);
-                }
             }
             break;
         case ATA_REG_ERR:
-            if (access == MMU_WRITE) {
-                /* FEATURES - ignore */
-            } else {
-                /* ERROR */
-
-                /* OSDev says that this register is 16-bit,
-                 * but there's no address stored so this seems wrong */
-                memcpy(memory_data, &ata->drive[ata->curdrive].error, size);
-            }
+            /* FEATURES - ignore */
             break;
         case ATA_REG_NSECT:
-            if (access == MMU_WRITE) {
-                ata->drive[ata->curdrive].sectcount <<= 8;
-                ata->drive[ata->curdrive].sectcount |= *(uint8_t*) memory_data;
-            } else {
-                *(uint8_t*) memory_data = (ata->drive[ata->curdrive].sectcount >> ata->drive[ata->curdrive].hob_shift) & 0xff;
-            }
+            ata->drive[ata->curdrive].sectcount <<= 8;
+            ata->drive[ata->curdrive].sectcount |= *(uint8_t*) memory_data;
             break;
         case ATA_REG_LBAL:
-            if (access == MMU_WRITE) {
-                ata->drive[ata->curdrive].lbal <<= 8;
-                ata->drive[ata->curdrive].lbal |= *(uint8_t*) memory_data;
-            } else {
-                *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbal >> ata->drive[ata->curdrive].hob_shift) & 0xff;
-            }
+            ata->drive[ata->curdrive].lbal <<= 8;
+            ata->drive[ata->curdrive].lbal |= *(uint8_t*) memory_data;
             break;
         case ATA_REG_LBAM:
-            if (access == MMU_WRITE) {
-                ata->drive[ata->curdrive].lbam <<= 8;
-                ata->drive[ata->curdrive].lbam |= *(uint8_t*) memory_data;
-            } else {
-                *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbam >> ata->drive[ata->curdrive].hob_shift) & 0xff;
-            }
+            ata->drive[ata->curdrive].lbam <<= 8;
+            ata->drive[ata->curdrive].lbam |= *(uint8_t*) memory_data;
             break;
         case ATA_REG_LBAH:
-            if (access == MMU_WRITE) {
-                ata->drive[ata->curdrive].lbah <<= 8;
-                ata->drive[ata->curdrive].lbah |= *(uint8_t*) memory_data;
-            } else {
-                *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbah >> ata->drive[ata->curdrive].hob_shift) & 0xff;
-            }
+            ata->drive[ata->curdrive].lbah <<= 8;
+            ata->drive[ata->curdrive].lbah |= *(uint8_t*) memory_data;
             break;
         case ATA_REG_DEVICE:
-            if (access == MMU_WRITE) {
-                ata->curdrive = bit_check(*(uint8_t*) memory_data, 4) ? 1 : 0;
-                ata->drive[ata->curdrive].drive = *(uint8_t*) memory_data;
-            } else {
-                *(uint8_t*) memory_data = ata->drive[ata->curdrive].drive | (1 << 5) | (1 << 7);
-            }
+            ata->curdrive = bit_check(*(uint8_t*) memory_data, 4) ? 1 : 0;
+            ata->drive[ata->curdrive].drive = *(uint8_t*) memory_data;
             break;
         case ATA_REG_STATUS:
-            if (access == MMU_WRITE) {
-                /* Command */
+            /* Command */
 
-                /* Not sure when error is cleared.
-                 * Spec says that it contains status of the last command executed */
-                ata->drive[ata->curdrive].error = 0;
-                ata->drive[ata->curdrive].status &= ~ATA_STATUS_ERR;
-                ata_handle_cmd(ata, *(uint8_t*) memory_data);
-            } else {
-                /* STATUS */
-                *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
-            }
+            /* Not sure when error is cleared.
+             * Spec says that it contains status of the last command executed */
+            ata->drive[ata->curdrive].error = 0;
+            ata->drive[ata->curdrive].status &= ~ATA_STATUS_ERR;
+            ata_handle_cmd(ata, *(uint8_t*) memory_data);
             break;
     }
 
     return true;
 }
 
-static bool ata_ctl_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ata_ctl_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    UNUSED(vm);
     struct ata_dev *ata = (struct ata_dev *) device->data;
 
     if (size != 1 || (offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
@@ -401,35 +414,54 @@ static bool ata_ctl_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device,
 
     offset >>= ATA_REG_SHIFT;
 #if 0
-    if (access == MMU_WRITE)
-        printf("ATA CTL MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
-    else
-        printf("ATA CTL MMIO offset: %d size: %d read\n", offset, size);
+    printf("ATA CTL MMIO offset: %d size: %d read\n", offset, size);
 #endif
 
     switch (offset) {
         case ATA_REG_CTL:
-            if (access == MMU_READ) {
-                /* Alternate STATUS */
-                *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
-            } else {
-                /* Device control */
-                ata->drive[ata->curdrive].hob_shift = bit_check(*(uint8_t*) memory_data, 7) ? 8 : 0;
-                if (bit_check(*(uint8_t*) memory_data, 2)) {
-                    /* Soft reset */
-                    ata->drive[ata->curdrive].bytes_to_rw = 0;
-                    ata->drive[ata->curdrive].lbal = 1; /* Sectors start from 1 */
-                    ata->drive[ata->curdrive].lbah = 0;
-                    ata->drive[ata->curdrive].lbam = 0;
-                    ata->drive[ata->curdrive].sectcount = 1;
-                    ata->drive[ata->curdrive].drive = 0;
-                    if (ata->drive[ata->curdrive].fp != NULL) {
-                        ata->drive[ata->curdrive].error = ATA_ERR_AMNF; /* AMNF means OK here... */
-                        ata->drive[ata->curdrive].status = ATA_STATUS_RDY | ATA_STATUS_SRV;
-                    } else {
-                        ata->drive[ata->curdrive].error = 0;
-                        ata->drive[ata->curdrive].status = 0;
-                    }
+            /* Alternate STATUS */
+            *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
+            break;
+        case ATA_REG_DRVADDR:
+            /* TODO: seems that Linux doesn't use this */
+            break;
+    }
+
+    return true;
+}
+
+static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+{
+    struct ata_dev *ata = (struct ata_dev *) device->data;
+
+    if (size != 1 || (offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
+        /* TODO: misalign */
+        return false;
+    }
+
+    offset >>= ATA_REG_SHIFT;
+#if 0
+    printf("ATA CTL MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
+#endif
+
+    switch (offset) {
+        case ATA_REG_CTL:
+            /* Device control */
+            ata->drive[ata->curdrive].hob_shift = bit_check(*(uint8_t*) memory_data, 7) ? 8 : 0;
+            if (bit_check(*(uint8_t*) memory_data, 2)) {
+                /* Soft reset */
+                ata->drive[ata->curdrive].bytes_to_rw = 0;
+                ata->drive[ata->curdrive].lbal = 1; /* Sectors start from 1 */
+                ata->drive[ata->curdrive].lbah = 0;
+                ata->drive[ata->curdrive].lbam = 0;
+                ata->drive[ata->curdrive].sectcount = 1;
+                ata->drive[ata->curdrive].drive = 0;
+                if (ata->drive[ata->curdrive].fp != NULL) {
+                    ata->drive[ata->curdrive].error = ATA_ERR_AMNF; /* AMNF means OK here... */
+                    ata->drive[ata->curdrive].status = ATA_STATUS_RDY | ATA_STATUS_SRV;
+                } else {
+                    ata->drive[ata->curdrive].error = 0;
+                    ata->drive[ata->curdrive].status = 0;
                 }
             }
             break;
@@ -458,10 +490,30 @@ static size_t get_img_size(FILE *fp)
     return size;
 }
 
-void ata_init(rvvm_hart_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE *master, FILE *slave)
+static void ata_data_remove(rvvm_mmio_dev_t* device)
+{
+    struct ata_dev *ata = (struct ata_dev *) device->data;
+
+    for (size_t i = 0; i < sizeof(ata->drive) / sizeof(ata->drive[0]); ++i) {
+        if (ata->drive[i].fp != NULL) {
+            fclose(ata->drive[i].fp);
+        }
+    }
+}
+
+static rvvm_mmio_type_t ata_data_dev_type = {
+    .name = "ata_data",
+    .remove = ata_data_remove,
+};
+
+static rvvm_mmio_type_t ata_ctl_dev_type = {
+    .name = "ata_ctl",
+};
+
+void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* master, FILE* slave)
 {
     assert(master != NULL || slave != NULL);
-    struct ata_dev *ata = (struct ata_dev *) safe_calloc(1, sizeof(struct ata_dev));
+    struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
     ata->drive[0].fp = master;
     ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
@@ -473,14 +525,26 @@ void ata_init(rvvm_hart_t *vm, paddr_t data_base_addr, paddr_t ctl_base_addr, FI
         ata->drive[1].fp = NULL;
     }
 
-    riscv32_mmio_add_device(vm,
-            data_base_addr,
-            data_base_addr + ((ATA_REG_STATUS + 1) << ATA_REG_SHIFT),
-            ata_data_mmio_handler,
-            ata);
-    riscv32_mmio_add_device(vm,
-            ctl_base_addr,
-            ctl_base_addr + ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT),
-            ata_ctl_mmio_handler,
-            ata);
+    rvvm_mmio_dev_t ata_data;
+    ata_data.min_op_size = 1;
+    ata_data.max_op_size = 2;
+    ata_data.read = ata_data_mmio_read_handler;
+    ata_data.write = ata_data_mmio_write_handler;
+    ata_data.type = &ata_data_dev_type;
+    ata_data.begin = data_base_addr;
+    ata_data.end = data_base_addr + ((ATA_REG_STATUS + 1) << ATA_REG_SHIFT);
+    ata_data.data = ata;
+    rvvm_attach_mmio(machine, &ata_data);
+
+    rvvm_mmio_dev_t ata_ctl;
+    ata_ctl.min_op_size = 1,
+    ata_ctl.max_op_size = 1,
+    ata_ctl.read = ata_ctl_mmio_read_handler,
+    ata_ctl.write = ata_ctl_mmio_write_handler,
+    ata_ctl.type = &ata_ctl_dev_type,
+    ata_ctl.data = ata;
+    ata_ctl.begin = ctl_base_addr;
+    ata_ctl.end = ctl_base_addr + ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT);
+    ata_ctl.data = ata;
+    rvvm_attach_mmio(machine, &ata_ctl);
 }

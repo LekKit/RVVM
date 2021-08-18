@@ -19,7 +19,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
+#include "rvvm.h"
+#include "riscv.h"
 #include "fb_window.h"
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"

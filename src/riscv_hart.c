@@ -20,25 +20,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_mmu.h"
 #include "riscv_csr.h"
 #include "riscv_priv.h"
+#include "riscv_cpu.h"
 #include "threading.h"
 #include "atomics.h"
 #include "bit_ops.h"
-
-// Stubs
-static inline void riscv_run_till_event(rvvm_hart_t* vm)
-{
-    UNUSED(vm);
-}
-
-static inline void riscv_decoder_init_rv64(rvvm_hart_t* vm)
-{
-    UNUSED(vm);
-}
-
-static inline void riscv_decoder_init_rv32(rvvm_hart_t* vm)
-{
-    UNUSED(vm);
-}
 
 void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 {
@@ -46,8 +31,12 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     riscv_tlb_flush(vm);
     rvtimer_init(&vm->timer, 10000000); // 10 MHz timer
     vm->priv_mode = PRIVILEGE_MACHINE;
+    // Delegate exceptions from M to S
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
+    // Initialize decoder to illegal instructions
+    for (size_t i=0; i<512; ++i) vm->decoder.opcodes[i] = riscv_illegal_insn;
+    for (size_t i=0; i<24; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
 #ifdef USE_RV64
     vm->rv64 = rv64;
     if (rv64) {
@@ -58,7 +47,7 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
         riscv_decoder_init_rv32(vm);
     }
 #else
-    UNUSED(rv64);
+    if (rv64) rvvm_error("Requested RV64 in RV32-only build");
     vm->csr.isa = CSR_MISA_RV32;
     riscv_decoder_init_rv32(vm);
 #endif
@@ -68,6 +57,7 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 void riscv_hart_run(rvvm_hart_t* vm)
 {
     uint32_t events;
+    rvvm_info("Hart %p started", vm);
     atomic_store_uint32(&vm->wait_event, HART_RUNNING);
 #ifdef USE_SJLJ
     setjmp(vm->unwind);
@@ -87,10 +77,12 @@ void riscv_hart_run(rvvm_hart_t* vm)
         events = atomic_swap_uint32(&vm->pending_events, 0);
 
         if ((events & EXT_EVENT_TIMER) && rvtimer_pending(&vm->timer)) {
+            //rvvm_info("Timer IRQ");
             vm->csr.ip |= (1 << INTERRUPT_MTIMER);
         }
 
         if (events & EXT_EVENT_PAUSE) {
+            rvvm_info("Hart %p stopped", vm);
             return;
         }
 
@@ -176,6 +168,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     uint8_t priv = PRIVILEGE_MACHINE;
     // Delegate to lower privilege mode if needed
     while (vm->csr.edeleg[priv] & (1 << cause)) priv--;
+    //rvvm_info("Hart %p trap at %x -> %x, cause %x, tval %x", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3ULL), cause, tval);
     // Write exception info
     vm->csr.epc[priv] = vm->registers[REGISTER_PC];
     vm->csr.cause[priv] = cause;
@@ -188,6 +181,8 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     riscv_switch_priv(vm, priv);
 #ifdef USE_SJLJ
     longjmp(vm->unwind, 1);
+#else
+    riscv_restart_dispatch(vm);
 #endif
 }
 
@@ -227,7 +222,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 // Target privilege mode
                 uint8_t priv = PRIVILEGE_MACHINE;
                 // Delegate to lower privilege mode if needed
-                while (vm->csr.edeleg[priv] & (1 << i)) priv--;
+                while (vm->csr.ideleg[priv] & (1 << i)) priv--;
                 // Write exception info
                 vm->csr.epc[priv] = vm->registers[REGISTER_PC];
                 if (wfi) vm->csr.epc[priv] += 4;
@@ -241,6 +236,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 } else {
                     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
                 }
+                //rvvm_info("Hart %p irq to %x, cause %x", vm, vm->registers[REGISTER_PC], i);
                 riscv_switch_priv(vm, priv);
 #ifdef USE_SJLJ
                 longjmp(vm->unwind, 1);
@@ -254,11 +250,8 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
 
 void riscv_restart_dispatch(rvvm_hart_t* vm)
 {
-#ifdef USE_SJLJ
-    if (vm->wait_event != HART_STOPPED) longjmp(vm->unwind, 1);
-#else
+    //if (vm->wait_event != HART_STOPPED) longjmp(vm->unwind, 1);
     atomic_store_uint32(&vm->wait_event, HART_STOPPED);
-#endif
 }
 
 static void* riscv_hart_run_wrap(void* ptr)
@@ -285,15 +278,24 @@ void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)
     riscv_hart_notify(vm);
 }
 
+void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
+{
+#ifdef USE_RV64
+    atomic_and_uint64(&vm->csr.ip, ~(1U << irq));
+#else
+    atomic_and_uint32(&vm->csr.ip, ~(1U << irq));
+#endif
+}
+
 void riscv_hart_check_timer(rvvm_hart_t* vm)
 {
-    atomic_or_uint32(&vm->pending_events, 1U << EXT_EVENT_TIMER);
+    atomic_or_uint32(&vm->pending_events, EXT_EVENT_TIMER);
     riscv_hart_notify(vm);
 }
 
 void riscv_hart_pause(rvvm_hart_t* vm)
 {
-    atomic_or_uint32(&vm->pending_events, 1U << EXT_EVENT_PAUSE);
+    atomic_or_uint32(&vm->pending_events, EXT_EVENT_PAUSE);
     riscv_hart_notify(vm);
     thread_join(vm->thread);
 }

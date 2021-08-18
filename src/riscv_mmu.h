@@ -83,49 +83,6 @@ NOINLINE void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 NOINLINE void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 #endif
 
-/*
- * Inlined TLB-cached memory operations (used for performance)
- * Fall back to MMU functions if:
- *     Address is not TLB-cached (TLB miss/protection fault)
- *     Address misalign (optimized on hosts without misalign)
- *     MMIO is accessed (since MMIO regions aren't memory)
- */
-
-static inline bool riscv_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
-{
-    vaddr_t vpn = addr >> PAGE_SHIFT;
-    if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
-        if ((addr & 3) == 0) {
-            // Instruction is 4-byte aligned, just fetch it and move on
-            *inst = read_uint32_le(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
-            return true;
-        }
-        if ((addr & 1) == 0) {
-            uint32_t tmp = read_uint16_le(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
-            // Check RVI mask
-            if ((tmp & 0x3) != 0x3) {
-                // This is a 2-byte instruction
-                *inst = tmp;
-                return true;
-            } else {
-                // This is a 4-byte instruction, check that it's at least inside a page
-                if (likely((addr & PAGE_MASK) + 4 <= PAGE_SIZE)) {
-                    *inst = tmp | (read_uint16_le(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr)) << 16);
-                    return true;
-                } else {
-                    // Oh god, our 4-byte instruction is scattered between 2 pages
-                    // Another tlb lookup... and possibly a tlb miss
-                    if (likely(vm->tlb[(vpn+1) & TLB_MASK].e == (vpn+1))) {
-                        *inst = tmp | (read_uint16_le(vm->tlb[(vpn+1) & TLB_MASK].ptr + TLB_VADDR(addr) - 4094) << 16);
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    return riscv_mmu_fetch_inst(vm, addr, inst);
-}
-
 // Alignment checks / fixup
 
 static inline bool riscv_block_in_page(addr_t addr, size_t size)
@@ -141,6 +98,31 @@ static inline bool riscv_block_aligned(addr_t addr, size_t size)
 static inline addr_t riscv_align_addr(addr_t addr, size_t size)
 {
     return addr & (~(addr_t)(size - 1));
+}
+
+/*
+ * Inlined TLB-cached memory operations (used for performance)
+ * Fall back to MMU functions if:
+ *     Address is not TLB-cached (TLB miss/protection fault)
+ *     Address misalign (optimized on hosts without misalign)
+ *     MMIO is accessed (since MMIO regions aren't memory)
+ */
+
+static inline bool riscv_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
+{
+    vaddr_t vpn = addr >> PAGE_SHIFT;
+    if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
+        *inst = read_uint16_le_m(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
+        if ((*inst & 0x3) == 0x3) {
+            // This is a 4-byte instruction, force tlb lookup again
+            vpn = (addr + 2) >> PAGE_SHIFT;
+            if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
+                *inst |= ((uint32_t)read_uint16_le_m(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr + 2))) << 16;
+                return true;
+            }
+        } else return true;
+    }
+    return riscv_mmu_fetch_inst(vm, addr, inst);
 }
 
 // VM Address translation (translated within single page bounds)

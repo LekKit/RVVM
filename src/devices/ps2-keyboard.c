@@ -18,7 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "ps2-altera.h"
 #include "ringbuf.h"
-#include "riscv32.h"
+#include "rvvm.h"
+#include "riscv.h"
 #include "rvtimer.h"
 #include "ps2-keyboard.h"
 #include "spinlock.h"

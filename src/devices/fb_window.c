@@ -16,8 +16,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
-#include "riscv32_mmu.h"
 #include "fb_window.h"
 
 void r5g6b5_to_a8r8g8b8(const void* _in, void* _out, size_t length)
@@ -41,39 +39,43 @@ void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length)
     const uint8_t* in = (uint8_t*)_in;
     uint8_t* out = (uint8_t*)_out;
     for (size_t i=0; i<length; ++i) {
-	    uint8_t r5 = in[i*4] >> 3;
-	    uint8_t g6 = in[i*4 + 1] >> 2;
-	    uint8_t b5 = in[i*4 + 2] >> 3;
+        uint8_t r5 = in[i*4] >> 3;
+        uint8_t g6 = in[i*4 + 1] >> 2;
+        uint8_t b5 = in[i*4 + 2] >> 3;
 
-	    out[i * 2] = (g6 << 5) | b5;
-	    out[i * 2 + 1] = (r5 << 3) | (g6 >> 3);
+        out[i * 2] = (g6 << 5) | b5;
+        out[i * 2 + 1] = (r5 << 3) | (g6 >> 3);
     }
 }
 
-static bool fb_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* data, uint32_t size, uint8_t op)
+static void window_update(rvvm_mmio_dev_t* device)
 {
-    char* devptr = ((char*)device->data) + offset;
-    char* dataptr = (char*)data;
-
-    char *destptr;
-    const char *srcptr;
-
-    UNUSED(vm);
-    if (op == MMU_WRITE) {
-        destptr = devptr;
-        srcptr = dataptr;
-    } else {
-        destptr = dataptr;
-        srcptr = devptr;
-    }
-
-    memcpy(destptr, srcptr, size);
-    return true;
+    fb_update((struct fb_data*)device->data);
 }
 
-void init_fb(rvvm_hart_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard)
+static void window_remove(rvvm_mmio_dev_t* device)
 {
+    fb_close_window((struct fb_data*)device->data);
+    free(device->data);
+}
+
+static rvvm_mmio_type_t fb_dev_type = {
+    .name = "framebuffer",
+};
+
+static rvvm_mmio_type_t win_dev_type = {
+    .name = "vm_window",
+    .remove = window_remove,
+    .update = window_update,
+};
+
+void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard)
+{
+    struct fb_data* data = safe_calloc(sizeof(struct fb_data), 1);
     uint32_t fb_size = width * height * 4;
+    rvvm_mmio_dev_t fb_region = {0};
+    rvvm_mmio_dev_t win_placeholder = {0};
+    
     data->mouse = mouse;
     data->keyboard = keyboard;
     fb_create_window(data, width, height, "RVVM");
@@ -81,5 +83,16 @@ void init_fb(rvvm_hart_t* vm, struct fb_data *data, unsigned width, unsigned hei
         /* Initialize empty buffer so that the MMIO handler would not crash */
         data->framebuffer = safe_calloc(1, fb_size);
     }
-    riscv32_mmio_add_device(vm, addr, addr + fb_size, fb_mmio_handler, data->framebuffer);
+    
+    // Map the framebuffer into memory
+    fb_region.data = data->framebuffer;
+    fb_region.begin = addr;
+    fb_region.end = addr + fb_size;
+    fb_region.type = &fb_dev_type;
+    rvvm_attach_mmio(machine, &fb_region);
+    
+    // Placeholder for window data, region size is 0
+    win_placeholder.data = data;
+    win_placeholder.type = &win_dev_type;
+    rvvm_attach_mmio(machine, &win_placeholder);
 }

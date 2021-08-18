@@ -34,6 +34,7 @@ static bool builtin_eventloop_enabled;
 static void* builtin_eventloop(void* arg)
 {
     rvvm_machine_t* machine;
+    rvvm_mmio_dev_t* dev;
     
     // The eventloop runs while its enabled/ran manually,
     // and there are any running machines
@@ -45,6 +46,14 @@ static void* builtin_eventloop(void* arg)
             vector_foreach(machine->harts, i) {
                 // Wake hart thread to check timer interrupt.
                 riscv_hart_check_timer(&vector_at(machine->harts, i));
+            }
+            
+            vector_foreach(machine->mmio, i) {
+                dev = &vector_at(machine->mmio, i);
+                if (dev->type && dev->type->update) {
+                    // Update device
+                    dev->type->update(dev);
+                }
             }
         }
         spin_unlock(&global_lock);
@@ -103,8 +112,11 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
         riscv_hart_init(vm, rv64);
         vm->machine = machine;
         vm->mem = machine->mem;
-        // a0 register containing hart ID
+        // a0 register & mhartid csr contain hart ID
+        vm->csr.hartid = i;
         vm->registers[REGISTER_X10] = i;
+        // Boot from ram base addr by default
+        vm->registers[REGISTER_PC] = vm->mem.begin;
     }
     if (hart_count == 0)
         rvvm_warn("Creating machine with no harts at all... What are you even??");
@@ -166,8 +178,12 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 
 PUBLIC void rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
+    rvvm_mmio_dev_t* dev;
     if (machine->running) return;
     vector_push_back(machine->mmio, *mmio);
+    dev = &vector_at(machine->mmio, vector_size(machine->mmio)-1);
+    dev->machine = machine;
+    rvvm_info("Attached MMIO device at 0x%08"PRIxXLEN", type \"%s\"", dev->begin, dev->type ? dev->type->name : "null");
 }
 
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr)

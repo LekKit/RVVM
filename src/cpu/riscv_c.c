@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "bit_ops.h"
 #include "riscv_cpu.h"
-#include "riscv32_mmu.h"
+#include "riscv_mmu.h"
 #include "compiler.h"
 
 // Decode c.j / c.jal offset
@@ -94,11 +94,8 @@ static void riscv_c_lw(rvvm_hart_t *vm, const uint16_t instruction)
                       (bit_cut(instruction, 5, 1)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint32_t)];
-
-    if (riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
-        riscv_write_register(vm, rds, read_uint32_le(val));
-    }
+    
+    riscv_load_u32(vm, addr, rds);
 }
 
 static void riscv_c_li(rvvm_hart_t *vm, const uint16_t instruction)
@@ -119,11 +116,8 @@ static void riscv_c_lwsp(rvvm_hart_t *vm, const uint16_t instruction)
                       (bit_cut(instruction, 2, 2)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
-    uint8_t val[sizeof(uint32_t)];
-
-    if (riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
-        riscv_write_register(vm, rds, read_uint32_le(val));
-    }
+    
+    riscv_load_u32(vm, addr, rds);
 }
 
 static void riscv_c_addi16sp_lui(rvvm_hart_t *vm, const uint16_t instruction)
@@ -244,9 +238,8 @@ static void riscv_c_sw(rvvm_hart_t *vm, const uint16_t instruction)
                       (bit_cut(instruction, 5, 1)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint32_t)];
-    write_uint32_le(val, riscv_read_register(vm, rs2));
-    riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+    
+    riscv_store_u32(vm, addr, rs2);
 }
 
 static inline sxlen_t decode_branch_imm(const uint16_t instruction)
@@ -280,9 +273,8 @@ static void riscv_c_swsp(rvvm_hart_t *vm, const uint16_t instruction)
                       (bit_cut(instruction, 7, 2)  << 6);
 
     xaddr_t addr = riscv_read_register(vm, REGISTER_X2) + offset;
-    uint8_t val[sizeof(uint32_t)];
-    write_uint32_le(val, riscv_read_register(vm, rs2));
-    riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+    
+    riscv_store_u32(vm, addr, rs2);
 }
 
 static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
@@ -298,33 +290,33 @@ static void riscv_c_bnez(rvvm_hart_t *vm, const uint16_t instruction)
     }
 }
 
-void riscv_c_init()
+void riscv_c_init(rvvm_hart_t* vm)
 {
-    riscv_install_opcode_C(RVC_ADDI4SPN, riscv_c_addi4spn);
-    riscv_install_opcode_C(RVC_ADDI, riscv_c_addi);
-    riscv_install_opcode_C(RVC_SLLI, riscv_c_slli);
+    riscv_install_opcode_C(vm, RVC_ADDI4SPN, riscv_c_addi4spn);
+    riscv_install_opcode_C(vm, RVC_ADDI, riscv_c_addi);
+    riscv_install_opcode_C(vm, RVC_SLLI, riscv_c_slli);
 #ifndef RV64
-    riscv_install_opcode_C(RVC_JAL, riscv_c_jal);
+    riscv_install_opcode_C(vm, RVC_JAL, riscv_c_jal);
 #endif
     // riscv_install_opcode_C(RVC_FLDSP, riscv_c_fldsp);
-    riscv_install_opcode_C(RVC_LW, riscv_c_lw);
-    riscv_install_opcode_C(RVC_LI, riscv_c_li);
-    riscv_install_opcode_C(RVC_LWSP, riscv_c_lwsp);
-    riscv_install_opcode_C(RVC_ADDI16SP_LUI, riscv_c_addi16sp_lui);
+    riscv_install_opcode_C(vm, RVC_LW, riscv_c_lw);
+    riscv_install_opcode_C(vm, RVC_LI, riscv_c_li);
+    riscv_install_opcode_C(vm, RVC_LWSP, riscv_c_lwsp);
+    riscv_install_opcode_C(vm, RVC_ADDI16SP_LUI, riscv_c_addi16sp_lui);
     // riscv_install_opcode_C(RVC_FLWSP, riscv_c_flwsp);
 
     // Those are tricky fuckers and need additional decoding
     // basically a glue instruction for CR and CA instructions
-    riscv_install_opcode_C(RVC_ALOPS1, riscv_c_alops1);
-    riscv_install_opcode_C(RVC_ALOPS2, riscv_c_alops2);
+    riscv_install_opcode_C(vm, RVC_ALOPS1, riscv_c_alops1);
+    riscv_install_opcode_C(vm, RVC_ALOPS2, riscv_c_alops2);
 
     // riscv_install_opcode_C(RVC_FSD, riscv_c_fsd);
-    riscv_install_opcode_C(RVC_J, riscv_c_j);
+    riscv_install_opcode_C(vm, RVC_J, riscv_c_j);
     // riscv_install_opcode_C(RVC_FSDSP, riscv_c_fsdsp);
-    riscv_install_opcode_C(RVC_SW, riscv_c_sw);
-    riscv_install_opcode_C(RVC_BEQZ, riscv_c_beqz);
-    riscv_install_opcode_C(RVC_SWSP, riscv_c_swsp);
+    riscv_install_opcode_C(vm, RVC_SW, riscv_c_sw);
+    riscv_install_opcode_C(vm, RVC_BEQZ, riscv_c_beqz);
+    riscv_install_opcode_C(vm, RVC_SWSP, riscv_c_swsp);
     // riscv_install_opcode_C(RVC_FSW, riscv_c_fsw);
-    riscv_install_opcode_C(RVC_BNEZ, riscv_c_bnez);
+    riscv_install_opcode_C(vm, RVC_BNEZ, riscv_c_bnez);
     // riscv_install_opcode_C(RVC_FSWSP, riscv_c_fswsp);
 }

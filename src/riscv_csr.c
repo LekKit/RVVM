@@ -20,13 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_csr.h"
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
-
-// Stub
-static inline void riscv_decoder_enable_fpu(rvvm_hart_t* vm, bool enable)
-{
-    UNUSED(vm);
-    UNUSED(enable);
-}
+#include "riscv_cpu.h"
 
 #ifdef USE_FPU
 // For host FPU exception manipulation
@@ -93,6 +87,8 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
 {
 #ifdef USE_FPU
     bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
+#else
+    mask = bit_replace(mask, 13, 2, 0);
 #endif
     csr_helper_masked(&vm->csr.status, dest, mask, op);
 #ifdef USE_FPU
@@ -168,7 +164,7 @@ static bool riscv_csr_mhartid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(op);
-    *dest = 0;
+    *dest = vm->csr.hartid;
     return true;
 }
 
@@ -192,7 +188,11 @@ static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
         riscv_update_xlen(vm);
     }
 #endif
+#ifdef USE_FPU
     *dest = vm->csr.isa | riscv_mkmisa("IMAFDCSU");
+#else
+    *dest = vm->csr.isa | riscv_mkmisa("IMACSU");
+#endif
     return true;
 }
 
@@ -547,10 +547,12 @@ void riscv_csr_global_init()
     riscv_csr_list[0x043] = riscv_csr_illegal;  // utval
     riscv_csr_list[0x044] = riscv_csr_illegal;  // uip
 
+#ifdef USE_FPU
     // User Floating-Point CSRs
     riscv_csr_list[0x001] = riscv_csr_fflags;   // fflags
     riscv_csr_list[0x002] = riscv_csr_frm;      // frm
     riscv_csr_list[0x003] = riscv_csr_fcsr;     // fcsr
+#endif
 
     // User Counter/Timers
     riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle

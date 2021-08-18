@@ -20,16 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_csr.h"
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
+#include "riscv_cpu.h"
 #include "bit_ops.h"
 #include "atomics.h"
-
-// Stub
-static inline void riscv_install_opcode_ISB(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_t func)
-{
-    UNUSED(vm);
-    UNUSED(opcode);
-    UNUSED(func);
-}
 
 static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
 {
@@ -79,24 +72,20 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             }
             return;
         case RV_PRIV_S_WFI:
-            // Check for external interrupts
-            if (riscv_handle_irqs(vm, true)) {
-                // If we aren't unwinded to dispatch decrement PC by instruction size
-                vm->registers[REGISTER_PC] -= 4;
-                return;
-            }
             /*
             * Sleep before timer interrupt or external interrupt.
             * External interrupts are dropping CPU executor to scheduler,
             * where it gets ev_int flags and jumps into trap handler on it's own
             */
-            while (!rvtimer_pending(&vm->timer) && vm->wait_event) {
+            if (!rvtimer_pending(&vm->timer)) vm->csr.ip &= ~(1 << INTERRUPT_MTIMER);
+            while (vm->wait_event) {
+                if (rvtimer_pending(&vm->timer)) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+                if (riscv_handle_irqs(vm, true)) {
+                    // If we aren't unwinded to dispatch decrement PC by instruction size
+                    vm->registers[REGISTER_PC] -= 4;
+                    return;
+                }
                 sleep_ms(10);
-            }
-            if (rvtimer_pending(&vm->timer)) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
-            if (riscv_handle_irqs(vm, true)) {
-                // If we aren't unwinded to dispatch decrement PC by instruction size
-                vm->registers[REGISTER_PC] -= 4;
             }
             return;
     }

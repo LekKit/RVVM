@@ -21,8 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "bit_ops.h"
 #include "riscv_cpu.h"
-#include "riscv32_mmu.h"
-#include "spinlock.h"
+#include "riscv_mmu.h"
+#include "atomics.h"
 
 #define AMO_LR           0x2
 #define AMO_SC           0x3
@@ -36,15 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define AMO_MINU         0x18
 #define AMO_MAXU         0x1C
 
-/*
-* Currently, atomics are not handled directly, instead a global lock is used
-* This is still a conforming implementation (and fast enough as for now)
-* There is no multi-core support, but will eventually come with proper atomics
-*/
-// This may break in some ways when changing ISA, needs testing
-static spinlock_t global_amo_lock;
-static bool lr_reserved = false;
-
 static void riscv_a_atomic_w(rvvm_hart_t *vm, const uint32_t instruction)
 {
     regid_t rds = bit_cut(instruction, 7, 5);
@@ -52,76 +43,64 @@ static void riscv_a_atomic_w(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     uint8_t op = bit_cut(instruction, 27, 5);
     xaddr_t addr = riscv_read_register(vm, rs1);
-    xlen_t val = riscv_read_register(vm, rs2);
-    xlen_t mval;
-    uint8_t tmp[sizeof(uint32_t)];
+    uint32_t val = riscv_read_register(vm, rs2);
 
-    spin_lock(&global_amo_lock);
-
-    if (!riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_READ))
-    {
-        spin_unlock(&global_amo_lock);
+    if (unlikely(addr & 3)) {
+        riscv_trap(vm, TRAP_STORE_MISALIGN, 0);
         return;
     }
-
-    mval = sign_extend(read_uint32_le(tmp), 32);
-    riscv_write_register(vm, rds, mval);
-
+    
+    uint32_t* ptr = (uint32_t*)riscv_vma_translate_w(vm, addr);
+    
+    if (unlikely(ptr == NULL)) {
+        return;
+    }
+    
     switch (op) {
     case AMO_LR:
-        lr_reserved = true;
+        vm->lrsc = true;
+        vm->lrsc_cas = atomic_load_uint32_le(ptr);
+        vm->registers[rds] = (int32_t)vm->lrsc_cas;
         break;
     case AMO_SC:
-        if (lr_reserved) {
-            lr_reserved = false;
-            write_uint32_le(tmp, val);
-            riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
+            vm->lrsc = false;
             riscv_write_register(vm, rds, 0);
         } else {
             riscv_write_register(vm, rds, 1);
         }
         break;
     case AMO_SWAP:
-        write_uint32_le(tmp, val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_swap_uint32_le(ptr, val);
         break;
     case AMO_ADD:
-        write_uint32_le(tmp, mval + val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_add_uint32_le(ptr, val);
         break;
     case AMO_XOR:
-        write_uint32_le(tmp, mval ^ val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_xor_uint32_le(ptr, val);
         break;
     case AMO_AND:
-        write_uint32_le(tmp, mval & val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_and_uint32_le(ptr, val);
         break;
     case AMO_OR:
-        write_uint32_le(tmp, mval | val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_or_uint32_le(ptr, val);
         break;
     case AMO_MIN:
-        write_uint32_le(tmp, ((sxlen_t)mval < (sxlen_t)val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_min_int32_le(ptr, val);
         break;
     case AMO_MAX:
-        write_uint32_le(tmp, ((sxlen_t)mval > (sxlen_t)val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_max_int32_le(ptr, val);
         break;
     case AMO_MINU:
-        write_uint32_le(tmp, (mval < val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_minu_uint32_le(ptr, val);
         break;
     case AMO_MAXU:
-        write_uint32_le(tmp, (mval > val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint32_t), MMU_WRITE);
+        vm->registers[rds] = (int32_t)atomic_maxu_uint32_le(ptr, val);
         break;
     default:
-        riscv_illegal_insn(vm, instruction);
+        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
         break;
     }
-    spin_unlock(&global_amo_lock);
 }
 
 #ifdef RV64
@@ -132,84 +111,71 @@ static void riscv_a_atomic_d(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     uint8_t op = bit_cut(instruction, 27, 5);
     xaddr_t addr = riscv_read_register(vm, rs1);
-    xlen_t val = riscv_read_register(vm, rs2);
-    xlen_t mval;
-    uint8_t tmp[sizeof(uint64_t)];
+    uint64_t val = riscv_read_register(vm, rs2);
 
-    spin_lock(&global_amo_lock);
-
-    if (!riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_READ))
-    {
-        spin_unlock(&global_amo_lock);
+    if (unlikely(addr & 3)) {
+        riscv_trap(vm, TRAP_STORE_MISALIGN, 0);
         return;
     }
-
-    mval = read_uint64_le(tmp);
-    riscv_write_register(vm, rds, mval);
-
+    
+    uint64_t* ptr = (uint64_t*)riscv_vma_translate_w(vm, addr);
+    
+    if (unlikely(ptr == NULL)) {
+        return;
+    }
+    
     switch (op) {
     case AMO_LR:
-        lr_reserved = true;
+        vm->lrsc = true;
+        vm->lrsc_cas = atomic_load_uint32_le(ptr);
+        vm->registers[rds] = vm->lrsc_cas;
         break;
     case AMO_SC:
-        if (lr_reserved) {
-            lr_reserved = false;
-            write_uint64_le(tmp, val);
-            riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
+            vm->lrsc = false;
             riscv_write_register(vm, rds, 0);
         } else {
             riscv_write_register(vm, rds, 1);
         }
         break;
     case AMO_SWAP:
-        write_uint64_le(tmp, val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_swap_uint64_le(ptr, val);
         break;
     case AMO_ADD:
-        write_uint64_le(tmp, mval + val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_add_uint64_le(ptr, val);
         break;
     case AMO_XOR:
-        write_uint64_le(tmp, mval ^ val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_xor_uint64_le(ptr, val);
         break;
     case AMO_AND:
-        write_uint64_le(tmp, mval & val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_and_uint64_le(ptr, val);
         break;
     case AMO_OR:
-        write_uint64_le(tmp, mval | val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_or_uint64_le(ptr, val);
         break;
     case AMO_MIN:
-        write_uint64_le(tmp, ((sxlen_t)mval < (sxlen_t)val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_min_int64_le(ptr, val);
         break;
     case AMO_MAX:
-        write_uint64_le(tmp, ((sxlen_t)mval > (sxlen_t)val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_max_int64_le(ptr, val);
         break;
     case AMO_MINU:
-        write_uint64_le(tmp, (mval < val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_minu_uint64_le(ptr, val);
         break;
     case AMO_MAXU:
-        write_uint64_le(tmp, (mval > val) ? mval : val);
-        riscv_mem_op(vm, addr, tmp, sizeof(uint64_t), MMU_WRITE);
+        vm->registers[rds] = atomic_maxu_uint64_le(ptr, val);
         break;
     default:
-        riscv_illegal_insn(vm, instruction);
+        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
         break;
     }
-    spin_unlock(&global_amo_lock);
 }
 #endif
 
-void riscv_a_init()
+void riscv_a_init(rvvm_hart_t* vm)
 {
-    spin_init(&global_amo_lock);
-    riscv_install_opcode_ISB(RVA_ATOMIC_W, riscv_a_atomic_w);
+    riscv_install_opcode_ISB(vm, RVA_ATOMIC_W, riscv_a_atomic_w);
 #ifdef RV64
-    riscv_install_opcode_ISB(RV64A_ATOMIC_D, riscv_a_atomic_d);
+    riscv_install_opcode_ISB(vm, RV64A_ATOMIC_D, riscv_a_atomic_d);
 #endif
 }

@@ -16,6 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Currently broken
+#if 0
+
 #include "elf_load.h"
 #include <stddef.h>
 
@@ -254,4 +257,5 @@ bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, p
     return false;
 }
 
+#endif
 #endif

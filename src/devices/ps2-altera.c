@@ -16,8 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
-#include "riscv32_mmu.h"
+#include "rvvm.h"
 #include "bit_ops.h"
 
 #include "plic.h"
@@ -38,87 +37,78 @@ struct altps2
 	spinlock_t lock;
 
 	// IRQ data
-	rvvm_hart_t *hart; // hart to send IRQ to
+	rvvm_machine_t *mach; // machine to send IRQ to
 	void *intc_data; // private interrupt controller data
 	uint32_t irq;
 
 	bool irq_enabled;
 	bool irq_pending;
 	bool error;
-
 };
 
-static bool altps2_mmio_handler_impl(rvvm_hart_t* vm, struct altps2* ps2port, uint32_t offset, uint32_t* data, uint8_t access)
+static bool altps2_mmio_read_handler_impl(struct altps2* ps2port, uint32_t offset, uint32_t* data)
 {
-	UNUSED(vm);
-	if (access == MMU_READ) {
-		switch (offset)
-		{
-			case ALTERA_DATA:
-				{
-					uint8_t val;
-					uint16_t avail = ps2port->child->ps2_op(ps2port->child, &val, false);
-					*data = (val &= 0xff);
-					*data |= (avail != 0) << 15; // RVALID bit
-					*data |= avail << 16; // RAVAIL
-					break;
-				}
-			case ALTERA_CONTROL:
-				*data |= ps2port->irq_enabled << ALTERA_RE;
-				*data |= ps2port->irq_pending << ALTERA_RI;
-				ps2port->irq_pending = false; // not sure when this is cleared
-				*data |= ps2port->error << ALTERA_CE;
-				break;
-			default:
-				return false;
-		}
+    switch (offset)
+    {
+        case ALTERA_DATA:
+            {
+                uint8_t val;
+                uint16_t avail = ps2port->child->ps2_op(ps2port->child, &val, false);
+                *data = (val &= 0xff);
+                *data |= (avail != 0) << 15; // RVALID bit
+                *data |= avail << 16; // RAVAIL
+                break;
+            }
+        case ALTERA_CONTROL:
+            *data |= ps2port->irq_enabled << ALTERA_RE;
+            *data |= ps2port->irq_pending << ALTERA_RI;
+            ps2port->irq_pending = false; // not sure when this is cleared
+            *data |= ps2port->error << ALTERA_CE;
+            break;
+        default:
+            return false;
+    }
 
-		return true;
-	} else if (access == MMU_WRITE) {
-		switch (offset)
-		{
-			case ALTERA_DATA:
-				{
-					uint8_t val = (*data & 0xff);
-					uint16_t err = ps2port->child->ps2_op(ps2port->child, &val, true);
-					if (!err)
-					{
-						ps2port->error = true;
-					}
-					break;
-				}
-				break;
-			case ALTERA_CONTROL:
-				ps2port->irq_enabled = bit_check(*data, ALTERA_RE);
-				if (!bit_check(*data, ALTERA_CE))
-				{
-					ps2port->error = 0;
-				}
-				break;
-			default:
-				return false;
-		}
-
-		return true;
-	}
-
-	return false;
+    return true;
 }
 
-static bool altps2_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool altps2_mmio_write_handler_impl(struct altps2* ps2port, uint32_t offset, uint32_t* data)
+{
+    switch (offset)
+    {
+        case ALTERA_DATA:
+            {
+                uint8_t val = (*data & 0xff);
+                uint16_t err = ps2port->child->ps2_op(ps2port->child, &val, true);
+                if (!err)
+                {
+                    ps2port->error = true;
+                }
+                break;
+            }
+            break;
+        case ALTERA_CONTROL:
+            ps2port->irq_enabled = bit_check(*data, ALTERA_RE);
+            if (!bit_check(*data, ALTERA_CE))
+            {
+                ps2port->error = 0;
+            }
+            break;
+        default:
+            return false;
+    }
+
+    return true;
+}
+
+static bool altps2_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
 	struct altps2 *ps2port = device->data;
 	spin_lock(&ps2port->lock);
 	bool ret = false;
 
-	if ((size % 4 != 0) || (offset % 4 != 0))
-	{
-		// TODO: misalign
-		goto out;
-	}
-
 	for (size_t i = 0; i < size; i += 4) {
-		if (!altps2_mmio_handler_impl(vm, ps2port, offset + i, (uint32_t*)((char*)memory_data + i), access)) {
+		if (!altps2_mmio_read_handler_impl(ps2port, offset + i, (uint32_t*)((char*)memory_data + i))) {
 			ps2port->error = 1;
 			goto out;
 		}
@@ -130,12 +120,35 @@ out:
 	return ret;
 }
 
-void altps2_init(rvvm_hart_t *vm, uint32_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
+static bool altps2_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+{
+	struct altps2 *ps2port = device->data;
+	spin_lock(&ps2port->lock);
+	bool ret = false;
+
+	for (size_t i = 0; i < size; i += 4) {
+		if (!altps2_mmio_write_handler_impl(ps2port, offset + i, (uint32_t*)((char*)memory_data + i))) {
+			ps2port->error = 1;
+			goto out;
+		}
+	}
+
+	ret = true;
+out:
+	spin_unlock(&ps2port->lock);
+	return ret;
+}
+
+static rvvm_mmio_type_t altps2_dev_type = {
+    .name = "altera_ps2",
+};
+
+void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
 {
 	struct altps2 *ptr = safe_calloc(1, sizeof (struct altps2));
 
 	ptr->child = child;
-	ptr->hart = vm;
+	ptr->mach = machine;
 	ptr->intc_data = intc_data;
 	ptr->irq = irq;
 
@@ -143,7 +156,16 @@ void altps2_init(rvvm_hart_t *vm, uint32_t base_addr, void *intc_data, uint32_t 
 
 	spin_init(&ptr->lock);
 
-	riscv32_mmio_add_device(vm, base_addr, base_addr + ALTERA_REG_SIZE, altps2_mmio_handler, ptr);
+    rvvm_mmio_dev_t altps2 = {0};
+    altps2.min_op_size = 4;
+    altps2.max_op_size = 4;
+    altps2.read = altps2_mmio_read_handler;
+    altps2.write = altps2_mmio_write_handler;
+    altps2.type = &altps2_dev_type;
+    altps2.begin = base_addr;
+    altps2.end = base_addr + ALTERA_REG_SIZE;
+    altps2.data = ptr;
+    rvvm_attach_mmio(machine, &altps2);
 }
 
 // Send interrupt via PS/2 controller.
@@ -157,7 +179,7 @@ void altps2_interrupt_unlocked(struct ps2_device *dev)
 	}
 
 	ptr->irq_pending = true;
-	plic_send_irq(ptr->hart, ptr->intc_data, ptr->irq);
+	plic_send_irq(ptr->mach, ptr->intc_data, ptr->irq);
 }
 
 // Send interrupt via PS/2 controller.

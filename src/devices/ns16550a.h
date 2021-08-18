@@ -20,8 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef NS16550A_H
 #define NS16550A_H
 
-#include "riscv32.h"
+#include "rvvm.h"
 
-void ns16550a_init(rvvm_hart_t *vm, uint32_t base_addr);
+void ns16550a_init(rvvm_machine_t *mach, paddr_t base_addr);
 
 #endif // NS16550A_H

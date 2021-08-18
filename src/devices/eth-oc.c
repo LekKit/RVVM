@@ -18,12 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifdef USE_NET
 
+#include "eth-oc.h"
+#include "plic.h"
 #include "bit_ops.h"
 #include "mem_ops.h"
-#include "riscv32.h"
-#include "riscv32_mmu.h"
-#include "rvvm_types.h"
-#include "plic.h"
 #include "threading.h"
 #include "spinlock.h"
 #include "tap.h"
@@ -187,7 +185,7 @@ struct ethoc_dev
     struct bd bdbuf[ETHOC_BD_BUFSIZ / sizeof(struct bd)];
     struct mdio mdio;
     struct tap_pollevent_cb pollev;
-    rvvm_hart_t *hart; /* Hart to send IRQ to, also used as memory to send/recv packets */
+    rvvm_machine_t* machine; /* Machine to send IRQ to, also used as memory to send/recv packets */
     void *intc_data;
     uint32_t irq;
     uint32_t cur_txbd;
@@ -219,7 +217,7 @@ static bool ethoc_interrupt(struct ethoc_dev *eth, uint8_t int_num)
         return false;
     }
 
-    plic_send_irq(eth->hart, eth->intc_data, eth->irq);
+    plic_send_irq(eth->machine, eth->intc_data, eth->irq);
     return true;
 }
 
@@ -243,9 +241,8 @@ static void ethoc_reset(struct ethoc_dev *eth)
     eth->txctrl = 0;
 }
 
-static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
+static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    UNUSED(vm);
     if (offset < 0x400 && (offset % 4 != 0 || size != 4))
     {
         /* TODO: misalign */
@@ -253,10 +250,107 @@ static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* devi
     }
 
 #if 0
-    if (access == MMU_WRITE)
-        printf("ETHOC MMIO offset: 0x%02x size: %d write val: 0x%08X\n", offset, size, *(uint32_t*) memory_data);
-    else
-        printf("ETHOC MMIO offset: 0x%02x size: %d read\n", offset, size);
+    printf("ETHOC MMIO offset: 0x%02x size: %d read\n", offset, size);
+#endif
+    struct ethoc_dev *eth = (struct ethoc_dev *) device->data;
+    uint32_t *data = (uint32_t*) memory_data;
+
+    spin_lock(&eth->pollev.lock);
+    switch (offset)
+    {
+        case ETHOC_MODER:
+            *data = eth->moder;
+            break;
+        case ETHOC_INT_SRC:
+            *data = eth->int_src;
+            break;
+        case ETHOC_INT_MASK:
+            *data = eth->int_mask;
+            break;
+        case ETHOC_IPGT:
+            /* ignore */
+            break;
+        case ETHOC_IPGR1:
+            /* ignore */
+            break;
+        case ETHOC_IPGR2:
+            /* ignore */
+            break;
+        case ETHOC_PACKETLEN:
+            *data = eth->packetlen;
+            break;
+        case ETHOC_COLLCONF:
+            *data = eth->collconf;
+            break;
+        case ETHOC_TX_BD_NUM:
+            *data = eth->tx_bd_num;
+            break;
+        case ETHOC_CTRLMODER:
+            *data = eth->ctrlmoder;
+            break;
+        case ETHOC_MIIMODER:
+            *data = eth->miimoder;
+            break;
+        case ETHOC_MIICOMMAND:
+            *data = 0;
+            break;
+        case ETHOC_MIIADDRESS:
+            *data = eth->miiaddress;
+            break;
+        case ETHOC_MIITX_DATA:
+            *data = eth->miitx_data;
+            break;
+        case ETHOC_MIIRX_DATA:
+            *data = eth->miirx_data;
+            break;
+        case ETHOC_MIISTATUS:
+            *data = eth->miistatus;
+            break;
+        case ETHOC_MAC_ADDR0:
+            tap_get_mac(&eth->pollev.dev, eth->macaddr);
+            *data = eth->macaddr[5]
+                | (eth->macaddr[4] << 8)
+                | (eth->macaddr[3] << 16)
+                | ((uint32_t)eth->macaddr[4]) << 24;
+            break;
+        case ETHOC_MAC_ADDR1:
+            tap_get_mac(&eth->pollev.dev, eth->macaddr);
+            *data = eth->macaddr[1] | (eth->macaddr[0] << 8);
+            break;
+        case ETHOC_ETH_HASH0_ADR:
+            *data = eth->hash[0];
+            break;
+        case ETHOC_ETH_HASH1_ADR:
+            *data = eth->hash[1];
+            break;
+        case ETHOC_TXCTRL:
+            *data = eth->txctrl;
+            break;
+        default:
+            if (offset < ETHOC_BD_ADDR || offset + size >= ETHOC_BD_ADDR + ETHOC_BD_BUFSIZ) {
+                goto err;
+            }
+
+            memcpy(memory_data, (uint8_t*)&eth->bdbuf + offset - ETHOC_BD_ADDR, size);
+    }
+
+    spin_unlock(&eth->pollev.lock);
+    return true;
+err:
+    spin_unlock(&eth->pollev.lock);
+    return false;
+}
+
+static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+{
+    if (offset < 0x400 && (offset % 4 != 0 || size != 4))
+    {
+        /* TODO: misalign */
+        return false;
+    }
+
+#if 0
+    printf("ETHOC MMIO offset: 0x%02x size: %d write val: 0x%08X\n", offset, size, *(uint32_t*) memory_data);
 #endif
     struct ethoc_dev *eth = (struct ethoc_dev *) device->data;
     uint32_t *data = (uint32_t*) memory_data;
@@ -266,7 +360,7 @@ static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* devi
     switch (offset)
     {
         case ETHOC_MODER:
-            if (access == MMU_WRITE) {
+            {
                 bool prev_rx = !!(eth->moder & ETHOC_MODER_RXEN);
                 bool prev_tx = !!(eth->moder & ETHOC_MODER_TXEN);
 
@@ -281,31 +375,21 @@ static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* devi
                     eth->cur_txbd = 0;
                     wake = true;
                 }
-            } else {
-                *data = eth->moder;
             }
             break;
         case ETHOC_INT_SRC:
-            if (access == MMU_WRITE) {
-                /* Bits are cleared by writing 1 to them */
-                eth->int_src &= ~*data;
+            /* Bits are cleared by writing 1 to them */
+            eth->int_src &= ~*data;
 
-                if ((eth->int_src & eth->int_mask) != 0) {
-                    plic_send_irq(eth->hart, eth->intc_data, eth->irq);
-                }
-            } else {
-                *data = eth->int_src;
+            if ((eth->int_src & eth->int_mask) != 0) {
+                plic_send_irq(eth->machine, eth->intc_data, eth->irq);
             }
             break;
         case ETHOC_INT_MASK:
-            if (access == MMU_WRITE) {
-                eth->int_mask = *data;
+            eth->int_mask = *data;
 
-                if ((eth->int_src & eth->int_mask) != 0) {
-                    plic_send_irq(eth->hart, eth->intc_data, eth->irq);
-                }
-            } else {
-                *data = eth->int_mask;
+            if ((eth->int_src & eth->int_mask) != 0) {
+                plic_send_irq(eth->machine, eth->intc_data, eth->irq);
             }
             break;
         case ETHOC_IPGT:
@@ -318,139 +402,70 @@ static bool ethoc_data_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* devi
             /* ignore */
             break;
         case ETHOC_PACKETLEN:
-            if (access == MMU_WRITE) {
-                eth->packetlen = *data;
-            } else {
-                *data = eth->packetlen;
-            }
+            eth->packetlen = *data;
             break;
         case ETHOC_COLLCONF:
-            if (access == MMU_WRITE) {
-                eth->collconf = *data;
-            } else {
-                *data = eth->collconf;
-            }
+            eth->collconf = *data;
             break;
         case ETHOC_TX_BD_NUM:
-            if (access == MMU_WRITE) {
-                eth->tx_bd_num = *data;
-            } else {
-                *data = eth->tx_bd_num;
-            }
+            eth->tx_bd_num = *data;
             break;
         case ETHOC_CTRLMODER:
-            if (access == MMU_WRITE) {
-                eth->ctrlmoder = *data;
-            } else {
-                *data = eth->ctrlmoder;
-            }
+            eth->ctrlmoder = *data;
             break;
         case ETHOC_MIIMODER:
-            if (access == MMU_WRITE) {
-                eth->miimoder = *data;
-            } else {
-                *data = eth->miimoder;
-            }
+            eth->miimoder = *data;
             break;
         case ETHOC_MIICOMMAND:
-            if (access == MMU_WRITE) {
-                if (*data & ETHOC_MIICOMMAND_RSTAT) {
-                    eth->miirx_data = mdio_read(&eth->mdio, eth->miiaddress & 0x1f, (eth->miiaddress >> 8) & 0x1f) & 0xffff;
-                } else if (*data & ETHOC_MIICOMMAND_WCTRLDATA) {
-                    mdio_write(&eth->mdio, eth->miiaddress & 0x1f, (eth->miiaddress >> 8) & 0x1f, eth->miitx_data & 0xffff);
-                }
-            } else {
-                *data = 0;
+            if (*data & ETHOC_MIICOMMAND_RSTAT) {
+                eth->miirx_data = mdio_read(&eth->mdio, eth->miiaddress & 0x1f, (eth->miiaddress >> 8) & 0x1f) & 0xffff;
+            } else if (*data & ETHOC_MIICOMMAND_WCTRLDATA) {
+                mdio_write(&eth->mdio, eth->miiaddress & 0x1f, (eth->miiaddress >> 8) & 0x1f, eth->miitx_data & 0xffff);
             }
             break;
         case ETHOC_MIIADDRESS:
-            if (access == MMU_WRITE) {
-                eth->miiaddress = *data;
-            } else {
-                *data = eth->miiaddress;
-            }
+            eth->miiaddress = *data;
             break;
         case ETHOC_MIITX_DATA:
-            if (access == MMU_WRITE) {
-                eth->miitx_data = *data;
-            } else {
-                *data = eth->miitx_data;
-            }
+            eth->miitx_data = *data;
             break;
         case ETHOC_MIIRX_DATA:
-            if (access == MMU_WRITE) {
-                /* R/O, but was R/W in older spec */
-                /* eth->miirx_data = *data; */
-            } else {
-                *data = eth->miirx_data;
-            }
+            /* R/O, but was R/W in older spec */
+            /* eth->miirx_data = *data; */
             break;
         case ETHOC_MIISTATUS:
-            if (access == MMU_WRITE) {
-                eth->miistatus = *data;
-            } else {
-                *data = eth->miistatus;
-            }
+            eth->miistatus = *data;
             break;
         case ETHOC_MAC_ADDR0:
-            if (access == MMU_WRITE) {
-                eth->macaddr[5] = *data & 0xff;
-                eth->macaddr[4] = (*data >> 8) & 0xff;
-                eth->macaddr[3] = (*data >> 16) & 0xff;
-                eth->macaddr[2] = (*data >> 24) & 0xff;
-                tap_set_mac(&eth->pollev.dev, eth->macaddr);
-            } else {
-                tap_get_mac(&eth->pollev.dev, eth->macaddr);
-                *data = eth->macaddr[5]
-                    | eth->macaddr[4] << 8
-                    | eth->macaddr[3] << 16
-                    | eth->macaddr[4] << 24;
-            }
+            eth->macaddr[5] = *data & 0xff;
+            eth->macaddr[4] = (*data >> 8) & 0xff;
+            eth->macaddr[3] = (*data >> 16) & 0xff;
+            eth->macaddr[2] = (*data >> 24) & 0xff;
+            tap_set_mac(&eth->pollev.dev, eth->macaddr);
             break;
         case ETHOC_MAC_ADDR1:
-            if (access == MMU_WRITE) {
-                eth->macaddr[1] = *data & 0xff;
-                eth->macaddr[0] = (*data >> 8) & 0xff;
-                tap_set_mac(&eth->pollev.dev, eth->macaddr);
-            } else {
-                tap_get_mac(&eth->pollev.dev, eth->macaddr);
-                *data = eth->macaddr[1] | eth->macaddr[0] << 8;
-            }
+            eth->macaddr[1] = *data & 0xff;
+            eth->macaddr[0] = (*data >> 8) & 0xff;
+            tap_set_mac(&eth->pollev.dev, eth->macaddr);
             break;
         case ETHOC_ETH_HASH0_ADR:
-            if (access == MMU_WRITE) {
-                eth->hash[0] = *data;
-            } else {
-                *data = eth->hash[0];
-            }
+            eth->hash[0] = *data;
             break;
         case ETHOC_ETH_HASH1_ADR:
-            if (access == MMU_WRITE) {
-                eth->hash[1] = *data;
-            } else {
-                *data = eth->hash[1];
-            }
+            eth->hash[1] = *data;
             break;
         case ETHOC_TXCTRL:
-            if (access == MMU_WRITE) {
-                eth->txctrl = *data;
-            } else {
-                *data = eth->txctrl;
-            }
+            eth->txctrl = *data;
             break;
         default:
             if (offset < ETHOC_BD_ADDR || offset + size >= ETHOC_BD_ADDR + ETHOC_BD_BUFSIZ) {
                 goto err;
             }
 
-            if (access == MMU_WRITE) {
-                memcpy((uint8_t*)&eth->bdbuf + offset - ETHOC_BD_ADDR, memory_data, size);
-                /* Write BD might be modified, so wake the tap thread */
-                if (offset + size >= eth->tx_bd_num) {
-                    wake = true;
-                }
-            } else {
-                memcpy(memory_data, (uint8_t*)&eth->bdbuf + offset - ETHOC_BD_ADDR, size);
+            memcpy((uint8_t*)&eth->bdbuf + offset - ETHOC_BD_ADDR, memory_data, size);
+            /* Write BD might be modified, so wake the tap thread */
+            if (offset + size >= eth->tx_bd_num) {
+                wake = true;
             }
     }
 
@@ -491,32 +506,23 @@ static void ethoc_pollevent(int poll_status, void *arg)
 
         bd->data &= ~ETHOC_RXBD_E;
 
-        ptrdiff_t read = 0;
-        if (bd->ptr >= eth->hart->mem.begin && bd->ptr < eth->hart->mem.begin + eth->hart->mem.size) {
-#ifndef USE_VMSWAP
-            void *buf = eth->hart->mem.data + bd->ptr;
-            read = tap_recv(&eth->pollev.dev, buf, 1536);
-#else
-            void *buf = malloc(1536);
-            if (buf) {
-                read = tap_recv(&eth->pollev.dev, buf, 1536);
-                riscv32_physmem_op(eth->hart, bd->ptr, buf, read, MMU_WRITE);
-                free(buf);
-            }
-#endif
-            if (read < 0) {
-                /* Set Invalid Symbol flag on error - there's no generic error flag, but
-                 * this is close enough */
-                bd->data |= ETHOC_RXBD_IS;
-                ethoc_interrupt(eth, ETHOC_INT_TXE);
-            } else {
-                bd->data |= (read & 0xffff) << 16;
-            }
-        } else {
-            /* Where does this thing point to? Anyway, set some error flag... */
-            bd->data |= ETHOC_RXBD_OR;
+        void* buffer = safe_malloc(1536);
+        ptrdiff_t read = tap_recv(&eth->pollev.dev, buffer, 1536);
+        if (read < 0) {
+            /* Set Invalid Symbol flag on error - there's no generic error flag, but
+                * this is close enough */
+            bd->data |= ETHOC_RXBD_IS;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
+        } else {
+            if (rvvm_write_ram(eth->machine, bd->ptr, buffer, read)) {
+                bd->data |= (read & 0xffff) << 16;
+            } else {
+                /* Where does this thing point to? Anyway, set some error flag... */
+                bd->data |= ETHOC_RXBD_OR;
+                ethoc_interrupt(eth, ETHOC_INT_TXE);
+            }
         }
+        free(buffer);
 
         //printf("rx bd: %d read: %zd\n", eth->cur_rxbd, read);
 
@@ -550,21 +556,10 @@ err_read:
             ++eth->cur_txbd;
         }
 
-        ptrdiff_t written = 0;
-        if (bd->ptr >= eth->hart->mem.begin && bd->ptr < eth->hart->mem.begin + eth->hart->mem.size) {
-            uint16_t to_write = (bd->data >> 16) & 0xffff;
-#ifndef USE_VMSWAP
-            void *buf = eth->hart->mem.data + bd->ptr;
-            written = tap_send(&eth->pollev.dev, buf, to_write);
-#else
-            void *buf = malloc(to_write);
-            if (buf) {
-                riscv32_physmem_op(eth->hart, bd->ptr, buf, to_write, MMU_READ);
-                written = tap_send(&eth->pollev.dev, buf, to_write);
-                free(buf);
-            }
-#endif
-            /* Need to set the flag after transmission. Should we insert barrier? */
+        uint16_t to_write = (bd->data >> 16) & 0xffff;
+        void* buffer = safe_malloc(to_write);
+        if (rvvm_read_ram(eth->machine, buffer, bd->ptr, to_write)) {
+            ptrdiff_t written = tap_send(&eth->pollev.dev, buffer, to_write);
             bd->data &= ~ETHOC_TXBD_RD;
             if (written < 0) {
                 bd->data |= ETHOC_TXBD_RL;
@@ -578,6 +573,7 @@ err_read:
             bd->data |= ETHOC_TXBD_CS;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
         }
+        free(buffer);
 
         if (bd->data & ETHOC_BD_IRQ) {
             ethoc_interrupt(eth, ETHOC_INT_TXB);
@@ -609,15 +605,20 @@ static int ethoc_pollevent_check(void *arg) {
     return ret;
 }
 
-void ethoc_init(rvvm_hart_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq)
+static rvvm_mmio_type_t ethoc_dev_type = {
+    .name = "ethernet_oc",
+};
+
+void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
 {
-    struct ethoc_dev *eth = (struct ethoc_dev *) malloc(sizeof(struct ethoc_dev));
+    struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
     if (eth == NULL) {
         return;
     }
 
-    int err = tap_open(tap_name, &eth->pollev.dev);
+    int err = tap_open(NULL/*tap_name*/, &eth->pollev.dev);
     if (err < 0) {
+        free(eth);
         return;
     }
 
@@ -626,21 +627,29 @@ void ethoc_init(rvvm_hart_t *vm, const char *tap_name, paddr_t regs_base_addr, v
 
     eth->intc_data = intc_data;
     eth->irq = irq;
-    eth->hart = vm;
+    eth->machine = machine;
 
     if (!tap_pollevent_init(&eth->pollev, eth, ethoc_pollevent_check, ethoc_pollevent)) {
-        goto err;
+        free(eth);
+        return;
     }
 
     eth->mdio.phyid = 0;
     eth->mdio.dev = &eth->pollev.dev;
 
-    riscv32_mmio_add_device(vm, regs_base_addr, regs_base_addr + 0x800, ethoc_data_mmio_handler, eth);
-
+    rvvm_mmio_dev_t ethoc_dev = {0};
+    ethoc_dev.min_op_size = 4;
+    ethoc_dev.max_op_size = 4;
+    ethoc_dev.read = ethoc_data_mmio_read;
+    ethoc_dev.write = ethoc_data_mmio_write;
+    ethoc_dev.type = &ethoc_dev_type;
+    ethoc_dev.begin = base_addr;
+    ethoc_dev.end = base_addr + 0x800;
+    ethoc_dev.data = eth;
+    rvvm_attach_mmio(machine, &ethoc_dev);
+    
+    // TODO: this leaks thread handle, needs proper managing
     thread_create(tap_workthread, &eth->pollev);
-    return;
-err:
-    free(eth);
 }
 
 #endif

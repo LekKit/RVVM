@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "bit_ops.h"
 #include "riscv_cpu.h"
-#include "riscv32_mmu.h"
+#include "riscv_mmu.h"
 
 static void riscv_i_lui(rvvm_hart_t *vm, const uint32_t instruction)
 {
@@ -243,11 +243,8 @@ static void riscv_i_lb(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val;
-
-    if (riscv_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_READ)) {
-        riscv_write_register(vm, rds, sign_extend(val, 8));
-    }
+    
+    riscv_load_s8(vm, addr, rds);
 }
 
 static void riscv_i_lh(rvvm_hart_t *vm, const uint32_t instruction)
@@ -258,11 +255,8 @@ static void riscv_i_lh(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint16_t)];
-
-    if (riscv_mem_op(vm, addr, val, sizeof(uint16_t), MMU_READ)) {
-        riscv_write_register(vm, rds, sign_extend(read_uint16_le(val), 16));
-    }
+    
+    riscv_load_s16(vm, addr, rds);
 }
 
 static void riscv_i_lwu(rvvm_hart_t *vm, const uint32_t instruction)
@@ -274,11 +268,8 @@ static void riscv_i_lwu(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint32_t)];
-
-    if (riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_READ)) {
-        riscv_write_register(vm, rds, read_uint32_le(val));
-    }
+    
+    riscv_load_u32(vm, addr, rds);
 }
 
 static void riscv_i_lbu(rvvm_hart_t *vm, const uint32_t instruction)
@@ -289,11 +280,8 @@ static void riscv_i_lbu(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val;
-
-    if (riscv_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_READ)) {
-        riscv_write_register(vm, rds, val);
-    }
+    
+    riscv_load_u8(vm, addr, rds);
 }
 
 static void riscv_i_lhu(rvvm_hart_t *vm, const uint32_t instruction)
@@ -304,11 +292,8 @@ static void riscv_i_lhu(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint16_t)];
-
-    if (riscv_mem_op(vm, addr, val, sizeof(uint16_t), MMU_READ)) {
-        riscv_write_register(vm, rds, read_uint16_le(val));
-    }
+    
+    riscv_load_u16(vm, addr, rds);
 }
 
 static void riscv_i_sb(rvvm_hart_t *vm, const uint32_t instruction)
@@ -320,9 +305,8 @@ static void riscv_i_sb(rvvm_hart_t *vm, const uint32_t instruction)
                                (bit_cut(instruction, 25, 7) << 5), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val = riscv_read_register(vm, rs2);
-
-    riscv_mem_op(vm, addr, &val, sizeof(uint8_t), MMU_WRITE);
+    
+    riscv_store_u8(vm, addr, rs2);
 }
 
 static void riscv_i_sh(rvvm_hart_t *vm, const uint32_t instruction)
@@ -334,10 +318,8 @@ static void riscv_i_sh(rvvm_hart_t *vm, const uint32_t instruction)
                                (bit_cut(instruction, 25, 7) << 5), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint16_t)];
-    write_uint16_le(val, riscv_read_register(vm, rs2));
-
-    riscv_mem_op(vm, addr, val, sizeof(uint16_t), MMU_WRITE);
+    
+    riscv_store_u16(vm, addr, rs2);
 }
 
 static void riscv_i_sw(rvvm_hart_t *vm, const uint32_t instruction)
@@ -349,10 +331,8 @@ static void riscv_i_sw(rvvm_hart_t *vm, const uint32_t instruction)
                                (bit_cut(instruction, 25, 7) << 5), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
-    uint8_t val[sizeof(uint32_t)];
-    write_uint32_le(val, riscv_read_register(vm, rs2));
-
-    riscv_mem_op(vm, addr, val, sizeof(uint32_t), MMU_WRITE);
+    
+    riscv_store_u32(vm, addr, rs2);
 }
 
 static void riscv_i_addi(rvvm_hart_t *vm, const uint32_t instruction)
@@ -508,44 +488,44 @@ static void riscv_i_and(rvvm_hart_t *vm, const uint32_t instruction)
     // Implement RV64I-only instructions
 #endif
 
-void riscv_i_init()
+void riscv_i_init(rvvm_hart_t* vm)
 {
-    riscv_install_opcode_UJ(RVI_LUI, riscv_i_lui);
-    riscv_install_opcode_UJ(RVI_AUIPC, riscv_i_auipc);
-    riscv_install_opcode_UJ(RVI_JAL, riscv_i_jal);
+    riscv_install_opcode_UJ(vm, RVI_LUI, riscv_i_lui);
+    riscv_install_opcode_UJ(vm, RVI_AUIPC, riscv_i_auipc);
+    riscv_install_opcode_UJ(vm, RVI_JAL, riscv_i_jal);
 
-    riscv_install_opcode_R(RVI_SLLI, riscv_i_slli);
-    riscv_install_opcode_R(RVI_SRLI_SRAI, riscv_i_srli_srai);
-    riscv_install_opcode_R(RVI_ADD_SUB, riscv_i_add_sub);
-    riscv_install_opcode_R(RVI_SRL_SRA, riscv_i_srl_sra);
-    riscv_install_opcode_R(RVI_SLL, riscv_i_sll);
-    riscv_install_opcode_R(RVI_SLT, riscv_i_slt);
-    riscv_install_opcode_R(RVI_SLTU, riscv_i_sltu);
-    riscv_install_opcode_R(RVI_XOR, riscv_i_xor);
-    riscv_install_opcode_R(RVI_OR, riscv_i_or);
-    riscv_install_opcode_R(RVI_AND, riscv_i_and);
+    riscv_install_opcode_R(vm, RVI_SLLI, riscv_i_slli);
+    riscv_install_opcode_R(vm, RVI_SRLI_SRAI, riscv_i_srli_srai);
+    riscv_install_opcode_R(vm, RVI_ADD_SUB, riscv_i_add_sub);
+    riscv_install_opcode_R(vm, RVI_SRL_SRA, riscv_i_srl_sra);
+    riscv_install_opcode_R(vm, RVI_SLL, riscv_i_sll);
+    riscv_install_opcode_R(vm, RVI_SLT, riscv_i_slt);
+    riscv_install_opcode_R(vm, RVI_SLTU, riscv_i_sltu);
+    riscv_install_opcode_R(vm, RVI_XOR, riscv_i_xor);
+    riscv_install_opcode_R(vm, RVI_OR, riscv_i_or);
+    riscv_install_opcode_R(vm, RVI_AND, riscv_i_and);
 
-    riscv_install_opcode_ISB(RVI_JALR, riscv_i_jalr);
-    riscv_install_opcode_ISB(RVI_BEQ, riscv_i_beq);
-    riscv_install_opcode_ISB(RVI_BNE, riscv_i_bne);
-    riscv_install_opcode_ISB(RVI_BLT, riscv_i_blt);
-    riscv_install_opcode_ISB(RVI_BGE, riscv_i_bge);
-    riscv_install_opcode_ISB(RVI_BLTU, riscv_i_bltu);
-    riscv_install_opcode_ISB(RVI_BGEU, riscv_i_bgeu);
-    riscv_install_opcode_ISB(RVI_LB, riscv_i_lb);
-    riscv_install_opcode_ISB(RVI_LH, riscv_i_lh);
-    riscv_install_opcode_ISB(RVI_LW, riscv_i_lwu);
-    riscv_install_opcode_ISB(RVI_LBU, riscv_i_lbu);
-    riscv_install_opcode_ISB(RVI_LHU, riscv_i_lhu);
-    riscv_install_opcode_ISB(RVI_SB, riscv_i_sb);
-    riscv_install_opcode_ISB(RVI_SH, riscv_i_sh);
-    riscv_install_opcode_ISB(RVI_SW, riscv_i_sw);
-    riscv_install_opcode_ISB(RVI_ADDI, riscv_i_addi);
-    riscv_install_opcode_ISB(RVI_SLTI, riscv_i_slti);
-    riscv_install_opcode_ISB(RVI_SLTIU, riscv_i_sltiu);
-    riscv_install_opcode_ISB(RVI_XORI, riscv_i_xori);
-    riscv_install_opcode_ISB(RVI_ORI, riscv_i_ori);
-    riscv_install_opcode_ISB(RVI_ANDI, riscv_i_andi);
+    riscv_install_opcode_ISB(vm, RVI_JALR, riscv_i_jalr);
+    riscv_install_opcode_ISB(vm, RVI_BEQ, riscv_i_beq);
+    riscv_install_opcode_ISB(vm, RVI_BNE, riscv_i_bne);
+    riscv_install_opcode_ISB(vm, RVI_BLT, riscv_i_blt);
+    riscv_install_opcode_ISB(vm, RVI_BGE, riscv_i_bge);
+    riscv_install_opcode_ISB(vm, RVI_BLTU, riscv_i_bltu);
+    riscv_install_opcode_ISB(vm, RVI_BGEU, riscv_i_bgeu);
+    riscv_install_opcode_ISB(vm, RVI_LB, riscv_i_lb);
+    riscv_install_opcode_ISB(vm, RVI_LH, riscv_i_lh);
+    riscv_install_opcode_ISB(vm, RVI_LW, riscv_i_lwu);
+    riscv_install_opcode_ISB(vm, RVI_LBU, riscv_i_lbu);
+    riscv_install_opcode_ISB(vm, RVI_LHU, riscv_i_lhu);
+    riscv_install_opcode_ISB(vm, RVI_SB, riscv_i_sb);
+    riscv_install_opcode_ISB(vm, RVI_SH, riscv_i_sh);
+    riscv_install_opcode_ISB(vm, RVI_SW, riscv_i_sw);
+    riscv_install_opcode_ISB(vm, RVI_ADDI, riscv_i_addi);
+    riscv_install_opcode_ISB(vm, RVI_SLTI, riscv_i_slti);
+    riscv_install_opcode_ISB(vm, RVI_SLTIU, riscv_i_sltiu);
+    riscv_install_opcode_ISB(vm, RVI_XORI, riscv_i_xori);
+    riscv_install_opcode_ISB(vm, RVI_ORI, riscv_i_ori);
+    riscv_install_opcode_ISB(vm, RVI_ANDI, riscv_i_andi);
 #ifdef RV64
     // Install RV64I-only instructions
 #endif

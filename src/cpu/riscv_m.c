@@ -168,16 +168,16 @@ static void riscv_m_remu(rvvm_hart_t *vm, const uint32_t instruction)
     // Implement RV64M-only instructions
 #endif
 
-void riscv_m_init()
+void riscv_m_init(rvvm_hart_t* vm)
 {
-    riscv_install_opcode_R(RVM_MUL, riscv_m_mul);
-    riscv_install_opcode_R(RVM_MULH, riscv_m_mulh);
-    riscv_install_opcode_R(RVM_MULHSU, riscv_m_mulhsu);
-    riscv_install_opcode_R(RVM_MULHU, riscv_m_mulhu);
-    riscv_install_opcode_R(RVM_DIV, riscv_m_div);
-    riscv_install_opcode_R(RVM_DIVU, riscv_m_divu);
-    riscv_install_opcode_R(RVM_REM, riscv_m_rem);
-    riscv_install_opcode_R(RVM_REMU, riscv_m_remu);
+    riscv_install_opcode_R(vm, RVM_MUL, riscv_m_mul);
+    riscv_install_opcode_R(vm, RVM_MULH, riscv_m_mulh);
+    riscv_install_opcode_R(vm, RVM_MULHSU, riscv_m_mulhsu);
+    riscv_install_opcode_R(vm, RVM_MULHU, riscv_m_mulhu);
+    riscv_install_opcode_R(vm, RVM_DIV, riscv_m_div);
+    riscv_install_opcode_R(vm, RVM_DIVU, riscv_m_divu);
+    riscv_install_opcode_R(vm, RVM_REM, riscv_m_rem);
+    riscv_install_opcode_R(vm, RVM_REMU, riscv_m_remu);
 #ifdef RV64
     // Install RV64M-only instructions
 #endif

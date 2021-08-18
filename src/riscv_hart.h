@@ -62,6 +62,9 @@ void riscv_hart_spawn(rvvm_hart_t *vm);
 // Signals interrupt to the hart, may be called anywhere
 void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq_mask);
 
+// Clears interrupt in IP csr of the hart, may be called anywhere
+void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq_mask);
+
 // Forces hart to check timecmp register for interrupts
 void riscv_hart_check_timer(rvvm_hart_t* vm);
 

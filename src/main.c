@@ -17,209 +17,276 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "compiler.h"
-#include <string.h>
-
 #include "mem_ops.h"
-#include "riscv.h"
-#include "riscv32.h"
-#include "riscv32i_registers.h"
-#include "riscv32_mmu.h"
-#include "riscv32_csr.h"
-#include "elf_load.h"
+#include "rvvm.h"
+//#include "devices/ata.h"
+
+#include <stdio.h>
+
+#include "devices/clint.h"
+#include "devices/plic.h"
+#include "devices/ns16550a.h"
 #include "devices/ata.h"
+#include "devices/fb_window.h"
+#include "devices/ps2-altera.h"
+#include "devices/ps2-keyboard.h"
+#include "devices/ps2-mouse.h"
+
+#ifdef _WIN32
+// For unicode fix
+#include <windows.h>
+#endif
+
+#ifdef USE_NET
+#include "devices/eth-oc.h"
+#endif
+
+#ifndef VERSION
+#define VERSION "v0.4"
+#endif
 
 typedef struct {
     const char* bootrom;
+    const char* kernel;
     const char* dtb;
     const char* image;
-    bool is_linux;
+    size_t mem;
+    uint32_t smp;
+    bool rv64;
+    bool sbi_align_fix;
 } vm_args_t;
 
-size_t load_file_to_ram(rvvm_hart_t* vm, uint32_t addr, const char* filename)
+static size_t get_arg(const char** argv, const char** arg_name, const char** arg_val)
 {
-    FILE* file = fopen(filename, "rb");
-    size_t ret = 0;
-
-    if (file == NULL) {
-        printf("ERROR: Cannot open file %s.\n", filename);
-        return ret;
+    if (argv[0][0] == '-') {
+        size_t offset = (argv[0][1] == '-') ? 2 : 1;
+        *arg_name = &argv[0][offset];
+        for (size_t i=0; argv[0][offset + i] != 0; ++i) {
+            if (argv[0][offset + i] == '=') {
+                // Argument format -arg=val
+                *arg_val = &argv[0][offset + i + 1];
+                return 1;
+            }
+        }
+        
+        if (argv[1] == NULL || argv[1][0] == '-') {
+            // Argument format -arg
+            *arg_val = "";
+            return 1;
+        } else {
+            // Argument format -arg val
+            *arg_val = argv[1];
+            return 2;
+        }
+    } else {
+        *arg_name = "bootrom";
+        *arg_val = argv[0];
+        return 1;
     }
-
-#ifdef USE_VMSWAP
-    char *buf = malloc(BUFSIZ);
-    if (!buf)
-    {
-	    printf("ERROR: Unable to allocate buffer for file %s\n", filename);
-	    goto err_fclose;
-    }
-#endif
-
-    size_t to_end = vm->mem.begin + vm->mem.size - addr;
-    size_t buffer_size = to_end < BUFSIZ ? to_end : BUFSIZ;
-
-    while (addr >= vm->mem.begin && addr + buffer_size <= vm->mem.begin + vm->mem.size)
-    {
-#ifdef USE_VMSWAP
-	    size_t bytes_read = fread(buf, 1, buffer_size, file);
-	    riscv32_physmem_op(vm, addr, (vmptr_t)buf, buffer_size, MMU_WRITE);
-#else
-	    size_t bytes_read = fread(vm->mem.data + addr, 1, buffer_size, file);
-#endif
-	    ret += bytes_read;
-	    addr += bytes_read;
-
-	    if (buffer_size != bytes_read)
-	    {
-		    break;
-	    }
-    }
-
-    if (!feof(file))
-    {
-        printf("ERROR: File %s does not fit in VM RAM. Bytes read: 0x%zx\n", filename, ret);
-        ret = 0;
-        goto err_free;
-    }
-
-err_free:
-#ifdef USE_VMSWAP
-    free(buf);
-err_fclose:
-#endif
-    fclose(file);
-    return ret;
 }
 
-void parse_args(int argc, char** argv, vm_args_t* args)
+static inline size_t mem_suffix_shift(char suffix)
 {
-    for (int i=1; i<argc; ++i) {
-        if (strncmp(argv[i], "-dtb=", 5) == 0) {
-    		args->dtb = argv[i] + 5;
-    	} else if (strncmp(argv[i], "-image=", 7) == 0) {
-    		args->image = argv[i] + 7;
-        } else if (strcmp(argv[i], "--linux") == 0) {
-    		args->is_linux = true;
+    switch (suffix) {
+        case 'k': return 10;
+        case 'K': return 10;
+        case 'M': return 20;
+        case 'G': return 30;
+        default: return 0;
+    }
+}
+
+static inline bool cmp_arg(const char* arg, const char* name)
+{
+    for (size_t i=0; arg[i] != 0 && arg[i] != '='; ++i) {
+        if (arg[i] != name[i]) return false;
+    }
+    return true;
+}
+
+static void print_help()
+{
+#ifdef _WIN32
+    const wchar_t* help = L"\n"
+#else
+    printf("\n"
+#endif
+           "RVVM "VERSION"\n"
+           "\n"
+           "  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓\n"
+           " ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒\n"
+           " ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░\n"
+           " ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ \n"
+           " ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒\n"
+           " ░ ▒▓ ░▒▓░   ░ ▐░     ░ ▐░  ░ ▒░   ░  ░\n"
+           "   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░\n"
+           "   ░░   ░      ░░       ░░  ░      ░   \n"
+           "    ░           ░        ░         ░   \n"
+           "               ░        ░              \n"
+           "\n"
+           "Usage: rvvm [-mem 256M] [-smp 1] [-dtb ...] ... [bootrom]\n"
+           "\n"
+           "    -mem <amount>    Memory amount, default: 256M\n"
+           "    -smp <count>     Cores count, default: 1\n"
+           "    -rv64            Enable 64-bit RISC-V, 32-bit by default\n"
+           "    -dtb <file>      Pass Device Tree Blob to the machine\n"
+           "    -image <file>    Attach hard drive with raw image\n"
+           "    -verbose         Enable verbose logging\n"
+           "    -help            Show this help message\n"
+           "    [bootrom]        Machine bootrom (SBI, BBL, etc)\n"
+#ifdef _WIN32
+           "\n";
+    WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), help, wcslen(help), NULL, NULL);
+#else
+           "\n");
+#endif
+}
+
+static bool parse_args(int argc, const char** argv, vm_args_t* args)
+{
+    const char* arg_name = "";
+    const char* arg_val = "";
+    
+    // Default params: 1 core, 256M ram
+    args->smp = 1;
+    args->mem = 256 << 20;
+    
+    for (int i=1; i<argc;) {
+        i += get_arg(argv + i, &arg_name, &arg_val);
+        if (cmp_arg(arg_name, "dtb")) {
+            args->dtb = arg_val;
+        } else if (cmp_arg(arg_name, "image")) {
+            args->image = arg_val;
+        } else if (cmp_arg(arg_name, "bootrom")) {
+            args->bootrom = arg_val;
+        } else if (cmp_arg(arg_name, "kernel")) {
+            args->kernel = arg_val;
+        } else if (cmp_arg(arg_name, "mem")) {
+            if (arg_name[0])
+                args->mem = ((size_t)atoi(arg_val)) << mem_suffix_shift(arg_val[strlen(arg_val)-1]);
+        } else if (cmp_arg(arg_name, "smp")) {
+            args->smp = atoi(arg_val);
+            if (args->smp > 1024) {
+                rvvm_error("Invalid cores count specified: %s", arg_val);
+                return false;
+            }
+        } else if (cmp_arg(arg_name, "rv64")) {
+            args->rv64 = true;
+        } else if (cmp_arg(arg_name, "verbose")) {
+            rvvm_set_loglevel(LOG_INFO);
+        } else if (cmp_arg(arg_name, "help")
+                 || cmp_arg(arg_name, "h")
+                 || cmp_arg(arg_name, "H")) {
+            print_help();
+            return false;
         } else {
-            args->bootrom = argv[i];
+            rvvm_error("Unknown argument \"%s\"\n", arg_name);
+            return false;
         }
     }
+    return true;
 }
 
-int rvvm_run_with_args(vm_args_t args)
+static bool load_file_to_ram(rvvm_machine_t* machine, paddr_t addr, const char* filename)
 {
-    rvvm_hart_t* vm = riscv32_create_vm();
-    if (vm == NULL)
-    {
-        printf("ERROR: VM creation failed.\n");
+    FILE* file = fopen(filename, "rb");
+    size_t fsize;
+    uint8_t* buffer;
+    
+    if (file == NULL) {
+        rvvm_error("Cannot open file %s", filename);
+        return false;
+    }
+    
+    fseek(file, 0, SEEK_END);
+    fsize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    buffer = safe_malloc(fsize);
+    
+    fread(buffer, fsize, 1, file);
+    
+    if (!rvvm_write_ram(machine, addr, buffer, fsize)) {
+        rvvm_error("File %s does not fit in RAM", filename);
+        fclose(file);
+        free(buffer);
+        return false;
+    }
+
+    fclose(file);
+    free(buffer);
+    return true;
+}
+
+static int rvvm_run_with_args(vm_args_t args)
+{
+    rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
+    if (machine == NULL) {
+        rvvm_error("VM creation failed");
+        return 1;
+    } else if (!load_file_to_ram(machine, machine->mem.begin, args.bootrom)) {
+        rvvm_error("Failed to load bootrom");
         return 1;
     }
 
-    if (args.is_linux)
-    {
-	    if (!riscv32_elf_load_by_path(vm, args.bootrom, true, 0))
-	    {
-		printf("ERROR: Failed to load vmlinux ELF file.\n");
-		return 1;
-	    }
+    if (args.dtb) {
+        paddr_t dtb_addr = machine->mem.begin + machine->mem.size - 0x2000;
+
+        if (!load_file_to_ram(machine, dtb_addr, args.dtb)) {
+            rvvm_error("Failed to load DTB");
+            return 1;
+        }
+
+        // pass DTB address in a1 register of each hart
+        vector_foreach(machine->harts, i) {
+            vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
+        }
     }
-    else if (load_file_to_ram(vm, vm->mem.begin, args.bootrom) == 0)
-    {
-        printf("ERROR: Failed to load bootrom.\n");
-        return 1;
-    }
-
-    if (args.dtb)
-    {
-	    size_t dtb_addr = vm->mem.begin + vm->mem.size - 0x8000000;
-
-	    // Explicitly set a0 to 0 as boot hart
-	    riscv32i_write_register_u(vm, REGISTER_X10, 0);
-
-	    // DTB is aligned by 2MB
-	    uint32_t dts = load_file_to_ram(vm, dtb_addr, args.dtb);
-	    if (dts == 0)
-	    {
-		    printf("ERROR: Failed to load DTB.\n");
-		    return 1;
-	    }
-
-	    printf("DTB loaded at: 0x%zx size: %"PRId32"\n", dtb_addr, dts);
-
-	    // pass DTB address in a1 register
-	    riscv32i_write_register_u(vm, REGISTER_X11, dtb_addr);
-
-	    if (args.is_linux)
-	    {
-		    uint32_t medeleg = -1;
-		    riscv32_csr_op(vm, 0x302, &medeleg, CSR_SWAP);
-
-		    vm->priv_mode = PRIVILEGE_SUPERVISOR;
-	    }
-	    else
-	    {
-		    // OpenSBI FW_DYNAMIC struct passed in a2 register
-		    if (vm->mem.size - dtb_addr + dts >= 24)
-		    {
-			    paddr_t paddr = vm->mem.begin + vm->mem.size - 0x200000 + dts;
-#ifdef USE_VMSWAP
-			    uint32_t addr[24];
-#else
-			    void* addr = vm->mem.data + paddr;
-#endif
-			    write_uint32_le((vmptr_t)addr, 0x4942534F); // magic
-			    write_uint32_le((vmptr_t)addr+4, 0x2); // version
-			    write_uint32_le((vmptr_t)addr+8, 0x0); // next_addr
-			    write_uint32_le((vmptr_t)addr+12, 0x1); // next_mode
-			    write_uint32_le((vmptr_t)addr+16, 0x1); // options
-			    write_uint32_le((vmptr_t)addr+20, 0x0); // boot_hart
-#ifdef USE_VMSWAP
-			    riscv32_physmem_op(vm, paddr, (vmptr_t)addr, sizeof(addr), MMU_WRITE);
-#endif
-			    riscv32i_write_register_u(vm, REGISTER_X12, paddr);
-		    }
-		    else
-		    {
-			    printf("WARN: No space for FW_DYNAMIC struct\n");
-		    }
-
-#if 0
-		    //XXX - Linux raw image
-		    uint32_t medeleg = -1;
-		    riscv32_csr_op(vm, 0x302, &medeleg, CSR_SWAP);
-		    vm->priv_mode = PRIVILEGE_SUPERVISOR;
-#endif
-	    }
-    }
-
+    
     if (args.image) {
-	    FILE *fp = fopen(args.image, "rb+");
-	    if (fp == NULL) {
-		    printf("Unable to open image file %s\n", args.image);
-	    } else {
-		    ata_init(vm, 0x40000000, 0x40001000, fp, NULL);
-	    }
+        FILE *fp = fopen(args.image, "rb+");
+        if (fp == NULL) {
+            rvvm_error("Unable to open image file %s", args.image);
+        } else {
+            ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
+        }
     }
+    
+    clint_init(machine, 0x2000000);
+    ns16550a_init(machine, 0x10000000);
+    
+    void *plic_data = plic_init(machine, 0xC000000);
 
+    static struct ps2_device ps2_mouse;
+    ps2_mouse = ps2_mouse_create();
+    altps2_init(machine, 0x20000000, plic_data, 1, &ps2_mouse);
 
-    riscv32_run(vm);
-
-    riscv32_destroy_vm(vm);
+    static struct ps2_device ps2_keyboard;
+    ps2_keyboard = ps2_keyboard_create();
+    altps2_init(machine, 0x20001000, plic_data, 2, &ps2_keyboard);
+    
+    init_fb(machine, 0x30000000, 640, 480, &ps2_mouse, &ps2_keyboard);
+#ifdef USE_NET
+    ethoc_init(machine, 0x21000000, plic_data, 3);
+#endif
+    rvvm_enable_builtin_eventloop(false);
+    rvvm_start_machine(machine);
+    rvvm_run_eventloop(); // Returns on machine shutdown
+    
+    rvvm_free_machine(machine);
+    
     return 0;
 }
 
-int main(int argc, char** argv)
+int main(int argc, const char** argv)
 {
     vm_args_t args = {0};
-#ifdef _WIN32
+    rvvm_set_loglevel(LOG_WARN);
+    
     // let the vm be run by simple double-click, heh
-    args.dtb = "rvvm.dtb";
-    args.bootrom = "fw_payload.bin";
-    args.image = "rootfs.img";
-#endif
-    parse_args(argc, argv, &args);
-    if (args.bootrom == NULL)
-    {
-        printf("Usage: %s <bootrom> [--linux] [-dtb=<device.dtb>]\n", argv[0]);
+    if (!parse_args(argc, argv, &args)) return 0;
+    if (args.bootrom == NULL) {
+        printf("Usage: %s [-help] [-mem 256M] [-rv64] ... [bootrom]\n", argv[0]);
         return 0;
     }
 

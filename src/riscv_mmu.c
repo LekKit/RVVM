@@ -283,7 +283,7 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     }
 }
 
-static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, uint8_t size, paddr_t offset)
+static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, paddr_t offset, size_t size)
 {
     assert(dev->max_op_size >= dev->min_op_size);
     if (size < dev->min_op_size || (offset & (dev->min_op_size - 1))) {
@@ -304,7 +304,7 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rw
         return riscv_mmio_unaligned_op(dev, rwfunc, dest, size_half, offset) &&
                riscv_mmio_unaligned_op(dev, rwfunc, ((vmptr_t)dest) + size_half, size_half, offset + size_half);
     }
-    return rwfunc(dev, dest, size, offset);
+    return rwfunc(dev, dest, offset, size);
 }
 
 // Receives any operation on physical address space out of RAM region
@@ -316,7 +316,8 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
-        if (paddr >= dev->begin && paddr <= dev->end) {
+        if (paddr >= dev->begin && paddr < dev->end) {
+            //rvvm_info("Hart %p accessing MMIO at 0x%08x", vm, paddr);
             // Found the device
             offset = paddr - dev->begin;
             if (access == MMU_WRITE) {
@@ -341,9 +342,10 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
             }
             
             if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (dev->min_op_size-1)))) {
-                return riscv_mmio_unaligned_op(dev, rwfunc, dest, size, offset);
+                rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
+                return riscv_mmio_unaligned_op(dev, rwfunc, dest, offset, size);
             }
-            return rwfunc(dev, dest, size, offset);
+            return rwfunc(dev, dest, offset, size);
         }
     }
     
@@ -374,6 +376,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
     }
 
     if (riscv_mmu_translate(vm, addr, &paddr, access)) {
+        //rvvm_info("Hart %p accessing physmem at 0x%08x", vm, paddr);
         ptr = riscv_phys_translate(vm, paddr);
         if (ptr) {
             // Physical address in main memory, cache address translation
@@ -495,7 +498,7 @@ NOINLINE bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst
         if ((buff[0] & 0x3) == 0x3) {
             // This is a 4-byte instruction scattered between pages
             // Fetch second part (may trigger a pagefault, that's the point)
-            if (!riscv_mmu_op(vm, addr, buff + 2, 2, MMU_EXEC)) return false;
+            if (!riscv_mmu_op(vm, addr + 2, buff + 2, 2, MMU_EXEC)) return false;
         }
         *inst = read_uint32_le_m(buff);
         return true;
