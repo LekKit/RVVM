@@ -530,7 +530,7 @@ void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_
         ata->drive[0].fp = NULL;
     }
     ata->drive[1].fp = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[1].fp), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
         ata->drive[1].fp = NULL;
     }
@@ -552,7 +552,6 @@ void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_
     ata_ctl.read = ata_ctl_mmio_read_handler,
     ata_ctl.write = ata_ctl_mmio_write_handler,
     ata_ctl.type = &ata_ctl_dev_type,
-    ata_ctl.data = ata;
     ata_ctl.begin = ctl_base_addr;
     ata_ctl.end = ctl_base_addr + ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT);
     ata_ctl.data = ata;
