@@ -994,11 +994,10 @@ void riscv_f_enable(rvvm_hart_t* vm, bool enable)
 
 #else
 
-#include <stdbool.h>
-
 #ifdef RVD
 void riscv_d_enable(rvvm_hart_t* vm, bool enable) { UNUSED(vm); UNUSED(enable); }
 #else
 void riscv_f_enable(rvvm_hart_t* vm, bool enable) { UNUSED(vm); UNUSED(enable); }
 #endif
+
 #endif

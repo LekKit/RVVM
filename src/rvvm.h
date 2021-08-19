@@ -75,6 +75,8 @@ enum
     REGISTERS_MAX
 };
 
+#define FPU_REGISTERS_MAX REGISTERS_MAX
+
 enum
 {
     PRIVILEGE_USER,
