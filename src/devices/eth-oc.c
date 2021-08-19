@@ -612,10 +612,6 @@ static rvvm_mmio_type_t ethoc_dev_type = {
 void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
-    if (eth == NULL) {
-        return;
-    }
-
     int err = tap_open(NULL/*tap_name*/, &eth->pollev.dev);
     if (err < 0) {
         free(eth);
