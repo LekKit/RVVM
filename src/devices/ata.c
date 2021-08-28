@@ -23,6 +23,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "ata.h"
 #include "rvvm_types.h"
 
+/* On Windows, ftell/fseek use 32-bit offsets,
+ * this breaks when mounting >=4GB images.
+ * Using _fseeki64, _ftelli64 therefore
+ */
+
+#ifdef _WIN32
+#define fseek _fseeki64
+#define ftell _ftelli64
+#endif
+
 /* Data registers */
 #define ATA_REG_DATA 0x00
 #define ATA_REG_ERR 0x01 /* or FEATURE */
@@ -477,7 +487,7 @@ static size_t get_img_size(FILE *fp)
 {
     fseek(fp, 0, SEEK_END);
 
-    long size = ftell(fp);
+    long long size = ftell(fp);
     if (size < 0) {
         printf("Unable to get ATA disk size\n");
         return 0;
