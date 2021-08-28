@@ -1,6 +1,8 @@
 /*
-main.c - Entry point
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
+main.c - RVVM Entry point, API example
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "mem_ops.h"
 #include "rvvm.h"
-//#include "devices/ata.h"
 
 #include <stdio.h>
 
@@ -146,13 +147,15 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
 {
     const char* arg_name = "";
     const char* arg_val = "";
+    uint8_t argpair;
     
     // Default params: 1 core, 256M ram
     args->smp = 1;
     args->mem = 256 << 20;
     
     for (int i=1; i<argc;) {
-        i += get_arg(argv + i, &arg_name, &arg_val);
+        argpair = get_arg(argv + i, &arg_name, &arg_val);
+        i += argpair;
         if (cmp_arg(arg_name, "dtb")) {
             args->dtb = arg_val;
         } else if (cmp_arg(arg_name, "image")) {
@@ -172,8 +175,10 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
             }
         } else if (cmp_arg(arg_name, "rv64")) {
             args->rv64 = true;
+            if (argpair == 2) i--;
         } else if (cmp_arg(arg_name, "verbose")) {
             rvvm_set_loglevel(LOG_INFO);
+            if (argpair == 2) i--;
         } else if (cmp_arg(arg_name, "help")
                  || cmp_arg(arg_name, "h")
                  || cmp_arg(arg_name, "H")) {
@@ -230,7 +235,7 @@ static int rvvm_run_with_args(vm_args_t args)
     }
 
     if (args.dtb) {
-        paddr_t dtb_addr = machine->mem.begin + machine->mem.size - 0x2000;
+        paddr_t dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
 
         if (!load_file_to_ram(machine, dtb_addr, args.dtb)) {
             rvvm_error("Failed to load DTB");
@@ -243,10 +248,23 @@ static int rvvm_run_with_args(vm_args_t args)
         }
     }
     
+    if (args.kernel) {
+        // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
+        
+        // TODO: It's possible to move memory region 128k behind and put
+        // patched OpenSBI there, to save those precious 4MB
+        size_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
+        if (!load_file_to_ram(machine, machine->mem.begin + hugepage_offset, args.kernel)) {
+            rvvm_error("Failed to load kernel");
+            return 1;
+        }
+        rvvm_info("Kernel image loaded at 0x%08"PRIxXLEN, machine->mem.begin + (2 << 20));
+    }
+    
     if (args.image) {
         FILE *fp = fopen(args.image, "rb+");
         if (fp == NULL) {
-            rvvm_error("Unable to open image file %s", args.image);
+            rvvm_error("Unable to open hard drive image file %s", args.image);
         } else {
             ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
         }

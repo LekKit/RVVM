@@ -31,17 +31,9 @@ riscv_csr_handler_t riscv_csr_list[4096];
 
 #define CSR_MARCHID 0x5256564D // 'RVVM'
 
-#define CSR_GENERIC_MASK 0xFFFFFFFF
-
 // no N extension, U_x bits are hardwired to 0
-#ifdef USE_RV64
-#define CSR_MSTATUS_MASK 0xF007E79CC
-#define CSR_SSTATUS_MASK 0x3000C6122
-#else
-// No UXL/SXL fields
 #define CSR_MSTATUS_MASK 0x7E79CC
 #define CSR_SSTATUS_MASK 0x0C6122
-#endif
 
 #define CSR_STATUS_FS_MASK 0x6000
 
@@ -90,7 +82,24 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
 #else
     mask = bit_replace(mask, 13, 2, 0);
 #endif
+#ifdef USE_RV64
+    if (vm->rv64 && unlikely(bit_cut(*dest, 32, 6) ^ (bit_cut(*dest, 32, 6) >> 1))) {
+        // Changed XLEN somewhere
+        if (bit_cut(*dest, 32, 2) ^ (bit_cut(*dest, 32, 2) >> 1)) {
+            mask |= 0x300000000ULL;
+        }
+        if (bit_cut(*dest, 34, 2) ^ (bit_cut(*dest, 34, 2) >> 1)) {
+            mask |= 0xC00000000ULL;
+        }
+        if (bit_cut(*dest, 36, 2) ^ (bit_cut(*dest, 36, 2) >> 1)) {
+            mask |= 0x3000000000ULL;
+        }
+    }
+#endif
     csr_helper_masked(&vm->csr.status, dest, mask, op);
+#ifdef USE_RV64
+    if (vm->rv64) *dest |= vm->csr.status & 0x3F00000000ULL;
+#endif
 #ifdef USE_FPU
     uint8_t new_fs = bit_cut(vm->csr.status, 13, 2);
     bool fpu_enabled = new_fs != FS_OFF;
@@ -178,11 +187,11 @@ static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(op);
 #ifdef USE_RV64
-    if (vm->rv64 && !(*dest & CSR_MISA_RV64)) {
+    if (vm->rv64 && (*dest & CSR_MISA_RV32)) {
         vm->csr.isa &= (~CSR_MISA_RV64);
         vm->csr.isa |= CSR_MISA_RV32;
         riscv_update_xlen(vm);
-    } else if (!vm->rv64 && (*dest & CSR_MISA_RV64)) {
+    } else if (!vm->rv64 && (*dest & (CSR_MISA_RV64 >> 32))) {
         vm->csr.isa &= (~CSR_MISA_RV32);
         vm->csr.isa |= CSR_MISA_RV64;
         riscv_update_xlen(vm);
@@ -212,6 +221,7 @@ static bool riscv_csr_mie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ie, dest, CSR_MEIP_MASK, op);
     // handle possible interrupts?
+    riscv_restart_dispatch(vm);
     return true;
 }
 
@@ -249,6 +259,7 @@ static bool riscv_csr_mip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ip, dest, CSR_MEIP_MASK, op);
     // handle possible interrupts?
+    riscv_restart_dispatch(vm);
     return true;
 }
 
@@ -266,6 +277,7 @@ static bool riscv_csr_sie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ie, dest, CSR_SEIP_MASK, op);
     // handle possible interrupts?
+    riscv_restart_dispatch(vm);
     return true;
 }
 
@@ -303,6 +315,7 @@ static bool riscv_csr_sip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ip, dest, CSR_SEIP_MASK, op);
     // handle possible interrupts?
+    riscv_restart_dispatch(vm);
     return true;
 }
 
@@ -466,10 +479,18 @@ static bool riscv_csr_timeh(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     return true;
 }
 
+static bool riscv_csr_debug(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+{
+    UNUSED(op);
+    printf("Terminated with code: %d\n", (*dest) >> 1);
+    exit(0);
+    return true;
+}
+
 void riscv_csr_global_init()
 {
     for (size_t i=0; i<4096; ++i) riscv_csr_list[i] = riscv_csr_illegal;
-
+riscv_csr_list[0x800] = riscv_csr_debug;
     // Machine Information Registers
     riscv_csr_list[0xF11] = riscv_csr_zero;     // mvendorid
     riscv_csr_list[0xF12] = riscv_csr_marchid;  // marchid
@@ -555,12 +576,12 @@ void riscv_csr_global_init()
 #endif
 
     // User Counter/Timers
-    riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
+    //riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
     riscv_csr_list[0xC01] = riscv_csr_time;     // time
-    riscv_csr_list[0xC02] = riscv_csr_zero;     // instret
-    riscv_csr_list[0xC80] = riscv_csr_zero;     // cycleh
+    //riscv_csr_list[0xC02] = riscv_csr_zero;     // instret
+    //riscv_csr_list[0xC80] = riscv_csr_zero;     // cycleh
     riscv_csr_list[0xC81] = riscv_csr_timeh;    // timeh
-    riscv_csr_list[0xC82] = riscv_csr_zero;     // instreth
+    //riscv_csr_list[0xC82] = riscv_csr_zero;     // instreth
 
     for (size_t i=0xC03; i<0xC20; ++i)
         riscv_csr_list[i] = riscv_csr_zero;     // hpmcounter

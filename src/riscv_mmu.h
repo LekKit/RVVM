@@ -39,8 +39,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PAGE_PNMASK       (~0xFFFULL)
 
 #define TLB_MASK          (TLB_SIZE-1)
-#define TLB_VADDR(vaddr)  vaddr
-//#define TLB_VADDR(vaddr)  (vaddr & PAGE_MASK) // we may remove vaddr offset if needed
+#define TLB_VADDR(vaddr)  (vaddr)
+//#define TLB_VADDR(vaddr)  ((vaddr) & PAGE_MASK) // we may remove vaddr offset if needed
 
 // Init physical memory (be careful to not overlap MMIO regions!)
 bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size);

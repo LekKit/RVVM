@@ -165,7 +165,90 @@ static void riscv_m_remu(rvvm_hart_t *vm, const uint32_t instruction)
 }
 
 #ifdef RV64
-    // Implement RV64M-only instructions
+
+static void riscv64m_mulw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    int32_t reg1 = riscv_read_register_s(vm, rs1);
+    int32_t reg2 = riscv_read_register_s(vm, rs2);
+
+    vm->registers[rds] = (int32_t)(reg1 * reg2);
+}
+
+static void riscv64m_divw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    int32_t reg1 = riscv_read_register_s(vm, rs1);
+    int32_t reg2 = riscv_read_register_s(vm, rs2);
+    int32_t result = -1;
+
+    // overflow
+    if (reg1 == ((int32_t)0x80000000U) && reg2 == -1) {
+        result = ((int32_t)0x80000000U);
+    // division by zero check (we already setup result var for error)
+    } else if (reg2 != 0) {
+        result = reg1 / reg2;
+    }
+    vm->registers[rds] = result;
+}
+
+static void riscv64m_divuw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t reg1 = riscv_read_register_s(vm, rs1);
+    uint32_t reg2 = riscv_read_register_s(vm, rs2);
+    uint32_t result = -1;
+
+    // overflow
+    if (reg2 != 0) {
+        result = reg1 / reg2;
+    }
+    vm->registers[rds] = (int32_t)result;
+}
+
+static void riscv64m_remw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    int32_t reg1 = riscv_read_register_s(vm, rs1);
+    int32_t reg2 = riscv_read_register_s(vm, rs2);
+    int32_t result = reg1;
+
+    // overflow
+    if (reg1 == ((int32_t)0x80000000U) && reg2 == -1) {
+        result = 0;
+    // division by zero check (we already setup result var for error)
+    } else if (reg2 != 0) {
+        result = reg1 % reg2;
+    }
+
+    vm->registers[rds] = result;
+}
+
+static void riscv64m_remuw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t reg1 = riscv_read_register(vm, rs1);
+    uint32_t reg2 = riscv_read_register(vm, rs2);
+    uint32_t result = reg1;
+
+    // division by zero check (we already setup result var for error)
+    if (reg2 != 0) {
+        result = reg1 % reg2;
+    }
+
+    vm->registers[rds] = (int32_t)result;
+}
+
 #endif
 
 void riscv_m_init(rvvm_hart_t* vm)
@@ -179,6 +262,17 @@ void riscv_m_init(rvvm_hart_t* vm)
     riscv_install_opcode_R(vm, RVM_REM, riscv_m_rem);
     riscv_install_opcode_R(vm, RVM_REMU, riscv_m_remu);
 #ifdef RV64
-    // Install RV64M-only instructions
+    riscv_install_opcode_R(vm, RV64M_MULW, riscv64m_mulw);
+    riscv_install_opcode_R(vm, RV64M_DIVW, riscv64m_divw);
+    riscv_install_opcode_R(vm, RV64M_DIVUW, riscv64m_divuw);
+    riscv_install_opcode_R(vm, RV64M_REMW, riscv64m_remw);
+    riscv_install_opcode_R(vm, RV64M_REMUW, riscv64m_remuw);
+#else
+    // Remove RV64M-only instructions from decoder
+    riscv_install_opcode_R(vm, RV64M_MULW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64M_DIVW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64M_DIVUW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64M_REMW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64M_REMUW, riscv_illegal_insn);
 #endif
 }

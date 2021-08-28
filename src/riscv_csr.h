@@ -84,10 +84,14 @@ extern riscv_csr_handler_t riscv_csr_list[4096];
 static inline bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op)
 {
     uint8_t priv = bit_cut(csr_id, 8, 2);
-    if (priv > vm->priv_mode)
+    if (priv > vm->priv_mode) {
         return false;
-    else
+    } else {
+#ifdef USE_RV64
+        if (!vm->rv64) *dest = (uint32_t)*dest;
+#endif
         return riscv_csr_list[csr_id](vm, dest, op);
+    }
 }
 
 // Called once from priv_init

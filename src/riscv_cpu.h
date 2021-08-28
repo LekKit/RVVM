@@ -111,7 +111,9 @@ static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
     assert(reg < FPU_REGISTERS_MAX);
     // NOTE: for performance reasons/smaller JIT footprint, maybe
     // we should hardcode the FPU state to dirty?
+#ifdef USE_PRECISE_FS
     fpu_set_fs(vm, FS_DIRTY);
+#endif
     write_float_nanbox(&vm->fpu_registers[reg], val);
 }
 
@@ -124,7 +126,9 @@ static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
 static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
 {
     assert(reg < FPU_REGISTERS_MAX);
+#ifdef USE_PRECISE_FS
     fpu_set_fs(vm, FS_DIRTY);
+#endif
     vm->fpu_registers[reg] = val;
 }
 #endif
@@ -210,11 +214,13 @@ static inline regid_t riscv_c_reg(regid_t reg)
 #define RVC_ADDI4SPN     0x0
 #define RVC_FLD          0x4
 #define RVC_LW           0x8
-#define RVC_FLW          0xC
+#define RVC_FLW          0xC  // only exists on RV32!
 #define RVC_RESERVED1    0x10
 #define RVC_FSD          0x14
 #define RVC_SW           0x18
-#define RVC_FSW          0x1C
+#define RVC_FSW          0x1C // only exists on RV32!
+#define RV64C_SD         0x1C // Replaces FSW on RV64
+#define RV64C_LD         0xC  // Replaces FLW on RV64
 /* opcode 1 */
 #define RVC_ADDI         0x1  // this is also NOP when rs/rd == 0
 #define RVC_JAL          0x5  // only exists on RV32!
@@ -224,15 +230,18 @@ static inline regid_t riscv_c_reg(regid_t reg)
 #define RVC_J            0x15
 #define RVC_BEQZ         0x19
 #define RVC_BNEZ         0x1D
+#define RV64C_ADDIW      0x5  // Replaces JAL on RV64
 /* opcode 2 */
 #define RVC_SLLI         0x2
 #define RVC_FLDSP        0x6
 #define RVC_LWSP         0xA
-#define RVC_FLWSP        0xE
+#define RVC_FLWSP        0xE  // only exists on RV32!
 #define RVC_ALOPS2       0x12 // same as RVC_ALOPS1
 #define RVC_FSDSP        0x16
 #define RVC_SWSP         0x1A
-#define RVC_FSWSP        0x1E
+#define RVC_FSWSP        0x1E // only exists on RV32!
+#define RV64C_LDSP       0xE  // Replaces FLWSP on RV64
+#define RV64C_SDSP       0x1E // Replaces FSWSP on RV64
 
 /*
  * RVM Math instructions

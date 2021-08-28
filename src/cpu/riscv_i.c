@@ -72,11 +72,11 @@ static void riscv_i_srli_srai(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t shamt = bit_cut(instruction, 20, SHAMT_BITS);
     xlen_t src_reg = riscv_read_register(vm, rs1);
 
-    uint8_t funct7 = bit_cut(instruction, 25, 7);
-
-    if (funct7 == 0x20) {
+    uint8_t funct7 = bit_cut(instruction, 20 + SHAMT_BITS, 12 - SHAMT_BITS);
+    
+    if (funct7 == (0x400 >> SHAMT_BITS)) {
         riscv_write_register(vm, rds, ((sxlen_t)src_reg) >> shamt);
-    } else if (funct7 == 0x0) {
+    } else if (likely(funct7 == 0x0)) {
         riscv_write_register(vm, rds, src_reg >> shamt);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -95,7 +95,7 @@ static void riscv_i_add_sub(rvvm_hart_t *vm, const uint32_t instruction)
 
     if (funct7 == 0x20) {
         riscv_write_register(vm, rds, reg1 - reg2);
-    } else if (funct7 == 0x0) {
+    } else if (likely(funct7 == 0x0)) {
         riscv_write_register(vm, rds, reg1 + reg2);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -112,10 +112,10 @@ static void riscv_i_srl_sra(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
     uint8_t funct7 = bit_cut(instruction, 25, 7);
-
+    
     if (funct7 == 0x20) {
         riscv_write_register(vm, rds, ((sxlen_t)reg1) >> (reg2 & bit_mask(SHAMT_BITS)));
-    } else if (funct7 == 0x0) {
+    } else if (likely(funct7 == 0x0)) {
         riscv_write_register(vm, rds, reg1 >> (reg2 & bit_mask(SHAMT_BITS)));
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -259,17 +259,16 @@ static void riscv_i_lh(rvvm_hart_t *vm, const uint32_t instruction)
     riscv_load_s16(vm, addr, rds);
 }
 
-static void riscv_i_lwu(rvvm_hart_t *vm, const uint32_t instruction)
+static void riscv_i_lw(rvvm_hart_t *vm, const uint32_t instruction)
 {
-    // Read 32-bit unsigned integer from address rs1+offset (offset is signed) to rds
-    // In fact, this is lw on RV32, for RV64 there is a real lw with signext
+    // Read 32-bit signed integer from address rs1+offset (offset is signed) to rds
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
-    riscv_load_u32(vm, addr, rds);
+    riscv_load_s32(vm, addr, rds);
 }
 
 static void riscv_i_lbu(rvvm_hart_t *vm, const uint32_t instruction)
@@ -485,7 +484,137 @@ static void riscv_i_and(rvvm_hart_t *vm, const uint32_t instruction)
 }
 
 #ifdef RV64
-    // Implement RV64I-only instructions
+
+static void riscv64i_slliw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Left-shift rs1 by immediate, store to rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    uint8_t shamt = bit_cut(instruction, 20, 5);
+    uint32_t src_reg = vm->registers[rs1];
+
+    vm->registers[rds] = (int32_t)(src_reg << shamt);
+}
+
+static void riscv64i_srliw_sraiw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Perform right arithmetical/logical bitshift on rs1 by imm, store into rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    uint8_t shamt = bit_cut(instruction, 20, 5);
+    uint32_t src_reg = riscv_read_register(vm, rs1);
+
+    uint8_t funct7 = bit_cut(instruction, 25, 7);
+    
+    if (funct7 == 0x20) {
+        vm->registers[rds] = (int32_t)(((int32_t)src_reg) >> shamt);
+    } else if (likely(funct7 == 0x0)) {
+        vm->registers[rds] = (int32_t)(src_reg >> shamt);
+    } else {
+        riscv_illegal_insn(vm, instruction);
+    }
+}
+
+static void riscv64i_addw_subw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Add/sub rs2 to rs1, store to rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t reg1 = riscv_read_register(vm, rs1);
+    uint32_t reg2 = riscv_read_register(vm, rs2);
+
+    uint8_t funct7 = bit_cut(instruction, 25, 7);
+
+    if (funct7 == 0x20) {
+        vm->registers[rds] = (int32_t)(reg1 - reg2);
+    } else if (likely(funct7 == 0x0)) {
+        vm->registers[rds] = (int32_t)(reg1 + reg2);
+    } else {
+        riscv_illegal_insn(vm, instruction);
+    }
+}
+
+static void riscv64i_sllw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Left-shift rs1 by rs2, store to rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t reg1 = riscv_read_register(vm, rs1);
+    uint32_t reg2 = riscv_read_register(vm, rs2);
+
+    vm->registers[rds] = (int32_t)(reg1 << (reg2 & bit_mask(5)));
+}
+
+static void riscv64i_srlw_sraw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Perform right arithmetical/logical bitshift on rs1 by rs2, store into rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    uint32_t reg1 = riscv_read_register(vm, rs1);
+    uint32_t reg2 = riscv_read_register(vm, rs2);
+
+    uint8_t funct7 = bit_cut(instruction, 25, 7);
+    
+    if (instruction >> 25) {
+        riscv_write_register(vm, rds, ((int32_t)reg1) >> (reg2 & bit_mask(5)));
+    } else if (likely(funct7 == 0x0)) {
+        riscv_write_register(vm, rds, (int32_t)(reg1 >> (reg2 & bit_mask(5))));
+    } else {
+        riscv_illegal_insn(vm, instruction);
+    }
+}
+
+static void riscv64i_addiw(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Add signed immediate to rs1, store to rds (32 bit + signext)
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    uint32_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
+    uint32_t src_reg = riscv_read_register(vm, rs1);
+
+    vm->registers[rds] = (int32_t)(src_reg + imm);
+}
+
+static void riscv64i_lwu(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Read 32-bit unsigned integer from address rs1+offset (offset is signed) to rds
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    
+    riscv_load_u32(vm, addr, rds);
+}
+
+static void riscv64i_ld(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Read 64-bit integer from address rs1+offset (offset is signed) to rds
+    regid_t rds = bit_cut(instruction, 7, 5);
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    
+    riscv_load_u64(vm, addr, rds);
+}
+
+static void riscv64i_sd(rvvm_hart_t *vm, const uint32_t instruction)
+{
+    // Write 64-bit integer rs2 to address rs1+offset (offset is signed)
+    regid_t rs1 = bit_cut(instruction, 15, 5);
+    regid_t rs2 = bit_cut(instruction, 20, 5);
+    sxlen_t offset = sign_extend(bit_cut(instruction, 7, 5) |
+                                (bit_cut(instruction, 25, 7) << 5), 12);
+
+    xaddr_t addr = riscv_read_register(vm, rs1) + offset;
+    
+    riscv_store_u64(vm, addr, rs2);
+}
+
 #endif
 
 void riscv_i_init(rvvm_hart_t* vm)
@@ -494,8 +623,10 @@ void riscv_i_init(rvvm_hart_t* vm)
     riscv_install_opcode_UJ(vm, RVI_AUIPC, riscv_i_auipc);
     riscv_install_opcode_UJ(vm, RVI_JAL, riscv_i_jal);
 
+#ifndef RV64
     riscv_install_opcode_R(vm, RVI_SLLI, riscv_i_slli);
     riscv_install_opcode_R(vm, RVI_SRLI_SRAI, riscv_i_srli_srai);
+#endif
     riscv_install_opcode_R(vm, RVI_ADD_SUB, riscv_i_add_sub);
     riscv_install_opcode_R(vm, RVI_SRL_SRA, riscv_i_srl_sra);
     riscv_install_opcode_R(vm, RVI_SLL, riscv_i_sll);
@@ -514,7 +645,7 @@ void riscv_i_init(rvvm_hart_t* vm)
     riscv_install_opcode_ISB(vm, RVI_BGEU, riscv_i_bgeu);
     riscv_install_opcode_ISB(vm, RVI_LB, riscv_i_lb);
     riscv_install_opcode_ISB(vm, RVI_LH, riscv_i_lh);
-    riscv_install_opcode_ISB(vm, RVI_LW, riscv_i_lwu);
+    riscv_install_opcode_ISB(vm, RVI_LW, riscv_i_lw);
     riscv_install_opcode_ISB(vm, RVI_LBU, riscv_i_lbu);
     riscv_install_opcode_ISB(vm, RVI_LHU, riscv_i_lhu);
     riscv_install_opcode_ISB(vm, RVI_SB, riscv_i_sb);
@@ -527,6 +658,30 @@ void riscv_i_init(rvvm_hart_t* vm)
     riscv_install_opcode_ISB(vm, RVI_ORI, riscv_i_ori);
     riscv_install_opcode_ISB(vm, RVI_ANDI, riscv_i_andi);
 #ifdef RV64
-    // Install RV64I-only instructions
+    riscv_install_opcode_ISB(vm, RVI_SLLI, riscv_i_slli);
+    riscv_install_opcode_ISB(vm, RVI_SRLI_SRAI, riscv_i_srli_srai);
+    
+    riscv_install_opcode_R(vm, RV64I_SLLIW, riscv64i_slliw);
+    riscv_install_opcode_R(vm, RV64I_SRLIW_SRAIW, riscv64i_srliw_sraiw);
+    riscv_install_opcode_R(vm, RV64I_ADDW_SUBW, riscv64i_addw_subw);
+    riscv_install_opcode_R(vm, RV64I_SLLW, riscv64i_sllw);
+    riscv_install_opcode_R(vm, RV64I_SRLW_SRAW, riscv64i_srlw_sraw);
+
+    riscv_install_opcode_ISB(vm, RV64I_ADDIW, riscv64i_addiw);
+    riscv_install_opcode_ISB(vm, RV64I_LWU, riscv64i_lwu);
+    riscv_install_opcode_ISB(vm, RV64I_LD, riscv64i_ld);
+    riscv_install_opcode_ISB(vm, RV64I_SD, riscv64i_sd);
+#else
+    // Remove RV64I-only instructions from decoder
+    riscv_install_opcode_R(vm, RV64I_SLLIW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64I_SRLIW_SRAIW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64I_ADDW_SUBW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64I_SLLW, riscv_illegal_insn);
+    riscv_install_opcode_R(vm, RV64I_SRLW_SRAW, riscv_illegal_insn);
+
+    riscv_install_opcode_ISB(vm, RV64I_ADDIW, riscv_illegal_insn);
+    riscv_install_opcode_ISB(vm, RV64I_LWU, riscv_illegal_insn);
+    riscv_install_opcode_ISB(vm, RV64I_LD, riscv_illegal_insn);
+    riscv_install_opcode_ISB(vm, RV64I_SD, riscv_illegal_insn);
 #endif
 }

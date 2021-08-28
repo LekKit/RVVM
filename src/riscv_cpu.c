@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "riscv_cpu.h"
 #include "riscv_mmu.h"
+#include <stdio.h>
 
 void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t instruction)
 {
@@ -69,13 +70,10 @@ void riscv_install_opcode_C(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_c_t fun
 static inline void riscv_emulate(rvvm_hart_t *vm, uint32_t instruction)
 {
     if ((instruction & RV_OPCODE_MASK) != RV_OPCODE_MASK) {
-        // 16-bit opcode
-        //printf("RVC: %x\n", (uint16_t)instruction);
         vm->decoder.opcodes_c[riscv_c_funcid(instruction)](vm, instruction);
         // FYI: Any jump instruction implementation should take care of PC increment
         vm->registers[REGISTER_PC] += 2;
     } else {
-        //printf("RV: %x\n", instruction);
         vm->decoder.opcodes[riscv_funcid(instruction)](vm, instruction);
         vm->registers[REGISTER_PC] += 4;
     }
@@ -88,6 +86,12 @@ void riscv_decoder_init_rv64(rvvm_hart_t* vm)
     riscv64c_init(vm);
     riscv64m_init(vm);
     riscv64a_init(vm);
+#ifdef USE_FPU
+    if (fpu_is_enabled(vm)) {
+        riscv64f_enable(vm, true);
+        riscv64d_enable(vm, true);
+    }
+#endif
 }
 #endif
 
@@ -97,6 +101,12 @@ void riscv_decoder_init_rv32(rvvm_hart_t* vm)
     riscv32c_init(vm);
     riscv32m_init(vm);
     riscv32a_init(vm);
+#ifdef USE_FPU
+    if (fpu_is_enabled(vm)) {
+        riscv32f_enable(vm, true);
+        riscv32d_enable(vm, true);
+    }
+#endif
 }
 
 void riscv_decoder_enable_fpu(rvvm_hart_t* vm, bool enable)

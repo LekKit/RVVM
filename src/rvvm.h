@@ -209,6 +209,7 @@ struct rvvm_hart_t {
     uint8_t priv_mode;
     bool rv64;
     bool trap;
+    maxlen_t trap_pc;
     
     struct {
         maxlen_t hartid;

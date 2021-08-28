@@ -191,7 +191,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
     paddr_t pagetable = vm->root_page_table;
     paddr_t pte, pgt_off;
     vmptr_t pte_addr;
-    bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + PAGE_SIZE - SV64_VPN_BITS;
+    bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + PAGE_SHIFT - SV64_VPN_BITS;
     
     if (unlikely(vaddr != (vaddr_t)sign_extend(vaddr, bit_off+SV64_VPN_BITS)))
         return false;
@@ -314,6 +314,8 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     rvvm_mmio_handler_t rwfunc;
     paddr_t offset;
     
+    //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
+    
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
         if (paddr >= dev->begin && paddr < dev->end) {
@@ -363,6 +365,7 @@ static inline void riscv_jit_flush(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr
 
 static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size, uint8_t access)
 {
+    //rvvm_info("Hart %p tlb miss at 0x%08"PRIxXLEN, vm, addr);
     paddr_t paddr;
     vmptr_t ptr;
     uint32_t trap_cause;
@@ -384,6 +387,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
             if (access == MMU_WRITE) {
                 // Clear JITted blocks & flush trace cache if necessary
                 riscv_jit_flush(vm, addr, paddr, size);
+                // Should we make this atomic? RVWMO expects ld/st atomicity
                 memcpy(ptr, dest, size);
             } else {
                 memcpy(dest, ptr, size);
@@ -440,6 +444,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
 
 NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
 {
+    //rvvm_info("Hart %p vma tlb miss at 0x%08"PRIxXLEN, vm, addr);
     paddr_t paddr;
     vmptr_t ptr;
     uint32_t trap_cause;

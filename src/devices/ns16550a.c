@@ -219,7 +219,7 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, padd
             case NS16550A_REG_THR: {
                 //if (value > 127) printf ("we are retarded\n");
                 //rvvm_info("UART prints 0x%02x", value);
-                printf("%c", value);
+                putc(value, stdout);
                 fflush(stdout);
                 break;
             }

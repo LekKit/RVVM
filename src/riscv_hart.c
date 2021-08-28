@@ -36,10 +36,12 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     // Initialize decoder to illegal instructions
     for (size_t i=0; i<512; ++i) vm->decoder.opcodes[i] = riscv_illegal_insn;
-    for (size_t i=0; i<24; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
+    for (size_t i=0; i<32; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
 #ifdef USE_RV64
     vm->rv64 = rv64;
     if (rv64) {
+        // 0x2A00000000 for H-mode
+        vm->csr.status = 0xA00000000;
         vm->csr.isa = CSR_MISA_RV64;
         riscv_decoder_init_rv64(vm);
     } else {
@@ -52,6 +54,24 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     riscv_decoder_init_rv32(vm);
 #endif
     riscv_priv_init(vm);
+}
+
+static inline void riscv_irqs_set(rvvm_hart_t* vm, maxlen_t irqs)
+{
+#ifdef USE_RV64
+    atomic_or_uint64(&vm->csr.ip, irqs);
+#else
+    atomic_or_uint32(&vm->csr.ip, irqs);
+#endif
+}
+
+static inline void riscv_irqs_clear(rvvm_hart_t* vm, maxlen_t irqs)
+{
+#ifdef USE_RV64
+    atomic_and_uint64(&vm->csr.ip, ~irqs);
+#else
+    atomic_and_uint32(&vm->csr.ip, ~irqs);
+#endif
 }
 
 void riscv_hart_run(rvvm_hart_t* vm)
@@ -76,9 +96,12 @@ void riscv_hart_run(rvvm_hart_t* vm)
         vm->csr.ip |= atomic_swap_uint32(&vm->pending_irqs, 0);
         events = atomic_swap_uint32(&vm->pending_events, 0);
 
-        if ((events & EXT_EVENT_TIMER) && rvtimer_pending(&vm->timer)) {
-            //rvvm_info("Timer IRQ");
-            vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+        if (events & EXT_EVENT_TIMER) {
+            vm->csr.ip |= (1U << INTERRUPT_MTIMER);
+        }
+        
+        if ((vm->csr.ip & (1U << INTERRUPT_MTIMER)) && !rvtimer_pending(&vm->timer)) {
+            riscv_interrupt_clear(vm, INTERRUPT_MTIMER);
         }
 
         if (events & EXT_EVENT_PAUSE) {
@@ -99,23 +122,33 @@ void riscv_update_xlen(rvvm_hart_t* vm)
             rv64 = !!(vm->csr.isa & CSR_MISA_RV64);
             break;
         case PRIVILEGE_HYPERVISOR:
-            rv64 = bit_cut(vm->csr.status, 37, 1);
+            rv64 = bit_check(vm->csr.status, 37);
             break;
         case PRIVILEGE_SUPERVISOR:
-            rv64 = bit_cut(vm->csr.status, 35, 1);
+            rv64 = bit_check(vm->csr.status, 35);
             break;
         case PRIVILEGE_USER:
-            rv64 = bit_cut(vm->csr.status, 33, 1);
+            rv64 = bit_check(vm->csr.status, 33);
             break;
     }
     
     if (vm->rv64 != rv64) {
-        for (size_t i=0; i<REGISTERS_MAX; ++i) {
-            vm->registers[i] = (int32_t)vm->registers[i];
-        }
         if (rv64) {
+            rvvm_info("Hart %p switches to RV64", vm);
+            exit(0);
+            for (size_t i=0; i<REGISTERS_MAX; ++i) {
+                vm->registers[i] = (int32_t)vm->registers[i];
+            }
+            vm->csr.isa &= ~CSR_MISA_RV32;
+            vm->csr.isa |= CSR_MISA_RV64;
             riscv_decoder_init_rv64(vm);
         } else {
+            rvvm_info("Hart %p switches to RV32", vm);
+            for (size_t i=0; i<REGISTERS_MAX; ++i) {
+                vm->registers[i] = (uint32_t)vm->registers[i];
+            }
+            vm->csr.isa &= ~CSR_MISA_RV64;
+            vm->csr.isa |= CSR_MISA_RV32;
             riscv_decoder_init_rv32(vm);
         }
         vm->rv64 = rv64;
@@ -167,8 +200,8 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     // Target privilege mode
     uint8_t priv = PRIVILEGE_MACHINE;
     // Delegate to lower privilege mode if needed
-    while (vm->csr.edeleg[priv] & (1 << cause)) priv--;
-    //rvvm_info("Hart %p trap at %x -> %x, cause %x, tval %x", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3ULL), cause, tval);
+    while ((vm->csr.edeleg[priv] & (1 << cause)) && priv > vm->priv_mode) priv--;
+    //rvvm_info("Hart %p trap at %08"PRIxXLEN" -> %08"PRIxXLEN", cause %x, tval %08"PRIxXLEN"\n", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3UL), cause, tval);
     // Write exception info
     vm->csr.epc[priv] = vm->registers[REGISTER_PC];
     vm->csr.cause[priv] = cause;
@@ -236,7 +269,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 } else {
                     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
                 }
-                //rvvm_info("Hart %p irq to %x, cause %x", vm, vm->registers[REGISTER_PC], i);
+                //rvvm_info("Hart %p irq to %08"PRIxXLEN", cause %x", vm, vm->registers[REGISTER_PC], i);
                 riscv_switch_priv(vm, priv);
 #ifdef USE_SJLJ
                 longjmp(vm->unwind, 1);
@@ -280,11 +313,14 @@ void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)
 
 void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
 {
+    // Discard pending irq
+    atomic_and_uint32(&vm->pending_irqs, ~(1U << irq));
 #ifdef USE_RV64
     atomic_and_uint64(&vm->csr.ip, ~(1U << irq));
 #else
     atomic_and_uint32(&vm->csr.ip, ~(1U << irq));
 #endif
+    //rvvm_info("Hart %p сleared irq %d\n", vm, irq);
 }
 
 void riscv_hart_check_timer(rvvm_hart_t* vm)

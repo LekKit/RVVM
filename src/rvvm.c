@@ -167,7 +167,12 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     
     vector_foreach(machine->mmio, i) {
         dev = &vector_at(machine->mmio, i);
-        dev->type->remove(dev);
+        // Either device implements it's own cleanup routine,
+        // or we free it's data buffer
+        if (dev->type && dev->type->remove)
+            dev->type->remove(dev);
+        else
+            free(dev->data);
     }
     
     vector_free(machine->harts);
