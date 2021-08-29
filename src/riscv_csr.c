@@ -79,9 +79,29 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
 {
 #ifdef USE_FPU
     bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
-#else
-    mask = bit_replace(mask, 13, 2, 0);
+#ifndef USE_PRECISE_FS
+    if (fpu_was_enabled) {
+        vm->csr.status = bit_replace(vm->csr.status, 13, 2, FS_DIRTY);
+    }
 #endif
+    maxlen_t sd_mask = 0x80000000U;
+#ifdef USE_RV64
+    if (vm->rv64) {
+        sd_mask = 0x8000000000000000ULL;
+    }
+#endif
+    mask |= sd_mask;
+    
+    // Set SD bit
+    if (bit_cut(vm->csr.status, 13, 2) == FS_DIRTY) {
+        vm->csr.status |= sd_mask;
+    } else {
+        vm->csr.status &= ~sd_mask;
+    }
+#else
+    mask = bit_replace(mask, 13, 2, FS_OFF);
+#endif
+
 #ifdef USE_RV64
     if (vm->rv64 && unlikely(bit_cut(*dest, 32, 6) ^ (bit_cut(*dest, 32, 6) >> 1))) {
         // Changed XLEN somewhere
@@ -94,6 +114,7 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
         if (bit_cut(*dest, 36, 2) ^ (bit_cut(*dest, 36, 2) >> 1)) {
             mask |= 0x3000000000ULL;
         }
+        riscv_update_xlen(vm);
     }
 #endif
     csr_helper_masked(&vm->csr.status, dest, mask, op);
@@ -105,27 +126,7 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
     bool fpu_enabled = new_fs != FS_OFF;
     if (fpu_was_enabled != fpu_enabled) {
         riscv_decoder_enable_fpu(vm, fpu_enabled);
-    #ifndef USE_PRECISE_FS
-        if (fpu_enabled) {
-            vm->csr.status = bit_replace(vm->csr.status, 13, 2, FS_DIRTY);
-        }
-    #endif
     }
-    // Set SD bit
-    if (bit_cut(vm->csr.status, 13, 2) == FS_DIRTY) {
-    #ifdef USE_RV64
-        if (vm->rv64) {
-            *dest |= 0x8000000000000000ULL;
-        } else {
-            *dest |= 0x80000000U;
-        }
-    #else
-        *dest |= 0x80000000U;
-    #endif
-    }
-#endif
-#ifdef USE_RV64
-    riscv_update_xlen(vm);
 #endif
 }
 
@@ -479,18 +480,10 @@ static bool riscv_csr_timeh(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     return true;
 }
 
-static bool riscv_csr_debug(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(op);
-    printf("Terminated with code: %d\n", (*dest) >> 1);
-    exit(0);
-    return true;
-}
-
 void riscv_csr_global_init()
 {
     for (size_t i=0; i<4096; ++i) riscv_csr_list[i] = riscv_csr_illegal;
-riscv_csr_list[0x800] = riscv_csr_debug;
+
     // Machine Information Registers
     riscv_csr_list[0xF11] = riscv_csr_zero;     // mvendorid
     riscv_csr_list[0xF12] = riscv_csr_marchid;  // marchid
