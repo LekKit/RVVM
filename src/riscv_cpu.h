@@ -111,9 +111,7 @@ static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
     assert(reg < FPU_REGISTERS_MAX);
     // NOTE: for performance reasons/smaller JIT footprint, maybe
     // we should hardcode the FPU state to dirty?
-#ifdef USE_PRECISE_FS
     fpu_set_fs(vm, FS_DIRTY);
-#endif
     write_float_nanbox(&vm->fpu_registers[reg], val);
 }
 
@@ -126,9 +124,7 @@ static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
 static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
 {
     assert(reg < FPU_REGISTERS_MAX);
-#ifdef USE_PRECISE_FS
     fpu_set_fs(vm, FS_DIRTY);
-#endif
     vm->fpu_registers[reg] = val;
 }
 #endif

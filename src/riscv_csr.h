@@ -72,7 +72,12 @@ static inline bool fpu_is_enabled(rvvm_hart_t* vm)
 
 static inline void fpu_set_fs(rvvm_hart_t* vm, uint8_t value)
 {
+#ifdef USE_PRECISE_FS
     vm->csr.status = bit_replace(vm->csr.status, 13, 2, value);
+#else
+    UNUSED(vm);
+    UNUSED(value);
+#endif
 }
 
 #endif
