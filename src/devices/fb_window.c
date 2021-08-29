@@ -48,6 +48,11 @@ void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length)
     }
 }
 
+static void fb_remove(rvvm_mmio_dev_t* device)
+{
+    UNUSED(device);
+}
+
 static void window_update(rvvm_mmio_dev_t* device)
 {
     fb_update((struct fb_data*)device->data);
@@ -61,6 +66,7 @@ static void window_remove(rvvm_mmio_dev_t* device)
 
 static rvvm_mmio_type_t fb_dev_type = {
     .name = "framebuffer",
+    .remove = fb_remove,
 };
 
 static rvvm_mmio_type_t win_dev_type = {

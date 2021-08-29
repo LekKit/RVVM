@@ -50,7 +50,8 @@ inline void fb_create_window(struct fb_data* data, unsigned width, unsigned heig
     UNUSED(name);
 }
 inline void fb_close_window(struct fb_data *data) {
-    UNUSED(data);
+    // Free a dummy framebuffer
+    free(data->framebuffer);
 }
 inline void fb_update(struct fb_data *data) {
     UNUSED(data);

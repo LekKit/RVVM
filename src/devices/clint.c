@@ -97,8 +97,14 @@ static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, paddr_
     return false;
 }
 
+static void clint_remove(rvvm_mmio_dev_t* device)
+{
+    UNUSED(device);
+}
+
 static rvvm_mmio_type_t clint_dev_type = {
     .name = "clint",
+    .remove = clint_remove,
 };
 
 void clint_init(rvvm_machine_t* machine, paddr_t addr)
