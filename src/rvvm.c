@@ -43,6 +43,20 @@ static void* builtin_eventloop(void* arg)
         spin_lock(&global_lock);
         vector_foreach(global_machines, m) {
             machine = vector_at(global_machines, m);
+            if (!atomic_load_uint32(&machine->running)) {
+                // The machine was shut down
+                vector_foreach(machine->harts, i) {
+                    riscv_hart_pause(&vector_at(machine->harts, i));
+                }
+                vector_erase(global_machines, m);
+                
+                if (vector_size(global_machines) == 0) {
+                    vector_free(global_machines);
+                    spin_unlock(&global_lock);
+                    return NULL;
+                } else continue;
+            }
+            
             vector_foreach(machine->harts, i) {
                 // Wake hart thread to check timer interrupt.
                 riscv_hart_check_timer(&vector_at(machine->harts, i));
@@ -167,6 +181,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     
     vector_foreach(machine->mmio, i) {
         dev = &vector_at(machine->mmio, i);
+        rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
         // Either device implements it's own cleanup routine,
         // or we free it's data buffer
         if (dev->type && dev->type->remove)

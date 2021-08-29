@@ -246,7 +246,8 @@ struct rvvm_machine_t {
     rvvm_ram_t mem;
     vector_t(rvvm_hart_t) harts;
     vector_t(rvvm_mmio_dev_t) mmio;
-    bool running;
+    uint32_t running;
+    bool needs_reset;
 };
 
 // Memory starts at 0x80000000 by default, machine boots from there as well

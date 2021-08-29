@@ -32,6 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/ps2-altera.h"
 #include "devices/ps2-keyboard.h"
 #include "devices/ps2-mouse.h"
+#include "devices/syscon.h"
 
 #ifdef _WIN32
 // For unicode fix
@@ -130,6 +131,7 @@ static void print_help()
            "    -mem <amount>    Memory amount, default: 256M\n"
            "    -smp <count>     Cores count, default: 1\n"
            "    -rv64            Enable 64-bit RISC-V, 32-bit by default\n"
+           "    -kernel <file>   Load kernel Image as SBI payload\n"
            "    -dtb <file>      Pass Device Tree Blob to the machine\n"
            "    -image <file>    Attach hard drive with raw image\n"
            "    -verbose         Enable verbose logging\n"
@@ -287,13 +289,41 @@ static int rvvm_run_with_args(vm_args_t args)
 #ifdef USE_NET
     ethoc_init(machine, 0x21000000, plic_data, 3);
 #endif
+    syscon_init(machine, 0x100000);
+    
     rvvm_enable_builtin_eventloop(false);
+
     rvvm_start_machine(machine);
     rvvm_run_eventloop(); // Returns on machine shutdown
-    
+
+    bool reset = machine->needs_reset;
     rvvm_free_machine(machine);
     
-    return 0;
+/*
+ * Example machine resetting code, but a few issues here:
+ * - Devices dont't know about resetting at all, may wreak havoc with DMA, etc
+ * 
+ * - We need to reload bootrom & kernel images into ram,
+ * but those may be not present after initial boot
+ * 
+ * - Moreover, this should be not done from API user viewpoint but instead wrapped
+ * in some helper routine (issue #2 again)
+ * 
+ * 
+    vector_foreach(machine->harts, i) {
+        riscv_tlb_flush(&vector_at(machine->harts, i));
+        vector_at(machine->harts, i).registers[REGISTER_PC] = machine->mem.begin;
+        vector_at(machine->harts, i).registers[REGISTER_X10] = i;
+        vector_at(machine->harts, i).registers[REGISTER_X11] = machine->mem.begin + (machine->mem.size >> 1);
+        vector_at(machine->harts, i).priv_mode = PRIVILEGE_MACHINE;
+        vector_at(machine->harts, i).pending_events = 0;
+    }
+    load_file_to_ram(machine, machine->mem.begin, args.bootrom);
+    load_file_to_ram(machine, machine->mem.begin + (machine->mem.size >> 1), args.dtb);
+    load_file_to_ram(machine, machine->mem.begin + (args.rv64 ? (2 << 20) : (4 << 20)), args.kernel);
+*/
+    
+    return reset;
 }
 
 int main(int argc, const char** argv)
@@ -308,7 +338,7 @@ int main(int argc, const char** argv)
         return 0;
     }
 
-    rvvm_run_with_args(args);
+    while (rvvm_run_with_args(args));
     return 0;
 }
 

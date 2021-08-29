@@ -54,6 +54,9 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi);
 // Used in tlb flush routines to reset page_addr in dispatch
 void riscv_restart_dispatch(rvvm_hart_t* vm);
 
+// Requests the hart to be paused as soon as possible
+void riscv_hart_queue_pause(rvvm_hart_t* vm);
+
 /* External-thread routines */
 
 // Spawns thread for hart execution, returns immediately
@@ -69,6 +72,7 @@ void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq_mask);
 void riscv_hart_check_timer(rvvm_hart_t* vm);
 
 // Pauses hart in a consistent state, terminates executing thread
+// This function is blocking
 void riscv_hart_pause(rvvm_hart_t* vm);
 
 #endif
