@@ -75,6 +75,8 @@ enum
     REGISTERS_MAX
 };
 
+#define FPU_REGISTERS_MAX REGISTERS_MAX
+
 enum
 {
     PRIVILEGE_USER,
@@ -196,7 +198,7 @@ struct rvvm_hart_t {
     uint32_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
 #ifdef USE_FPU
-    double fpu_registers[REGISTERS_MAX];
+    double fpu_registers[FPU_REGISTERS_MAX];
 #endif
     
     // We want short offsets from vmptr to tlb

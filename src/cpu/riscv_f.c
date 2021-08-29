@@ -137,12 +137,15 @@ static inline fnative_t canonize_nan(fnative_t x)
 
 static inline int32_t fpu_fp2int_uint32_t(fnative_t x)
 {
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    feclearexcept(FE_ALL_EXCEPT);
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
     if (!isinvalid) {
         isinvalid = ret < 0 || ret > (~(uint32_t)0);
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
+    feraiseexcept(exc);
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return 0;
@@ -160,6 +163,8 @@ static inline int32_t fpu_fp2int_uint32_t(fnative_t x)
 
 static inline int32_t fpu_fp2int_int32_t(fnative_t x)
 {
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    feclearexcept(FE_ALL_EXCEPT);
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
     if (!isinvalid) {
@@ -167,6 +172,7 @@ static inline int32_t fpu_fp2int_int32_t(fnative_t x)
                  || ret > (int32_t)(~(uint32_t)0 >> 1);
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
+    feraiseexcept(exc);
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return ~(~(uint32_t)0 >> 1);
@@ -185,12 +191,15 @@ static inline int32_t fpu_fp2int_int32_t(fnative_t x)
 #ifdef RV64
 static inline int64_t fpu_fp2int_uint64_t(fnative_t x)
 {
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    feclearexcept(FE_ALL_EXCEPT);
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
     if (!isinvalid) {
         isinvalid = ret < 0 /* || ret > (~(uint64_t)0) */;
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
+    feraiseexcept(exc);
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return 0;
@@ -208,6 +217,8 @@ static inline int64_t fpu_fp2int_uint64_t(fnative_t x)
 
 static inline int64_t fpu_fp2int_int64_t(fnative_t x)
 {
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    feclearexcept(FE_ALL_EXCEPT);
     long long ret = llrint(x);
     bool isinvalid = fetestexcept(FE_INVALID);
     if (!isinvalid) {
@@ -215,6 +226,7 @@ static inline int64_t fpu_fp2int_int64_t(fnative_t x)
                  || ret > (int64_t)(~(uint64_t)0 >> 1);
         if (isinvalid) feraiseexcept(FE_INVALID);
     }
+    feraiseexcept(exc);
     if (isinvalid) {
         if (isinf(x) && fpu_sign_check(x)) {
             return ~(~(uint64_t)0 >> 1);
@@ -993,8 +1005,6 @@ void riscv_f_enable(rvvm_hart_t* vm, bool enable)
 #endif
 
 #else
-
-#include <stdbool.h>
 
 #ifdef RVD
 void riscv_d_enable(rvvm_hart_t* vm, bool enable) { UNUSED(vm); UNUSED(enable); }
