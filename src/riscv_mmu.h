@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm.h"
 #include "compiler.h"
 #include "mem_ops.h"
+#include "riscv_csr.h"
 
 #define MMU_VALID_PTE     0x1
 #define MMU_READ          0x2
@@ -290,6 +291,7 @@ static inline void riscv_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     vaddr_t vpn = addr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].r == vpn && (addr & 7) == 0)) {
         vm->fpu_registers[reg] = read_double_le(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
+        fpu_set_fs(vm, FS_DIRTY);
         return;
     }
     riscv_mmu_load_double(vm, addr, reg);
@@ -300,6 +302,7 @@ static inline void riscv_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     vaddr_t vpn = addr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].r == vpn && (addr & 3) == 0)) {
         write_float_nanbox(&vm->fpu_registers[reg], read_float_le(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr)));
+        fpu_set_fs(vm, FS_DIRTY);
         return;
     }
     riscv_mmu_load_float(vm, addr, reg);

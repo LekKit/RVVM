@@ -614,6 +614,7 @@ NOINLINE void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     uint8_t buff[8];
     if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
         vm->fpu_registers[reg] = read_double_le_m(buff);
+        fpu_set_fs(vm, FS_DIRTY);
     }
 }
 
@@ -622,6 +623,7 @@ NOINLINE void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
         write_float_nanbox(&vm->fpu_registers[reg], read_float_le_m(buff));
+        fpu_set_fs(vm, FS_DIRTY);
     }
 }
 
