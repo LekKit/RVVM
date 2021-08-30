@@ -138,11 +138,14 @@ typedef struct {
 typedef struct {
     // Pointer to page (with vaddr subtracted? faster tlb translation)
     size_t ptr;
+    // Make entry size a power of 2 (32 or 16 bytes)
+#if !defined(HOST_64BIT) && defined(USE_RV64)
+    size_t align;
+#endif
     // Virtual page number per each op type (vaddr >> 12)
     vaddr_t r;
     vaddr_t w;
     vaddr_t e;
-    // Make entry size a power of 2 (32 or 16 bytes)
 #if defined(HOST_64BIT) && !defined(USE_RV64)
     vaddr_t align[3];
 #endif
