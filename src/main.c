@@ -225,15 +225,15 @@ static bool load_file_to_ram(rvvm_machine_t* machine, paddr_t addr, const char* 
     return true;
 }
 
-static int rvvm_run_with_args(vm_args_t args)
+static bool rvvm_run_with_args(vm_args_t args)
 {
     rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
     if (machine == NULL) {
         rvvm_error("VM creation failed");
-        return 1;
+        return false;
     } else if (!load_file_to_ram(machine, machine->mem.begin, args.bootrom)) {
         rvvm_error("Failed to load bootrom");
-        return 1;
+        return false;
     }
 
     if (args.dtb) {
@@ -241,7 +241,7 @@ static int rvvm_run_with_args(vm_args_t args)
 
         if (!load_file_to_ram(machine, dtb_addr, args.dtb)) {
             rvvm_error("Failed to load DTB");
-            return 1;
+            return false;
         }
 
         // pass DTB address in a1 register of each hart
@@ -258,7 +258,7 @@ static int rvvm_run_with_args(vm_args_t args)
         size_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
         if (!load_file_to_ram(machine, machine->mem.begin + hugepage_offset, args.kernel)) {
             rvvm_error("Failed to load kernel");
-            return 1;
+            return false;
         }
         rvvm_info("Kernel image loaded at 0x%08"PRIxXLEN, machine->mem.begin + (2 << 20));
     }
@@ -267,6 +267,7 @@ static int rvvm_run_with_args(vm_args_t args)
         FILE *fp = fopen(args.image, "rb+");
         if (fp == NULL) {
             rvvm_error("Unable to open hard drive image file %s", args.image);
+            return false;
         } else {
             ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
         }
