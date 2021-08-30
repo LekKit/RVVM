@@ -27,10 +27,10 @@ static void riscv_m_mul(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    sxlen_t reg1 = riscv_read_register_s(vm, rs1);
-    sxlen_t reg2 = riscv_read_register_s(vm, rs2);
+    xlen_t reg1 = riscv_read_register(vm, rs1);
+    xlen_t reg2 = riscv_read_register(vm, rs2);
 
-    riscv_write_register(vm, rds, (int64_t)reg1 * (int64_t)reg2);
+    riscv_write_register(vm, rds, reg1 * reg2);
 }
 
 static void riscv_m_mulh(rvvm_hart_t *vm, const uint32_t instruction)
@@ -171,8 +171,8 @@ static void riscv64m_mulw(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rds = bit_cut(instruction, 7, 5);
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    int32_t reg1 = riscv_read_register_s(vm, rs1);
-    int32_t reg2 = riscv_read_register_s(vm, rs2);
+    uint32_t reg1 = riscv_read_register_s(vm, rs1);
+    uint32_t reg2 = riscv_read_register_s(vm, rs2);
 
     vm->registers[rds] = (int32_t)(reg1 * reg2);
 }

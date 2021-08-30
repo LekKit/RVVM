@@ -124,7 +124,7 @@ static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t o
             break;
     }
 
-    entry->ptr = ptr - TLB_VADDR(vaddr);
+    entry->ptr = ((size_t)ptr) - TLB_VADDR(vaddr);
 }
 
 // Virtual memory addressing mode (SV32)

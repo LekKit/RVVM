@@ -137,7 +137,7 @@ typedef struct {
  */
 typedef struct {
     // Pointer to page (with vaddr subtracted? faster tlb translation)
-    vmptr_t ptr;
+    size_t ptr;
     // Virtual page number per each op type (vaddr >> 12)
     vaddr_t r;
     vaddr_t w;
