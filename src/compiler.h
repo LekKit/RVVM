@@ -83,4 +83,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HOST_64BIT 1
 #endif
 
+#define MACRO_MKSTRING(x) #x
+#define MACRO_TOSTRING(x) MACRO_MKSTRING(x)
+
+// Unwraps to src/example.c@128
+#define SOURCE_LINE __FILE__"@"MACRO_TOSTRING(__LINE__)
+
 #endif
