@@ -140,10 +140,13 @@ SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xli
 USE_FB ?= 1
 USE_XCB ?= 0
 USE_XSHM ?= 1
-USE_RV64 ?= 0
+USE_RV64 ?= 1
 USE_JIT ?= 0
 USE_NET ?= 0
 USE_FPU ?= 1
+USE_SPINLOCK_DEBUG ?= 1
+
+# Need fixes
 USE_VMSWAP ?= 0
 USE_VMSWAP_SPLIT ?= 0
 
@@ -199,12 +202,7 @@ endif
 endif
 
 ifeq ($(USE_RV64),1)
-# All 64-bit arches have 64 in name
-ifneq (,$(findstring 64,$(ARCH)))
 override CFLAGS += -DUSE_RV64
-else
-USE_RV64 = 0
-endif
 endif
 
 ifeq ($(USE_JIT),1)
@@ -228,6 +226,10 @@ endif
 
 ifeq ($(USE_VMSWAP),1)
 override CFLAGS += -DUSE_VMSWAP
+endif
+
+ifeq ($(USE_SPINLOCK_DEBUG),1)
+override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
 ifeq ($(OS),darwin)
