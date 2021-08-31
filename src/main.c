@@ -167,7 +167,7 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
         } else if (cmp_arg(arg_name, "kernel")) {
             args->kernel = arg_val;
         } else if (cmp_arg(arg_name, "mem")) {
-            if (arg_name[0])
+            if (strlen(arg_val))
                 args->mem = ((size_t)atoi(arg_val)) << mem_suffix_shift(arg_val[strlen(arg_val)-1]);
         } else if (cmp_arg(arg_name, "smp")) {
             args->smp = atoi(arg_val);
