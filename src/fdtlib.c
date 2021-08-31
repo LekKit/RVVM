@@ -1,7 +1,35 @@
-#include "riscv.h"
+/*
+fdtlib.c - Flattened Device Tree Library
+Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    LekKit <github.com/LekKit>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #include "fdtlib.h"
-#include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
+#include <assert.h>
+
+#ifdef FDTLIB_STANDALONE
+// cerg2010 wanted this to be usable out-of-tree
+#include <stdlib.h>
+#define safe_malloc malloc
+#define safe_calloc calloc
+#else
+#include "utils.h"
+#endif
 
 #define FDT_MAGIC 0xd00dfeed
 #define FDT_VERSION 17
@@ -35,18 +63,72 @@ enum fdt_node_tokens
     FDT_END = 9
 };
 
-void fdt_node_add_prop(struct fdt_node *node, const char *name, void *data, uint32_t len)
+/* all values are stored in big-endian format */
+static inline uint32_t fdt_host2u32(uint32_t value)
 {
-    assert(name != NULL && data != NULL && len > 0);
+    const uint8_t* arr = (const uint8_t*)&value;
+    return ((uint32_t)arr[0] << 24)
+        | ((uint32_t)arr[1] << 16)
+        | ((uint32_t)arr[2] << 8)
+        | ((uint32_t)arr[3]);
+}
 
-    struct fdt_prop_list *entry = malloc(sizeof(struct fdt_prop_list));
-    entry->prop.name = strdup(name);
-    char *new_data = malloc(len);
-    memcpy(new_data, data, len);
+static inline uint64_t fdt_host2u64(uint64_t value)
+{
+    const uint8_t* arr = (const uint8_t*)&value;
+    return ((uint64_t)arr[0] << 56)
+        | ((uint64_t)arr[1] << 48)
+        | ((uint64_t)arr[2] << 40)
+        | ((uint64_t)arr[3] << 32)
+        | ((uint64_t)arr[4] << 24)
+        | ((uint64_t)arr[5] << 16)
+        | ((uint64_t)arr[6] << 8)
+        | ((uint64_t)arr[7]);
+}
+
+static char* str_duplicate(const char* str)
+{
+    char* buffer = safe_malloc(strlen(str) + 1);
+    strcpy(buffer, str);
+    return buffer;
+}
+
+void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data, uint32_t len)
+{
+    assert(name != NULL);
+
+    struct fdt_prop_list *entry = safe_calloc(sizeof(struct fdt_prop_list), 1);
+    entry->prop.name = str_duplicate(name);
+    char *new_data = NULL;
+    if (data && len) {
+        new_data = safe_calloc(len, 1);
+        memcpy(new_data, data, len);
+    }
     entry->prop.data = new_data;
     entry->prop.len = len;
-    entry->next = node->props;
-    node->props = entry;
+    entry->next = NULL;
+    struct fdt_prop_list** last = &node->props;
+    while ((*last)) last = &(*last)->next;
+    *last = entry;
+}
+
+void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val)
+{
+    val = fdt_host2u32(val);
+    fdt_node_add_prop(node, name, &val, sizeof(val));
+}
+
+void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val)
+{
+    fdt_node_add_prop(node, name, val, strlen(val) + 1);
+}
+
+void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size)
+{
+    uint64_t arr[2];
+    arr[0] = fdt_host2u64(begin);
+    arr[1] = fdt_host2u64(size);
+    fdt_node_add_prop(node, name, arr, sizeof(arr));
 }
 
 static inline bool fdt_is_illegal_phandle(uint32_t phandle)
@@ -69,8 +151,8 @@ uint32_t fdt_node_get_phandle(struct fdt_context *ctx, struct fdt_node *node)
 
 struct fdt_node* fdt_node_create(const char *name)
 {
-    struct fdt_node* node = malloc(sizeof(struct fdt_node));
-    node->name = name ? strdup(name) : NULL;
+    struct fdt_node* node = safe_calloc(sizeof(struct fdt_node), 1);
+    node->name = name ? str_duplicate(name) : NULL;
     node->parent = NULL;
     node->phandle = 0;
     node->nodes = NULL;
@@ -82,11 +164,14 @@ void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
 {
     assert(node != NULL && child != NULL);
 
-    struct fdt_node_list *entry = malloc(sizeof(struct fdt_node_list));
-    entry->node = child;
-    entry->next = node->nodes;
-    node->nodes = entry;
+    struct fdt_node_list *entry = safe_calloc(sizeof(struct fdt_node_list), 1);
     child->parent = node;
+    entry->node = child;
+    entry->next = NULL;
+    
+    struct fdt_node_list** last = &node->nodes;
+    while ((*last)) last = &(*last)->next;
+    *last = entry;
 }
 
 void fdt_node_free(struct fdt_node *node)
@@ -142,7 +227,7 @@ static void fdt_get_tree_size(struct fdt_node *node, struct fdt_size_desc *desc)
         desc->struct_size += sizeof(uint32_t); // FDT_PROP
         desc->struct_size += sizeof(uint32_t) * 2; // struct fdt_prop_desc
         desc->struct_size += ALIGN_UP(entry->prop.len, sizeof(uint32_t));
-        name_len = strlen(entry->prop.name);
+        name_len = strlen(entry->prop.name) + 1;
         desc->strings_size += ALIGN_UP(name_len, sizeof(uint32_t));
     }
 
@@ -235,7 +320,7 @@ static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *
     fdt_serialize_u32(ctx, FDT_END_NODE);
 }
 
-void* fdt_serialize(struct fdt_node *node, uint32_t boot_cpuid, uint32_t *size)
+size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid)
 {
     struct fdt_size_desc size_desc = { 0 };
     fdt_get_tree_size(node, &size_desc);
@@ -249,8 +334,10 @@ void* fdt_serialize(struct fdt_node *node, uint32_t boot_cpuid, uint32_t *size)
     ctx.struct_off = buf_size = ALIGN_UP(buf_size + sizeof(struct fdt_reserve_entry), 4);
     ctx.strings_off = ctx.strings_begin = buf_size += size_desc.struct_size;
     buf_size += size_desc.strings_size;
+    
+    if (buf_size > size) return 0;
 
-    ctx.buf = calloc(1, buf_size);
+    ctx.buf = buffer;
     struct fdt_header *hdr = (struct fdt_header *) ctx.buf;
     hdr->magic = fdt_host2u32(FDT_MAGIC);
     hdr->version = fdt_host2u32(FDT_VERSION);
@@ -268,10 +355,6 @@ void* fdt_serialize(struct fdt_node *node, uint32_t boot_cpuid, uint32_t *size)
     fdt_serialize_tree(&ctx, node);
     fdt_serialize_u32(&ctx, FDT_END);
 
-    if (size != NULL)
-    {
-        *size = buf_size;
-    }
-    return ctx.buf;
+    return buf_size;
 }
 
