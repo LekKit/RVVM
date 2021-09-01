@@ -23,11 +23,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 #include <stddef.h>
 
-struct fdt_context
-{
-    uint32_t last_phandle;
-};
-
 struct fdt_prop
 {
     char *name;
@@ -47,6 +42,7 @@ struct fdt_node
 {
     char *name;
     struct fdt_node *parent;
+    // Used as last_phandle in root node (parent = NULL)
     uint32_t phandle;
 
     struct fdt_prop_list *props;
@@ -59,15 +55,46 @@ struct fdt_node_list
     struct fdt_node_list *next;
 };
 
-
+// Create a fdt node, root node should have name = NULL
 struct fdt_node* fdt_node_create(const char *name);
+
+// Create a fdt node with address, like device@10000
+struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr);
+
+// Add arbitary byte buffer property
 void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data, uint32_t len);
+
+// Add single-cell property
 void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val);
+
+// Add multi-cell property
+void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count);
+
+// Add string property
 void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val);
+
+// Add register range property (addr cells: 2, size cells: 2)
 void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size);
-uint32_t fdt_node_get_phandle(struct fdt_context *ctx, struct fdt_node *node);
+
+// Get child node phandle (allocates phandles transparently)
+uint32_t fdt_node_get_phandle(struct fdt_node *node);
+
+// Lookup for child node by name (returns NULL on failure)
+struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name);
+
+// Lookup for child node by name + addr, like device@10000 (returns NULL on failure)
+struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint64_t addr);
+
+// Lookup for any reg child node by name, like device@* (returns NULL on failure)
+struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name);
+
+// Add child node
 void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child);
+
+// Recursively free a node and it's child nodes
 void fdt_node_free(struct fdt_node *node);
+
+// Serialize DTB into buffer, returns 0 when there's insufficient space
 size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid);
 
 #endif

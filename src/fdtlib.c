@@ -118,6 +118,16 @@ void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val
     fdt_node_add_prop(node, name, &val, sizeof(val));
 }
 
+void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count)
+{
+    uint32_t* buf = safe_calloc(sizeof(uint32_t), count);
+    for (uint32_t i=0; i<count; ++i) {
+        buf[i] = fdt_host2u32(cells[i]);
+    }
+    fdt_node_add_prop(node, name, buf, count*sizeof(uint32_t));
+    free(buf);
+}
+
 void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val)
 {
     fdt_node_add_prop(node, name, val, strlen(val) + 1);
@@ -136,17 +146,78 @@ static inline bool fdt_is_illegal_phandle(uint32_t phandle)
     return phandle == 0 || phandle == 0xffffffff;
 }
 
-uint32_t fdt_node_get_phandle(struct fdt_context *ctx, struct fdt_node *node)
+static uint32_t fdt_get_new_phandle(struct fdt_node *node)
 {
-    if (fdt_is_illegal_phandle(node->phandle))
-    {
-        node->phandle = ++ctx->last_phandle;
+    // Trace to root node
+    while (node->parent) node = node->parent;
+    node->phandle++;
+    return node->phandle;
+}
 
-        uint32_t phandle_value = fdt_host2u32(node->phandle);
-        fdt_node_add_prop(node, "phandle", &phandle_value, sizeof(phandle_value));
+uint32_t fdt_node_get_phandle(struct fdt_node *node)
+{
+    if (node->parent == NULL) {
+        // This is a root node, no handle needed
+        return 0;
+    }
+
+    if (fdt_is_illegal_phandle(node->phandle)) {
+        node->phandle = fdt_get_new_phandle(node);
+        fdt_node_add_prop_u32(node, "phandle", node->phandle);
     }
 
     return node->phandle;
+}
+
+static void fdt_name_with_addr(char* buffer, size_t size, const char *name, uint64_t addr)
+{
+    const char* const lut = "0123456789abcdef";
+    size_t cur = 0;
+    size_t addr_len = 16;
+    while(name[cur] && size > (cur + 17)) {
+        buffer[cur] = name[cur];
+        cur++;
+    }
+    buffer[cur++] = '@';
+    while (addr_len > 1 && (addr >> 60) == 0) {
+        addr <<= 4;
+        addr_len--;
+    }
+    for (size_t i=0; i<addr_len; ++i) {
+        buffer[cur++] = lut[(addr >> (60 - (i * 4))) & 0xf];
+    }
+    buffer[cur] = 0;
+}
+
+struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name)
+{
+    struct fdt_node_list* list = node->nodes;
+    while (list) {
+        if (strcmp(list->node->name, name) == 0) return list->node;
+        list = list->next;
+    }
+    return NULL;
+}
+
+struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint64_t addr)
+{
+    char buffer[256];
+    fdt_name_with_addr(buffer, 256, name, addr);
+    return fdt_node_find(node, buffer);
+}
+
+struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name)
+{
+    char buffer[256] = {0};
+    strncpy(buffer, name, 254);
+    size_t len = strlen(buffer);
+    buffer[len++] = '@';
+    struct fdt_node_list* list = node->nodes;
+    while (list) {
+        if (strncmp(list->node->name, buffer, len) == 0) return list->node;
+        list = list->next;
+    }
+    return NULL;
 }
 
 struct fdt_node* fdt_node_create(const char *name)
@@ -158,6 +229,13 @@ struct fdt_node* fdt_node_create(const char *name)
     node->nodes = NULL;
     node->props = NULL;
     return node;
+}
+
+struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr)
+{
+    char buffer[256];
+    fdt_name_with_addr(buffer, 256, name, addr);
+    return fdt_node_create(buffer);
 }
 
 void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
@@ -186,7 +264,7 @@ void fdt_node_free(struct fdt_node *node)
 
         free(entry->prop.name);
         free(entry->prop.data);
-	free(entry);
+        free(entry);
     }
 
     for (struct fdt_node_list *entry = node->nodes, *entry_next = NULL;
@@ -197,7 +275,7 @@ void fdt_node_free(struct fdt_node *node)
 
         assert(entry->node);
         fdt_node_free(entry->node);
-	free(entry);
+        free(entry);
     }
 
     free(node);

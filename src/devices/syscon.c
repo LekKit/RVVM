@@ -74,4 +74,30 @@ void syscon_init(rvvm_machine_t* machine, paddr_t base_addr)
     syscon.begin = base_addr;
     syscon.end = base_addr + 0x1000;
     rvvm_attach_mmio(machine, &syscon);
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    if (soc == NULL) {
+        rvvm_warn("Missing soc node in FDT!");
+        return;
+    }
+    
+    struct fdt_node* test = fdt_node_create_reg("test", base_addr);
+    fdt_node_add_prop_reg(test, "reg", base_addr, 0x1000);
+    fdt_node_add_prop(test, "compatible", "sifive,test1\0sifive,test0\0syscon", 32);
+    fdt_node_add_child(soc, test);
+    
+    struct fdt_node* poweroff = fdt_node_create("poweroff");
+    fdt_node_add_prop_str(poweroff, "compatible", "syscon-poweroff");
+    fdt_node_add_prop_u32(poweroff, "value", SYSCON_POWEROFF);
+    fdt_node_add_prop_u32(poweroff, "offset", 0);
+    fdt_node_add_prop_u32(poweroff, "regmap", fdt_node_get_phandle(test));
+    fdt_node_add_child(soc, poweroff);
+    
+    struct fdt_node* reboot = fdt_node_create("reboot");
+    fdt_node_add_prop_str(reboot, "compatible", "syscon-reboot");
+    fdt_node_add_prop_u32(reboot, "value", SYSCON_RESET);
+    fdt_node_add_prop_u32(reboot, "offset", 0);
+    fdt_node_add_prop_u32(reboot, "regmap", fdt_node_get_phandle(test));
+    fdt_node_add_child(soc, reboot);
+#endif
 }

@@ -144,6 +144,7 @@ USE_RV64 ?= 1
 USE_JIT ?= 0
 USE_NET ?= 0
 USE_FPU ?= 1
+USE_FDT ?= 1
 USE_SPINLOCK_DEBUG ?= 1
 
 # Need fixes
@@ -226,6 +227,10 @@ endif
 
 ifeq ($(USE_VMSWAP),1)
 override CFLAGS += -DUSE_VMSWAP
+endif
+
+ifeq ($(USE_FDT),1)
+override CFLAGS += -DUSE_FDT
 endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)

@@ -646,6 +646,21 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uin
     
     // TODO: this leaks thread handle, needs proper managing
     thread_create(tap_workthread, &eth->pollev);
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (plic == NULL) {
+        rvvm_warn("Missing nodes in FDT!");
+        return;
+    }
+    
+    struct fdt_node* ethoc = fdt_node_create_reg("ethernet", base_addr);
+    fdt_node_add_prop_reg(ethoc, "reg", base_addr, 0x800);
+    fdt_node_add_prop_str(ethoc, "compatible", "opencores,ethoc");
+    fdt_node_add_prop_u32(ethoc, "interrupt-parent", fdt_node_get_phandle(plic));
+    fdt_node_add_prop_u32(ethoc, "interrupts", irq);
+    fdt_node_add_child(soc, ethoc);
+#endif
 }
 
 #endif

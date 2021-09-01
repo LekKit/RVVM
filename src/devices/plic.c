@@ -475,6 +475,41 @@ void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
     plic.end = base_addr + 0x4000000;
     plic.data = ptr;
     rvvm_attach_mmio(machine, &plic);
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    struct fdt_node* cpus = fdt_node_find(machine->fdt, "cpus");
+    if (soc == NULL || cpus == NULL) {
+        rvvm_warn("Missing nodes in FDT!");
+        return ptr;
+    }
+    
+    uint32_t* irq_ext = safe_calloc(sizeof(uint32_t), vector_size(machine->harts) * 4);
+    vector_foreach(machine->harts, i) {
+        struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
+        struct fdt_node* cpu_irq = cpu ? fdt_node_find(cpu, "interrupt-controller") : NULL;
+        if (cpu_irq == NULL) {
+            free(irq_ext);
+            rvvm_warn("Missing nodes in FDT!");
+            return ptr;
+        }
+
+        uint32_t irq_phandle = fdt_node_get_phandle(cpu_irq);
+        irq_ext[(i * 4)] = irq_ext[(i * 4) + 2] = irq_phandle;
+        irq_ext[(i * 4) + 1] = INTERRUPT_SEXTERNAL;
+        irq_ext[(i * 4) + 3] = INTERRUPT_MEXTERNAL;
+    }
+    
+    struct fdt_node* plic_node = fdt_node_create_reg("plic", base_addr);
+    fdt_node_add_prop_u32(plic_node, "#interrupt-cells", 1);
+    fdt_node_add_prop_reg(plic_node, "reg", base_addr, 0x4000000);
+    fdt_node_add_prop_str(plic_node, "compatible", "sifive,plic-1.0.0");
+    fdt_node_add_prop_u32(plic_node, "riscv,ndev", 32);
+    fdt_node_add_prop(plic_node, "interrupt-controller", NULL, 0);
+    fdt_node_add_prop_cells(plic_node, "interrupts-extended", irq_ext, vector_size(machine->harts) * 4);
+    free(irq_ext);
+    
+    fdt_node_add_child(soc, plic_node);
+#endif
 	return ptr;
 }
 

@@ -28,6 +28,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "vector.h"
 #include "utils.h"
 
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
+
 #ifdef USE_SJLJ
 // Useful for unwinding from JITed code, can be disabled for interpreter
 #include <setjmp.h>
@@ -251,6 +255,10 @@ struct rvvm_machine_t {
     vector_t(rvvm_mmio_dev_t) mmio;
     uint32_t running;
     bool needs_reset;
+#ifdef USE_FDT
+    // Root fdt node for device tree generation
+    struct fdt_node* fdt;
+#endif
 };
 
 // Memory starts at 0x80000000 by default, machine boots from there as well

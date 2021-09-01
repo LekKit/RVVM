@@ -556,4 +556,34 @@ void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_
     ata_ctl.end = ctl_base_addr + ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT);
     ata_ctl.data = ata;
     rvvm_attach_mmio(machine, &ata_ctl);
+
+#ifdef USE_FDT
+    uint32_t reg_cells[8];
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    if (soc == NULL) {
+        rvvm_warn("Missing soc node in FDT!");
+        return;
+    }
+    
+    reg_cells[0] = ((uint64_t)data_base_addr) >> 32;
+    reg_cells[1] = data_base_addr;
+    reg_cells[4] = ((uint64_t)ctl_base_addr) >> 32;
+    reg_cells[5] = ctl_base_addr;
+    reg_cells[2] = reg_cells[6] = 0;
+    reg_cells[3] = reg_cells[7] = 0x1000;
+    
+    struct fdt_node* ata_node = fdt_node_create_reg("ata", data_base_addr);
+    fdt_node_add_prop_cells(ata_node, "reg", reg_cells, 8);
+    fdt_node_add_prop_str(ata_node, "compatible", "ata-generic");
+    fdt_node_add_prop_u32(ata_node, "reg-shift", 2);
+    fdt_node_add_prop_u32(ata_node, "pio-mode", 4);
+    fdt_node_add_child(soc, ata_node);
+    
+    struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
+    if (chosen == NULL) {
+        rvvm_warn("Missing chosen node in FDT!");
+        return;
+    }
+    fdt_node_add_prop_str(chosen, "bootargs", "root=/dev/sda");
+#endif
 }

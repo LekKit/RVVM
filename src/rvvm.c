@@ -110,6 +110,101 @@ static void deregister_machine(rvvm_machine_t* machine)
     }
 }
 
+#ifdef USE_FDT
+static void rvvm_init_fdt(rvvm_machine_t* machine)
+{
+    machine->fdt = fdt_node_create(NULL);
+    fdt_node_add_prop_u32(machine->fdt, "#address-cells", 2);
+    fdt_node_add_prop_u32(machine->fdt, "#size-cells", 2);
+    // Weird workaround for OpenSBI bug with string copy
+    fdt_node_add_prop_str(machine->fdt, "compatible", "RVVM   ");
+    fdt_node_add_prop_str(machine->fdt, "model", "RVVM   ");
+    
+    struct fdt_node* chosen = fdt_node_create("chosen");
+    fdt_node_add_child(machine->fdt, chosen);
+    
+    struct fdt_node* memory = fdt_node_create_reg("memory", machine->mem.begin);
+    fdt_node_add_prop_str(memory, "device_type", "memory");
+    fdt_node_add_prop_reg(memory, "reg", machine->mem.begin, machine->mem.size);
+    fdt_node_add_child(machine->fdt, memory);
+    
+    struct fdt_node* cpus = fdt_node_create("cpus");
+    fdt_node_add_prop_u32(cpus, "#address-cells", 1);
+    fdt_node_add_prop_u32(cpus, "#size-cells", 0);
+    fdt_node_add_prop_u32(cpus, "timebase-frequency", 10000000);
+    
+    vector_foreach(machine->harts, i) {
+        struct fdt_node* cpu = fdt_node_create_reg("cpu", i);
+        
+        fdt_node_add_prop_str(cpu, "device_type", "cpu");
+        fdt_node_add_prop_u32(cpu, "reg", i);
+        fdt_node_add_prop_str(cpu, "compatible", "riscv");
+#ifdef USE_RV64
+        if (vector_at(machine->harts, i).rv64) {
+#ifdef USE_FPU
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdcsu");
+#else
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imacsu");
+#endif
+            fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv39");
+        } else {
+#endif
+#ifdef USE_FPU
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdcsu");
+#else
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imacsu");
+#endif
+            fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv32");
+#ifdef USE_RV64
+        }
+#endif
+        fdt_node_add_prop_str(cpu, "status", "okay");
+        
+        struct fdt_node* clic = fdt_node_create("interrupt-controller");
+        fdt_node_add_prop_u32(clic, "#interrupt-cells", 1);
+        fdt_node_add_prop(clic, "interrupt-controller", NULL, 0);
+        fdt_node_add_prop_str(clic, "compatible", "riscv,cpu-intc");
+        fdt_node_add_child(cpu, clic);
+        
+        fdt_node_add_child(cpus, cpu);
+    }
+    
+    fdt_node_add_child(machine->fdt, cpus);
+    
+    struct fdt_node* soc = fdt_node_create("soc");
+    fdt_node_add_prop_u32(soc, "#address-cells", 2);
+    fdt_node_add_prop_u32(soc, "#size-cells", 2);
+    fdt_node_add_prop_str(soc, "compatible", "simple-bus");
+    fdt_node_add_prop(soc, "ranges", NULL, 0);
+    
+    fdt_node_add_child(machine->fdt, soc);
+}
+#include <stdio.h>
+static void rvvm_gen_dtb(rvvm_machine_t* machine)
+{
+    vector_foreach(machine->harts, i) {
+        paddr_t a1 = vector_at(machine->harts, i).registers[REGISTER_X11];
+        if (a1 >= machine->mem.begin && a1 < (machine->mem.begin + machine->mem.size)) {
+            rvvm_info("DTB already present in a1 register, skipping");
+            return;
+        }
+    }
+    paddr_t dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
+    size_t dtb_size = fdt_serialize(machine->fdt, machine->mem.data + (machine->mem.size >> 1), machine->mem.size >> 1, 0);
+    if (dtb_size) {
+        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", dtb_addr, (uint32_t)dtb_size);
+        FILE* file = fopen("dtb_dump.dtb", "wb");
+        fwrite(machine->mem.data + (machine->mem.size >> 1), dtb_size, 1, file);
+        fclose(file);
+        vector_foreach(machine->harts, i) {
+            vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
+        }
+    } else {
+        rvvm_error("Generated DTB does not fit in RAM!");
+    }
+}
+#endif
+
 PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
     rvvm_hart_t* vm;
@@ -134,7 +229,9 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
     }
     if (hart_count == 0)
         rvvm_warn("Creating machine with no harts at all... What are you even??");
-    
+#ifdef USE_FDT
+    rvvm_init_fdt(machine);
+#endif
     return machine;
 }
 
@@ -158,6 +255,9 @@ PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
 {
     if (machine->running) return;
     machine->running = true;
+#ifdef USE_FDT
+    rvvm_gen_dtb(machine);
+#endif
     vector_foreach(machine->harts, i) {
         riscv_hart_spawn(&vector_at(machine->harts, i));
     }
@@ -193,6 +293,9 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     vector_free(machine->harts);
     vector_free(machine->mmio);
     riscv_free_ram(&machine->mem);
+#ifdef USE_FDT
+    fdt_node_free(machine->fdt);
+#endif
     free(machine);
 }
 
@@ -245,6 +348,9 @@ PUBLIC void rvvm_run_machine_singlethread(rvvm_machine_t* machine)
 {
     if (machine->running) return;
     machine->running = true;
+#ifdef USE_FDT
+    rvvm_gen_dtb(machine);
+#endif
     // I don't have the slightest idea how the preemptive timer,
     // nor the async peripherals should work now,
     // but for dumb environments might suffice

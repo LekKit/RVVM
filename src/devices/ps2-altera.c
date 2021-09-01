@@ -166,6 +166,21 @@ void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, ui
     altps2.end = base_addr + ALTERA_REG_SIZE;
     altps2.data = ptr;
     rvvm_attach_mmio(machine, &altps2);
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (plic == NULL) {
+        rvvm_warn("Missing nodes in FDT!");
+        return;
+    }
+    
+    struct fdt_node* ps2 = fdt_node_create_reg("ps2", base_addr);
+    fdt_node_add_prop_reg(ps2, "reg", base_addr, ALTERA_REG_SIZE);
+    fdt_node_add_prop_str(ps2, "compatible", "altr,ps2-1.0");
+    fdt_node_add_prop_u32(ps2, "interrupt-parent", fdt_node_get_phandle(plic));
+    fdt_node_add_prop_u32(ps2, "interrupts", irq);
+    fdt_node_add_child(soc, ps2);
+#endif
 }
 
 // Send interrupt via PS/2 controller.

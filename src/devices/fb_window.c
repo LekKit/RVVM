@@ -101,4 +101,22 @@ void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t hei
     win_placeholder.data = data;
     win_placeholder.type = &win_dev_type;
     rvvm_attach_mmio(machine, &win_placeholder);
+
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    if (soc == NULL) {
+        rvvm_warn("Missing soc node in FDT!");
+        return;
+    }
+    
+    struct fdt_node* fb = fdt_node_create_reg("framebuffer", addr);
+    fdt_node_add_prop_reg(fb, "reg", addr, fb_size);
+    fdt_node_add_prop_str(fb, "compatible", "simple-framebuffer");
+    fdt_node_add_prop_str(fb, "format", "a8r8g8b8");
+    fdt_node_add_prop_u32(fb, "width", width);
+    fdt_node_add_prop_u32(fb, "height", height);
+    fdt_node_add_prop_u32(fb, "stride", width * 4);
+    
+    fdt_node_add_child(soc, fb);
+#endif
 }

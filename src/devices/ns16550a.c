@@ -268,4 +268,20 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr)
     ns16550a.end = base_addr + NS16550A_REG_SIZE;
     ns16550a.data = ptr;
     rvvm_attach_mmio(machine, &ns16550a);
+    
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    if (soc == NULL) {
+        rvvm_warn("Missing soc node in FDT!");
+        return;
+    }
+    
+    struct fdt_node* uart = fdt_node_create_reg("uart", base_addr);
+    fdt_node_add_prop_reg(uart, "reg", base_addr, NS16550A_REG_SIZE);
+    fdt_node_add_prop_str(uart, "compatible", "ns16550a");
+    fdt_node_add_prop_u32(uart, "clock-frequency", 0x2625a00);
+    fdt_node_add_prop_u32(uart, "fifo-size", 0x80);
+    fdt_node_add_prop_str(uart, "status", "okay");
+    fdt_node_add_child(soc, uart);
+#endif
 }
