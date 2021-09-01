@@ -62,7 +62,6 @@ struct ps2_keyboard
 
 	// TODO: disable typematic, make, break keycodes
 
-	int8_t keycount; // currently pressed key count
 	struct ringbuf cmdbuf;
 	spinlock_t lock;
 };
@@ -344,16 +343,6 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		goto out;
 	}
 
-	pressed ? ++dev->keycount : --dev->keycount;
-
-	// When ALT-Tabbing out of the window, the ALT key remains pressed, so
-	// the counter is unbalanced. We need this to stop the keyboard from
-	// going insane repeating the last key.
-	if (dev->keycount < 0)
-	{
-		dev->keycount = 0;
-	}
-
 	uint8_t keycmd[KEY_SIZE];
 	uint8_t keylen;
 	if (pressed)
@@ -375,8 +364,10 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		/* try to make the break code */
 		/* this is for scan set 2 */
 
+		if (dev->lastkey.len == key->len
+				&& !memcmp(key->keycode, dev->lastkey.keycode, key->len))
+			dev->lastkey.len = 0;
 		//memset(dev->lastkey, '\0', KEY_SIZE);
-		if (dev->keycount == 0) dev->lastkey.len = 0;
 
 		if (key->len == 1)
 		{
