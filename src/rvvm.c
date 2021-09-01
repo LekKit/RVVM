@@ -179,7 +179,7 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     
     fdt_node_add_child(machine->fdt, soc);
 }
-#include <stdio.h>
+
 static void rvvm_gen_dtb(rvvm_machine_t* machine)
 {
     vector_foreach(machine->harts, i) {
@@ -193,9 +193,6 @@ static void rvvm_gen_dtb(rvvm_machine_t* machine)
     size_t dtb_size = fdt_serialize(machine->fdt, machine->mem.data + (machine->mem.size >> 1), machine->mem.size >> 1, 0);
     if (dtb_size) {
         rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", dtb_addr, (uint32_t)dtb_size);
-        FILE* file = fopen("dtb_dump.dtb", "wb");
-        fwrite(machine->mem.data + (machine->mem.size >> 1), dtb_size, 1, file);
-        fclose(file);
         vector_foreach(machine->harts, i) {
             vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
         }
