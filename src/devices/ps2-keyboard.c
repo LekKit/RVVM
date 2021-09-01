@@ -62,6 +62,7 @@ struct ps2_keyboard
 
 	// TODO: disable typematic, make, break keycodes
 
+	uint8_t keycount; // currently pressed key count
 	struct ringbuf cmdbuf;
 	spinlock_t lock;
 };
@@ -343,6 +344,8 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		goto out;
 	}
 
+	pressed ? ++dev->keycount : --dev->keycount;
+
 	uint8_t keycmd[KEY_SIZE];
 	uint8_t keylen;
 	if (pressed)
@@ -365,7 +368,7 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		/* this is for scan set 2 */
 
 		//memset(dev->lastkey, '\0', KEY_SIZE);
-		dev->lastkey.len = 0;
+		if (dev->keycount == 0) dev->lastkey.len = 0;
 
 		if (key->len == 1)
 		{
