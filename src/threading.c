@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 
-static void apc_membarrier(ULONG_PTR p)
+static void __stdcall apc_membarrier(ULONG_PTR p)
 {
     UNUSED(p);
     atomic_fence();
@@ -101,7 +101,7 @@ void thread_signal_membarrier(thread_handle_t handle)
         } else {
             sa.sa_handler = signal_membarrier;
             sigemptyset(&sa.sa_mask);
-            sa.sa_flags = 0;
+            sa.sa_flags = SA_RESTART;
             // Still a possible race here?..
             sigaction(SIGUSR2, &sa, NULL);
         }
