@@ -363,6 +363,34 @@ static inline void riscv_jit_flush(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr
     UNUSED(size);
 }
 
+/*
+ * Since aligned loads/stores expect relaxed atomicity, MMU should use this
+ * instead of a regular memcpy, to prevent other harts from observing
+ * half-made memory operation on TLB miss
+ */ 
+static inline void atomic_memcpy_relaxed(void* dest, const void* src, size_t size)
+{
+    if (likely(((((size_t)src) & (size-1)) == 0) && ((((size_t)dest) & (size-1)) == 0))) {
+        switch(size) {
+#ifdef USE_RV64
+            case 8:
+                *(uint64_t*)dest = *(uint64_t*)src;
+                return;
+#endif
+            case 4:
+                *(uint32_t*)dest = *(uint32_t*)src;
+                return;
+            case 2:
+                *(uint16_t*)dest = *(uint16_t*)src;
+                return;
+            case 1:
+                *(uint8_t*)dest = *(uint8_t*)src;
+                return;
+        }
+    }
+    memcpy(dest, src, size);
+}
+
 static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size, uint8_t access)
 {
     //rvvm_info("Hart %p tlb miss at 0x%08"PRIxXLEN, vm, addr);
@@ -388,9 +416,11 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
                 // Clear JITted blocks & flush trace cache if necessary
                 riscv_jit_flush(vm, addr, paddr, size);
                 // Should we make this atomic? RVWMO expects ld/st atomicity
-                memcpy(ptr, dest, size);
+                //memcpy(ptr, dest, size);
+                atomic_memcpy_relaxed(ptr, dest, size);
             } else {
-                memcpy(dest, ptr, size);
+                //memcpy(dest, ptr, size);
+                atomic_memcpy_relaxed(dest, ptr, size);
             }
             return true;
         }
