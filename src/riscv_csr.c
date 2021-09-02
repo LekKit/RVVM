@@ -99,7 +99,7 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
         vm->csr.status &= ~sd_mask;
     }
 #else
-    mask = bit_replace(mask, 13, 2, FS_OFF);
+    mask = bit_replace(mask, 13, 2, 0);
 #endif
 
 #ifdef USE_RV64
