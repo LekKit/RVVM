@@ -17,6 +17,13 @@ option(RVVM_USE_NET "Use networking" OFF)
 option(RVVM_USE_FPU "Use floating-point instructions" ON)
 option(RVVM_USE_VMSWAP "Use swap file for RAM" OFF)
 option(RVVM_USE_VMSWAP_SPLIT "Use swap splitting - one file per page" OFF)
+option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
+option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
+option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking - makes context switches cheaper" ON)
+
+if (RVVM_USE_JIT AND RVVM_USE_PRECISE_FS)
+	message(FATAL_ERROR "Precise FS tracking cannot be used with JIT.")
+endif()
 
 set(RVVM_SRC_DIR "${RVVM_SOURCE_DIR}/src")
 
@@ -46,6 +53,18 @@ if (RVVM_IS_TOP_LEVEL)
 	if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 		add_compile_options(-Wall -Wextra)
 	endif()
+endif()
+
+if (RVVM_USE_SPINLOCK_DEBUG)
+	target_compile_definitions(rvvm_common INTERFACE USE_SPINLOCK_DEBUG)
+endif()
+
+if (RVVM_USE_FDT)
+	target_compile_definitions(rvvm_common INTERFACE USE_FDT)
+endif()
+
+if (RVVM_USE_PRECISE_FS)
+	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
 endif()
 
 # CPU interpreter sources
