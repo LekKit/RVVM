@@ -135,7 +135,6 @@ void riscv_update_xlen(rvvm_hart_t* vm)
     if (vm->rv64 != rv64) {
         if (rv64) {
             rvvm_info("Hart %p switches to RV64", vm);
-            exit(0);
             for (size_t i=0; i<REGISTERS_MAX; ++i) {
                 vm->registers[i] = (int32_t)vm->registers[i];
             }
@@ -200,7 +199,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     // Target privilege mode
     uint8_t priv = PRIVILEGE_MACHINE;
     // Delegate to lower privilege mode if needed
-    while ((vm->csr.edeleg[priv] & (1 << cause)) && priv > vm->priv_mode) priv--;
+    while ((priv > vm->priv_mode) && (vm->csr.edeleg[priv] & (1 << cause))) priv--;
     //rvvm_info("Hart %p trap at %08"PRIxXLEN" -> %08"PRIxXLEN", cause %x, tval %08"PRIxXLEN"\n", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3UL), cause, tval);
     // Write exception info
     vm->csr.epc[priv] = vm->registers[REGISTER_PC];
@@ -255,7 +254,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 // Target privilege mode
                 uint8_t priv = PRIVILEGE_MACHINE;
                 // Delegate to lower privilege mode if needed
-                while (vm->csr.ideleg[priv] & (1 << i)) priv--;
+                while ((priv > vm->priv_mode) && (vm->csr.ideleg[priv] & (1 << i))) priv--;
                 // Write exception info
                 vm->csr.epc[priv] = vm->registers[REGISTER_PC];
                 if (wfi) vm->csr.epc[priv] += 4;
