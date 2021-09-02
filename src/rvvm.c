@@ -206,6 +206,14 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
 {
     rvvm_hart_t* vm;
     rvvm_machine_t* machine = safe_calloc(sizeof(rvvm_machine_t), 1);
+    if (hart_count == 0) {
+        rvvm_warn("Creating machine with no harts at all... What are you even??");
+    }
+    if (!rv64 && mem_size > (1U << 30)) {
+        // Workaround for SBI/Linux hangs on incorrect machine config
+        rvvm_warn("Creating RV32 machine with >1G of RAM is likely to break, fixing");
+        mem_size = 1U << 30;
+    }
     if (!riscv_init_ram(&machine->mem, mem_base, mem_size)) {
         free(machine);
         return NULL;
@@ -224,8 +232,6 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
         // Boot from ram base addr by default
         vm->registers[REGISTER_PC] = vm->mem.begin;
     }
-    if (hart_count == 0)
-        rvvm_warn("Creating machine with no harts at all... What are you even??");
 #ifdef USE_FDT
     rvvm_init_fdt(machine);
 #endif
