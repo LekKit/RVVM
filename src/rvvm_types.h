@@ -25,6 +25,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <inttypes.h>
 
+// Fix for MSVCRT printf specifier
+#if defined(_WIN32) && defined(PRIx64)
+#undef PRIx64
+#define PRIx64 "I64x"
+#endif
+
 #ifdef __SIZEOF_INT128__
 #define INT128_SUPPORT 1
 typedef unsigned __int128 uint128_t;
