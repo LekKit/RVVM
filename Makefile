@@ -63,7 +63,7 @@ ifeq ($(OS),windows)
 override CFLAGS += -mwindows -static
 PROGRAMEXT := .exe
 else
-override CFLAGS += -pthread
+override LDFLAGS += -lpthread
 endif
 
 
@@ -114,10 +114,10 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS += -O3 -flto
+override CFLAGS += -O3 -flto -pthread -frounding-math
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -O3 -flto
+override CFLAGS += -O3 -flto -pthread -frounding-math
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
@@ -243,7 +243,7 @@ override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
 endif
 
 # Generic compiler flags
-override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) -frounding-math
+override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
 
 DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 
