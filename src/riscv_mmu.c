@@ -285,24 +285,33 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
 
 static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, paddr_t offset, size_t size)
 {
-    assert(dev->max_op_size >= dev->min_op_size);
-    if (size < dev->min_op_size || (offset & (dev->min_op_size - 1))) {
+    if (unlikely(dev->max_op_size < dev->min_op_size)) {
+        rvvm_warn("Device \"%s\" has incorrect access properties: min %u, max %u",
+                  dev->type ? dev->type->name : "null", dev->min_op_size, dev->max_op_size);
+        return false;
+    }
+    if ((size < dev->min_op_size) || (offset & (dev->min_op_size - 1))) {
         // Operation size smaller than possible or address misaligned
         // Read bigger chunk, then use only part of it
         paddr_t aligned_offset = offset & ~(paddr_t)(dev->min_op_size - 1);
         uint8_t offset_diff = offset - aligned_offset;
         uint8_t new_size = dev->min_op_size;
         uint8_t tmp[16];
-        while (new_size < size + offset_diff) new_size <<= 1;
-        bool ret = riscv_mmio_unaligned_op(dev, rwfunc, tmp, dev->min_op_size, aligned_offset);
+        while (new_size < (size + offset_diff)) new_size <<= 1;
+        if (unlikely(new_size > 16)) {
+            rvvm_warn("Device \"%s\" has incorrect min op size: %u",
+                  dev->type ? dev->type->name : "null", dev->min_op_size);
+            return false;
+        }
+        bool ret = riscv_mmio_unaligned_op(dev, rwfunc, tmp, aligned_offset, new_size);
         if (ret) memcpy(dest, tmp + offset_diff, size);
         return ret;
     }
     if (size > dev->max_op_size) {
         // Max operation size exceeded, cut into smaller parts
         uint8_t size_half = size >> 1;
-        return riscv_mmio_unaligned_op(dev, rwfunc, dest, size_half, offset) &&
-               riscv_mmio_unaligned_op(dev, rwfunc, ((vmptr_t)dest) + size_half, size_half, offset + size_half);
+        return riscv_mmio_unaligned_op(dev, rwfunc, dest, offset, size_half) &&
+               riscv_mmio_unaligned_op(dev, rwfunc, ((vmptr_t)dest) + size_half, offset + size_half, size_half);
     }
     return rwfunc(dev, dest, offset, size);
 }
