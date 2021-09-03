@@ -1,7 +1,7 @@
 # Makefile :)
 NAME     := rvvm
 SRCDIR   := src
-#VERSION := 0.2-release
+VERSION  := 0.4
 
 # Passed by mingw make
 ifeq ($(OS),Windows_NT)
@@ -129,8 +129,11 @@ endif
 
 # Version string
 ifndef VERSION
-VERSION := git-$(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)-$(BUILD_TYPE)
+VERSION := git
 endif
+GIT_OUTPUT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
+VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
+
 
 $(info RVVM $(VERSION))
 

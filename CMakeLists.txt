@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.9)
 
-set(RVVM_VERSION 0.2)
+set(RVVM_VERSION 0.4)
 project(RVVM VERSION ${RVVM_VERSION}
 	DESCRIPTION "RISC-V Virtual Machine"
 	HOMEPAGE_URL "https://github.com/LekKit/RVVM"
@@ -11,7 +11,7 @@ project(RVVM VERSION ${RVVM_VERSION}
 option(RVVM_USE_FB "Use framebuffer output" ON)
 option(RVVM_USE_XCB "Use XCB framebuffer backend - Xlib is used otherwise" OFF)
 option(RVVM_USE_XSHM "Use XSHM shared memory extension for X11" ON)
-option(RVVM_USE_RV64 "Use RV64 CPU" OFF)
+option(RVVM_USE_RV64 "Use RV64 CPU" ON)
 option(RVVM_USE_JIT "Use RVJIT Just-in-time compiler" OFF)
 option(RVVM_USE_NET "Use networking" OFF)
 option(RVVM_USE_FPU "Use floating-point instructions" ON)
@@ -93,7 +93,7 @@ if (RVVM_USE_FPU)
 	endif()
 
 	# Enforce correct floating-point behavior
-	if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"
+	if (CMAKE_C_COMPILER_ID MATCHES "GNU"
 	    AND NOT MSVC) # clang-cl
 		target_compile_options(rvvm_cpu32 PRIVATE -frounding-math)
 		target_compile_options(rvvm_cpu64 PRIVATE -frounding-math)
