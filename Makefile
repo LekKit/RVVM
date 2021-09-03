@@ -117,7 +117,8 @@ ifeq ($(CC_TYPE),gcc)
 override CFLAGS += -O3 -flto -pthread -frounding-math
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -O3 -flto -pthread -frounding-math
+# Many clang versions lack -frounding-math, and it doesn't need it in fact
+override CFLAGS += -O3 -flto -pthread
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
