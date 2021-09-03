@@ -56,24 +56,6 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     riscv_priv_init(vm);
 }
 
-static inline void riscv_irqs_set(rvvm_hart_t* vm, maxlen_t irqs)
-{
-#ifdef USE_RV64
-    atomic_or_uint64(&vm->csr.ip, irqs);
-#else
-    atomic_or_uint32(&vm->csr.ip, irqs);
-#endif
-}
-
-static inline void riscv_irqs_clear(rvvm_hart_t* vm, maxlen_t irqs)
-{
-#ifdef USE_RV64
-    atomic_and_uint64(&vm->csr.ip, ~irqs);
-#else
-    atomic_and_uint32(&vm->csr.ip, ~irqs);
-#endif
-}
-
 void riscv_hart_run(rvvm_hart_t* vm)
 {
     uint32_t events;
