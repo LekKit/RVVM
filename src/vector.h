@@ -70,7 +70,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define vector_insert(vec, pos, val) \
 { \
     vector_grow(vec); \
-    for (size_t i=(vec).count; i>pos; --i) (vec).data[i] = (vec).data[i-1]; \
+    for (size_t _vec_i=(vec).count; _vec_i>pos; --_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i-1]; \
     (vec).data[pos] = val; \
     (vec).count++; \
 }
@@ -85,7 +85,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define vector_emplace(vec, pos) \
 { \
     vector_grow(vec); \
-    for (size_t i=(vec).count; i>pos; --i) (vec).data[i] = (vec).data[i-1]; \
+    for (size_t _vec_i=(vec).count; _vec_i>pos; --_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i-1]; \
     memset(&(vec).data[(vec).count], 0, sizeof(*(vec).data)); \
     (vec).count++; \
 }
@@ -95,10 +95,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define vector_erase(vec, pos) \
 { \
-    for (size_t i=pos; i<(vec).count-1; ++i) (vec).data[i] = (vec).data[i+1]; \
+    for (size_t _vec_i=pos; _vec_i<(vec).count-1; ++_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i+1]; \
     (vec).count--; \
     if ((vec).count < (vec).size >> 1) { \
-        (vec).size >= 1; \
+        (vec).size >>= 1; \
         (vec).data = safe_realloc((vec).data, (vec).size * sizeof(*(vec).data)); \
     } \
 }

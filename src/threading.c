@@ -17,13 +17,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "threading.h"
+#include "atomics.h"
+#include "utils.h"
 #include <stdlib.h>
 
 #ifdef _WIN32
 #include <windows.h>
+
+static void __stdcall apc_membarrier(ULONG_PTR p)
+{
+    UNUSED(p);
+    atomic_fence();
+}
+
 #else
+
 #include <pthread.h>
+#include <signal.h>
+
+static void signal_membarrier(int sig)
+{
+    UNUSED(sig);
+    atomic_fence();
+}
+
 #endif
+
 
 thread_handle_t thread_create(thread_func_t func_name, void *arg)
 {
@@ -46,7 +65,7 @@ void* thread_join(thread_handle_t handle)
     DWORD ltmp;
     WaitForSingleObject(*(HANDLE*)handle, INFINITE);
     GetExitCodeThread(*(HANDLE*)handle, &ltmp);
-    ret = (void*)ltmp;
+    ret = (void*)(size_t)ltmp;
 #else
     pthread_join(*(pthread_t*)handle, &ret);
 #endif
@@ -61,6 +80,33 @@ void thread_kill(thread_handle_t handle)
     TerminateThread(*(HANDLE*)handle, 0);
 #else
     pthread_cancel(*(pthread_t*)handle);
+    pthread_join(*(pthread_t*)handle, NULL);
 #endif
     free(handle);
+}
+
+void thread_signal_membarrier(thread_handle_t handle)
+{
+    if (handle == NULL) return;
+#ifdef _WIN32
+    QueueUserAPC(apc_membarrier, *(HANDLE*)handle, 0);
+#else
+    struct sigaction sa;
+    sigaction(SIGUSR2, NULL, &sa);
+    
+    if (sa.sa_handler != signal_membarrier) {
+        if (sa.sa_handler != SIG_DFL && sa.sa_handler != SIG_IGN) {
+            rvvm_warn("thread_signal_membarrier() failed: SIGUSR2 is already in use!");
+            return;
+        } else {
+            sa.sa_handler = signal_membarrier;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = SA_RESTART;
+            // Still a possible race here?..
+            sigaction(SIGUSR2, &sa, NULL);
+        }
+    }
+
+    pthread_kill(*(pthread_t*)handle, SIGUSR2);
+#endif
 }

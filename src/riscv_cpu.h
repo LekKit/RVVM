@@ -1,7 +1,7 @@
 /*
 riscv_cpu.h - RISC-V CPU Definitions
 Copyright (C) 2021  LekKit <github.com/LekKit>
-                    Mr0maks <mr.maks0443@gmail.com>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -20,33 +20,40 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_CPU_H
 #define RISCV_CPU_H
 
+#include "rvvm.h"
+#include "riscv_hart.h"
+#include "riscv_csr.h"
 #include "mem_ops.h"
-#include "riscv32.h"
+#include "assert.h"
 
-#define RISCV_I_VERSION 2.1
-#define RISCV_C_VERSION 2.0
-#define RISCV_M_VERSION 2.0
-#define RISCV_A_VERSION 2.0
+void riscv_install_opcode_R(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_t func);
+void riscv_install_opcode_UJ(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_t func);
+void riscv_install_opcode_ISB(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_t func);
+void riscv_install_opcode_C(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_c_t func);
 
-// Temporary compatibility with legacy riscv32_
-#define riscv_mem_op riscv32_mem_op
-#define riscv_mmu_op riscv32_mmu_op
-#define riscv_illegal_insn riscv32_illegal_insn
-#define riscv_c_illegal_insn riscv32c_illegal_insn
-#define riscv_trap riscv32_trap
+void riscv_decoder_init_rv64(rvvm_hart_t* vm);
+void riscv_decoder_init_rv32(rvvm_hart_t* vm);
+void riscv_decoder_enable_fpu(rvvm_hart_t* vm, bool enable);
+void riscv_run_till_event(rvvm_hart_t* vm);
 
-void riscv32_cpu_init();
-void riscv32_run_till_event(rvvm_hart_t *vm);
-void riscv32_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv32_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv32_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv32_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t));
-void riscv64_cpu_init();
-void riscv64_run_till_event(rvvm_hart_t *vm);
-void riscv64_install_opcode_R(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv64_install_opcode_UJ(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv64_install_opcode_ISB(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint32_t));
-void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const uint16_t));
+void riscv32i_init(rvvm_hart_t* vm);
+void riscv32c_init(rvvm_hart_t* vm);
+void riscv32m_init(rvvm_hart_t* vm);
+void riscv32a_init(rvvm_hart_t* vm);
+
+void riscv64i_init(rvvm_hart_t* vm);
+void riscv64c_init(rvvm_hart_t* vm);
+void riscv64m_init(rvvm_hart_t* vm);
+void riscv64a_init(rvvm_hart_t* vm);
+
+void riscv32f_enable(rvvm_hart_t* vm, bool enable);
+void riscv32d_enable(rvvm_hart_t* vm, bool enable);
+
+void riscv64f_enable(rvvm_hart_t* vm, bool enable);
+void riscv64d_enable(rvvm_hart_t* vm, bool enable);
+
+void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t instruction);
+void riscv_c_illegal_insn(rvvm_hart_t* vm, const uint16_t instruction);
 
 // Private CPU implementation definitions
 #ifdef RISCV_CPU_SOURCE
@@ -56,43 +63,26 @@ void riscv64_install_opcode_C(uint32_t opcode, void (*func)(rvvm_hart_t*, const 
     typedef int64_t sxlen_t;
     typedef uint64_t xaddr_t;
     #define SHAMT_BITS 6
-    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x8000000000000000)
-    #define riscv_install_opcode_R riscv64_install_opcode_R
-    #define riscv_install_opcode_UJ riscv64_install_opcode_UJ
-    #define riscv_install_opcode_ISB riscv64_install_opcode_ISB
-    #define riscv_install_opcode_C riscv64_install_opcode_C
+    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x8000000000000000ULL)
     #define riscv_i_init riscv64i_init
     #define riscv_c_init riscv64c_init
     #define riscv_m_init riscv64m_init
     #define riscv_a_init riscv64a_init
     #define riscv_f_enable riscv64f_enable
     #define riscv_d_enable riscv64d_enable
-    #define riscv_cpu_init riscv64_cpu_init
-    #define riscv_run_till_event riscv64_run_till_event
 #else
     typedef uint32_t xlen_t;
     typedef int32_t sxlen_t;
     typedef uint32_t xaddr_t;
     #define SHAMT_BITS 5
-    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x80000000)
-    #define riscv_install_opcode_R riscv32_install_opcode_R
-    #define riscv_install_opcode_UJ riscv32_install_opcode_UJ
-    #define riscv_install_opcode_ISB riscv32_install_opcode_ISB
-    #define riscv_install_opcode_C riscv32_install_opcode_C
+    #define DIV_OVERFLOW_RS1 ((sxlen_t)0x80000000U)
     #define riscv_i_init riscv32i_init
     #define riscv_c_init riscv32c_init
     #define riscv_m_init riscv32m_init
     #define riscv_a_init riscv32a_init
     #define riscv_f_enable riscv32f_enable
     #define riscv_d_enable riscv32d_enable
-    #define riscv_cpu_init riscv32_cpu_init
-    #define riscv_run_till_event riscv32_run_till_event
 #endif
-
-void riscv_i_init();
-void riscv_c_init();
-void riscv_m_init();
-void riscv_a_init();
 
 static inline xlen_t riscv_read_register(rvvm_hart_t *vm, regid_t reg)
 {
@@ -109,6 +99,7 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
     vm->registers[reg] = data;
 }
 
+#ifdef USE_FPU
 static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
 {
     assert(reg < FPU_REGISTERS_MAX);
@@ -120,7 +111,7 @@ static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)
     assert(reg < FPU_REGISTERS_MAX);
     // NOTE: for performance reasons/smaller JIT footprint, maybe
     // we should hardcode the FPU state to dirty?
-    fpu_set_fs(vm, S_DIRTY);
+    fpu_set_fs(vm, FS_DIRTY);
     write_float_nanbox(&vm->fpu_registers[reg], val);
 }
 
@@ -133,9 +124,10 @@ static inline double fpu_read_register64(rvvm_hart_t *vm, regid_t reg)
 static inline void fpu_write_register64(rvvm_hart_t *vm, regid_t reg, double val)
 {
     assert(reg < FPU_REGISTERS_MAX);
-    fpu_set_fs(vm, S_DIRTY);
+    fpu_set_fs(vm, FS_DIRTY);
     vm->fpu_registers[reg] = val;
 }
+#endif
 
 /* translate compressed register encoding into normal */
 static inline regid_t riscv_c_reg(regid_t reg)
@@ -218,11 +210,13 @@ static inline regid_t riscv_c_reg(regid_t reg)
 #define RVC_ADDI4SPN     0x0
 #define RVC_FLD          0x4
 #define RVC_LW           0x8
-#define RVC_FLW          0xC
+#define RVC_FLW          0xC  // only exists on RV32!
 #define RVC_RESERVED1    0x10
 #define RVC_FSD          0x14
 #define RVC_SW           0x18
-#define RVC_FSW          0x1C
+#define RVC_FSW          0x1C // only exists on RV32!
+#define RV64C_SD         0x1C // Replaces FSW on RV64
+#define RV64C_LD         0xC  // Replaces FLW on RV64
 /* opcode 1 */
 #define RVC_ADDI         0x1  // this is also NOP when rs/rd == 0
 #define RVC_JAL          0x5  // only exists on RV32!
@@ -232,15 +226,18 @@ static inline regid_t riscv_c_reg(regid_t reg)
 #define RVC_J            0x15
 #define RVC_BEQZ         0x19
 #define RVC_BNEZ         0x1D
+#define RV64C_ADDIW      0x5  // Replaces JAL on RV64
 /* opcode 2 */
 #define RVC_SLLI         0x2
 #define RVC_FLDSP        0x6
 #define RVC_LWSP         0xA
-#define RVC_FLWSP        0xE
+#define RVC_FLWSP        0xE  // only exists on RV32!
 #define RVC_ALOPS2       0x12 // same as RVC_ALOPS1
 #define RVC_FSDSP        0x16
 #define RVC_SWSP         0x1A
-#define RVC_FSWSP        0x1E
+#define RVC_FSWSP        0x1E // only exists on RV32!
+#define RV64C_LDSP       0xE  // Replaces FLWSP on RV64
+#define RV64C_SDSP       0x1E // Replaces FSWSP on RV64
 
 /*
  * RVM Math instructions

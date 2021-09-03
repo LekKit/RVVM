@@ -18,7 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "ps2-altera.h"
 #include "ringbuf.h"
-#include "riscv32.h"
+#include "rvvm.h"
+#include "riscv.h"
 #include "rvtimer.h"
 #include "ps2-keyboard.h"
 #include "spinlock.h"
@@ -70,8 +71,8 @@ static void ps2_set_sample_rate(struct ps2_keyboard *dev, uint8_t rate)
 	dev->rate = rate & 0x1f;
 	dev->delay = rate & 3;
 
-	rvtimer_init(&dev->sample_timer, dev->delay + 1);
-	dev->sample_timer.timecmp = 1; /* one sample */
+	rvtimer_init(&dev->sample_timer, 1000);
+	dev->sample_timer.timecmp = (dev->delay + 1) * 250;
 }
 
 static void ps2_defaults(struct ps2_keyboard *dev)
@@ -272,38 +273,38 @@ static void ps2_handle_typematic(struct ps2_device *ps2keyboard)
 
 	static const uint16_t rate2realrate[32] =
 	{
-		[0] = 20,
-		[1] = 21,
-		[2] = 23,
-		[3] = 25,
-		[4] = 28,
-		[5] = 30,
-		[6] = 33,
-		[7] = 37,
-		[8] = 40,
-		[9] = 43,
-		[10] = 46,
-		[11] = 50,
-		[12] = 55,
-		[13] = 60,
-		[14] = 67,
-		[15] = 75,
-		[16] = 80,
-		[17] = 86,
-		[18] = 92,
-		[19] = 100,
-		[20] = 109,
-		[21] = 120,
-		[22] = 133,
-		[23] = 150,
-		[24] = 160,
-		[25] = 171,
-		[26] = 185,
-		[27] = 200,
-		[28] = 218,
-		[29] = 240,
-		[30] = 267,
-		[31] = 300
+		[0]  = 300,
+		[1]  = 267,
+		[2]  = 240,
+		[3]  = 218,
+		[4]  = 200,
+		[5]  = 185,
+		[6]  = 171,
+		[7]  = 160,
+		[8]  = 150,
+		[9]  = 133,
+		[10] = 120,
+		[11] = 109,
+		[12] = 100,
+		[13] = 92,
+		[14] = 86,
+		[15] = 80,
+		[16] = 75,
+		[17] = 67,
+		[18] = 60,
+		[19] = 55,
+		[20] = 50,
+		[21] = 46,
+		[22] = 43,
+		[23] = 40,
+		[24] = 37,
+		[25] = 33,
+		[26] = 30,
+		[27] = 28,
+		[28] = 25,
+		[29] = 23,
+		[30] = 21,
+		[31] = 20,
 	};
 
 	if (!rvtimer_pending(&dev->sample_timer))
@@ -355,16 +356,18 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 		memcpy(keycmd, key->keycode, keylen);
 
 		memcpy(dev->lastkey.keycode, key->keycode, keylen);
-		rvtimer_init(&dev->sample_timer, 4 - dev->delay);
-		dev->sample_timer.timecmp = 1;
+		rvtimer_init(&dev->sample_timer, 1000);
+		dev->sample_timer.timecmp = (dev->delay + 1) * 250;
 	}
 	else
 	{
 		/* try to make the break code */
 		/* this is for scan set 2 */
 
+		if (dev->lastkey.len == key->len
+				&& !memcmp(key->keycode, dev->lastkey.keycode, key->len))
+			dev->lastkey.len = 0;
 		//memset(dev->lastkey, '\0', KEY_SIZE);
-		dev->lastkey.len = 0;
 
 		if (key->len == 1)
 		{

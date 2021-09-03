@@ -171,7 +171,7 @@ void fb_create_window(struct fb_data *data, unsigned width, unsigned height, con
     wdata->name[sizeof(wdata->name) - 1] = 0;
     
     if (winclass_atom == 0) {
-        WNDCLASS wc = {};
+        WNDCLASS wc = { 0 };
         wc.lpfnWndProc   = WindowProc;
         wc.hInstance     = GetModuleHandle(NULL);
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
@@ -198,9 +198,8 @@ void fb_close_window(struct fb_data *data)
     free(wdata);
 }
 
-void fb_update(struct fb_data *data, size_t nfbs)
+void fb_update(struct fb_data *data)
 {
-    UNUSED(nfbs);
     if (winclass_atom == 0) return;
     win32fb_data* wdata = (win32fb_data*)data->winsys_data;
     

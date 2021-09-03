@@ -18,26 +18,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef FB_WINDOW_H
 #define FB_WINDOW_H
+
+#include "rvvm.h"
 #include "ps2-altera.h"
 
 /* TODO: pixel format */
 
-struct fb_data
-{
-	char *framebuffer;
-	struct ps2_device *mouse;
-	struct ps2_device *keyboard;
-	void *winsys_data; // private window system data
-};
-
 void r5g6b5_to_a8r8b8g8(const void* _in, void* _out, size_t length);
 void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length);
-void init_fb(rvvm_hart_t* vm, struct fb_data *data, unsigned width, unsigned height, uint32_t addr, struct ps2_device *mouse, struct ps2_device *keyboard);
+
+struct fb_data
+{
+    char *framebuffer;
+    struct ps2_device *mouse;
+    struct ps2_device *keyboard;
+    void *winsys_data; // private window system data
+};
+
+void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard);
 
 #if defined(USE_FB)
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name);
 void fb_close_window(struct fb_data *data);
-void fb_update(struct fb_data *data, size_t nfbs);
+void fb_update(struct fb_data *data);
 #else
 /* dummy functions when no window system available */
 inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) {
@@ -47,11 +50,11 @@ inline void fb_create_window(struct fb_data* data, unsigned width, unsigned heig
     UNUSED(name);
 }
 inline void fb_close_window(struct fb_data *data) {
-    UNUSED(data);
+    // Free a dummy framebuffer
+    free(data->framebuffer);
 }
-inline void fb_update(struct fb_data *data, size_t nfbs) {
+inline void fb_update(struct fb_data *data) {
     UNUSED(data);
-    UNUSED(nfbs);
 }
 #endif
 #endif

@@ -23,7 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdbool.h>
 #include "compiler.h"
 
-#ifndef GNU_EXTS
+#ifdef GNU_EXTS
+/* do nothing */
 #elif __STDC_VERSION__ >= 201112LL && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define C11_ATOMICS
@@ -38,6 +39,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef HOST_BIG_ENDIAN
 #include "bit_ops.h"
 #endif
+
+static inline void atomic_fence()
+{
+#ifdef C11_ATOMICS
+    atomic_thread_fence(memory_order_seq_cst);
+#elif GNU_EXTS
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
 
 /*
  * Host-endian 32-bit operations
@@ -472,21 +482,21 @@ static inline uint32_t atomic_sub_uint32_le(void* addr, uint32_t val)
 #endif
 }
 
-static inline uint32_t atomic_max_int32_le(void* addr, int32_t val)
+static inline int32_t atomic_max_int32_le(void* addr, int32_t val)
 {
     int32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline uint32_t atomic_min_int32_le(void* addr, int32_t val)
+static inline int32_t atomic_min_int32_le(void* addr, int32_t val)
 {
     int32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -495,7 +505,7 @@ static inline uint32_t atomic_maxu_uint32_le(void* addr, uint32_t val)
     uint32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
@@ -504,7 +514,7 @@ static inline uint32_t atomic_minu_uint32_le(void* addr, uint32_t val)
     uint32_t tmp;
     do {
         tmp = atomic_load_uint32_le(addr);
-    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint32_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -534,21 +544,21 @@ static inline uint64_t atomic_sub_uint64_le(void* addr, uint64_t val)
 #endif
 }
 
-static inline uint64_t atomic_max_int64_le(void* addr, int64_t val)
+static inline int64_t atomic_max_int64_le(void* addr, int64_t val)
 {
     int64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline uint64_t atomic_min_int64_le(void* addr, int64_t val)
+static inline int64_t atomic_min_int64_le(void* addr, int64_t val)
 {
     int64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
@@ -557,7 +567,7 @@ static inline uint64_t atomic_maxu_uint64_le(void* addr, uint64_t val)
     uint64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
@@ -566,7 +576,7 @@ static inline uint64_t atomic_minu_uint64_le(void* addr, uint64_t val)
     uint64_t tmp;
     do {
         tmp = atomic_load_uint64_le(addr);
-    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? val : tmp));
+    } while (!atomic_cas_uint64_le(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 

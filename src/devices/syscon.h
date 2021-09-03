@@ -1,6 +1,6 @@
 /*
-elf_load.h - ELF loader
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+syscon.h - Poweroff/reset syscon device
+Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,8 +16,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#ifndef SYSCON_H
+#define SYSCON_H
 
-#include "riscv32.h"
+#include "rvvm.h"
 
-bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ptrdiff_t offset);
+void syscon_init(rvvm_machine_t* machine, paddr_t base_addr);
+
+#endif
+ 

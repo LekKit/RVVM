@@ -33,11 +33,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define unlikely(x)   (x)
 #endif
 
-#ifdef GNU_EXTS
+#if defined(RVVMLIB_SHARED) && defined(GNU_EXTS)
 #define PUBLIC        __attribute__((visibility("default")))
 #define HIDDEN        __attribute__((visibility("hidden")))
 #define NOINLINE      __attribute__((noinline))
-#elif defined(_WIN32)
+#elif defined(RVVMLIB_SHARED) && defined(_WIN32)
 #define PUBLIC        __declspec(dllexport)
 #define HIDDEN
 #define NOINLINE      __declspec(noinline)
@@ -82,5 +82,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #if UINTPTR_MAX == UINT64_MAX
 #define HOST_64BIT 1
 #endif
+
+#define MACRO_MKSTRING(x) #x
+#define MACRO_TOSTRING(x) MACRO_MKSTRING(x)
+
+// Unwraps to src/example.c@128
+#define SOURCE_LINE __FILE__"@"MACRO_TOSTRING(__LINE__)
 
 #endif

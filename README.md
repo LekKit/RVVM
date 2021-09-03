@@ -1,41 +1,36 @@
 
 # RVVM - The RISC-V Virtual Machine
 [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/LekKit/RVVM.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/LekKit/RVVM/context:cpp)
+![version](https://img.shields.io/badge/version-0.4-brightgreen)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
-
 
 RISC-V CPU & System software implementation written in С
 
 ## What's working
-- Passes RISC-V compliance tests
-- OpenSBI, custom firmwares boot and execute properly
+- Passes RISC-V compliance tests for both RV64 & RV32
+- OpenSBI, U-Boot, custom firmwares boot and execute properly
 - Linux kernel boots!
 - Linux userspace works, interactive shell through UART
 - Framebuffer graphics, working Xorg with mouse & keyboard
 - Raw image mounted as rootfs
 
 ## What's done so far
-- Feature-complete RV32ICMAFD instruction set
-- Extendable and fast instruction decoder
-- Physical memory
-- Memory mapping unit (MMU) with SV32 virtual addressing
-- TLB address caching (greatly speeds up memory operations)
-- MMIO handlers
-- CSR operations
+- Feature-complete RV64IMAFDC instruction set
+- Multicore support (SMP)
+- Bootrom, kernel Image loading
+- DTB auto-generation, passing to firmware/kernel
+- RVVM Lib API for VM integration
+- MMU with SV32/SV39/SV48/SV57 virtual addressing
 - UART 16550a-compatible text console
-- Bootrom loading
-- DTB loading, passing to firmware/kernel
-- ELF kernel loading
-- Interrupts
 - PLIC/CLIC, timers
 - PS2 Altera Controller, PS2 keyboard & mouse
-- Graphical framebuffer
+- Graphical framebuffer through X11/WinAPI
 - ATA PIO hard drive
-- OpenCores Ethernet
-- [Somewhat WIP] RV64 CPU, JIT prototype, Lib API
+- OpenCores Ethernet through Linux TAP
+- Poweroff/reset device
 
-## Usage
-Currently builds using GNU Make and tested on Linux, Windows and MacOS systems. More build targets are going to be supported.
+## Building
+Currently builds using GNU Make or CMake and tested on Linux, Windows and MacOS systems. More build targets are going to be supported.
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
@@ -46,34 +41,47 @@ To cross-compile, pass CC=target-gcc and OS=target-os if the target OS differs f
 
 Examples:
 ```
-make CC=x86_64-w64-mingw32-gcc OS=windows
-make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0 USE_NET=1
+make CC=x86_64-w64-mingw32-gcc OS=windows USE_JIT=1
+make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0 USE_NET=1 USE_JIT=0
+```
+Alternatively, you can use CMake (hint, build binaries are not host arch suffixed):
+```
+git clone https://github.com/LekKit/RVVM
+cd RVVM
+mkdir build
+cmake -S. -Bbuild
+cmake --build build --target all
+cd build
 ```
 
-Running:
+## Running
 ```
-./rvvm_x86_64 bootrom.bin -dtb=device.dtb -image=rootfs.img
+./rvvm_x86_64 fw_jump.bin -kernel linux_Image -image rootfs.img -rv64 -mem 2G -smp 2 -res 1280x720
 ```
-The bootrom.bin file is a user-provided raw binary, loaded at 0x80000000 address where it starts execution, and device.dtb is a DTB file containing description of the machine.
-You can pass -image=rootfs.img to mount a raw partition image as a flash drive.
-
+Argument explanation:
+```
+fw_jump.bin            Initial firmware, OpenSBI in this case
+-kernel linux_Image    Kernel Image to be booted by SBI, etc
+-image rootfs.img      Hard drive image to be mounted as rootfs
+-rv64                  Enable RV64, RV32 is used by default
+-mem 2G                Memory amount (may be suffixed by k/M/G), default 256M
+-smp 2                 Amount of cores, single-core machine by default
+-res 1280x720          Changes framebuffer & VM window resolution
+```
+Invoke "./rvvm_x86_64 -h" to see extended help.
 
 ## Our team
-- **LekKit**:  Instruction decoding, RAM/MMU/TLB implementation, RV32/64ICMA ISA, interrupts & timer, privileged ISA, JIT, lots of fixes
-- **cerg2010cerg2010**: ELF loading, important fixes, initial RV64 work, PLIC, PS2, ATA, Ethernet, XCB window backend, FPU extensions
+- **LekKit**: RVVM API, interpreter, RV64IMAC ISA, RISC-V Hart/MMU/Privileged/CSR, codebase infrastructure, working on JIT
+- **cerg2010cerg2010**: Important fixes, initial RV64 work, PLIC/PS2/ATA/Ethernet, XCB window backend, FPU extensions, FDT lib, working on PCI
 - **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
 - *Hoping to see more contributors here*
 
 ## TODO
-- Debug the available functionality and make sure it's conforming to the specs
-- Proper MMU atomicity, fence, native AMO
-- Multicore support (already works but the kernel races and crashes sometimes)
-- Improve MMU & TLB, allow their usage from JIT'ed code
-- Floating-point extensions
-- RV64-only instructions & MMU
-- Integrate JIT into the VM
+- Improve RVVM Lib public API
+- Working JIT infrastructure
+- PCI bus, SATA/SCSI for faster IO
+- Improve UART
 - Userspace networking, sound?
 - Other peripherals
-- DTB generation
 - *A lot more...*
 - Userspace emulation?

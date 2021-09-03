@@ -1,8 +1,7 @@
 # Makefile :)
 NAME     := rvvm
 SRCDIR   := src
-#VERSION := 0.2-release
-
+VERSION  := 0.4
 
 # Passed by mingw make
 ifeq ($(OS),Windows_NT)
@@ -64,7 +63,7 @@ ifeq ($(OS),windows)
 override CFLAGS += -mwindows -static
 PROGRAMEXT := .exe
 else
-override CFLAGS += -pthread
+override LDFLAGS += -lpthread
 endif
 
 
@@ -115,10 +114,11 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS += -O3 -flto
+override CFLAGS += -O3 -flto -pthread -frounding-math
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -O3 -flto
+# Many clang versions lack -frounding-math, and it doesn't need it in fact
+override CFLAGS += -O3 -flto -pthread
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
@@ -129,8 +129,11 @@ endif
 
 # Version string
 ifndef VERSION
-VERSION := git-$(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)-$(BUILD_TYPE)
+VERSION := git
 endif
+GIT_OUTPUT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
+VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
+
 
 $(info RVVM $(VERSION))
 
@@ -141,15 +144,25 @@ SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xli
 USE_FB ?= 1
 USE_XCB ?= 0
 USE_XSHM ?= 1
-USE_RV64 ?= 0
+USE_RV64 ?= 1
 USE_JIT ?= 0
 USE_NET ?= 0
+USE_FPU ?= 1
+USE_FDT ?= 1
+USE_SPINLOCK_DEBUG ?= 1
+
+# Need fixes
+USE_VMSWAP ?= 0
+USE_VMSWAP_SPLIT ?= 0
 
 ifeq ($(OS),linux)
 override LDFLAGS += -lrt
 endif
 # Needed for floating-point functions like fetestexcept/feraiseexcept
+ifeq ($(USE_FPU),1)
 override LDFLAGS += -lm
+override CFLAGS += -DUSE_FPU
+endif
 
 ifeq ($(USE_FB),1)
 override CFLAGS += -DUSE_FB
@@ -194,12 +207,7 @@ endif
 endif
 
 ifeq ($(USE_RV64),1)
-# All 64-bit arches have 64 in name
-ifneq (,$(findstring 64,$(ARCH)))
 override CFLAGS += -DUSE_RV64
-else
-USE_RV64 = 0
-endif
 endif
 
 ifeq ($(USE_JIT),1)
@@ -216,13 +224,30 @@ ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
 endif
 
+ifeq ($(USE_VMSWAP_SPLIT),1)
+override CFLAGS += -DUSE_VMSWAP_SPLIT
+USE_VMSWAP := 1
+endif
+
+ifeq ($(USE_VMSWAP),1)
+override CFLAGS += -DUSE_VMSWAP
+endif
+
+ifeq ($(USE_FDT),1)
+override CFLAGS += -DUSE_FDT
+endif
+
+ifeq ($(USE_SPINLOCK_DEBUG),1)
+override CFLAGS += -DUSE_SPINLOCK_DEBUG
+endif
+
 ifeq ($(OS),darwin)
 override CFLAGS += $(shell pkg-config $(PKGCFG_LIST) --cflags)
 override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
 endif
 
 # Generic compiler flags
-override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) -frounding-math
+override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
 
 DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 

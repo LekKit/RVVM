@@ -16,17 +16,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Currently broken
+#if 0
+
+#include "elf_load.h"
+#include <stddef.h>
+
+#if !defined _WIN32 && !defined __APPLE__
+
 #include <stdio.h>
 #include <string.h>
 
 #include "bit_ops.h"
 #include "riscv32.h"
-#include "elf_load.h"
 #include "mem_ops.h"
 #include "riscv32_csr.h"
 #include "riscv32_mmu.h"
-
-#if !defined _WIN32 && !defined __APPLE__
 
 #include <elf.h>
 
@@ -34,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PN_XNUM 0xffff
 #endif
 
-bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ssize_t offset)
+bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ptrdiff_t offset)
 {
 	FILE *fp = fopen(path, "rb");
 	if (!fp)
@@ -135,15 +140,33 @@ bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, s
 			goto err_fclose;
 		}
 
-		if (1 != fread(vm->mem.data + dest_addr, phdr.p_filesz, 1, fp))
+		vmptr_t temp_mem = malloc(phdr.p_filesz);
+		if (temp_mem == NULL) {
+			printf("Unable to allocate memory of size %d\n", phdr.p_filesz);
+			status = false;
+			goto err_fclose;
+		}
+
+		if (1 != fread(temp_mem, phdr.p_filesz, 1, fp))
 		{
 			printf("Unable to read ELF segment at offset 0x%zx of file %s\n", phdr_start, path);
 			status = false;
 			goto err_fclose;
 		}
 
+		riscv32_physmem_op(vm, dest_addr, temp_mem, phdr.p_filesz, MMU_WRITE);
+		free(temp_mem);
+
 		/* fill .bss */
-		memset(vm->mem.data + dest_addr + phdr.p_filesz, '\0', phdr.p_memsz - phdr.p_filesz);
+		temp_mem = calloc(1, phdr.p_memsz - phdr.p_filesz);
+		if (temp_mem == NULL) {
+			printf("Unable to allocate memory of size %d\n", phdr.p_memsz - phdr.p_filesz);
+			status = false;
+			goto err_fclose;
+		}
+
+		riscv32_physmem_op(vm, dest_addr + phdr.p_filesz, temp_mem, phdr.p_memsz - phdr.p_filesz, MMU_WRITE);
+		free(temp_mem);
 
 		if (!use_mmu)
 		{
@@ -172,7 +195,9 @@ bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, s
 		for (size_t i = 0; i < pte1_count; ++i)
 		{
 			size_t pte1_addr = pte1_start + i * 4;
-			uint32_t pte1 = read_uint32_le(vm->mem.data + pte1_addr);
+			uint32_t pte1;
+			riscv32_physmem_op(vm, pte1_addr, (vmptr_t)&pte1, sizeof(pte1), MMU_READ);
+			pte1 = read_uint32_le(&pte1);
 
 			size_t pte0_start;
 			if (pte1 & MMU_VALID_PTE)
@@ -185,8 +210,8 @@ bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, s
 				pte0_start = pgd;
 				assert((pte0_start & bit_mask(12)) == 0);
 
-				write_uint32_le(vm->mem.data + pte1_addr,
-						SET_PHYS_ADDR(MMU_VALID_PTE, pte0_start));
+				uint32_t data = SET_PHYS_ADDR(MMU_VALID_PTE, pte0_start);
+				riscv32_physmem_op(vm, pte1_addr, (vmptr_t)&data, sizeof(data), MMU_WRITE);
 			}
 			pte0_start += GET_VPN2(phdr.p_vaddr) * 4;
 
@@ -196,8 +221,8 @@ bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, s
 			{
 				size_t pte0_addr = pte0_start + j * 4;
 
-				write_uint32_le(vm->mem.data + pte0_addr,
-						SET_PHYS_ADDR(pte, segment_start_addr + j * 4096));
+				uint32_t data = SET_PHYS_ADDR(pte, segment_start_addr + j * 4096);
+				riscv32_physmem_op(vm, pte0_addr, (vmptr_t)&data, sizeof(data), MMU_WRITE);
 			}
 
 			page_count -= pte0_count;
@@ -223,6 +248,14 @@ err_fclose:
 
 #else
 
-bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ssize_t offset){}
+bool riscv32_elf_load_by_path(rvvm_hart_t *vm, const char *path, bool use_mmu, ptrdiff_t offset)
+{
+    UNUSED(vm);
+    UNUSED(path);
+    UNUSED(use_mmu);
+    UNUSED(offset);
+    return false;
+}
 
+#endif
 #endif

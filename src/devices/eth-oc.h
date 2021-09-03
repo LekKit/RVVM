@@ -19,20 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef ETH_OC_H
 #define ETH_OC_H
 
-#include "riscv32.h"
-#include "rvvm_types.h"
+#include "rvvm.h"
 
-#ifdef USE_NET
-void ethoc_init(rvvm_hart_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq);
-#else
-static inline void ethoc_init(rvvm_hart_t *vm, const char *tap_name, paddr_t regs_base_addr, void *intc_data, uint32_t irq)
-{
-    UNUSED(vm);
-    UNUSED(tap_name);
-    UNUSED(regs_base_addr);
-    UNUSED(intc_data);
-    UNUSED(irq);
-}
-#endif
+void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq);
 
 #endif

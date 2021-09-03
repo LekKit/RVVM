@@ -20,13 +20,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef RVVM_H
 #define RVVM_H
-
+//#define USE_SJLJ
 #include "rvvm_types.h"
 #include "rvtimer.h"
 #include "compiler.h"
 #include "threading.h"
 #include "vector.h"
 #include "utils.h"
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 #ifdef USE_SJLJ
 // Useful for unwinding from JITed code, can be disabled for interpreter
@@ -75,6 +79,8 @@ enum
     REGISTERS_MAX
 };
 
+#define FPU_REGISTERS_MAX REGISTERS_MAX
+
 enum
 {
     PRIVILEGE_USER,
@@ -95,8 +101,8 @@ enum
 #define INTERRUPT_MEXTERNAL    0xB
 
 // Internal events delivered to the hart
-#define EXT_EVENT_TIMER        0x0 // Check timecmp for irq
-#define EXT_EVENT_PAUSE        0x1 // Pause the hart in a consistent state
+#define EXT_EVENT_TIMER        0x1 // Check timecmp for irq
+#define EXT_EVENT_PAUSE        0x2 // Pause the hart in a consistent state
 
 #define TRAP_INSTR_MISALIGN    0x0
 #define TRAP_INSTR_FETCH       0x1
@@ -112,6 +118,8 @@ enum
 #define TRAP_INSTR_PAGEFAULT   0xC
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
+
+#define RVVM_DEFAULT_MEMBASE   0x80000000
 
 typedef struct rvvm_hart_t rvvm_hart_t;
 typedef struct rvvm_machine_t rvvm_machine_t;
@@ -133,12 +141,15 @@ typedef struct {
  */
 typedef struct {
     // Pointer to page (with vaddr subtracted? faster tlb translation)
-    vmptr_t ptr;
+    size_t ptr;
+    // Make entry size a power of 2 (32 or 16 bytes)
+#if !defined(HOST_64BIT) && defined(USE_RV64)
+    size_t align;
+#endif
     // Virtual page number per each op type (vaddr >> 12)
     vaddr_t r;
     vaddr_t w;
     vaddr_t e;
-    // Make entry size a power of 2 (32 or 16 bytes)
 #if defined(HOST_64BIT) && !defined(USE_RV64)
     vaddr_t align[3];
 #endif
@@ -175,15 +186,26 @@ struct rvvm_mmio_dev_t {
 
 typedef struct {
     paddr_t begin;  // First usable address in physical memory
-    paddr_t end;    // Last usable address in physical memory
+    paddr_t size;   // Memory amount (since the region may be empty)
     vmptr_t data;   // Pointer to memory data
 } rvvm_ram_t;
 
+typedef struct {
+    // Virtual page number per each op type (vaddr >> 12)
+    vaddr_t r;
+    vaddr_t w;
+    vaddr_t e;
+    // Physical address of the page mapped to the device
+    paddr_t phys;
+    // The device itself
+    const rvvm_mmio_dev_t* mmio;
+} rvvm_mmio_tlb_t;
+
 struct rvvm_hart_t {
-    size_t wait_event;
+    uint32_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
 #ifdef USE_FPU
-    double fpu_registers[REGISTERS_MAX];
+    double fpu_registers[FPU_REGISTERS_MAX];
 #endif
     
     // We want short offsets from vmptr to tlb
@@ -191,44 +213,56 @@ struct rvvm_hart_t {
     rvvm_decoder_t decoder;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
-    thread_handle_t thread;
-    rvvm_mmio_dev_t* recent_mmio; // cache recently used MMIO device
     paddr_t root_page_table;
-    uint32_t irq_mask;
-    uint32_t ev_mask;
     uint8_t mmu_mode;
     uint8_t priv_mode;
     bool rv64;
-
+    bool trap;
+    maxlen_t trap_pc;
+    
     struct {
+        maxlen_t hartid;
+        maxlen_t isa;
         maxlen_t status;
         maxlen_t edeleg[PRIVILEGES_MAX];
         maxlen_t ideleg[PRIVILEGES_MAX];
         maxlen_t ie;
         maxlen_t tvec[PRIVILEGES_MAX];
-        maxlen_t counteren[PRIVILEGES_MAX];
         maxlen_t scratch[PRIVILEGES_MAX];
         maxlen_t epc[PRIVILEGES_MAX];
         maxlen_t cause[PRIVILEGES_MAX];
         maxlen_t tval[PRIVILEGES_MAX];
         maxlen_t ip;
+        maxlen_t fcsr;
     } csr;
+    maxlen_t lrsc_cas;
+    bool lrsc;
     
+    thread_handle_t thread;
     rvtimer_t timer;
+    uint32_t pending_irqs;
+    uint32_t pending_events;
 #ifdef USE_SJLJ
     jmp_buf unwind;
 #endif
+    // Cacheline alignment
+    uint8_t align[64];
 };
 
 struct rvvm_machine_t {
     rvvm_ram_t mem;
     vector_t(rvvm_hart_t) harts;
     vector_t(rvvm_mmio_dev_t) mmio;
-    bool running;
+    uint32_t running;
+    bool needs_reset;
+#ifdef USE_FDT
+    // Root fdt node for device tree generation
+    struct fdt_node* fdt;
+#endif
 };
 
 // Memory starts at 0x80000000 by default, machine boots from there as well
-PUBLIC rvvm_machine_t* rvvm_create_machine(size_t mem_size, size_t hart_count, bool rv64);
+PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
 // Directly access physical memory (returns true on success)
 PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* src, size_t size);

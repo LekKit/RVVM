@@ -17,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
-#include "riscv32_mmu.h"
+#include "ns16550a.h"
+#include <stdio.h>
 
 #define NS16550A_REG_SIZE 0x100
 
@@ -113,12 +113,14 @@ static uint8_t terminal_readchar(void* addr)
 }
 #endif
 
-static bool ns16550a_mmio_read(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t *value)
+static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    UNUSED(vm);
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
+    uint8_t *value = (uint8_t*) memory_data;
+    UNUSED(size);
+    //rvvm_info("Reading UART at 0x%08x", offset);
     if (regs->regs[NS16550A_REG_LCR] & 0x80) {
-        riscv32_debug(vm, "NS16550A: DLAB = 1\n");
+        //riscv32_debug(vm, "NS16550A: DLAB = 1\n");
 
         switch (offset) {
             case NS16550A_REG_DLL:
@@ -136,12 +138,12 @@ static bool ns16550a_mmio_read(rvvm_hart_t* vm, riscv32_mmio_device_t* device, u
                 break;
             }
             default: {
-                riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
+                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
                 break;
             }
         }
     } else {
-        riscv32_debug(vm, "NS16550A: DLAB = 0\n");
+        //riscv32_debug(vm, "NS16550A: DLAB = 0\n");
 
         switch (offset) {
             case NS16550A_REG_RBR: {
@@ -163,7 +165,7 @@ static bool ns16550a_mmio_read(rvvm_hart_t* vm, riscv32_mmio_device_t* device, u
             case NS16550A_REG_LSR: {
                 // Read char from stdin
                 *value = regs->regs[offset] | terminal_readchar(regs->regs + NS16550A_REG_RBR);
-                riscv32_debug(vm, "NS16550A: Unimplemented LSR\n");
+                //riscv32_debug(vm, "NS16550A: Unimplemented LSR\n");
                 break;
             }
             case NS16550A_REG_MSR:
@@ -172,7 +174,7 @@ static bool ns16550a_mmio_read(rvvm_hart_t* vm, riscv32_mmio_device_t* device, u
                 break;
             }
             default: {
-                riscv32_debug(vm, "NS16550A: Unimplemented offset %h\n", offset);
+                //riscv32_debug(vm, "NS16550A: Unimplemented offset %h\n", offset);
                 break;
             }
         }
@@ -181,11 +183,12 @@ static bool ns16550a_mmio_read(rvvm_hart_t* vm, riscv32_mmio_device_t* device, u
     return true;
 }
 
-static bool ns16550a_mmio_write(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, uint8_t value)
+static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    UNUSED(vm);
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
-
+    uint8_t value = *(uint8_t*) memory_data;
+    UNUSED(size);
+    //rvvm_info("Writing to UART at 0x%08x", offset);
     if (regs->regs[NS16550A_REG_LCR] & 0x80) {
         switch (offset) {
             case NS16550A_REG_DLL:
@@ -206,7 +209,7 @@ static bool ns16550a_mmio_write(rvvm_hart_t* vm, riscv32_mmio_device_t* device, 
                 break;
             }
             default: {
-                riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
+                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
                 break;
             }
         }
@@ -214,7 +217,9 @@ static bool ns16550a_mmio_write(rvvm_hart_t* vm, riscv32_mmio_device_t* device, 
     } else {
         switch (offset) {
             case NS16550A_REG_THR: {
-                printf("%c", value);
+                //if (value > 127) printf ("we are retarded\n");
+                //rvvm_info("UART prints 0x%02x", value);
+                putc(value, stdout);
                 fflush(stdout);
                 break;
             }
@@ -235,7 +240,7 @@ static bool ns16550a_mmio_write(rvvm_hart_t* vm, riscv32_mmio_device_t* device, 
                 break;
             }
             default: {
-                riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
+                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
                 break;
             }
         }
@@ -243,24 +248,40 @@ static bool ns16550a_mmio_write(rvvm_hart_t* vm, riscv32_mmio_device_t* device, 
     return true;
 }
 
-static bool ns16550a_mmio_handler(rvvm_hart_t* vm, riscv32_mmio_device_t* device, uint32_t offset, void* memory_data, uint32_t size, uint8_t access)
-{
-    UNUSED(size);
-    if (size > 1) return false;
-    if (access == MMU_READ) {
-        return ns16550a_mmio_read(vm, device, offset, memory_data);
-    } else if (access == MMU_WRITE) {
-        return ns16550a_mmio_write(vm, device, offset, *(uint8_t*)memory_data);
-    }
-    return false;
-}
+static rvvm_mmio_type_t ns16550a_dev_type = {
+    .name = "ns16550a",
+};
 
-void ns16550a_init(rvvm_hart_t *vm, uint32_t base_addr)
+void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr)
 {
-    struct ns16550a_data *ptr = safe_calloc(1, sizeof (struct ns16550a_data));
+    struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
     terminal_rawmode();
     ptr->regs[NS16550A_REG_LSR] = 0x60;
 
-    riscv32_debug_always(vm, "NS16550A UART ON %h", base_addr);
-    riscv32_mmio_add_device(vm, base_addr, base_addr + NS16550A_REG_SIZE, ns16550a_mmio_handler, ptr);
+    rvvm_mmio_dev_t ns16550a = {0};
+    ns16550a.min_op_size = 1;
+    ns16550a.max_op_size = 1;
+    ns16550a.read = ns16550a_mmio_read;
+    ns16550a.write = ns16550a_mmio_write;
+    ns16550a.type = &ns16550a_dev_type;
+    ns16550a.begin = base_addr;
+    ns16550a.end = base_addr + NS16550A_REG_SIZE;
+    ns16550a.data = ptr;
+    rvvm_attach_mmio(machine, &ns16550a);
+    
+#ifdef USE_FDT
+    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+    if (soc == NULL) {
+        rvvm_warn("Missing soc node in FDT!");
+        return;
+    }
+    
+    struct fdt_node* uart = fdt_node_create_reg("uart", base_addr);
+    fdt_node_add_prop_reg(uart, "reg", base_addr, NS16550A_REG_SIZE);
+    fdt_node_add_prop_str(uart, "compatible", "ns16550a");
+    fdt_node_add_prop_u32(uart, "clock-frequency", 0x2625a00);
+    fdt_node_add_prop_u32(uart, "fifo-size", 0x80);
+    fdt_node_add_prop_str(uart, "status", "okay");
+    fdt_node_add_child(soc, uart);
+#endif
 }

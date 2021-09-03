@@ -23,17 +23,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct {
     uint32_t flag;
+#ifdef USE_SPINLOCK_DEBUG
+    const char* lock_info;
+#endif
 } spinlock_t;
+
+NOINLINE void spin_lock_slow(spinlock_t* lock, const char* info);
 
 static inline void spin_init(spinlock_t* lock)
 {
     lock->flag = 0;
 }
 
-static inline void spin_lock(spinlock_t* lock)
+static inline void _spin_lock(spinlock_t* lock, const char* info)
 {
-    while (atomic_swap_uint32(&lock->flag, 1));
+    if (atomic_swap_uint32(&lock->flag, 1)) {
+        spin_lock_slow(lock, info);
+    }
+#ifdef USE_SPINLOCK_DEBUG
+    lock->lock_info = info;
+#endif
 }
+
+#ifdef USE_SPINLOCK_DEBUG
+#define spin_lock(lock) _spin_lock(lock, SOURCE_LINE)
+#else
+#define spin_lock(lock) _spin_lock(lock, "[no debug]")
+#endif
 
 static inline void spin_unlock(spinlock_t* lock)
 {

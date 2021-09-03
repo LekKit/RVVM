@@ -16,7 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
+#include "rvvm.h"
 
-void* plic_init(rvvm_hart_t *vm, uint32_t base_addr);
-bool plic_send_irq(rvvm_hart_t *vm, void *data, uint32_t id);
+void* plic_init(rvvm_machine_t *mach, paddr_t base_addr);
+bool plic_send_irq(rvvm_machine_t *vm, void *data, uint32_t id);

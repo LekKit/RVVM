@@ -24,6 +24,12 @@ typedef void* (*thread_func_t)(void*);
 
 thread_handle_t thread_create(thread_func_t func, void *arg);
 void* thread_join(thread_handle_t handle);
+
+// Use with care, only for hanged threads
 void thread_kill(thread_handle_t handle);
+
+// Deliver a signal with total memory ordering to the thread
+// Also immediately interrupts any sleep in a target thread
+void thread_signal_membarrier(thread_handle_t handle);
 
 #endif

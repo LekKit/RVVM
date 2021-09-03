@@ -17,7 +17,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "riscv32.h"
 #include "fb_window.h"
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"
@@ -98,22 +97,22 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 			height);
 	if (!xdata->ximage)
 	{
-		printf("Error in XShmCreateImage\n");
+		rvvm_error("Error in XShmCreateImage");
 		goto err;
 	}
 
-	xdata->seginfo.shmid = shmget(IPC_PRIVATE, (size_t)((bpp / 8) * width * height), IPC_CREAT | 0777);
+	xdata->seginfo.shmid = shmget(IPC_PRIVATE, (size_t)(bpp / 8) * width * height, IPC_CREAT | 0777);
 	if (xdata->seginfo.shmid < 0)
 	{
 
-		printf("Error in shmget, err %d\n", errno);
+		rvvm_error("Error in shmget, err %d", errno);
 		goto err_image;
 	}
 
 	xdata->seginfo.shmaddr = xdata->ximage->data = shmat(xdata->seginfo.shmid, NULL, 0);
 	if (xdata->seginfo.shmaddr == (void*) -1)
 	{
-		printf("Error in shmat, err %d\n", errno);
+		rvvm_error("Error in shmat, err %d", errno);
 		goto err_shmget;
 	}
 
@@ -121,7 +120,7 @@ static void* x11_xshm_init(struct x11_data *xdata, unsigned width, unsigned heig
 
 	if (!XShmAttach(dsp, &xdata->seginfo))
 	{
-		printf("Error in XShmAttach\n");
+		rvvm_error("Error in XShmAttach");
 		goto err_shmat;
 	}
 
@@ -160,11 +159,6 @@ err:
 void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name)
 {
 	struct x11_data *xdata = safe_calloc(1, sizeof(struct x11_data));
-	if (xdata == NULL)
-	{
-		return;
-	}
-
 	data->winsys_data = xdata;
 	++window_count;
 	if (dsp == NULL)
@@ -172,7 +166,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 		init_keycodes();
 		dsp = XOpenDisplay(NULL);
 		if (dsp == NULL) {
-			printf("Could not open a connection to the X server\n");
+			rvvm_error("Could not open a connection to the X server");
 			free(data->winsys_data);
 			data->winsys_data = NULL;
 			return;
@@ -206,7 +200,7 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 
 		if (bpp != 16 && bpp != 32)
 		{
-			printf("Error, depth %d is not supported\n", bpp);
+			rvvm_error("X11 - depth %d is not supported!", bpp);
 			goto err;
 		}
 	}
@@ -237,17 +231,9 @@ void fb_create_window(struct fb_data* data, unsigned width, unsigned height, con
 			DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
 			NULL, width, height, 8, 0);
 		xdata->ximage->data = safe_calloc(xdata->ximage->bytes_per_line, xdata->ximage->height);
-		if (xdata->ximage->data == NULL)
-		{
-			goto err;
-		}
 
 		if (bpp != 32) {
 			data->framebuffer = safe_calloc(4, (size_t)width * height);
-			if (data->framebuffer == NULL)
-			{
-				goto err;
-			}
 		} else {
 			data->framebuffer = xdata->ximage->data;
 		}
@@ -329,57 +315,46 @@ free_xdata:
 	} while (0)
 					
 
-void fb_update(struct fb_data *all_data, size_t nfbs)
+void fb_update(struct fb_data *data)
 {
-	if (dsp == NULL)
-	{
-		return;
-	}
+    struct x11_data *xdata = data->winsys_data;
+    if (dsp == NULL) return;
+    if (!xdata->ximage) return;
 
-	for (size_t i = 0; i < nfbs; ++i)
-	{
-		struct x11_data *xdata = all_data[i].winsys_data;
-		if (!xdata->ximage)
-		{
-			continue;
-		}
-
-		if (bpp != 32)
-		{
-			a8r8g8b8_to_r5g6b5(all_data[i].framebuffer, xdata->ximage->data,
-					   (size_t)xdata->ximage->width * xdata->ximage->height);
-		}
+    if (bpp != 32) {
+        a8r8g8b8_to_r5g6b5(data->framebuffer, xdata->ximage->data,
+                    (size_t)xdata->ximage->width * xdata->ximage->height);
+    }
 
 #ifdef USE_XSHM
-		if (xdata->seginfo.shmaddr != NULL)
-		{
-			XShmPutImage(dsp,
-					xdata->window,
-					xdata->gc,
-					xdata->ximage,
-					0, /* src_x */
-					0, /* src_y */
-					0, /* dst_x */
-					0, /* dst_y */
-					xdata->ximage->width,
-					xdata->ximage->height,
-					False /* send_event */);
-		}
-		else
+    if (xdata->seginfo.shmaddr != NULL)
+    {
+        XShmPutImage(dsp,
+                xdata->window,
+                xdata->gc,
+                xdata->ximage,
+                0, /* src_x */
+                0, /* src_y */
+                0, /* dst_x */
+                0, /* dst_y */
+                xdata->ximage->width,
+                xdata->ximage->height,
+                False /* send_event */);
+    }
+    else
 #endif
-		{
-			XPutImage(dsp,
-					xdata->window,
-					xdata->gc,
-					xdata->ximage,
-					0, /* src_x */
-					0, /* src_y */
-					0, /* dst_x */
-					0, /* dst_y */
-					xdata->ximage->width,
-					xdata->ximage->height);
-		}
-	}
+    {
+        XPutImage(dsp,
+                xdata->window,
+                xdata->gc,
+                xdata->ximage,
+                0, /* src_x */
+                0, /* src_y */
+                0, /* dst_x */
+                0, /* dst_y */
+                xdata->ximage->width,
+                xdata->ximage->height);
+    }
 
 	XSync(dsp, False);
 
@@ -391,11 +366,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 		{
 			case ButtonPress:
 				{
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, ev.xbutton);
-					if (data == NULL) break;
-					struct x11_data *xdata = data->winsys_data;
-
 					if (ev.xbutton.button == Button1)
 					{
 						xdata->btns.left = true;
@@ -413,11 +383,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 				}
 			case ButtonRelease:
 				{
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, ev.xbutton);
-					if (data == NULL) break;
-					struct x11_data *xdata = data->winsys_data;
-
 					if (ev.xbutton.button == Button1)
 					{
 						xdata->btns.left = false;
@@ -435,11 +400,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 				}
 			case MotionNotify:
 				{
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, ev.xmotion);
-					if (data == NULL) break;
-					struct x11_data *xdata = data->winsys_data;
-
 					ps2_handle_mouse(data->mouse, ev.xmotion.x - xdata->x, -(ev.xmotion.y - xdata->y), &xdata->btns);
 					xdata->x = ev.xmotion.x;
 					xdata->y = ev.xmotion.y;
@@ -447,10 +407,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 				}
 			case KeyPress:
 				{
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, ev.xkey);
-					if (data == NULL) break;
-
 					KeySym keysym = keycodemap[(ev.xkey.keycode - min_keycode) * keysyms_per_keycode];
 					struct key k = keysym2makecode(keysym);
 #if 0
@@ -466,10 +422,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 				}
 			case KeyRelease:
 				{
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, ev.xkey);
-					if (data == NULL) break;
-
 					if (pending > 1)
 					{
 						XEvent nev;
@@ -513,9 +465,5 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 				}
 		}
 	}
-
-	for (size_t i = 0; i < nfbs; ++i)
-	{
-		ps2_handle_keyboard(all_data[i].keyboard, NULL, false);
-	}
+    ps2_handle_keyboard(data->keyboard, NULL, false);
 }
