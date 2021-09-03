@@ -44,7 +44,7 @@ Examples:
 make CC=x86_64-w64-mingw32-gcc OS=windows USE_JIT=1
 make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0 USE_NET=1 USE_JIT=0
 ```
-Alternatively, you can use CMake:
+Alternatively, you can use CMake (hint, build binaries are not host arch suffixed):
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
