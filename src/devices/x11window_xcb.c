@@ -390,79 +390,62 @@ xcb_generic_event_t* poll_for_event(xcb_connection_t *conn, struct ev_queue *q)
 	return q->curr;
 }
 
-#define GET_DATA_FOR_WINDOW(data, all_data, nfbs, xevent) \
-	do { \
-		for (size_t i = 0; i < nfbs; ++i) \
-		{ \
-			struct x11_data *tmpdata = all_data[i].winsys_data; \
-			if (tmpdata != NULL && tmpdata->win == xevent->event) \
-			{ \
-				data = &all_data[i]; \
-				break; \
-			} \
-		} \
-	} while (0)
-
-
-void fb_update(struct fb_data *all_data, size_t nfbs)
+void fb_update(struct fb_data* data)
 {
 	if (connection == NULL)
 	{
 		return;
 	}
 
-	for (size_t i = 0; i < nfbs; ++i)
-	{
-		struct x11_data *xdata = all_data[i].winsys_data;
-		xcb_generic_error_t *err;
+    struct x11_data *xdata = data->winsys_data;
+    xcb_generic_error_t *err;
 
-		if (bpp != 32)
-		{
-			a8r8g8b8_to_r5g6b5(all_data[i].framebuffer, xdata->local_data, xdata->width * xdata->height);
-		}
+    if (bpp != 32)
+    {
+        a8r8g8b8_to_r5g6b5(data->framebuffer, xdata->local_data, xdata->width * xdata->height);
+    }
 
 #ifdef USE_XSHM
-		if (xdata->seginfo.shmaddr != NULL)
-		{
-			if ((err = xcb_request_check(connection, xcb_shm_put_image_checked(connection,
-					xdata->win,
-					xdata->gc,
-					xdata->width,
-					xdata->height,
-					0, /* src_x */
-					0, /* src_y */
-					xdata->width,
-					xdata->height,
-					0, /* dst_x */
-					0, /* dst_y */
-					xdata->depth,
-					XCB_IMAGE_FORMAT_Z_PIXMAP,
-					false, /* send_event */
-					xdata->seginfo.shmseg,
-					0 /* offset */))))
-			{
-				printf("err in shm_put_image, code: %d\n", err->error_code);
-			}
-		}
-		else
+    if (xdata->seginfo.shmaddr != NULL)
+    {
+        if ((err = xcb_request_check(connection, xcb_shm_put_image_checked(connection,
+                xdata->win,
+                xdata->gc,
+                xdata->width,
+                xdata->height,
+                0, /* src_x */
+                0, /* src_y */
+                xdata->width,
+                xdata->height,
+                0, /* dst_x */
+                0, /* dst_y */
+                xdata->depth,
+                XCB_IMAGE_FORMAT_Z_PIXMAP,
+                false, /* send_event */
+                xdata->seginfo.shmseg,
+                0 /* offset */))))
+        {
+            printf("err in shm_put_image, code: %d\n", err->error_code);
+        }
+    }
+    else
 #endif
-		if ((err = xcb_request_check(connection, xcb_put_image_checked(connection,
-							XCB_IMAGE_FORMAT_Z_PIXMAP,
-							xdata->win,
-							xdata->gc,
-							xdata->width,
-							xdata->height,
-							0, /* dst_x */
-							0, /* dst_y */
-							0, /* left_pad */
-							xdata->depth,
-							(bpp / 8) * xdata->width * xdata->height,
-							xdata->local_data))))
-		{
-			printf("err in put_image, code: %d\n", err->error_code);
-			XCB_ACCESS;
-		}
-	}
+    if ((err = xcb_request_check(connection, xcb_put_image_checked(connection,
+                        XCB_IMAGE_FORMAT_Z_PIXMAP,
+                        xdata->win,
+                        xdata->gc,
+                        xdata->width,
+                        xdata->height,
+                        0, /* dst_x */
+                        0, /* dst_y */
+                        0, /* left_pad */
+                        xdata->depth,
+                        (bpp / 8) * xdata->width * xdata->height,
+                        xdata->local_data))))
+    {
+        printf("err in put_image, code: %d\n", err->error_code);
+        XCB_ACCESS;
+    }
 	xcb_flush(connection);
 
 	struct ev_queue q = { };
@@ -474,9 +457,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			case XCB_KEY_PRESS:
 				{
 					xcb_key_press_event_t *xkey = (xcb_key_press_event_t *) ev;
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, xkey);
-					if (data == NULL) break;
 
 					xcb_keysym_t keysym = keycodemap[(xkey->detail - min_keycode) * keysyms_per_keycode];
 					struct key k = keysym2makecode(keysym);
@@ -494,9 +474,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			case XCB_KEY_RELEASE:
 				{
 					xcb_key_release_event_t *xkey = (xcb_key_press_event_t *) ev;
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, xkey);
-					if (data == NULL) break;
 
 					if (q.next != NULL && (q.next->response_type & ~0x80) == XCB_KEY_PRESS)
 					{
@@ -525,9 +502,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			case XCB_BUTTON_PRESS:
 				{
 					xcb_button_press_event_t *xbutton = (xcb_button_press_event_t *) ev;
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, xbutton);
-					if (data == NULL) break;
 					struct x11_data *xdata = data->winsys_data;
 
 					if (xbutton->detail == XCB_BUTTON_INDEX_1)
@@ -548,9 +522,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			case XCB_BUTTON_RELEASE:
 				{
 					xcb_button_release_event_t *xbutton = (xcb_button_press_event_t *) ev;
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, xbutton);
-					if (data == NULL) break;
 					struct x11_data *xdata = data->winsys_data;
 
 					if (xbutton->detail == XCB_BUTTON_INDEX_1)
@@ -571,9 +542,6 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 			case XCB_MOTION_NOTIFY:
 				{
 					xcb_motion_notify_event_t *xmotion = (xcb_motion_notify_event_t *) ev;
-					struct fb_data *data = NULL;
-					GET_DATA_FOR_WINDOW(data, all_data, nfbs, xmotion);
-					if (data == NULL) break;
 					struct x11_data *xdata = data->winsys_data;
 
 					ps2_handle_mouse(data->mouse, xmotion->event_x - xdata->x, -(xmotion->event_y - xdata->y), &xdata->btns);
@@ -598,8 +566,5 @@ void fb_update(struct fb_data *all_data, size_t nfbs)
 		}
 	}
 
-	for (size_t i = 0; i < nfbs; ++i)
-	{
-		ps2_handle_keyboard(all_data[i].keyboard, NULL, false);
-	}
+    ps2_handle_keyboard(data->keyboard, NULL, false);
 }
