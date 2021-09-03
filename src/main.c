@@ -234,7 +234,12 @@ static bool load_file_to_ram(rvvm_machine_t* machine, paddr_t addr, const char* 
     
     buffer = safe_malloc(fsize);
     
-    fread(buffer, fsize, 1, file);
+    if (fread(buffer, 1, fsize, file) != fsize) {
+        rvvm_error("File %s read error", filename);
+        fclose(file);
+        free(buffer);
+        return false;
+    }
     
     if (!rvvm_write_ram(machine, addr, buffer, fsize)) {
         rvvm_error("File %s does not fit in RAM", filename);
