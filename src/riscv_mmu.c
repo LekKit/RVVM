@@ -283,7 +283,7 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     }
 }
 
-static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, paddr_t offset, size_t size)
+static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, paddr_t offset, uint8_t size)
 {
     if (unlikely(dev->max_op_size < dev->min_op_size)) {
         rvvm_warn("Device \"%s\" has incorrect access properties: min %u, max %u",
@@ -297,12 +297,12 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rw
         uint8_t offset_diff = offset - aligned_offset;
         uint8_t new_size = dev->min_op_size;
         uint8_t tmp[16];
-        while (new_size < (size + offset_diff)) new_size <<= 1;
-        if (unlikely(new_size > 16)) {
+        if (unlikely(new_size > 8)) {
             rvvm_warn("Device \"%s\" has incorrect min op size: %u",
                   dev->type ? dev->type->name : "null", dev->min_op_size);
             return false;
         }
+        while (new_size < (size + offset_diff)) new_size <<= 1;
         bool ret = riscv_mmio_unaligned_op(dev, rwfunc, tmp, aligned_offset, new_size);
         if (ret) memcpy(dest, tmp + offset_diff, size);
         return ret;
@@ -317,7 +317,7 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rw
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void* dest, size_t size, uint8_t access)
+static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void* dest, uint8_t size, uint8_t access)
 {
     rvvm_mmio_dev_t* dev;
     rvvm_mmio_handler_t rwfunc;
@@ -377,7 +377,7 @@ static inline void riscv_jit_flush(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr
  * instead of a regular memcpy, to prevent other harts from observing
  * half-made memory operation on TLB miss
  */ 
-static inline void atomic_memcpy_relaxed(void* dest, const void* src, size_t size)
+static inline void atomic_memcpy_relaxed(void* dest, const void* src, uint8_t size)
 {
     if (likely(((((size_t)src) & (size-1)) == 0) && ((((size_t)dest) & (size-1)) == 0))) {
         switch(size) {
@@ -400,7 +400,7 @@ static inline void atomic_memcpy_relaxed(void* dest, const void* src, size_t siz
     memcpy(dest, src, size);
 }
 
-static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size, uint8_t access)
+static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size, uint8_t access)
 {
     //rvvm_info("Hart %p tlb miss at 0x%08"PRIxXLEN, vm, addr);
     paddr_t paddr;
@@ -410,7 +410,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, size_t size,
     // Handle misalign between pages
     if (!riscv_block_in_page(addr, size)) {
         // Prevent recursive faults by checking return flag
-        size_t part_size = PAGE_SIZE - (addr & PAGE_MASK);
+        uint8_t part_size = PAGE_SIZE - (addr & PAGE_MASK);
         return riscv_mmu_op(vm, addr, dest, part_size, access) &&
                riscv_mmu_op(vm, addr + part_size, ((vmptr_t)dest) + part_size, size - part_size, access);
     }
