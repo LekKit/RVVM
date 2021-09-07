@@ -63,7 +63,7 @@ ifeq ($(OS),windows)
 override CFLAGS += -mwindows -static
 PROGRAMEXT := .exe
 else
-override LDFLAGS += -lpthread
+override LDFLAGS += -lpthread -latomic
 endif
 
 
