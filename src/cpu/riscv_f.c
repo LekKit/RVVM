@@ -34,6 +34,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <fenv.h>
 #include <float.h>
 /* well... */
+#if defined(_WIN32) && defined(__clang__)
+#define _C_COMPLEX_T
+typedef _Complex double _C_double_complex;
+typedef _Complex float _C_float_complex;
+typedef _Complex long double _C_ldouble_complex;
+#endif
 #include <tgmath.h>
 
 #ifdef RVD
