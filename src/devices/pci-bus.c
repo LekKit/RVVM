@@ -81,6 +81,7 @@ static bool pci_bar_is_io(const struct pci_bar_desc *desc) {
 }
 
 void pci_send_irq(struct pci_func *func) {
+    spin_lock(&func->irq_lock);
     /* no interrupt specified */
     if (func->desc->irq_pin == 0) {
         return;
@@ -95,12 +96,15 @@ void pci_send_irq(struct pci_func *func) {
     func->status |= (1 << 3);
     struct pci_device *dev = func->dev;
     struct pci_bus *bus = dev->bus;
+    spin_unlock(&func->irq_lock);
     plic_send_irq(bus->machine, bus->intc_data, bus->irq[func->desc->irq_pin - 1]);
 }
 
 void pci_clear_irq(struct pci_func *func) {
+    spin_lock(&func->irq_lock);
     /* clear interrupt status bit */
     func->status &= ~(1 << 3);
+    spin_unlock(&func->irq_lock);
 }
 
 static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, uint8_t size)
@@ -127,27 +131,28 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
         return pci_bus_read_invalid(reg, dest, size);
     }
     struct pci_func *func = &device->func[fun];
+    spin_lock(&func->irq_lock);
 
     switch (reg) {
         case PCI_REG_DEV_VEN_ID:
             {
                 uint32_t reg = func->desc->vendor_id | (uint32_t)func->desc->device_id << 16;
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
         case PCI_REG_STATUS_CMD:
             {
                 /* idk why '| 3' is needed, kernel should set these bits... */
                 uint32_t reg = func->status << 16 | func->command | 3;
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
         case PCI_REG_CLASS_REV:
             {
                 uint32_t reg = func->desc->class_code << 16
                    | (uint32_t)func->desc->prog_if << 8;
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
         case PCI_REG_BIST_HDR_LATENCY_CACHE:
             {
@@ -163,7 +168,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
 
                 uint32_t reg = (uint32_t)mf << 23;
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
         case PCI_REG_CAP_PTR: /* currently no capabilities supported */
         case PCI_REG_SSID_SVID: /* not necessary */
@@ -171,12 +176,12 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
         case 0xf8: /* needed for Intel ATA probe */
         case 0x40: /* needed for Intel ATA probe */
             memset(dest, 0x0, size);
-            return true;
+            goto out;
         case PCI_REG_IRQ_PIN_LINE:
             {
                 uint32_t reg = func->irq_line | (uint32_t)func->desc->irq_pin << 8;
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
         case PCI_REG_BAR0:
         case PCI_REG_BAR1:
@@ -188,23 +193,27 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
                 uint8_t bar_num = (reg - 0x10) >> 2;
                 if (func->desc->bar[bar_num].len == 0) {
                     memset(dest, 0x0, size);
-                    return true;
+                    goto out;
                 }
 
                 rvvm_mmio_dev_t *bar_dev = rvvm_get_mmio(mmio_dev->machine,
                         func->bar_mapping[bar_num]);
                 if (bar_dev == NULL) {
                     memset(dest, 0x0, size);
-                    return true;
+                    goto out;
                 }
 
                 uint32_t reg = (uint32_t)bar_dev->begin | pci_bar_is_io(&func->desc->bar[bar_num]);
                 memcpy(dest, &reg, size);
-                return true;
+                goto out;
             }
     }
 
+    spin_unlock(&func->irq_lock);
     return pci_bus_read_invalid(reg, dest, size);
+out:
+    spin_unlock(&func->irq_lock);
+    return true;
 }
 
 static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, uint8_t size)
@@ -231,18 +240,19 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
         return pci_bus_write_invalid(reg, dest, size);
     }
     struct pci_func *func = &device->func[fun];
+    spin_lock(&func->irq_lock);
 
     switch (reg) {
         case PCI_REG_EXPANSION_ROM: /* not needed for now, works as BAR */
         case PCI_REG_BIST_HDR_LATENCY_CACHE:
         case 0x40: /* needed for Intel ATA probe */
-            return true;
+            goto out;
         case PCI_REG_STATUS_CMD:
             {
                 uint32_t val;
                 memcpy(&val, dest, size);
                 func->command = val & 0xff;
-                return true;
+                goto out;
             }
         case PCI_REG_BAR0:
         case PCI_REG_BAR1:
@@ -254,7 +264,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
                 uint8_t bar_num = (reg - 0x10) >> 2;
                 uint32_t len = (uint32_t)func->desc->bar[bar_num].len;
                 if (len == 0) {
-                    return true;
+                    goto out;
                 }
 
                 uint32_t addr;
@@ -268,7 +278,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
                 rvvm_mmio_dev_t *bar_dev = rvvm_get_mmio(mmio_dev->machine,
                         func->bar_mapping[bar_num]);
                 if (bar_dev == NULL) {
-                    return true;
+                    goto out;
                 }
 
                 /* must be atomic... */
@@ -276,18 +286,22 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
                 bar_dev->begin = (paddr_t)addr;
                 bar_dev->end = (paddr_t)addr + mmio_len;
                 /* ...up to this point. But no way to make it... */
-                return true;
+                goto out;
             }
         case PCI_REG_IRQ_PIN_LINE:
             {
                 uint32_t val;
                 memcpy(&val, dest, size);
                 func->irq_line = val & 0xff;
-                return true;
+                goto out;
             }
     }
 
+    spin_unlock(&func->irq_lock);
     return pci_bus_write_invalid(reg, dest, size);
+out:
+    spin_unlock(&func->irq_lock);
+    return true;
 }
 
 rvvm_mmio_type_t bar_type = {
@@ -311,6 +325,7 @@ struct pci_device* pci_bus_add_device(rvvm_machine_t *machine,
         func->desc = func_desc;
         func->command = 0x7; /* io+mem access and bus mastering */
         func->data = data;
+        spin_init(&func->irq_lock);
 
         for (size_t i = 0; i < 6; ++i) {
             struct pci_bar_desc *bar = &dev->desc->func[fun].bar[i];

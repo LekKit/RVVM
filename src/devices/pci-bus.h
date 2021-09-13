@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PCI_BUS_H
 
 #include "rvvm.h"
+#include "spinlock.h"
 
 struct pci_bar_desc {
     rvvm_mmio_handler_t read;
@@ -46,6 +47,7 @@ struct pci_func {
     struct pci_func_desc *desc;
     struct pci_device *dev;
     rvvm_mmio_handle_t bar_mapping[6];
+    spinlock_t irq_lock;
     uint16_t command;
     uint16_t status;
     uint8_t irq_line;
