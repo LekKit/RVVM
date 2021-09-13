@@ -124,6 +124,8 @@ enum
 typedef struct rvvm_hart_t rvvm_hart_t;
 typedef struct rvvm_machine_t rvvm_machine_t;
 typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
+typedef int rvvm_mmio_handle_t;
+#define RVVM_INVALID_MMIO (-1)
 
 typedef void (*riscv_inst_t)(rvvm_hart_t *vm, const uint32_t instruction);
 typedef void (*riscv_inst_c_t)(rvvm_hart_t *vm, const uint16_t instruction);
@@ -276,8 +278,9 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine);
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
 
 // Connect devices to the machine (only when it's stopped!)
-PUBLIC void rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
+PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr);
+PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_t handle);
 
 /*
  * Allows to disable the internal eventloop thread and
