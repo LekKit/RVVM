@@ -21,9 +21,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm.h"
 #include "rvvm_types.h"
+#include "pci-bus.h"
 
 #include <stdio.h>
 
 void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* fp0, FILE* fp1);
+void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave);
 
 #endif
