@@ -34,6 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/ps2-mouse.h"
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
+#include "devices/pci-bus.h"
 
 #ifdef _WIN32
 // For unicode fix
@@ -293,22 +294,32 @@ static bool rvvm_run_with_args(vm_args_t args)
         }
         rvvm_info("Kernel image loaded at 0x%08"PRIxXLEN, machine->mem.begin + hugepage_offset);
     }
-    
+
+    clint_init(machine, 0x2000000);
+
+    void *plic_data = plic_init(machine, 0xC000000);
+
+    ns16550a_init(machine, 0x10000000, plic_data, 1);
+#ifdef USE_FDT
+    struct pci_bus_list *pci_buses = pci_bus_init_dt(machine,
+		    1, 1, 0x50000000,
+		    0x58000000, 0x1000000, 0x59000000, 0x6000000,
+		    plic_data, 4);
+#endif
+
     if (args.image) {
         FILE *fp = fopen(args.image, "rb+");
         if (fp == NULL) {
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
         } else {
+#if 0
             ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
+#else
+            ata_init_pci(machine, &pci_buses->buses[0], fp, NULL);
+#endif
         }
     }
-    
-    clint_init(machine, 0x2000000);
-    
-    void *plic_data = plic_init(machine, 0xC000000);
-
-    ns16550a_init(machine, 0x10000000, plic_data, 1);
     
     if (!args.nogui) {
         static struct ps2_device ps2_mouse;
