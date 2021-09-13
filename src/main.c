@@ -313,7 +313,7 @@ static bool rvvm_run_with_args(vm_args_t args)
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
         } else {
-#if 0
+#ifndef USE_FDT
             ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
 #else
             ata_init_pci(machine, &pci_buses->buses[0], fp, NULL);
