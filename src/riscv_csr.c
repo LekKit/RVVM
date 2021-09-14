@@ -569,12 +569,12 @@ void riscv_csr_global_init()
 #endif
 
     // User Counter/Timers
-    //riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
+    riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
     riscv_csr_list[0xC01] = riscv_csr_time;     // time
-    //riscv_csr_list[0xC02] = riscv_csr_zero;     // instret
-    //riscv_csr_list[0xC80] = riscv_csr_zero;     // cycleh
+    riscv_csr_list[0xC02] = riscv_csr_zero;     // instret
+    riscv_csr_list[0xC80] = riscv_csr_zero;     // cycleh
     riscv_csr_list[0xC81] = riscv_csr_timeh;    // timeh
-    //riscv_csr_list[0xC82] = riscv_csr_zero;     // instreth
+    riscv_csr_list[0xC82] = riscv_csr_zero;     // instreth
 
     for (size_t i=0xC03; i<0xC20; ++i)
         riscv_csr_list[i] = riscv_csr_zero;     // hpmcounter
