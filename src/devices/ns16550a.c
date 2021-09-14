@@ -1,7 +1,7 @@
 /*
-ns16550a.c - NS16550A UART emulator code
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+ns16550a.c - NS16550A UART
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,36 +18,54 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ns16550a.h"
+#include "plic.h"
+#include "spinlock.h"
 #include <stdio.h>
 
-#define NS16550A_REG_SIZE 0x100
+#define NS16550A_REG_SIZE 0x8
 
 struct ns16550a_data {
-    uint8_t regs[8];
-    uint8_t regs_dlab[2];
+    void* plic;
+    uint32_t irq_num;
+    spinlock_t lock;
+    
+    uint8_t ier;
+    uint8_t iir;
+    uint8_t lcr;
+    uint8_t mcr;
+    uint8_t scr;
+    uint8_t dll;
+    uint8_t dlm;
+    
+    uint8_t buf;
+    uint8_t len;
 };
 
-// Read DLAB = 0
-#define NS16550A_REG_RBR 0
-// Write DLAB = 0
-#define NS16550A_REG_THR 0
-// RW DLAB = 0
-#define NS16550A_REG_IER 1
 // RW DLAB = 1
 #define NS16550A_REG_DLL 0
 #define NS16550A_REG_DLM 1
-// Read DLAB = 0/1
+
+// Read
+#define NS16550A_REG_RBR 0
 #define NS16550A_REG_IIR 2
-// Write DLAB = 0/1
+// Write
+#define NS16550A_REG_THR 0
 #define NS16550A_REG_FCR 2
-// RW DLAB = 0/1
+// RW
+#define NS16550A_REG_IER 1
 #define NS16550A_REG_LCR 3
 #define NS16550A_REG_MCR 4
 #define NS16550A_REG_LSR 5
 #define NS16550A_REG_MSR 6
 #define NS16550A_REG_SCR 7
 
-#define NS16550A_IER_MASK    0xF
+
+#define NS16550A_IER_MASK  0xF
+#define NS16550A_IIR_FIFO  0xC0
+#define NS16550A_IIR_THR   0x2
+#define NS16550A_IIR_RECV  0x4
+#define NS16550A_LSR_THR   0x60
+#define NS16550A_LCR_DLAB  0x80
 
 #if defined __linux__ || defined __APPLE__
 #include <unistd.h>
@@ -118,66 +136,57 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     uint8_t *value = (uint8_t*) memory_data;
     UNUSED(size);
-    //rvvm_info("Reading UART at 0x%08x", offset);
-    if (regs->regs[NS16550A_REG_LCR] & 0x80) {
-        //riscv32_debug(vm, "NS16550A: DLAB = 1\n");
-
+    if (regs->lcr & NS16550A_LCR_DLAB) {
         switch (offset) {
             case NS16550A_REG_DLL:
-            case NS16550A_REG_DLM: {
-                *value = regs->regs_dlab[offset];
+                *value = regs->dll;
+                return true;
+            case NS16550A_REG_DLM:
+                *value = regs->dlm;
+                return true;
+            default:
                 break;
-            }
-            case NS16550A_REG_IIR:
-            case NS16550A_REG_LCR:
-            case NS16550A_REG_MCR:
-            case NS16550A_REG_LSR:
-            case NS16550A_REG_MSR:
-            case NS16550A_REG_SCR: {
-                *value = regs->regs[offset];
-                break;
-            }
-            default: {
-                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
-                break;
-            }
         }
-    } else {
-        //riscv32_debug(vm, "NS16550A: DLAB = 0\n");
-
-        switch (offset) {
-            case NS16550A_REG_RBR: {
-                *value = regs->regs[offset];
-                break;
-            }
-            case NS16550A_REG_IER: {
-                *value = regs->regs[offset];
-                break;
-            }
-            case NS16550A_REG_IIR: {
-                // Some weird bullshit going on if we are reading regs[offset] properly,
-                // Linux kernel does not show userspace stdout in tty...
+    }
+    switch (offset) {
+        case NS16550A_REG_RBR:
+            spin_lock(&regs->lock);
+            if (regs->len) {
+                *value = regs->buf;
+                regs->len = 0;
+            } else {
                 *value = 0;
-                break;
             }
-            case NS16550A_REG_LCR:
-            case NS16550A_REG_MCR:
-            case NS16550A_REG_LSR: {
-                // Read char from stdin
-                *value = regs->regs[offset] | terminal_readchar(regs->regs + NS16550A_REG_RBR);
-                //riscv32_debug(vm, "NS16550A: Unimplemented LSR\n");
-                break;
-            }
-            case NS16550A_REG_MSR:
-            case NS16550A_REG_SCR: {
-                *value = regs->regs[offset];
-                break;
-            }
-            default: {
-                //riscv32_debug(vm, "NS16550A: Unimplemented offset %h\n", offset);
-                break;
-            }
-        }
+            spin_unlock(&regs->lock);
+            break;
+        case NS16550A_REG_IER:
+            *value = regs->ier;
+            break;
+        case NS16550A_REG_IIR:
+            *value = regs->iir;
+            break;
+        case NS16550A_REG_LCR:
+            *value = regs->lcr;
+            break;
+        case NS16550A_REG_MCR:
+            *value = regs->mcr;
+            break;
+        case NS16550A_REG_LSR:
+            // Read char from stdin
+            spin_lock(&regs->lock);
+            regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
+            *value = NS16550A_LSR_THR | regs->len;
+            spin_unlock(&regs->lock);
+            break;
+        case NS16550A_REG_MSR:
+            *value = 0;
+            break;
+        case NS16550A_REG_SCR:
+            *value = regs->scr;
+            break;
+        default:
+            *value = 0;
+            break;
     }
 
     return true;
@@ -188,75 +197,87 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, padd
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     uint8_t value = *(uint8_t*) memory_data;
     UNUSED(size);
-    //rvvm_info("Writing to UART at 0x%08x", offset);
-    if (regs->regs[NS16550A_REG_LCR] & 0x80) {
+    if (regs->lcr & NS16550A_LCR_DLAB) {
         switch (offset) {
             case NS16550A_REG_DLL:
-            case NS16550A_REG_DLM: {
-                regs->regs_dlab[offset] = value;
+                regs->dll = value;
+                return true;
+            case NS16550A_REG_DLM:
+                regs->dlm = value;
+                return true;
+            default:
                 break;
-            }
-            case NS16550A_REG_FCR:
-            case NS16550A_REG_LCR:
-            case NS16550A_REG_MCR:
-            case NS16550A_REG_SCR: {
-                regs->regs[offset] = value;
-                break;
-            }
-            case NS16550A_REG_LSR:
-            case NS16550A_REG_MSR: {
-                // Registers are RO
-                break;
-            }
-            default: {
-                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
-                break;
-            }
         }
-
-    } else {
-        switch (offset) {
-            case NS16550A_REG_THR: {
-                //if (value > 127) printf ("we are retarded\n");
-                //rvvm_info("UART prints 0x%02x", value);
-                putc(value, stdout);
-                fflush(stdout);
+    }
+    switch (offset) {
+        case NS16550A_REG_THR:
+            putc(value, stdout);
+            fflush(stdout);
+            break;
+        case NS16550A_REG_IER:
+            //rvvm_info("NS16550A IER: 0x%x", value);
+            regs->ier = value & NS16550A_IER_MASK;
+            spin_lock(&regs->lock);
+            if ((regs->ier & 1) && regs->len) {
+                regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_RECV;
+                if (regs->plic) {
+                    plic_send_irq(device->machine, regs->plic, regs->irq_num);
+                }
+                spin_unlock(&regs->lock);
                 break;
             }
-            case NS16550A_REG_IER: {
-                regs->regs[offset] = value & NS16550A_IER_MASK;
-                break;
+            if (regs->ier & 2) {
+                regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_THR;
+                if (regs->plic) {
+                    plic_send_irq(device->machine, regs->plic, regs->irq_num);
+                }
             }
-            case NS16550A_REG_FCR:
-            case NS16550A_REG_LCR:
-            case NS16550A_REG_MCR:
-            case NS16550A_REG_SCR: {
-                regs->regs[offset] = value;
-                break;
-            }
-            case NS16550A_REG_LSR:
-            case NS16550A_REG_MSR: {
-                // Registers are RO
-                break;
-            }
-            default: {
-                //riscv32_debug_always(vm, "NS16550A: Unimplemented offset %h\n", offset);
-                break;
-            }
-        }
+            spin_unlock(&regs->lock);
+            break;
+        case NS16550A_REG_FCR:
+            break;
+        case NS16550A_REG_LCR:
+            regs->lcr = value;
+            break;
+        case NS16550A_REG_MCR:
+            regs->mcr = value;
+            break;
+        case NS16550A_REG_SCR:
+            regs->scr = value;
+            break;
+        // Registers are RO
+        case NS16550A_REG_LSR:
+        case NS16550A_REG_MSR:
+            break;
+        default:
+            break;
     }
     return true;
 }
 
+static void ns16550a_update(rvvm_mmio_dev_t* device)
+{
+    struct ns16550a_data* regs = (struct ns16550a_data*)device->data;
+    if (regs->plic) {
+        spin_lock(&regs->lock);
+        regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
+        if (regs->len) plic_send_irq(device->machine, regs->plic, regs->irq_num);
+        spin_unlock(&regs->lock);
+    }
+}
+
 static rvvm_mmio_type_t ns16550a_dev_type = {
     .name = "ns16550a",
+    .update = ns16550a_update,
 };
 
-void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr)
+void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
 {
     struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
+    ptr->plic = intc_data;
+    ptr->irq_num = irq;
+    spin_init(&ptr->lock);
     terminal_rawmode();
-    ptr->regs[NS16550A_REG_LSR] = 0x60;
 
     rvvm_mmio_dev_t ns16550a = {0};
     ns16550a.min_op_size = 1;
@@ -271,8 +292,9 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr)
     
 #ifdef USE_FDT
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    if (soc == NULL) {
-        rvvm_warn("Missing soc node in FDT!");
+    struct fdt_node* plic = (soc && intc_data) ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (soc == NULL || (intc_data && plic == NULL)) {
+        rvvm_warn("Missing nodes in FDT!");
         return;
     }
     
@@ -280,8 +302,12 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr)
     fdt_node_add_prop_reg(uart, "reg", base_addr, NS16550A_REG_SIZE);
     fdt_node_add_prop_str(uart, "compatible", "ns16550a");
     fdt_node_add_prop_u32(uart, "clock-frequency", 0x2625a00);
-    fdt_node_add_prop_u32(uart, "fifo-size", 0x80);
+    fdt_node_add_prop_u32(uart, "fifo-size", 16);
     fdt_node_add_prop_str(uart, "status", "okay");
+    if (intc_data) {
+        fdt_node_add_prop_u32(uart, "interrupt-parent", fdt_node_get_phandle(plic));
+        fdt_node_add_prop_u32(uart, "interrupts", irq);
+    }
     fdt_node_add_child(soc, uart);
 #endif
 }

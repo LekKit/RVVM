@@ -22,6 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm.h"
 
-void ns16550a_init(rvvm_machine_t *mach, paddr_t base_addr);
+void ns16550a_init(rvvm_machine_t *mach, paddr_t base_addr, void* intc_data, uint32_t irq);
 
 #endif // NS16550A_H

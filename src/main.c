@@ -304,28 +304,30 @@ static bool rvvm_run_with_args(vm_args_t args)
     }
     
     clint_init(machine, 0x2000000);
-    ns16550a_init(machine, 0x10000000);
     
     void *plic_data = plic_init(machine, 0xC000000);
 
+    ns16550a_init(machine, 0x10000000, plic_data, 1);
+    
     if (!args.nogui) {
         static struct ps2_device ps2_mouse;
         ps2_mouse = ps2_mouse_create();
-        altps2_init(machine, 0x20000000, plic_data, 1, &ps2_mouse);
+        altps2_init(machine, 0x20000000, plic_data, 2, &ps2_mouse);
 
         static struct ps2_device ps2_keyboard;
         ps2_keyboard = ps2_keyboard_create();
-        altps2_init(machine, 0x20001000, plic_data, 2, &ps2_keyboard);
+        altps2_init(machine, 0x20001000, plic_data, 3, &ps2_keyboard);
         
         init_fb(machine, 0x30000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
     } else {
 #ifdef USE_FDT
+        // Broken in FreeBSD for whatever reason
         struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
         if (chosen) fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
 #endif
     }
 #ifdef USE_NET
-    ethoc_init(machine, 0x21000000, plic_data, 3);
+    ethoc_init(machine, 0x21000000, plic_data, 4);
 #endif
     syscon_init(machine, 0x100000);
 
