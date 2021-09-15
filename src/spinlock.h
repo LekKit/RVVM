@@ -33,6 +33,9 @@ NOINLINE void spin_lock_slow(spinlock_t* lock, const char* info);
 static inline void spin_init(spinlock_t* lock)
 {
     lock->flag = 0;
+#ifdef USE_SPINLOCK_DEBUG
+    lock->lock_info = "[not locked(?)]";
+#endif
 }
 
 static inline void _spin_lock(spinlock_t* lock, const char* info)
