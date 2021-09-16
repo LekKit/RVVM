@@ -300,7 +300,7 @@ static bool rvvm_run_with_args(vm_args_t args)
     void *plic_data = plic_init(machine, 0xC000000);
 
     ns16550a_init(machine, 0x10000000, plic_data, 1);
-#ifdef USE_FDT
+#if defined(USE_FDT) && defined(USE_PCI)
     struct pci_bus_list *pci_buses = pci_bus_init_dt(machine,
 		    1, 1, 0x50000000,
 		    0x58000000, 0x1000000, 0x59000000, 0x6000000,
@@ -313,7 +313,7 @@ static bool rvvm_run_with_args(vm_args_t args)
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
         } else {
-#ifndef USE_FDT
+#if !defined(USE_FDT) || !defined(USE_PCI)
             ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
 #else
             ata_init_pci(machine, &pci_buses->buses[0], fp, NULL);

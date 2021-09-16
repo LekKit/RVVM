@@ -26,6 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdio.h>
 
 void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* fp0, FILE* fp1);
+#ifdef USE_PCI
 void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave);
+#endif
 
 #endif

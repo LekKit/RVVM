@@ -151,6 +151,7 @@ USE_FPU ?= 1
 USE_FDT ?= 1
 USE_RTC ?= 1
 USE_SPINLOCK_DEBUG ?= 1
+USE_PCI ?= 1
 
 # Need fixes
 USE_VMSWAP ?= 0
@@ -245,6 +246,10 @@ endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
+endif
+
+ifeq ($(USE_PCI),1)
+override CFLAGS += -DUSE_PCI
 endif
 
 ifeq ($(OS),darwin)

@@ -20,6 +20,7 @@ option(RVVM_USE_VMSWAP_SPLIT "Use swap splitting - one file per page" OFF)
 option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking - makes context switches cheaper" ON)
+option(RVVM_USE_PCI "Use PCI bus emulation" ON)
 
 if (RVVM_USE_JIT AND RVVM_USE_PRECISE_FS)
 	message(FATAL_ERROR "Precise FS tracking cannot be used with JIT.")
@@ -66,6 +67,10 @@ endif()
 
 if (RVVM_USE_PRECISE_FS)
 	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
+endif()
+
+if (RVVM_USE_PCI)
+	target_compile_definitions(rvvm_common INTERFACE USE_PCI)
 endif()
 
 # CPU interpreter sources

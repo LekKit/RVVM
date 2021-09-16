@@ -16,10 +16,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifdef USE_PCI
 #include "pci-bus.h"
 #include "bit_ops.h"
 #include "plic.h"
-#include <stdio.h>
 
 static void pci_bus_remove(rvvm_mmio_dev_t *dev)
 {
@@ -500,4 +500,5 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
 
     return list;
 }
+#endif
 #endif

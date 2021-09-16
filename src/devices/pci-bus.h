@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef PCI_BUS_H
 #define PCI_BUS_H
 
+#ifdef USE_PCI
 #include "rvvm.h"
 #include "spinlock.h"
 
@@ -107,5 +108,6 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
 
 void pci_send_irq(struct pci_func *func);
 void pci_clear_irq(struct pci_func *func);
+#endif
 
 #endif

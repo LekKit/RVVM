@@ -157,7 +157,9 @@ static void ata_send_interrupt(struct ata_dev *ata) {
         return;
     }
 
+#ifdef USE_PCI
     pci_send_irq(ata->func);
+#endif
 }
 
 static void ata_clear_interrupt(struct ata_dev *ata) {
@@ -165,7 +167,9 @@ static void ata_clear_interrupt(struct ata_dev *ata) {
         return;
     }
 
+#ifdef USE_PCI
     pci_clear_irq(ata->func);
+#endif
 }
 
 static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
@@ -706,6 +710,7 @@ static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_dat
     return true;
 }
 
+#ifdef USE_PCI
 static bool ata_bmdma_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
@@ -785,6 +790,7 @@ err:
     spin_unlock(&ata->dma_info.lock);
     return false;
 }
+#endif
 
 static size_t get_img_size(FILE *fp)
 {
@@ -905,6 +911,7 @@ void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_
 #endif
 }
 
+#ifdef USE_PCI
 static bool ata_data_read_primary(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
     return ata_data_mmio_read_handler(device, memory_data, offset, size);
@@ -951,6 +958,9 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 }
 #endif
 
+#endif
+
+#ifdef USE_PCI
 void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave)
 {
     assert(master != NULL || slave != NULL);
@@ -1018,7 +1028,6 @@ void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master
                     .read = ata_bmdma_mmio_read_handler,
                     .write = ata_bmdma_mmio_write_handler,
                 }
-
             }
         }
     };
@@ -1044,3 +1053,5 @@ void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master
     fdt_node_add_prop_str(chosen, "bootargs", "root=/dev/sda rw");
 #endif
 }
+#endif
+
