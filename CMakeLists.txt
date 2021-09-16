@@ -20,6 +20,7 @@ option(RVVM_USE_VMSWAP_SPLIT "Use swap splitting - one file per page" OFF)
 option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking - makes context switches cheaper" ON)
+option(RVVM_USE_PCI "Use PCI bus emulation" ON)
 
 if (RVVM_USE_JIT AND RVVM_USE_PRECISE_FS)
 	message(FATAL_ERROR "Precise FS tracking cannot be used with JIT.")
@@ -30,6 +31,7 @@ set(RVVM_SRC_DIR "${RVVM_SOURCE_DIR}/src")
 # Common pseudo-library to pass parameters to other targets
 add_library(rvvm_common INTERFACE)
 target_include_directories(rvvm_common INTERFACE "${RVVM_SRC_DIR}")
+target_compile_definitions(rvvm_common INTERFACE "VERSION=\"${RVVM_VERSION}\"")
 if (MSVC)
 	# Suppress warnings
 	target_compile_definitions(rvvm_common INTERFACE _CRT_SECURE_NO_WARNINGS)
@@ -65,6 +67,10 @@ endif()
 
 if (RVVM_USE_PRECISE_FS)
 	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
+endif()
+
+if (RVVM_USE_PCI)
+	target_compile_definitions(rvvm_common INTERFACE USE_PCI)
 endif()
 
 # CPU interpreter sources
@@ -110,7 +116,6 @@ list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
 add_library(rvvm ${RVVM_SRC})
 target_link_libraries(rvvm PRIVATE rvvm_common)
 target_link_libraries(rvvm PUBLIC rvvm_cpu32)
-target_compile_definitions(rvvm PRIVATE "VERSION=${RVVM_VERSION}")
 if (UNIX OR WIN32)
 	find_package(Threads REQUIRED)
 	target_link_libraries(rvvm PRIVATE Threads::Threads)

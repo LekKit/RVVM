@@ -302,23 +302,38 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     free(machine);
 }
 
-PUBLIC void rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
+PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_t handle)
+{
+    if (handle < 0 || (size_t)handle >= vector_size(machine->mmio)) {
+        return NULL;
+    }
+
+    return &vector_at(machine->mmio, (size_t)handle);
+}
+
+PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
     rvvm_mmio_dev_t* dev;
-    if (machine->running) return;
+    if (machine->running) return RVVM_INVALID_MMIO;
+
     vector_push_back(machine->mmio, *mmio);
-    dev = &vector_at(machine->mmio, vector_size(machine->mmio)-1);
+    rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
+    dev = &vector_at(machine->mmio, ret);
     dev->machine = machine;
     rvvm_info("Attached MMIO device at 0x%08"PRIxXLEN", type \"%s\"", dev->begin, dev->type ? dev->type->name : "null");
+    return ret;
 }
 
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr)
 {
     if (machine->running) return;
     vector_foreach(machine->mmio, i) {
-        if (mmio_addr >= vector_at(machine->mmio, i).begin
-         && mmio_addr <= vector_at(machine->mmio, i).end) {
-             vector_erase(machine->mmio, i);
+        struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
+        if (mmio_addr >= dev->begin
+         && mmio_addr <= dev->end) {
+            /* do not remove the machine from vector so that the handles
+             * remain valid */
+            dev->begin = dev->end = 0;
         }
     }
 }
