@@ -177,6 +177,84 @@ static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
     }
 }
 
+static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
+{
+    /* No DMA transfer active */
+    if (!bit_check(ata->dma_info.cmd, 0)) {
+        spin_unlock(&ata->dma_info.lock);
+        return;
+    }
+
+    bool is_read = bit_check(ata->dma_info.cmd, 3);
+    size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
+    FILE *fp = ata->drive[ata->curdrive].fp;
+    size_t processed = 0;
+    while (1) {
+        /* Read PRD */
+        uint32_t prd_physaddr;
+        if (!rvvm_read_ram(machine, &prd_physaddr,
+                    ata->dma_info.prdt_addr, sizeof(prd_physaddr)))
+            goto err;
+        uint32_t prd_sectcount;
+        if (!rvvm_read_ram(machine, &prd_sectcount,
+                    ata->dma_info.prdt_addr + 4, sizeof(prd_sectcount)))
+            goto err;
+
+        uint32_t buf_size = prd_sectcount & 0xffff;
+        /* Value if 0 means size of 64K */
+        if (buf_size == 0) {
+            buf_size = 64 * 1024;
+        }
+
+        /* Read/write data to/from RAM */
+        void *buf = safe_malloc(buf_size);
+        if (is_read) {
+            if (1 != fread(buf, buf_size, 1, fp)) {
+                free(buf);
+                goto err;
+            }
+            if (!rvvm_write_ram(machine, (paddr_t) prd_physaddr, buf, buf_size)) {
+                free(buf);
+                goto err;
+            }
+        } else {
+            if (!rvvm_read_ram(machine, buf, (paddr_t) prd_physaddr, buf_size)) {
+                free(buf);
+                goto err;
+            }
+            if (1 != fwrite(buf, buf_size, 1, fp)) {
+                free(buf);
+                goto err;
+            }
+        }
+        free(buf);
+
+        processed += buf_size;
+
+        /* If bit 31 is set, this is the last PRD */
+        if (bit_check(prd_sectcount, 31)) {
+            if (processed != to_process) {
+                goto err;
+            }
+
+            break;
+        }
+
+        /* All good, advance the pointer */
+        ata->dma_info.prdt_addr += 8;
+    }
+
+    ata->dma_info.cmd &= ~(1 << 0);
+    ata->dma_info.status |= (1 << 2);
+    ata_send_interrupt(ata);
+    return;
+
+err:
+    ata->dma_info.cmd &= ~(1 << 0);
+    ata->dma_info.status |= (1 << 2) | (1 << 1);
+    ata_send_interrupt(ata);
+}
+
 static void ata_cmd_identify(struct ata_dev *ata)
 {
     uint16_t id_buf[SECTOR_SIZE / 2] = {
@@ -679,6 +757,9 @@ static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_d
         case ATA_BMDMA_CMD:
             if (size != 1) goto err;
             ata->dma_info.cmd = *(uint8_t*) memory_data;
+#ifndef ATA_ASYNC
+            ata_process_prdt(ata, device->machine);
+#endif
             break;
         case ATA_BMDMA_STATUS:
             if (size != 1) goto err;
@@ -733,94 +814,22 @@ static void ata_data_remove(rvvm_mmio_dev_t* device)
     }
 }
 
+#ifdef ATA_ASYNC
 static void ata_data_update(rvvm_mmio_dev_t* device)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
     spin_lock(&ata->dma_info.lock);
-
-    /* No DMA transfer active */
-    if (!bit_check(ata->dma_info.cmd, 0)) {
-        spin_unlock(&ata->dma_info.lock);
-        return;
-    }
-
-    bool is_read = bit_check(ata->dma_info.cmd, 3);
-    size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
-    FILE *fp = ata->drive[ata->curdrive].fp;
-    struct rvvm_machine_t *machine = device->machine;
-    size_t processed = 0;
-    while (1) {
-        /* Read PRD */
-        uint32_t prd_physaddr;
-        if (!rvvm_read_ram(machine, &prd_physaddr,
-                    ata->dma_info.prdt_addr, sizeof(prd_physaddr)))
-            goto err;
-        uint32_t prd_sectcount;
-        if (!rvvm_read_ram(machine, &prd_sectcount,
-                    ata->dma_info.prdt_addr + 4, sizeof(prd_sectcount)))
-            goto err;
-
-        uint32_t buf_size = prd_sectcount & 0xffff;
-        /* Value if 0 means size of 64K */
-        if (buf_size == 0) {
-            buf_size = 64 * 1024;
-        }
-
-        /* Read/write data to/from RAM */
-        void *buf = safe_malloc(buf_size);
-        if (is_read) {
-            if (1 != fread(buf, buf_size, 1, fp)) {
-                free(buf);
-                goto err;
-            }
-            if (!rvvm_write_ram(machine, (paddr_t) prd_physaddr, buf, buf_size)) {
-                free(buf);
-                goto err;
-            }
-        } else {
-            if (!rvvm_read_ram(machine, buf, (paddr_t) prd_physaddr, buf_size)) {
-                free(buf);
-                goto err;
-            }
-            if (1 != fwrite(buf, buf_size, 1, fp)) {
-                free(buf);
-                goto err;
-            }
-        }
-        free(buf);
-
-        processed += buf_size;
-
-        /* If bit 31 is set, this is the last PRD */
-        if (bit_check(prd_sectcount, 31)) {
-            if (processed != to_process) {
-                goto err;
-            }
-
-            break;
-        }
-
-        /* All good, advance the pointer */
-        ata->dma_info.prdt_addr += 8;
-    }
-
-    ata->dma_info.cmd &= ~(1 << 0);
-    ata->dma_info.status |= (1 << 2);
+    ata_process_prdt(ata, device->machine);
     spin_unlock(&ata->dma_info.lock);
-    ata_send_interrupt(ata);
-    return;
-
-err:
-    ata->dma_info.cmd &= ~(1 << 0);
-    ata->dma_info.status |= (1 << 2) | (1 << 1);
-    spin_unlock(&ata->dma_info.lock);
-    ata_send_interrupt(ata);
 }
+#endif
 
 static rvvm_mmio_type_t ata_data_dev_type = {
     .name = "ata_data",
     .remove = ata_data_remove,
+#ifdef ATA_ASYNC
     .update = ata_data_update,
+#endif
 };
 
 static rvvm_mmio_type_t ata_ctl_dev_type = {
