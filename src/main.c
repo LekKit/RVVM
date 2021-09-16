@@ -33,6 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/ps2-keyboard.h"
 #include "devices/ps2-mouse.h"
 #include "devices/syscon.h"
+#include "devices/rtc-goldfish.h"
 
 #ifdef _WIN32
 // For unicode fix
@@ -330,6 +331,9 @@ static bool rvvm_run_with_args(vm_args_t args)
     ethoc_init(machine, 0x21000000, plic_data, 4);
 #endif
     syscon_init(machine, 0x100000);
+#ifdef USE_RTC
+    rtc_goldfish_init(machine, 0x101000, plic_data, 5);
+#endif
 
     if (args.dumpdtb) {
 #ifdef USE_FDT

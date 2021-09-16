@@ -138,7 +138,7 @@ VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
 $(info RVVM $(VERSION))
 
 # Target-dependant sources
-SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c
+SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c
 
 # Default build configuration
 USE_FB ?= 1
@@ -149,6 +149,7 @@ USE_JIT ?= 0
 USE_NET ?= 0
 USE_FPU ?= 1
 USE_FDT ?= 1
+USE_RTC ?= 1
 USE_SPINLOCK_DEBUG ?= 1
 
 # Need fixes
@@ -235,6 +236,11 @@ endif
 
 ifeq ($(USE_FDT),1)
 override CFLAGS += -DUSE_FDT
+endif
+
+ifeq ($(USE_RTC),1)
+SRC_depbuild += $(SRCDIR)/devices/rtc-goldfish.c
+override CFLAGS += -DUSE_RTC
 endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)
