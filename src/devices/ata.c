@@ -818,6 +818,8 @@ static void ata_data_remove(rvvm_mmio_dev_t* device)
             fclose(ata->drive[i].fp);
         }
     }
+
+    free(ata);
 }
 
 #ifdef ATA_ASYNC
@@ -838,8 +840,15 @@ static rvvm_mmio_type_t ata_data_dev_type = {
 #endif
 };
 
+static void ata_remove_dummy(rvvm_mmio_dev_t* device)
+{
+    /* dummy remove */
+    UNUSED(device);
+}
+
 static rvvm_mmio_type_t ata_ctl_dev_type = {
     .name = "ata_ctl",
+    .remove = ata_remove_dummy,
 };
 
 void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* master, FILE* slave)
@@ -1033,16 +1042,30 @@ void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master
     };
 
     struct pci_device *pci_dev = pci_bus_add_device(machine, pci_bus, &ata_desc, (void*) ata);
+
     ata->func = &pci_dev->func[0];
-    for (size_t i = 0; i < 5; ++i) {
-        struct rvvm_mmio_dev_t *mmio_dev = rvvm_get_mmio(machine, pci_dev->func[0].bar_mapping[i]);
-        if (mmio_dev == NULL) continue;
-        mmio_dev->data = (void*) ata;
-        if (i % 2 == 0) {
-            /* for remove & update function */
-            mmio_dev->type = &ata_data_dev_type;
-        }
+    struct rvvm_mmio_dev_t *mmio_dev = rvvm_get_mmio(machine, ata->func->bar_mapping[0]);
+    if (!mmio_dev) {
+        rvvm_warn("ATA BAR mapping 0 not found!");
+        return;
     }
+    mmio_dev->data = (void *) ata;
+    /* for remove & update function */
+    mmio_dev->type = &ata_data_dev_type;
+    mmio_dev = rvvm_get_mmio(machine, pci_dev->func[0].bar_mapping[1]);
+    if (!mmio_dev) {
+        rvvm_warn("ATA BAR mapping 1 not found!");
+        return;
+    }
+    mmio_dev->data = (void *) ata;
+    mmio_dev->type = &ata_ctl_dev_type;
+    mmio_dev = rvvm_get_mmio(machine, pci_dev->func[0].bar_mapping[4]);
+    if (!mmio_dev) {
+        rvvm_warn("ATA BAR mapping 4 not found!");
+        return;
+    }
+    mmio_dev->data = (void *) ata;
+    mmio_dev->type = &ata_ctl_dev_type;
 
 #ifdef USE_FDT
     struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");

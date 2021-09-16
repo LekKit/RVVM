@@ -27,6 +27,9 @@ static void pci_bus_remove(rvvm_mmio_dev_t *dev)
     for (size_t i = 0; i < list->count; ++i) {
         vector_free(list->buses[i].devices);
     }
+
+    free(list->buses);
+    free(list);
 }
 
 rvvm_mmio_type_t pci_bus_type = {
