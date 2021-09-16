@@ -297,7 +297,7 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rw
         uint8_t offset_diff = offset - aligned_offset;
         uint8_t new_size = dev->min_op_size;
         uint8_t misaligned_size = size + offset_diff;
-        uint8_t tmp[16];
+        uint8_t tmp[16] = {0};
         if (unlikely(new_size > 8)) {
             rvvm_warn("Device \"%s\" has incorrect min op size: %u",
                   dev->type ? dev->type->name : "null", dev->min_op_size);
