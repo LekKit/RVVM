@@ -25,7 +25,9 @@ RISC-V CPU & System software implementation written in С
 - PLIC/CLIC, timers
 - PS2 Altera Controller, PS2 keyboard & mouse
 - Graphical framebuffer through X11/WinAPI
+- Generic PCI Bus
 - ATA PIO hard drive
+- ATA BMDMA (IDE UDMA) over PCI
 - OpenCores Ethernet through Linux TAP
 - Poweroff/reset device
 
@@ -77,11 +79,15 @@ Invoke "./rvvm_x86_64 -h" to see extended help.
 - *Hoping to see more contributors here*
 
 ## TODO
+- Test FreeBSD, HaikuOS
+  (FreeBSD generic kernel boots but i have no idea how to mount rootfs,
+  too lazy to look at Haiku)
 - Improve RVVM Lib public API
-- Working JIT infrastructure
-- PCI bus, SATA/SCSI for faster IO
-- Improve UART
+- Working JIT infrastructure (many headaches from x86 backend)
+- SATA/SCSI
+- Sparse HDD image format, compression
 - Userspace networking, sound?
+- Maybe virtio devices
 - Other peripherals
 - *A lot more...*
 - Userspace emulation?
