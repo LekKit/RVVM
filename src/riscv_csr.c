@@ -467,8 +467,7 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_time(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(op);
-    rvtimer_update(&vm->timer);
-    *dest = vm->timer.time;
+    *dest = rvtimer_get(&vm->timer);
     return true;
 }
 
@@ -476,7 +475,7 @@ static bool riscv_csr_timeh(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(op);
     if (vm->rv64) return false;
-    *dest = vm->timer.time >> 32;
+    *dest = rvtimer_get(&vm->timer) >> 32;
     return true;
 }
 

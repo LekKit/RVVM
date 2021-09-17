@@ -1,5 +1,5 @@
 /*
-timer.c - Timers, sleep functions
+rvtimer.c - Timers, sleep functions
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -19,27 +19,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "compiler.h"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(BSD) || defined(__APPLE__)
 #include <unistd.h>
 #include <time.h>
-#define HAS_CLOCK_GETTIME
 
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
 #endif
 
-#elif defined(BSD)
-#include <unistd.h>
-#include <time.h>
-#define HAS_CLOCK_GETTIME
-#elif defined(__APPLE__)
-#include <unistd.h>
-#include <time.h>
-#define HAS_CLOCK_GETTIME
+static uint64_t rvtimer_clocksource(uint64_t freq)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+    return ((now.tv_sec * 1000000000ULL) + now.tv_nsec) / (1000000000ULL / freq);
+}
+
 #elif defined(_WIN32)
 #include <windows.h>
+
+/*#define CLOCK_MONOTONIC_RAW 0
 struct timespec { long tv_sec; long tv_nsec; };
-static void clock_gettime(int t, struct timespec* tp)
+static inline void clock_gettime(int t, struct timespec* tp)
 {
     UNUSED(t);
     ULARGE_INTEGER tmp;
@@ -47,52 +47,49 @@ static void clock_gettime(int t, struct timespec* tp)
     tmp.QuadPart -= 0x19DB1DED53E8000ULL; // to UNIX time
     tp->tv_sec = tmp.QuadPart / 10000000ULL;
     tp->tv_nsec = (tmp.QuadPart % 10000000ULL) * 100;
+}*/
+
+static uint64_t rvtimer_clocksource(uint64_t freq)
+{
+    ULARGE_INTEGER tmp;
+    GetSystemTimeAsFileTime((LPFILETIME)&tmp);
+    tmp.QuadPart -= 0x19DB1DED53E8000ULL; // to UNIX time
+    return (tmp.QuadPart * 100ULL) / (1000000000ULL / freq);
 }
-#define CLOCK_MONOTONIC_RAW 0
-#define HAS_CLOCK_GETTIME
+
 #else
 #warning No support for platform clocksource!
-#endif
 
-#if defined(HAS_CLOCK_GETTIME)
-static inline uint64_t timespec_to_rvtimer(struct timespec* tp, uint64_t freq)
+static uint64_t __rvtimer = 0;
+
+static uint64_t rvtimer_clocksource(uint64_t freq)
 {
-    return (tp->tv_sec * freq) + (tp->tv_nsec / 1000 * freq / 1000000);
+    return __rvtimer++ * freq / 1000;
 }
+
 #endif
 
 void rvtimer_init(rvtimer_t* timer, uint64_t freq)
 {
     timer->freq = freq;
-    timer->time = 0;
-    timer->timecmp = -1ULL;
-    rvtimer_rebase(timer);
+    // Some dumb rv32 OSes may ignore higher timecmp bits
+    timer->timecmp = 0xFFFFFFFFU;
+    rvtimer_rebase(timer, 0);
 }
 
-void rvtimer_update(rvtimer_t* timer)
+uint64_t rvtimer_get(rvtimer_t* timer)
 {
-#if defined(HAS_CLOCK_GETTIME)
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-    timer->time = timespec_to_rvtimer(&now, timer->freq) - timer->begin;
-#else
-    timer->time++;
-#endif
+    return rvtimer_clocksource(timer->freq) - timer->begin;
 }
 
-void rvtimer_rebase(rvtimer_t* timer)
+void rvtimer_rebase(rvtimer_t* timer, uint64_t time)
 {
-#if defined(HAS_CLOCK_GETTIME)
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-    timer->begin = timespec_to_rvtimer(&now, timer->freq) - timer->time;
-#endif
+    timer->begin = rvtimer_clocksource(timer->freq) - time;
 }
 
 bool rvtimer_pending(rvtimer_t* timer)
 {
-    rvtimer_update(timer);
-    return timer->time >= timer->timecmp;
+    return rvtimer_get(timer) >= timer->timecmp;
 }
 
 void sleep_ms(uint32_t ms)
@@ -100,7 +97,7 @@ void sleep_ms(uint32_t ms)
 #if defined(_WIN32)
     //Sleep(ms);
     SleepEx(ms, TRUE);
-#elif defined(HAS_CLOCK_GETTIME)
+#elif defined(CLOCK_MONOTONIC_RAW)
     usleep(ms*1000);
 #endif
 }

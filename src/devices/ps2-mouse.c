@@ -460,8 +460,7 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 		goto out;
 	}
 
-	dev->sample_timer.time = 0;
-	rvtimer_rebase(&dev->sample_timer);
+	rvtimer_rebase(&dev->sample_timer, 0);
 
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);

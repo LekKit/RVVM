@@ -37,11 +37,9 @@ static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, paddr_t
         return true;
     }
 
-    rvtimer_update(&vm->timer);
-
     // MTIMECMP register, 64-bit compare register for timer interrupts
     if (offset >= 0x4000 && (offset + size) <= 0x4008) {
-        write_uint64_le(tmp, vm->timer.timecmp);
+        write_uint64_le_m(tmp, vm->timer.timecmp);
         offset -= 0x4000;
         memcpy(data, tmp + offset, size);
         return true;
@@ -49,7 +47,7 @@ static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, paddr_t
 
     // MTIME register, 64-bit timer value
     if (offset >= 0xBFF8 && (offset + size) <= 0xC000) {
-        write_uint64_le(tmp, vm->timer.time);
+        write_uint64_le_m(tmp, rvtimer_get(&vm->timer));
         offset -= 0xBFF8;
         memcpy(data, tmp + offset, size);
         return true;
@@ -73,24 +71,24 @@ static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, paddr_
         return true;
     }
 
-    rvtimer_update(&vm->timer);
-
     // MTIMECMP register, 64-bit compare register for timer interrupts
     if (offset >= 0x4000 && (offset + size) <= 0x4008) {
-        write_uint64_le(tmp, vm->timer.timecmp);
+        write_uint64_le_m(tmp, vm->timer.timecmp);
         offset -= 0x4000;
         memcpy(tmp + offset, data, size);
-        vm->timer.timecmp = read_uint64_le(tmp);
+        vm->timer.timecmp = read_uint64_le_m(tmp);
         return true;
     }
 
     // MTIME register, 64-bit timer value
     if (offset >= 0xBFF8 && (offset + size) <= 0xC000) {
-        write_uint64_le(tmp, vm->timer.time);
+        write_uint64_le_m(tmp, rvtimer_get(&vm->machine->timer));
         offset -= 0xBFF8;
         memcpy(tmp + offset, data, size);
-        vm->timer.time = read_uint64_le(tmp);
-        rvtimer_rebase(&vm->timer);
+        rvtimer_rebase(&vm->machine->timer, read_uint64_le_m(tmp));
+        vector_foreach(vm->machine->harts, i) {
+            vector_at(vm->machine->harts, i).timer = vm->machine->timer;
+        }
         return true;
     }
 

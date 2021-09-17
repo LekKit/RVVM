@@ -1,5 +1,5 @@
 /*
-timer.h - Timers, sleep functions
+rvtimer.h - Timers, sleep functions
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -25,18 +25,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef struct {
     uint64_t begin; // Internal usage only
     uint64_t freq;
-    uint64_t time;
     uint64_t timecmp;
 } rvtimer_t;
 
 // Initialize the timer and the clocksource
 void rvtimer_init(rvtimer_t* timer, uint64_t freq);
 
-// Update time field using clocksource
-void rvtimer_update(rvtimer_t* timer);
+// Get current timer value
+uint64_t rvtimer_get(rvtimer_t* timer);
 
 // Rebase the clocksource by time field
-void rvtimer_rebase(rvtimer_t* timer);
+void rvtimer_rebase(rvtimer_t* timer, uint64_t time);
 
 // Check if we have a pending timer interrupt. Updates on it's own
 bool rvtimer_pending(rvtimer_t* timer);

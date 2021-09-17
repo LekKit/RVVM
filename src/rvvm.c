@@ -218,12 +218,14 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
         free(machine);
         return NULL;
     }
+    rvtimer_init(&machine->timer, 10000000); // 10 MHz timer
     vector_init(machine->harts);
     vector_init(machine->mmio);
     for (size_t i=0; i<hart_count; ++i) {
         vector_emplace_back(machine->harts);
         vm = &vector_at(machine->harts, i);
         riscv_hart_init(vm, rv64);
+        vm->timer = machine->timer;
         vm->machine = machine;
         vm->mem = machine->mem;
         // a0 register & mhartid csr contain hart ID

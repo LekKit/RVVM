@@ -255,6 +255,7 @@ struct rvvm_machine_t {
     rvvm_ram_t mem;
     vector_t(rvvm_hart_t) harts;
     vector_t(rvvm_mmio_dev_t) mmio;
+    rvtimer_t timer;
     uint32_t running;
     bool needs_reset;
 #ifdef USE_FDT

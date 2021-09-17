@@ -29,7 +29,6 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 {
     memset(vm, 0, sizeof(rvvm_hart_t));
     riscv_tlb_flush(vm);
-    rvtimer_init(&vm->timer, 10000000); // 10 MHz timer
     vm->priv_mode = PRIVILEGE_MACHINE;
     // Delegate exceptions from M to S
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
