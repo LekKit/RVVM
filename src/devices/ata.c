@@ -181,6 +181,7 @@ static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
     }
 }
 
+#ifdef USE_PCI
 static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
 {
     /* No DMA transfer active */
@@ -258,6 +259,7 @@ err:
     ata->dma_info.status |= (1 << 2) | (1 << 1);
     ata_send_interrupt(ata);
 }
+#endif
 
 static void ata_cmd_identify(struct ata_dev *ata)
 {
