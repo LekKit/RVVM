@@ -79,6 +79,55 @@ static inline void write_uint16_le_m(void* addr, uint16_t val) {
 }
 
 /*
+ * Big-endian operations
+ */
+
+static inline uint64_t read_uint64_be_m(const void* addr) {
+    const uint8_t* arr = (const uint8_t*)addr;
+    return (uint64_t)arr[7] | ((uint64_t)arr[6] << 8)
+    | ((uint64_t)arr[5] << 16) | ((uint64_t)arr[4] << 24)
+    | ((uint64_t)arr[3] << 32) | ((uint64_t)arr[2] << 40)
+    | ((uint64_t)arr[1] << 48) | ((uint64_t)arr[0] << 56);
+}
+
+static inline void write_uint64_be_m(void* addr, uint64_t val) {
+    uint8_t* arr = (uint8_t*)addr;
+    arr[7] = val & 0xFF;
+    arr[6] = (val >> 8) & 0xFF;
+    arr[5] = (val >> 16) & 0xFF;
+    arr[4] = (val >> 24) & 0xFF;
+    arr[3] = (val >> 32) & 0xFF;
+    arr[2] = (val >> 40) & 0xFF;
+    arr[1] = (val >> 48) & 0xFF;
+    arr[0] = (val >> 56) & 0xFF;
+}
+
+static inline uint32_t read_uint32_be_m(const void* addr) {
+    const uint8_t* arr = (const uint8_t*)addr;
+    return (uint32_t)arr[3] | ((uint32_t)arr[2] << 8)
+    | ((uint32_t)arr[1] << 16) | ((uint32_t)arr[0] << 24);
+}
+
+static inline void write_uint32_be_m(void* addr, uint32_t val) {
+    uint8_t* arr = (uint8_t*)addr;
+    arr[3] = val & 0xFF;
+    arr[2] = (val >> 8) & 0xFF;
+    arr[1] = (val >> 16) & 0xFF;
+    arr[0] = (val >> 24) & 0xFF;
+}
+
+static inline uint16_t read_uint16_be_m(const void* addr) {
+    const uint8_t* arr = (const uint8_t*)addr;
+    return (uint16_t)arr[1] | ((uint16_t)arr[0] << 8);
+}
+
+static inline void write_uint16_be_m(void* addr, uint16_t val) {
+    uint8_t* arr = (uint8_t*)addr;
+    arr[1] = val & 0xFF;
+    arr[0] = (val >> 8) & 0xFF;
+}
+
+/*
  * Strictly aligned access for performace
  * Falls back to byte-bang operations on big-endian systems
  */
