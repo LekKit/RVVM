@@ -114,11 +114,11 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS += -O3 -flto -pthread -frounding-math
+override CFLAGS += -O3 -flto -pthread -frounding-math -fvisibility=hidden
 else
 ifeq ($(CC_TYPE),clang)
 # Many clang versions lack -frounding-math, and it doesn't need it in fact
-override CFLAGS += -O3 -flto -pthread
+override CFLAGS += -O3 -flto -pthread -fvisibility=hidden
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2
@@ -138,7 +138,7 @@ VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
 $(info RVVM $(VERSION))
 
 # Target-dependant sources
-SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c
+SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c $(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c
 
 # Default build configuration
 USE_FB ?= 1
@@ -147,6 +147,7 @@ USE_XSHM ?= 1
 USE_RV64 ?= 1
 USE_JIT ?= 0
 USE_NET ?= 0
+USE_TAP_LINUX ?= 0
 USE_FPU ?= 1
 USE_FDT ?= 1
 USE_RTC ?= 1
@@ -224,6 +225,15 @@ endif
 
 ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
+ifneq ($(OS_UNAME),Linux)
+USE_TAP_LINUX := 0
+endif
+ifeq ($(USE_TAP_LINUX),1)
+SRC_depbuild += $(SRCDIR)/devices/tap_linux.c
+override CFLAGS += -DUSE_TAP_LINUX
+else
+SRC_depbuild += $(SRCDIR)/devices/tap_user.c
+endif
 endif
 
 ifeq ($(USE_VMSWAP_SPLIT),1)

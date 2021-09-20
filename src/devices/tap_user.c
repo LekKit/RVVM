@@ -1,0 +1,182 @@
+/*
+tap_user.c - Userspace networking TAP
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    0xCatPKG <github.com/PacketCat>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+#include "rvvm.h"
+#include "tap.h"
+#include "mem_ops.h"
+#include <string.h>
+
+#define GATEWAY_MAC "\x13\x37\xDE\xAD\xBE\xEF"
+
+#define ETH2_IPv6 0x86DD
+#define ETH2_IPv4 0x0800
+#define ETH2_ARP  0x0806
+
+#define IP_PROTO_ICMP   0x1
+#define IP_PROTO_TCP    0x6
+#define IP_PROTO_UDP    0x11
+#define IP_PROTO_ENCv6  0x29 // IPv6 in IPv4 encapsulation
+#define IP_PROTO_ICMPv6 0x3A // IPv6 ICMP
+
+#define ARP_HTYPE_ETHER 0x1
+#define ARP_PTYPE_IPv4  ETH2_IPv4
+#define ARP_PTYPE_IPv6  ETH2_IPv6
+#define ARP_HLEN_ETHER  0x6
+#define ARP_PLEN_IPv4   0x4
+#define ARP_PLEN_IPv6   0x10
+#define ARP_OP_REQUEST  0x1
+#define ARP_OP_RESPONSE 0x2
+
+static void eth_send(struct tap_dev *td, vmptr_t buffer, size_t size)
+{
+    if (size < 65536) {
+        /*for (size_t i=0; i<size; ++i) printf("%02x", buffer[i]);
+        printf("\n");*/
+        ringbuf_put_u16(&td->rx, size);
+        ringbuf_put(&td->rx, buffer, size);
+        td->flag = TAPPOLL_IN;
+    }
+}
+
+static void handle_ipv4(struct tap_dev *td, vmptr_t buffer, size_t size)
+{
+    rvvm_info("Handling IPv4 frame");
+}
+
+static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
+{
+    UNUSED(size);
+    rvvm_info("Handling ARP frame");
+    uint16_t oper = read_uint16_be_m(buffer + 6);
+    if (oper != ARP_OP_REQUEST) return;
+    rvvm_info("Requesting IP addr %d.%d.%d.%d", buffer[24], buffer[25], buffer[26], buffer[27]);
+    
+    uint8_t response[46];
+    memcpy(response, td->mac, 6);
+    memcpy(response+6, GATEWAY_MAC, 6);
+    write_uint16_be_m(response+12, ETH2_ARP);
+    write_uint16_be_m(response+14, ARP_HTYPE_ETHER);
+    write_uint16_be_m(response+16, ARP_PTYPE_IPv4);
+    response[18] = 6;
+    response[19] = 4;
+    write_uint16_be_m(response+20, ARP_OP_RESPONSE);
+    memcpy(response+22, GATEWAY_MAC, 6);
+    memcpy(response+28, buffer + 24, 4);
+    memcpy(response+32, td->mac, 6);
+    //memcpy(response+36, buffer + 24, 4);
+    response[38] = 192;
+    response[39] = 168;
+    response[40] = 2;
+    response[41] = 1;
+    write_uint32_be_m(response+42, 0);
+    
+    eth_send(td, response, 46);
+}
+
+ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
+{
+    vmptr_t buffer = buf;
+    if (unlikely(len < 18)) {
+        rvvm_warn("Malformed ETH2 frame!");
+    }
+    uint16_t ether_type = read_uint16_be_m(buffer + 12);
+    switch (ether_type) {
+        case ETH2_IPv4:
+            handle_ipv4(td, buffer + 14, len - 18);
+            break;
+        case ETH2_IPv6:
+            // тут спит котб
+            break;
+        case ETH2_ARP:
+            handle_arp(td, buffer + 14, len - 18);
+            break;
+        default:
+            rvvm_warn("Unknown EtherType!");
+            break;
+    }
+    return len;
+}
+
+ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
+{
+    uint16_t rx_len;
+    if (ringbuf_get_u16(&td->rx, &rx_len)) {
+        if (len >= rx_len) {
+            rvvm_info("Receiving Eth frame, length %d", rx_len);
+            if (ringbuf_get(&td->rx, buf, rx_len)) return rx_len;
+        } else {
+            ringbuf_skip(&td->rx, rx_len);
+        }
+    }
+    if (ringbuf_is_empty(&td->rx)) {
+        td->flag = TAPPOLL_OUT;
+    }
+    return 0;
+}
+
+bool tap_is_up(struct tap_dev *td)
+{
+    return td->is_up;
+}
+
+bool tap_set_up(struct tap_dev *td, bool up)
+{
+    td->is_up = up;
+    return true;
+}
+
+bool tap_get_mac(struct tap_dev *td, uint8_t mac[static 6])
+{
+    memcpy(mac, td->mac, 6);
+    return true;
+}
+
+bool tap_set_mac(struct tap_dev *td, uint8_t mac[static 6])
+{
+    rvvm_info("MAC set to %02x::%02x::%02x::%02x::%02x::%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    memcpy(td->mac, mac, 6);
+    return true;
+}
+
+int tap_open(const char* dev, struct tap_dev *ret)
+{
+    rvvm_info("TAP open on \"%s\"", dev);
+    ret->is_up = true;
+    ret->flag = TAPPOLL_OUT;
+    ringbuf_create(&ret->rx, 0x10000);
+    return 0;
+}
+
+void* tap_workthread(void *arg)
+{
+    return arg;
+}
+
+void tap_wake(struct tap_pollevent_cb *pollev)
+{
+    pollev->pollevent(pollev->dev.flag, pollev->pollevent_arg);
+}
+
+bool tap_pollevent_init(struct tap_pollevent_cb *pollcb, void *eth, pollevent_check_func pchk, pollevent_func pfunc)
+{
+    pollcb->pollevent_arg = (void*) eth;
+    pollcb->pollevent_check = pchk;
+    pollcb->pollevent = pfunc;
+    return true;
+}
