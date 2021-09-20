@@ -24,9 +24,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define GATEWAY_MAC "\x13\x37\xDE\xAD\xBE\xEF"
 
-#define ETH2_IPv6 0x86DD
-#define ETH2_IPv4 0x0800
-#define ETH2_ARP  0x0806
+#define ETH2_IPv6       0x86DD
+#define ETH2_IPv4       0x0800
+#define ETH2_ARP        0x0806
+
+#define ETH2_WRAP_SIZE  0x12
+#define IPv4_WRAP_SIZE  0x10
+#define IPv6_WRAP_SIZE  0x28
+
+#define UDP_WRAP_SIZE   0x8
+#define TCP_WRAP_SIZE   0x14
+
+#define ARPv4_SIZE      0x1C
+#define ARPv6_SIZE      0x34
+#define ICMP_SIZE       0x8
 
 #define IP_PROTO_ICMP   0x1
 #define IP_PROTO_TCP    0x6
@@ -54,18 +65,49 @@ static void eth_send(struct tap_dev *td, vmptr_t buffer, size_t size)
     }
 }
 
-static void create_ethernet_frame(struct tap_dev *td, uint8_t *frame, uint8_t *buffer, size_t size, uint16_t ether_type)
+static uint8_t* create_eth_frame(struct tap_dev *td, uint8_t *frame, size_t size, uint16_t ether_type)
 {
-    memcpy(frame, td->mac, 6);
-    memcpy(frame+6, GATEWAY_MAC, 6);
-    write_uint16_be_m(frame+12, ether_type);
-    memcpy(frame+14, buffer, size);
-    write_uint32_be_m(frame+14+size, 0);
+    memcpy(frame, td->mac, ARP_HLEN_ETHER);
+    memcpy(frame + ARP_HLEN_ETHER, GATEWAY_MAC, ARP_HLEN_ETHER);
+    write_uint16_be_m(frame + 12, ether_type);
+    write_uint32_be_m(frame + 14 + size, 0);
+    return frame + 14;
+}
+
+static void create_arp_frame(struct tap_dev *td, uint8_t *frame, uint8_t *req_ip)
+{
+    write_uint16_be_m(frame, ARP_HTYPE_ETHER);
+    write_uint16_be_m(frame + 2, ARP_PTYPE_IPv4);
+    frame[4] = ARP_HLEN_ETHER;
+    frame[5] = ARP_PLEN_IPv4;
+    write_uint16_be_m(frame + 6, ARP_OP_RESPONSE);
+    memcpy(frame + 8, GATEWAY_MAC, ARP_HLEN_ETHER);
+    memcpy(frame + 14, req_ip, ARP_PLEN_IPv4);
+    memcpy(frame + 18, td->mac, ARP_HLEN_ETHER);
+    memcpy(frame + 24, req_ip, ARP_PLEN_IPv4); // client ip?
 }
 
 static void handle_ipv4(struct tap_dev *td, vmptr_t buffer, size_t size)
 {
     rvvm_info("Handling IPv4 frame");
+    rvvm_info("Source IP: %d.%d.%d.%d", buffer[12], buffer[13], buffer[14], buffer[15]);
+    rvvm_info("Destination IP: %d.%d.%d.%d", buffer[16], buffer[17], buffer[18], buffer[19]);
+}
+
+static void handle_ipv6(struct tap_dev *td, vmptr_t buffer, size_t size)
+{
+    rvvm_info("Handling IPv6 frame");
+    rvvm_info("Source IP: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x", read_uint16_be_m(buffer + 8),
+                                                                    read_uint16_be_m(buffer + 10), read_uint16_be_m(buffer + 12),
+                                                                    read_uint16_be_m(buffer + 14), read_uint16_be_m(buffer + 16),
+                                                                    read_uint16_be_m(buffer + 18), read_uint16_be_m(buffer + 20),
+                                                                    read_uint16_be_m(buffer + 22));
+    rvvm_info("Destination IP: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x", read_uint16_be_m(buffer + 24),
+                                                                         read_uint16_be_m(buffer + 26), read_uint16_be_m(buffer + 28),
+                                                                         read_uint16_be_m(buffer + 30), read_uint16_be_m(buffer + 32),
+                                                                         read_uint16_be_m(buffer + 34), read_uint16_be_m(buffer + 36),
+                                                                         read_uint16_be_m(buffer + 38));
+    // тут спит котб
 }
 
 static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
@@ -73,88 +115,38 @@ static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
     UNUSED(size);
     rvvm_info("Handling ARP frame");
 
-
     uint16_t protocol_type = read_uint16_be_m(buffer + 2);
     uint16_t oper = read_uint16_be_m(buffer + 6);
     if (oper != ARP_OP_REQUEST) return;
-    // uint8_t *response;
-    // uint8_t response_lenght;
     if (protocol_type == ETH2_IPv4) {
-        rvvm_info("Requesting IP addr %d.%d.%d.%d", buffer[24],
-                                                    buffer[25], buffer[26],
-                                                    buffer[27]);
-        uint8_t response[28];
-        // response_lenght = 28;
-        write_uint16_be_m(response + 2, ARP_PTYPE_IPv4);
-        response[5] = 4;
-        memcpy(response + 14, buffer + 24, 4);
-        memcpy(response + 18, td->mac, 6);
-        response[24] = 192;
-        response[25] = 168;
-        response[26] = 2;
-        response[27] = 1;
-        write_uint16_be_m(response, ARP_HTYPE_ETHER);
-        response[4] = 6;
-        write_uint16_be_m(response+6, ARP_OP_RESPONSE);
-        memcpy(response+8, GATEWAY_MAC, 6);
+        rvvm_info("ARP: Requesting IP addr %d.%d.%d.%d", buffer[24], buffer[25], buffer[26], buffer[27]);
 
-
-        uint8_t frame[28+18];
-        create_ethernet_frame(td, frame, response, 28+18, ETH2_ARP);
-
-        eth_send(td, frame, 28+18);
-    } else if (protocol_type == ETH2_IPv6) {
-        rvvm_info("Requesting IP addr %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x", read_uint16_be_m(buffer + 36),
-                                                                                read_uint16_be_m(buffer + 38), read_uint16_be_m(buffer + 40),
-                                                                                read_uint16_be_m(buffer + 42), read_uint16_be_m(buffer + 44),
-                                                                                read_uint16_be_m(buffer + 46), read_uint16_be_m(buffer + 48),
-                                                                                read_uint16_be_m(buffer + 50));
-        uint8_t response[52];
-        // response_lenght = 52;
-        write_uint16_be_m(response + 2, ARP_PTYPE_IPv6);
-        response[5] = 16;
-        memcpy(response + 14, buffer + 36, 16);
-        memcpy(response + 30, td->mac, 6);
-        write_uint32_be_m(response + 36, 0x2002);
-        write_uint32_be_m(response + 40, 0x0C89);
-        write_uint16_be_m(response + 44, 0xA000);
-        write_uint16_be_m(response + 46, 0x0);
-        write_uint16_be_m(response + 48, 0x0);
-        write_uint16_be_m(response + 50, 0x0001);
-        write_uint16_be_m(response, ARP_HTYPE_ETHER);
-        response[4] = 6;
-        write_uint16_be_m(response+6, ARP_OP_RESPONSE);
-        memcpy(response+8, GATEWAY_MAC, 6);
-
-
-        uint8_t frame[52+18];
-        create_ethernet_frame(td, frame, response, 52+18, ETH2_ARP);
-
-        eth_send(td, frame, 52+18);
+        uint8_t frame[ARPv4_SIZE + ETH2_WRAP_SIZE];
+        uint8_t* arp = create_eth_frame(td, frame, ARPv4_SIZE, ETH2_ARP);
+        create_arp_frame(td, arp, buffer + 24, false);
+        eth_send(td, frame, ARPv4_SIZE + ETH2_WRAP_SIZE);
     } else {
         rvvm_info("ARP: Unsupported protocol type");
         return;
     }
-
-
 }
 
 ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
 {
     vmptr_t buffer = buf;
-    if (unlikely(len < 18)) {
+    if (unlikely(len < ETH2_WRAP_SIZE)) {
         rvvm_warn("Malformed ETH2 frame!");
     }
     uint16_t ether_type = read_uint16_be_m(buffer + 12);
     switch (ether_type) {
         case ETH2_IPv4:
-            handle_ipv4(td, buffer + 14, len - 18);
+            handle_ipv4(td, buffer + 14, len - ETH2_WRAP_SIZE);
             break;
         case ETH2_IPv6:
-            // тут спит котб
+            handle_ipv6(td, buffer + 14, len - ETH2_WRAP_SIZE);
             break;
         case ETH2_ARP:
-            handle_arp(td, buffer + 14, len - 18);
+            handle_arp(td, buffer + 14, len - ETH2_WRAP_SIZE);
             break;
         default:
             rvvm_warn("Unknown EtherType!");
