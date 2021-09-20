@@ -29,7 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ETH2_ARP        0x0806
 
 #define ETH2_WRAP_SIZE  0x12
-#define IPv4_WRAP_SIZE  0x10
+#define IPv4_WRAP_SIZE  0x14
 #define IPv6_WRAP_SIZE  0x28
 
 #define UDP_WRAP_SIZE   0x8
@@ -87,15 +87,82 @@ static void create_arp_frame(struct tap_dev *td, uint8_t *frame, uint8_t *req_ip
     memcpy(frame + 24, req_ip, ARP_PLEN_IPv4); // client ip?
 }
 
+static uint8_t* create_ipv4_frame(uint8_t *frame, size_t size, uint8_t proto, uint8_t *src_ip, uint8_t *dest_ip)
+{
+    frame[0] = 0x45; // Version 4, IHL 5
+    frame[1] = 0; // DSCP, ECN
+    write_uint16_be_m(frame + 2, size + IPv4_WRAP_SIZE);
+    write_uint16_be_m(frame + 4, 0); // Identification
+    write_uint16_be_m(frame + 6, 0); // Flags, Fragment Offset
+    frame[8] = 0xFF; // TTL
+    frame[9] = proto;
+    write_uint16_be_m(frame + 10, 0); // Initial checksum is zero
+    memcpy(frame + 12, src_ip, ARP_PLEN_IPv4);
+    memcpy(frame + 16, dest_ip, ARP_PLEN_IPv4);
+    
+    // Checksum calculation
+    uint32_t tmp = 0;
+    for (size_t i=0; i<20; i+=2) {
+        tmp += read_uint16_be_m(frame + i);
+    }
+    tmp = (tmp >> 16) + (tmp & 0xFFFF);
+    tmp += tmp >> 16;
+    write_uint16_be_m(frame + 10, ~tmp);
+    
+    return frame + 20;
+}
+
+static void handle_icmp(struct tap_dev *td, vmptr_t buffer, size_t size)
+{
+    if (buffer[20] != 8) return;
+    rvvm_info("Handling ICMP request");
+    uint8_t frame[ICMP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE];
+    uint8_t* ipv4 = create_eth_frame(td, frame, ICMP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
+    uint8_t* icmp = create_ipv4_frame(ipv4, ICMP_SIZE, IP_PROTO_ICMP, buffer + 16, buffer + 12);
+    icmp[0] = 0;
+    icmp[1] = 0;
+    write_uint16_be_m(icmp + 2, 0); // Initial checksum is zero
+    memcpy(icmp + 4, buffer + 24, 4);
+    
+    uint32_t tmp = 0;
+    for (size_t i=0; i<8; i+=2) {
+        tmp += read_uint16_be_m(icmp + i);
+    }
+    tmp = (tmp >> 16) + (tmp & 0xFFFF);
+    tmp += tmp >> 16;
+    write_uint16_be_m(icmp + 2, ~tmp);
+    
+    eth_send(td, frame, ICMP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE);
+}
+
 static void handle_ipv4(struct tap_dev *td, vmptr_t buffer, size_t size)
 {
+    if (unlikely(size < IPv4_WRAP_SIZE)) {
+        rvvm_warn("Malformed IPv4 frame!");
+    }
     rvvm_info("Handling IPv4 frame");
     rvvm_info("Source IP: %d.%d.%d.%d", buffer[12], buffer[13], buffer[14], buffer[15]);
     rvvm_info("Destination IP: %d.%d.%d.%d", buffer[16], buffer[17], buffer[18], buffer[19]);
+    uint8_t proto = buffer[9];
+    switch (proto) {
+        case IP_PROTO_TCP:
+            break;
+        case IP_PROTO_UDP:
+            break;
+        case IP_PROTO_ICMP:
+            handle_icmp(td, buffer, size);
+            break;
+        default:
+            rvvm_warn("Unknown protocol encapsulated in IPv4!");
+            break;
+    }
 }
 
 static void handle_ipv6(struct tap_dev *td, vmptr_t buffer, size_t size)
 {
+    if (unlikely(size < IPv6_WRAP_SIZE)) {
+        rvvm_warn("Malformed IPv6 frame!");
+    }
     rvvm_info("Handling IPv6 frame");
     rvvm_info("Source IP: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x", read_uint16_be_m(buffer + 8),
                                                                     read_uint16_be_m(buffer + 10), read_uint16_be_m(buffer + 12),
@@ -123,7 +190,7 @@ static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
 
         uint8_t frame[ARPv4_SIZE + ETH2_WRAP_SIZE];
         uint8_t* arp = create_eth_frame(td, frame, ARPv4_SIZE, ETH2_ARP);
-        create_arp_frame(td, arp, buffer + 24, false);
+        create_arp_frame(td, arp, buffer + 24);
         eth_send(td, frame, ARPv4_SIZE + ETH2_WRAP_SIZE);
     } else {
         rvvm_info("ARP: Unsupported protocol type");
