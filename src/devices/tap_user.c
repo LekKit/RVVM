@@ -226,19 +226,20 @@ ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
 
 ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
 {
-    uint16_t rx_len;
+    uint16_t rx_len = 0;
     if (ringbuf_get_u16(&td->rx, &rx_len)) {
         if (len >= rx_len) {
             rvvm_info("Receiving Eth frame, length %d", rx_len);
-            if (ringbuf_get(&td->rx, buf, rx_len)) return rx_len;
+            if (!ringbuf_get(&td->rx, buf, rx_len)) rx_len = 0;
         } else {
             ringbuf_skip(&td->rx, rx_len);
+            rx_len = 0;
         }
     }
     if (ringbuf_is_empty(&td->rx)) {
         td->flag = TAPPOLL_OUT;
     }
-    return 0;
+    return rx_len;
 }
 
 bool tap_is_up(struct tap_dev *td)
