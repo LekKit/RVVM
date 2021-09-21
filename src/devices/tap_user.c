@@ -61,7 +61,7 @@ static void eth_send(struct tap_dev *td, vmptr_t buffer, size_t size)
         printf("\n");*/
         ringbuf_put_u16(&td->rx, size);
         ringbuf_put(&td->rx, buffer, size);
-        td->flag = TAPPOLL_IN;
+        td->flag |= TAPPOLL_IN;
     }
 }
 
@@ -102,37 +102,38 @@ static uint8_t* create_ipv4_frame(uint8_t *frame, size_t size, uint8_t proto, ui
     
     // Checksum calculation
     uint32_t tmp = 0;
-    for (size_t i=0; i<20; i+=2) {
+    for (size_t i=0; i<IPv4_WRAP_SIZE; i+=2) {
         tmp += read_uint16_be_m(frame + i);
     }
     tmp = (tmp >> 16) + (tmp & 0xFFFF);
     tmp += tmp >> 16;
     write_uint16_be_m(frame + 10, ~tmp);
     
-    return frame + 20;
+    return frame + IPv4_WRAP_SIZE;
 }
 
 static void handle_icmp(struct tap_dev *td, vmptr_t buffer, size_t size)
 {
     if (buffer[20] != 8) return;
     rvvm_info("Handling ICMP request");
-    uint8_t frame[ICMP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE];
-    uint8_t* ipv4 = create_eth_frame(td, frame, ICMP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
-    uint8_t* icmp = create_ipv4_frame(ipv4, ICMP_SIZE, IP_PROTO_ICMP, buffer + 16, buffer + 12);
+
+    uint8_t frame[256];
+    uint8_t* ipv4 = create_eth_frame(td, frame, size, ETH2_IPv4);
+    uint8_t* icmp = create_ipv4_frame(ipv4, size - IPv4_WRAP_SIZE, IP_PROTO_ICMP, buffer + 16, buffer + 12);
+    memcpy(icmp, buffer + IPv4_WRAP_SIZE, size - IPv4_WRAP_SIZE);
     icmp[0] = 0;
     icmp[1] = 0;
     write_uint16_be_m(icmp + 2, 0); // Initial checksum is zero
-    memcpy(icmp + 4, buffer + 24, 4);
     
     uint32_t tmp = 0;
-    for (size_t i=0; i<8; i+=2) {
+    for (size_t i=0; i<size - IPv4_WRAP_SIZE; i+=2) {
         tmp += read_uint16_be_m(icmp + i);
     }
     tmp = (tmp >> 16) + (tmp & 0xFFFF);
     tmp += tmp >> 16;
     write_uint16_be_m(icmp + 2, ~tmp);
     
-    eth_send(td, frame, ICMP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE);
+    eth_send(td, frame, size + ETH2_WRAP_SIZE);
 }
 
 static void handle_ipv4(struct tap_dev *td, vmptr_t buffer, size_t size)
@@ -201,6 +202,7 @@ static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
 ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
 {
     vmptr_t buffer = buf;
+    len += 4;
     if (unlikely(len < ETH2_WRAP_SIZE)) {
         rvvm_warn("Malformed ETH2 frame!");
     }
@@ -279,7 +281,11 @@ void* tap_workthread(void *arg)
 
 void tap_wake(struct tap_pollevent_cb *pollev)
 {
-    pollev->pollevent(pollev->dev.flag, pollev->pollevent_arg);
+    int req = pollev->pollevent_check(pollev->pollevent_arg);
+    if (req == TAPPOLL_ERR) {
+        return;
+    }
+    pollev->pollevent(req & pollev->dev.flag, pollev->pollevent_arg);
 }
 
 bool tap_pollevent_init(struct tap_pollevent_cb *pollcb, void *eth, pollevent_check_func pchk, pollevent_func pfunc)
