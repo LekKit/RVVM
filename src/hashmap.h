@@ -62,7 +62,7 @@ static inline size_t hashmap_used_mem(hashmap_t* map)
     return (map->size + 1) * sizeof(hashmap_bucket_t);
 }
 
-#define hasmap_foreach(map, k, v) \
+#define hashmap_foreach(map, k, v) \
     for (size_t _i=0, k, v; k=(map)->buckets[_i].key, v=(map)->buckets[_i].val, _i<(map)->size+1; ++_i) if (v)
 
 static inline size_t hashmap_hash(size_t k)
