@@ -103,6 +103,30 @@ static void create_arp_frame(struct tap_dev *td, uint8_t *frame, const uint8_t *
     memcpy(frame + 24, req_ip, PLEN_IPv4); // client ip?
 }
 
+static uint16_t ip_checksum(void *buf, size_t size)
+{
+    uint32_t tmp = 0;
+    uint8_t tail = size & 1;
+    size -= tail;
+    for (size_t i = 0; i < size; i += 2) {
+        tmp += read_uint16_be_m((uint8_t*)buf + i);
+    }
+    if (tail) {
+        tmp += (uint16_t)read_uint8((uint8_t*)buf + size) << 8;
+    }
+    tmp = (tmp >> 16) + (tmp & 0xFFFF);
+    tmp += tmp >> 16;
+    return ~tmp;
+}
+
+static uint16_t ip_checksum_combine(uint16_t cksum1, uint16_t cksum2)
+{
+    uint32_t tmp = (~cksum1 & 0xFFFF) + (~cksum2 & 0xFFFF);
+    tmp = (tmp >> 16) + (tmp & 0xFFFF);
+    tmp += tmp >> 16;
+    return ~tmp;
+}
+
 static uint8_t* create_ipv4_frame(uint8_t *frame, size_t size, uint8_t proto, const uint8_t *src_ip, const uint8_t *dest_ip)
 {
     frame[0] = 0x45; // Version 4, IHL 5
@@ -115,16 +139,10 @@ static uint8_t* create_ipv4_frame(uint8_t *frame, size_t size, uint8_t proto, co
     write_uint16_be_m(frame + 10, 0); // Initial checksum is zero
     memcpy(frame + 12, src_ip, PLEN_IPv4);
     memcpy(frame + 16, dest_ip, PLEN_IPv4);
-    
+
     // Checksum calculation
-    uint32_t tmp = 0;
-    for (size_t i=0; i<IPv4_WRAP_SIZE; i+=2) {
-        tmp += read_uint16_be_m(frame + i);
-    }
-    tmp = (tmp >> 16) + (tmp & 0xFFFF);
-    tmp += tmp >> 16;
-    write_uint16_be_m(frame + 10, ~tmp);
-    
+    write_uint16_be_m(frame + 10, ip_checksum(frame, IPv4_WRAP_SIZE));
+
     return frame + IPv4_WRAP_SIZE;
 }
 
@@ -149,7 +167,7 @@ static void handle_icmp(struct tap_dev *td, vmptr_t buffer, size_t size)
     icmp[0] = 0;
     icmp[1] = 0;
     write_uint16_be_m(icmp + 2, 0); // Initial checksum is zero
-    
+
     uint32_t tmp = 0;
     for (size_t i=0; i<size - IPv4_WRAP_SIZE; i+=2) {
         tmp += read_uint16_be_m(icmp + i);
@@ -157,7 +175,7 @@ static void handle_icmp(struct tap_dev *td, vmptr_t buffer, size_t size)
     tmp = (tmp >> 16) + (tmp & 0xFFFF);
     tmp += tmp >> 16;
     write_uint16_be_m(icmp + 2, ~tmp);
-    
+
     eth_send(td, frame, size + ETH2_WRAP_SIZE);
 }
 
@@ -167,7 +185,7 @@ static void handle_dhcp(struct tap_dev *td, vmptr_t buffer, size_t size, uint16_
         rvvm_warn("Malformed DHCP packet!");
         return;
     }
-    
+
     uint8_t msg_type = 0xFF;
     for (size_t i = 240; i + 2 < size;) {
         if (buffer[i] == DHCP_MSG_TYPE) {
@@ -180,13 +198,13 @@ static void handle_dhcp(struct tap_dev *td, vmptr_t buffer, size_t size, uint16_
         rvvm_warn("Lacking DHCP message type!");
         return;
     }
-    
+
     rvvm_info("Handling DHCP");
     uint8_t frame[1536];
     uint8_t* ipv4 = create_eth_frame(td, frame, 273 + UDP_WRAP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
     uint8_t* udp = create_ipv4_frame(ipv4, 273 + UDP_WRAP_SIZE, IP_PROTO_UDP, GATEWAY_IP, (const uint8_t*)"\xFF\xFF\xFF\xFF");
     uint8_t* dhcp = create_udp_datagram(udp, 273, 67, src_port);
-    
+
     dhcp[0] = OP_RESPONSE;
     dhcp[1] = HTYPE_ETHER;
     dhcp[2] = HLEN_ETHER;
@@ -198,17 +216,17 @@ static void handle_dhcp(struct tap_dev *td, vmptr_t buffer, size_t size, uint16_
     memcpy(dhcp + 16, CLIENT_IP, PLEN_IPv4);
     memcpy(dhcp + 20, GATEWAY_IP, PLEN_IPv4);
     memcpy(dhcp + 24, GATEWAY_IP, PLEN_IPv4);
-    
+
     memcpy(dhcp + 28, buffer + 28, 16);
-    
-    
+
+
     memset(dhcp + 44, 0, 64);
     //memcpy(dhcp + 44, "RVVM DHCP", 10);
-    
+
     memset(dhcp + 108, 0, 128);
-    
+
     memcpy(dhcp + 236, buffer + 236, 4); // magic cookie
-    
+
     dhcp[240] = DHCP_MSG_TYPE;
     dhcp[241] = 1;
     if (msg_type == DHCP_DISCOVER) {
@@ -216,27 +234,27 @@ static void handle_dhcp(struct tap_dev *td, vmptr_t buffer, size_t size, uint16_
     } else {
         dhcp[242] = DHCP_ACK;
     }
-    
+
     dhcp[243] = DHCP_SUBMASK;
     dhcp[244] = 4;
     write_uint32_be_m(dhcp + 245, 0xFFFFFF00);
-    
+
     dhcp[249] = DHCP_ROUTER;
     dhcp[250] = 4;
     memcpy(dhcp + 251, GATEWAY_IP, PLEN_IPv4);
-    
+
     dhcp[255] = DHCP_LEASETIME;
     dhcp[256] = 4;
     write_uint32_be_m(dhcp + 257, 86400);
-    
+
     dhcp[261] = DHCP_DHCPSERVER;
     dhcp[262] = 4;
     memcpy(dhcp + 263, GATEWAY_IP, PLEN_IPv4);
-    
+
     dhcp[267] = DHCP_DNSERVERS;
     dhcp[268] = 4;
     write_uint32_be_m(dhcp + 269, 0x01010101);
-    
+
     eth_send(td, frame, 273 + UDP_WRAP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE);
 }
 
@@ -261,7 +279,7 @@ static void handle_udp(struct tap_dev *td, vmptr_t buffer, size_t size)
         handle_dhcp(td, udb_buff, udp_size, src_port);
         return;
     }
-    
+
     netsocket_t sock = hashmap_get(&td->udp_ports, src_port);
     if (sock == 0) {
         sock = net_create_udp();
@@ -381,25 +399,27 @@ ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
         size_t udp_offset = 14 + IPv4_WRAP_SIZE + UDP_WRAP_SIZE;
         uint32_t ip;
         uint16_t port;
+        memset(buf, '\0', udp_offset);
         rvvm_info("Receiving data to guest port %u", td->recvport);
         udp_size = net_udp_recv(td->recvsock, buffer + udp_offset, udp_size, &ip, &port);
         if (likely(udp_size)) {
             uint8_t ip_buf[4];
             write_uint32_be_m(ip_buf, ip);
             rvvm_info("Received packet from %d.%d.%d.%d:%d, size %u", ip_buf[0], ip_buf[1], ip_buf[2], ip_buf[3], port, (uint32_t)udp_size);
-            
+
             uint8_t* ipv4 = create_eth_frame(td, buffer, udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
             uint8_t* udp  = create_ipv4_frame(ipv4, udp_size + UDP_WRAP_SIZE, IP_PROTO_UDP, ip_buf, CLIENT_IP);
             create_udp_datagram(udp, udp_size, port, td->recvport);
-            
-            uint32_t tmp = 0;
-            for (size_t i=0; i<udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE; i+=2) {
-                tmp += read_uint16_be_m(ipv4 + i);
-            }
-            tmp = (tmp >> 16) + (tmp & 0xFFFF);
-            tmp += tmp >> 16;
-            write_uint16_be_m(udp + 6, ~tmp);
-            
+
+            uint16_t udpcksum = ip_checksum(ipv4 + 12, PLEN_IPv4 * 2);
+            uint8_t udphdrspec[4];
+            udphdrspec[0] = 0;
+            udphdrspec[1] = IP_PROTO_UDP;
+            write_uint16_be_m(udphdrspec + 2, udp_size + UDP_WRAP_SIZE);
+            udpcksum = ip_checksum_combine(udpcksum, ip_checksum(&udphdrspec, sizeof udphdrspec));
+            udpcksum = ip_checksum_combine(udpcksum, ip_checksum(udp, udp_size + UDP_WRAP_SIZE));
+            write_uint16_be_m(udp + 6, udpcksum);
+
             td->recvsock = NET_SOCK_INVALID;
             return udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE;
         } else {
@@ -477,19 +497,19 @@ void* tap_workthread(void *arg)
                 uint16_t port;
                 uint8_t tmp;
                 net_udp_recv(td->wakesock1, &tmp, 1, &ip, &port);
-                
+
                 // Check events
                 int req = pollev->pollevent_check(pollev->pollevent_arg);
                 if (req != TAPPOLL_ERR) {
                     pollev->pollevent(req & pollev->dev.flag, pollev->pollevent_arg);
                 }
             }
-            
+
             hashmap_foreach(&td->udp_ports, port, sock) {
                 if (net_selector_ready(td->selector, sock)) {
                     td->recvsock = sock;
                     td->recvport = port;
-                    
+
                     int req = pollev->pollevent_check(pollev->pollevent_arg);
                     if (req != TAPPOLL_ERR && (req & TAPPOLL_IN)) {
                         pollev->pollevent(TAPPOLL_IN, pollev->pollevent_arg);
