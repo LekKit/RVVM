@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm.h"
 #include "tap.h"
 #include "mem_ops.h"
+#include "networking.h"
 #include <string.h>
 
 #define GATEWAY_MAC ((const uint8_t*)"\x13\x37\xDE\xAD\xBE\xEF")
@@ -131,7 +132,7 @@ static uint8_t* create_udp_datagram(uint8_t *frame, uint16_t size, uint16_t src_
 {
     write_uint16_be_m(frame, src_port);
     write_uint16_be_m(frame + 2, dst_port);
-    write_uint16_be_m(frame + 4, size);
+    write_uint16_be_m(frame + 4, size + UDP_WRAP_SIZE);
     write_uint16_be_m(frame + 6, 0); // checksum
     return frame + UDP_WRAP_SIZE;
 }
@@ -245,19 +246,34 @@ static void handle_udp(struct tap_dev *td, vmptr_t buffer, size_t size)
         rvvm_warn("Malformed UDP datagram!");
         return;
     }
-    rvvm_info("Handling UDP datagram");
+    uint32_t dst_ip = read_uint32_be_m(buffer + 16);
     uint16_t src_port = read_uint16_be_m(buffer + 20);
     uint16_t dst_port = read_uint16_be_m(buffer + 22);
     uint16_t udp_size = read_uint16_be_m(buffer + 24) - UDP_WRAP_SIZE;
+    uint8_t* udb_buff = buffer + IPv4_WRAP_SIZE + UDP_WRAP_SIZE;
+    rvvm_info("Handling UDP datagram from port %u", src_port);
     if (unlikely(udp_size > (size - (IPv4_WRAP_SIZE + UDP_WRAP_SIZE)))) {
         rvvm_warn("Malformed UDP datagram size!");
         return;
     }
 
     if (dst_port == 67 && (read_uint32_be_m(buffer + 12) == 0)) {
-        handle_dhcp(td, buffer + IPv4_WRAP_SIZE + UDP_WRAP_SIZE, udp_size, src_port);
+        handle_dhcp(td, udb_buff, udp_size, src_port);
         return;
     }
+    
+    netsocket_t sock = hashmap_get(&td->udp_ports, src_port);
+    if (sock == 0) {
+        sock = net_create_udp();
+        if (!sock) {
+            rvvm_warn("Unable to create UDP socket!");
+            return;
+        }
+        hashmap_put(&td->udp_ports, src_port, sock);
+        net_selector_add(td->selector, sock);
+    }
+    if (!net_udp_send(sock, udb_buff, udp_size, dst_ip, dst_port))
+        rvvm_warn("Failed to send UDP!");
 }
 
 static void handle_ipv4(struct tap_dev *td, vmptr_t buffer, size_t size)
@@ -355,6 +371,43 @@ ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
 
 ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
 {
+    vmptr_t buffer = buf;
+    if (td->recvsock != NET_SOCK_INVALID) {
+        if (unlikely(len < (ETH2_WRAP_SIZE + IPv4_WRAP_SIZE + UDP_WRAP_SIZE))) {
+            rvvm_warn("No space in recv buffer!");
+            return -1;
+        }
+        size_t udp_size = len - (ETH2_WRAP_SIZE + IPv4_WRAP_SIZE + UDP_WRAP_SIZE);
+        size_t udp_offset = 14 + IPv4_WRAP_SIZE + UDP_WRAP_SIZE;
+        uint32_t ip;
+        uint16_t port;
+        rvvm_info("Receiving data to guest port %u", td->recvport);
+        udp_size = net_udp_recv(td->recvsock, buffer + udp_offset, udp_size, &ip, &port);
+        if (likely(udp_size)) {
+            uint8_t ip_buf[4];
+            write_uint32_be_m(ip_buf, ip);
+            rvvm_info("Received packet from %d.%d.%d.%d:%d, size %u", ip_buf[0], ip_buf[1], ip_buf[2], ip_buf[3], port, (uint32_t)udp_size);
+            
+            uint8_t* ipv4 = create_eth_frame(td, buffer, udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
+            uint8_t* udp  = create_ipv4_frame(ipv4, udp_size + UDP_WRAP_SIZE, IP_PROTO_UDP, ip_buf, CLIENT_IP);
+            create_udp_datagram(udp, udp_size, port, td->recvport);
+            
+            uint32_t tmp = 0;
+            for (size_t i=0; i<udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE; i+=2) {
+                tmp += read_uint16_be_m(ipv4 + i);
+            }
+            tmp = (tmp >> 16) + (tmp & 0xFFFF);
+            tmp += tmp >> 16;
+            write_uint16_be_m(udp + 6, ~tmp);
+            
+            td->recvsock = NET_SOCK_INVALID;
+            return udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE;
+        } else {
+            rvvm_warn("Failed to receive UDP packet!");
+            td->recvsock = NET_SOCK_INVALID;
+            return -1;
+        }
+    }
     uint16_t rx_len = 0;
     if (ringbuf_get_u16(&td->rx, &rx_len)) {
         if (len >= rx_len) {
@@ -401,21 +454,60 @@ int tap_open(const char* dev, struct tap_dev *ret)
     ret->is_up = true;
     ret->flag = TAPPOLL_OUT;
     ringbuf_create(&ret->rx, 0x10000);
+    hashmap_init(&ret->udp_ports, 64);
+    ret->selector = net_create_selector();
+    ret->wakesock1 = net_create_udp();
+    ret->wakesock2 = net_create_udp();
+    net_udp_bind(ret->wakesock1, NET_PORT_ANY, true);
+    ret->wakeport = net_udp_port(ret->wakesock1);
+    net_selector_add(ret->selector, ret->wakesock1);
+    ret->recvsock = NET_SOCK_INVALID;
     return 0;
 }
 
 void* tap_workthread(void *arg)
 {
+    struct tap_pollevent_cb *pollev = (struct tap_pollevent_cb *) arg;
+    struct tap_dev *td = &pollev->dev;
+    while (true) {
+        if (net_selector_wait(pollev->dev.selector)) {
+            if (net_selector_ready(td->selector, td->wakesock1)) {
+                // Clear the wake event
+                uint32_t ip;
+                uint16_t port;
+                uint8_t tmp;
+                net_udp_recv(td->wakesock1, &tmp, 1, &ip, &port);
+                
+                // Check events
+                int req = pollev->pollevent_check(pollev->pollevent_arg);
+                if (req != TAPPOLL_ERR) {
+                    pollev->pollevent(req & pollev->dev.flag, pollev->pollevent_arg);
+                }
+            }
+            
+            hashmap_foreach(&td->udp_ports, port, sock) {
+                if (net_selector_ready(td->selector, sock)) {
+                    td->recvsock = sock;
+                    td->recvport = port;
+                    
+                    int req = pollev->pollevent_check(pollev->pollevent_arg);
+                    if (req != TAPPOLL_ERR && (req & TAPPOLL_IN)) {
+                        pollev->pollevent(TAPPOLL_IN, pollev->pollevent_arg);
+                    } else {
+                        // Eventloop throttle to prevent 100% CPU usage
+                        sleep_ms(1);
+                    }
+                }
+            }
+        }
+    }
     return arg;
 }
 
 void tap_wake(struct tap_pollevent_cb *pollev)
 {
-    int req = pollev->pollevent_check(pollev->pollevent_arg);
-    if (req == TAPPOLL_ERR) {
-        return;
-    }
-    pollev->pollevent(req & pollev->dev.flag, pollev->pollevent_arg);
+    uint8_t tmp = 0;
+    net_udp_send(pollev->dev.wakesock2, &tmp, 1, NET_IP_LOCAL, pollev->dev.wakeport);
 }
 
 bool tap_pollevent_init(struct tap_pollevent_cb *pollcb, void *eth, pollevent_check_func pchk, pollevent_func pfunc)

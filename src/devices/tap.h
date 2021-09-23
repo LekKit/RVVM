@@ -33,10 +33,18 @@ struct tap_dev {
 };
 #else
 #include "ringbuf.h"
+#include "hashmap.h"
+#include "networking.h"
 
 struct tap_dev {
     struct ringbuf rx;
+    hashmap_t udp_ports;
+    netselector_t selector;
+    netsocket_t wakesock1, wakesock2;
+    netsocket_t recvsock;
     int flag;
+    uint16_t wakeport;
+    uint16_t recvport;
     uint8_t mac[6];
     bool is_up;
 };
