@@ -138,7 +138,7 @@ VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
 $(info RVVM $(VERSION))
 
 # Target-dependant sources
-SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c $(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c
+SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c $(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
 
 # Default build configuration
 USE_FB ?= 1
@@ -232,7 +232,10 @@ ifeq ($(USE_TAP_LINUX),1)
 SRC_depbuild += $(SRCDIR)/devices/tap_linux.c
 override CFLAGS += -DUSE_TAP_LINUX
 else
-SRC_depbuild += $(SRCDIR)/devices/tap_user.c
+SRC_depbuild += $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
+ifeq ($(OS),windows)
+override LDFLAGS += -lws2_32
+endif
 endif
 endif
 
