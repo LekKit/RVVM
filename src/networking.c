@@ -28,6 +28,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef SOCKET nethandle_t;
 typedef int netaddrlen_t;
 #define NET_HANDLE_INVALID INVALID_SOCKET
+
+static void net_init()
+{
+    static bool wsa_init = false;
+    if (!wsa_init) {
+        wsa_init = true;
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+            rvvm_warn("Failed to initialize WinSock");
+        }
+    }
+}
+
 #else
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -36,6 +50,9 @@ typedef int netaddrlen_t;
 typedef int nethandle_t;
 typedef socklen_t netaddrlen_t;
 #define NET_HANDLE_INVALID -1
+
+static inline void net_init() {}
+
 #endif
 
 struct net_selector {
@@ -47,6 +64,7 @@ struct net_selector {
 
 netsocket_t net_create_udp()
 {
+    net_init();
     nethandle_t sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock != NET_HANDLE_INVALID) {
         return (netsocket_t)sock;
@@ -57,6 +75,7 @@ netsocket_t net_create_udp()
 
 netselector_t net_create_selector()
 {
+    net_init();
     struct net_selector* selector = safe_calloc(sizeof(struct net_selector), 1);
     FD_ZERO(&selector->sockets);
     FD_ZERO(&selector->ready);
