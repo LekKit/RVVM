@@ -152,53 +152,54 @@ static inline int32_t fpu_fp2int_uint32_t(fnative_t x)
 {
     int exc = fetestexcept(FE_ALL_EXCEPT);
     feclearexcept(FE_ALL_EXCEPT);
-    long long ret = llrint(x);
-    bool isinvalid = fetestexcept(FE_INVALID);
-    if (!isinvalid) {
-        isinvalid = ret < 0 || ret > (~(uint32_t)0);
-        if (isinvalid) feraiseexcept(FE_INVALID);
+    uint32_t ret;
+    if (isinf(x)) {
+        exc |= FE_INVALID;
+        ret = fpu_sign_check(x) ? 0 : ~(uint32_t)0;
+    } else if (isnan(x)) {
+        exc |= FE_INVALID;
+        ret = ~(uint32_t)0;
+    } else if (fabs(x) < 1.0f) {
+        exc |= FE_INEXACT;
+        ret = 0;
+    } else if (x < 0.0f) {
+        exc |= FE_INVALID;
+        ret = 0;
+    } else if (x > nextafter(~(uint32_t)0, 0)) {
+        exc |= FE_INVALID;
+        ret = ~(uint32_t)0;
+    } else {
+        ret = (uint32_t)llrint(x);
     }
     feraiseexcept(exc);
-    if (isinvalid) {
-        if (isinf(x) && fpu_sign_check(x)) {
-            return 0;
-        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
-            return ~(uint32_t)0;
-        } else if (!fpu_sign_check(x)) {
-            return ~(uint32_t)0;
-        } else {
-            return 0;
-        }
-    }
-
-    return (uint32_t)ret;
+    return ret;
 }
 
 static inline int32_t fpu_fp2int_int32_t(fnative_t x)
 {
     int exc = fetestexcept(FE_ALL_EXCEPT);
     feclearexcept(FE_ALL_EXCEPT);
-    long long ret = llrint(x);
-    bool isinvalid = fetestexcept(FE_INVALID);
-    if (!isinvalid) {
-        isinvalid = ret < (int32_t)~(~(uint32_t)0 >> 1)
-                 || ret > (int32_t)(~(uint32_t)0 >> 1);
-        if (isinvalid) feraiseexcept(FE_INVALID);
+    int32_t ret;
+    if (isinf(x)) {
+        exc |= FE_INVALID;
+        ret = fpu_sign_check(x) ? ~(~(uint32_t)0 >> 1) : ~(uint32_t)0 >> 1;
+    } else if (isnan(x)) {
+        exc |= FE_INVALID;
+        ret = ~(uint32_t)0 >> 1;
+    } else if (fabs(x) < 1.0f) {
+        exc |= FE_INEXACT;
+        ret = 0;
+    } else if (x < nextafter((int32_t)~(~(uint32_t)0 >> 1), 0)) {
+        exc |= FE_INVALID;
+        ret = ~(~(uint32_t)0 >> 1);
+    } else if (x > nextafter((int32_t)(~(uint32_t)0 >> 1), 0)) {
+        exc |= FE_INVALID;
+        ret = ~(uint32_t)0 >> 1;
+    } else {
+        ret = (int32_t)llrint(x);
     }
     feraiseexcept(exc);
-    if (isinvalid) {
-        if (isinf(x) && fpu_sign_check(x)) {
-            return ~(~(uint32_t)0 >> 1);
-        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
-            return ~(uint32_t)0 >> 1;
-        } else if (!fpu_sign_check(x)) {
-            return ~(uint32_t)0 >> 1;
-        } else {
-            return ~(~(uint32_t)0 >> 1);
-        }
-    }
-
-    return (int32_t)ret;
+    return ret;
 }
 
 #ifdef RV64
@@ -206,53 +207,54 @@ static inline int64_t fpu_fp2int_uint64_t(fnative_t x)
 {
     int exc = fetestexcept(FE_ALL_EXCEPT);
     feclearexcept(FE_ALL_EXCEPT);
-    long long ret = llrint(x);
-    bool isinvalid = fetestexcept(FE_INVALID);
-    if (!isinvalid) {
-        isinvalid = ret < 0 /* || ret > (~(uint64_t)0) */;
-        if (isinvalid) feraiseexcept(FE_INVALID);
+    uint64_t ret;
+    if (isinf(x)) {
+        exc |= FE_INVALID;
+        ret = fpu_sign_check(x) ? 0 : ~(uint64_t)0;
+    } else if (isnan(x)) {
+        exc |= FE_INVALID;
+        ret = ~(uint64_t)0;
+    } else if (fabs(x) < 1.0f) {
+        exc |= FE_INEXACT;
+        ret = 0;
+    } else if (x < 0.0f) {
+        exc |= FE_INVALID;
+        ret = 0;
+    } else if (x > nextafter(~(uint64_t)0, 0)) {
+        exc |= FE_INVALID;
+        ret = ~(uint64_t)0;
+    } else {
+        ret = (uint64_t)llrint(x);
     }
     feraiseexcept(exc);
-    if (isinvalid) {
-        if (isinf(x) && fpu_sign_check(x)) {
-            return 0;
-        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
-            return ~(uint64_t)0;
-        } else if (!fpu_sign_check(x)) {
-            return ~(uint64_t)0;
-        } else {
-            return 0;
-        }
-    }
-
-    return (uint64_t)ret;
+    return ret;
 }
 
 static inline int64_t fpu_fp2int_int64_t(fnative_t x)
 {
     int exc = fetestexcept(FE_ALL_EXCEPT);
     feclearexcept(FE_ALL_EXCEPT);
-    long long ret = llrint(x);
-    bool isinvalid = fetestexcept(FE_INVALID);
-    if (!isinvalid) {
-        isinvalid = ret < (int64_t)~(~(uint64_t)0 >> 1)
-                 || ret > (int64_t)(~(uint64_t)0 >> 1);
-        if (isinvalid) feraiseexcept(FE_INVALID);
+    int64_t ret;
+    if (isinf(x)) {
+        exc |= FE_INVALID;
+        ret = fpu_sign_check(x) ? ~(~(uint64_t)0 >> 1) : ~(uint64_t)0 >> 1;
+    } else if (isnan(x)) {
+        exc |= FE_INVALID;
+        ret = ~(uint64_t)0 >> 1;
+    } else if (fabs(x) < 1.0f) {
+        exc |= FE_INEXACT;
+        ret = 0;
+    } else if (x < nextafter((int64_t)~(~(uint64_t)0 >> 1), 0)) {
+        exc |= FE_INVALID;
+        ret = ~(~(uint64_t)0 >> 1);
+    } else if (x > nextafter((int64_t)(~(uint64_t)0 >> 1), 0)) {
+        exc |= FE_INVALID;
+        ret = ~(uint64_t)0 >> 1;
+    } else {
+        ret = (int64_t)llrint(x);
     }
     feraiseexcept(exc);
-    if (isinvalid) {
-        if (isinf(x) && fpu_sign_check(x)) {
-            return ~(~(uint64_t)0 >> 1);
-        } else if (isnan(x) || (isinf(x) && !fpu_sign_check(x))) {
-            return ~(uint64_t)0 >> 1;
-        } else if (!fpu_sign_check(x)) {
-            return ~(uint64_t)0 >> 1;
-        } else {
-            return ~(~(uint64_t)0 >> 1);
-        }
-    }
-
-    return (int64_t)ret;
+    return ret;
 }
 #endif
 
