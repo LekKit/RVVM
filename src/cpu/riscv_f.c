@@ -80,8 +80,8 @@ typedef _Complex long double _C_ldouble_complex;
 #define fpu_min(x, y)      fpu_min_impl(x, y)
 #define fpu_max(x, y)      fpu_max_impl(x, y)
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
-#define fpu_lt(x, y)                  ((fnative_t)(x) <  (fnative_t)(y))
-#define fpu_le(x, y)                  ((fnative_t)(x) <= (fnative_t)(y))
+#define fpu_lt(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <  (fnative_t)(y))
+#define fpu_le(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <= (fnative_t)(y))
 #define fpu_sign_check(x)             (signbit(x))
 #define fpu_sign_set(x, s) (fnative_t)((s) ? copysign((fnative_t)(x), (fnative_t)(-1.0)) : copysign((fnative_t)(x), (fnative_t)(1.0)))
 #define fpu_fp2int(t, x)   (sxlen_t)(fpu_fp2int_##t(x))
@@ -101,6 +101,13 @@ enum {
     FCL_NAN_SIG,
     FCL_NAN_QUIET
 };
+
+static inline void check_nan(fnative_t x)
+{
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+    }
+}
 
 static inline uint8_t fpu_fclass_impl(fnative_t x)
 {
