@@ -262,7 +262,10 @@ static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
         return fpu_sign_check(x) ? x : y;
     }
 
+    int exc = fetestexcept(FE_ALL_EXCEPT);
     fnative_t res = fmin(x, y);
+    feclearexcept(FE_ALL_EXCEPT);
+    feraiseexcept(exc);
 
     if (isnan(res)) {
         if (!isnan(x)) {
@@ -283,7 +286,10 @@ static inline fnative_t fpu_max_impl(fnative_t x, fnative_t y)
         return fpu_sign_check(x) ? y : x;
     }
 
+    int exc = fetestexcept(FE_ALL_EXCEPT);
     fnative_t res = fmax(x, y);
+    feclearexcept(FE_ALL_EXCEPT);
+    feraiseexcept(exc);
 
     if (isnan(res)) {
         if (!isnan(x)) {
