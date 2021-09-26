@@ -83,7 +83,7 @@ void syscon_init(rvvm_machine_t* machine, paddr_t base_addr)
     
     struct fdt_node* test = fdt_node_create_reg("test", base_addr);
     fdt_node_add_prop_reg(test, "reg", base_addr, 0x1000);
-    fdt_node_add_prop(test, "compatible", "sifive,test1\0sifive,test0\0syscon", 32);
+    fdt_node_add_prop(test, "compatible", "sifive,test1\0sifive,test0\0syscon\0", 33);
     fdt_node_add_child(soc, test);
     
     struct fdt_node* poweroff = fdt_node_create("poweroff");
