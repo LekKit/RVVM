@@ -339,11 +339,11 @@ static bool rvvm_run_with_args(vm_args_t args)
 #endif
     }
 #ifdef USE_NET
-    ethoc_init(machine, 0x21000000, plic_data, 4);
+    ethoc_init(machine, 0x21000000, plic_data, 5);
 #endif
     syscon_init(machine, 0x100000);
 #ifdef USE_RTC
-    rtc_goldfish_init(machine, 0x101000, plic_data, 5);
+    rtc_goldfish_init(machine, 0x101000, plic_data, 6);
 #endif
 
     if (args.dumpdtb) {
