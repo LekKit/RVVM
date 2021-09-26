@@ -133,6 +133,12 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     fdt_node_add_prop_u32(cpus, "#size-cells", 0);
     fdt_node_add_prop_u32(cpus, "timebase-frequency", 10000000);
     
+    struct fdt_node* cpu_map = fdt_node_create("cpu-map");
+    struct fdt_node* cluster = fdt_node_create("cluster0");
+    
+    // Attach all the nodes to the root node before getting phandles
+    fdt_node_add_child(machine->fdt, cpus);
+    
     vector_foreach(machine->harts, i) {
         struct fdt_node* cpu = fdt_node_create_reg("cpu", i);
         
@@ -167,9 +173,16 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
         fdt_node_add_child(cpu, clic);
         
         fdt_node_add_child(cpus, cpu);
+        
+        char core_name[32] = "core";
+        int_to_str_dec(core_name + 4, 20, i);
+        struct fdt_node* core = fdt_node_create(core_name);
+        fdt_node_add_prop_u32(core, "cpu", fdt_node_get_phandle(cpu));
+        fdt_node_add_child(cluster, core);
     }
-    
-    fdt_node_add_child(machine->fdt, cpus);
+
+    fdt_node_add_child(cpu_map, cluster);
+    fdt_node_add_child(cpus, cpu_map);
     
     struct fdt_node* soc = fdt_node_create("soc");
     fdt_node_add_prop_u32(soc, "#address-cells", 2);
