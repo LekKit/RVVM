@@ -73,17 +73,7 @@ void* thread_join(thread_handle_t handle)
     return ret;
 }
 
-void thread_kill(thread_handle_t handle)
-{
-    if (handle == NULL) return;
-#ifdef _WIN32
-    TerminateThread(*(HANDLE*)handle, 0);
-#else
-    pthread_cancel(*(pthread_t*)handle);
-    pthread_join(*(pthread_t*)handle, NULL);
-#endif
-    free(handle);
-}
+
 
 void thread_signal_membarrier(thread_handle_t handle)
 {
