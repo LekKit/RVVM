@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "compiler.h"
 
-#if defined(__linux__) || defined(BSD) || defined(__APPLE__)
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #include <time.h>
 
