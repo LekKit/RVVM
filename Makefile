@@ -63,7 +63,7 @@ ifeq ($(OS),windows)
 override CFLAGS += -mwindows -static
 PROGRAMEXT := .exe
 else
-override LDFLAGS += -lpthread -latomic
+override LDFLAGS += -lpthread
 endif
 
 
@@ -211,6 +211,15 @@ endif
 
 ifeq ($(USE_RV64),1)
 override CFLAGS += -DUSE_RV64
+
+# GCC builtins need libatomic on 32-bit targets
+# Clang builtins are in compiler-rt, libatomic should be omitted
+ifeq ($(CC_TYPE),gcc)
+ifeq (,$(findstring 64,$(ARCH)))
+override LDFLAGS += -latomic
+endif
+endif
+
 endif
 
 ifeq ($(USE_JIT),1)

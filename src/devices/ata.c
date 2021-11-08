@@ -1030,7 +1030,7 @@ void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master
                     .write = ata_ctl_write_secondary,
                 },
 #else
-                { }, { },
+                { 0 }, { 0 },
 #endif
                 {
                     .len = 16,
