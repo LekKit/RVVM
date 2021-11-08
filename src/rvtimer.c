@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvtimer.h"
 #include "compiler.h"
+#include "utils.h"
 
 #if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
@@ -51,10 +52,18 @@ static inline void clock_gettime(int t, struct timespec* tp)
 
 static uint64_t rvtimer_clocksource(uint64_t freq)
 {
-    ULARGE_INTEGER tmp;
-    GetSystemTimeAsFileTime((LPFILETIME)&tmp);
-    tmp.QuadPart -= 0x19DB1DED53E8000ULL; // to UNIX time
-    return (tmp.QuadPart * 100ULL) / (1000000000ULL / freq);
+    static LARGE_INTEGER perf_freq = {0};
+    if (perf_freq.QuadPart == 0) {
+        QueryPerformanceFrequency(&perf_freq);
+        if (perf_freq.QuadPart == 0) {
+            // Should not fail since WinXP
+            rvvm_fatal("perf_clocksource not supported!");
+        }
+    }
+
+    LARGE_INTEGER clk;
+    QueryPerformanceCounter(&clk);
+    return clk.QuadPart * perf_freq.QuadPart / freq;
 }
 
 #else
