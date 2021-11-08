@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "utils.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -92,4 +93,45 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size)
         rvvm_fatal("Out of memory!");
     }
     return ret;
+}
+
+size_t int_to_str_dec(char* str, size_t size, int val)
+{
+    size_t len = 0;
+    bool neg = val < 0;
+    do {
+        if (len + 1 > size) return 0;
+        str[len++] = ('0' + (val % 10));
+        val /= 10;
+    } while (val);
+    
+    // Append sign
+    if (len + 1 > size) return 0;
+    if (neg) str[len++] = '-';
+    str[len] = 0;
+    
+    // Reverse the string
+    for (size_t i=0; i<len / 2; ++i) {
+        char tmp = str[i];
+        str[i] = str[len - i - 1];
+        str[len - i - 1] = tmp;
+    }
+    return len;
+}
+
+int str_to_int_dec(const char* str)
+{
+    int val = 0;
+    bool neg = false;
+    if (*str == '-') {
+        neg = true;
+        str++;
+    }
+    while (*str >= '0' && *str <= '9') {
+        val *= 10;
+        val += *str - '0';
+        str++;
+    }
+    if (neg) val *= -1;
+    return val;
 }

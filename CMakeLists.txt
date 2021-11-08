@@ -21,6 +21,7 @@ option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking - makes context switches cheaper" ON)
 option(RVVM_USE_PCI "Use PCI bus emulation" ON)
+option(RVVM_USE_RTC "Use Real Time Clock" ON)
 option(RVVM_USE_TAP_LINUX "Use Linux TAP implementation" OFF)
 
 if (RVVM_USE_JIT AND RVVM_USE_PRECISE_FS)
@@ -149,17 +150,19 @@ file(GLOB RVVM_DEVICES_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
 set(RVVM_XCB_SRC "${RVVM_SRC_DIR}/devices/x11window_xcb.c")
 set(RVVM_XLIB_SRC "${RVVM_SRC_DIR}/devices/x11window_xlib.c")
 set(RVVM_WIN32_SRC "${RVVM_SRC_DIR}/devices/win32window.c")
+set(RVVM_RTC_SRC "${RVVM_SRC_DIR}/devices/rtc-goldfish.c")
 set(RVVM_TAP_LINUX_SRC "${RVVM_SRC_DIR}/devices/tap_linux.c")
 set(RVVM_TAP_USER_SRC "${RVVM_SRC_DIR}/devices/tap_user.c")
 list(REMOVE_ITEM RVVM_DEVICES_SRC
-	"${RVVM_XCB_SRC}"
-	"${RVVM_XLIB_SRC}"
-	"${RVVM_WIN32_SRC}"
-	"${RVVM_TAP_LINUX_SRC}"
-	"${RVVM_TAP_USER_SRC}")
+	${RVVM_XCB_SRC}
+	${RVVM_XLIB_SRC}
+	${RVVM_WIN32_SRC}
+	${RVVM_RTC_SRC}
+	${RVVM_TAP_LINUX_SRC}
+	${RVVM_TAP_USER_SRC})
 target_sources(rvvm PRIVATE ${RVVM_DEVICES_SRC})
 if (RVVM_USE_FB)
-	target_compile_definitions(rvvm PRIVATE USE_FB)
+	target_compile_definitions(rvvm PUBLIC USE_FB)
 	if (UNIX)
 		find_package(X11 REQUIRED)
 		target_compile_definitions(rvvm PRIVATE USE_X11)
@@ -207,6 +210,11 @@ if (RVVM_USE_NET)
 	else()
 		target_sources(rvvm PRIVATE "${RVVM_TAP_USER_SRC}")
 	endif()
+endif()
+
+if (RVVM_USE_RTC)
+  target_compile_definitions(rvvm PUBLIC USE_RTC)
+  target_sources(rvvm PRIVATE ${RVVM_RTC_SRC})
 endif()
 
 # RVJIT library

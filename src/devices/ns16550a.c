@@ -67,7 +67,7 @@ struct ns16550a_data {
 #define NS16550A_LSR_THR   0x60
 #define NS16550A_LCR_DLAB  0x80
 
-#if defined __linux__ || defined __APPLE__
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
