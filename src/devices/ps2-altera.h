@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PS2_ALTERA_H
 
 #include "rvvm.h"
+#include "spinlock.h"
 
 struct ps2_device
 {
@@ -32,6 +33,7 @@ struct ps2_device
 
     void *data; // private device data
     void *port_data; // private PS/2 port data - used to send IRQ
+    spinlock_t *lock; // PS/2 bus lock - used for external locks
 };
 
 void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child);
