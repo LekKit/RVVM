@@ -37,7 +37,7 @@ void hashmap_resize(hashmap_t* map, size_t size)
 {
     hashmap_t tmp;
     hashmap_init(&tmp, size);
-    hasmap_foreach(map, k, v)
+    hashmap_foreach(map, k, v)
         hashmap_put(&tmp, k, v);
     free(map->buckets);
     map->buckets = tmp.buckets;

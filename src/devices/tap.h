@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "spinlock.h"
 
-#ifdef __linux__
+#ifdef USE_TAP_LINUX
 #include <net/if.h>
 
 struct tap_dev {
@@ -32,7 +32,23 @@ struct tap_dev {
     char _ifname[IFNAMSIZ];
 };
 #else
-#error TAP API not supported!
+#include "ringbuf.h"
+#include "hashmap.h"
+#include "networking.h"
+
+struct tap_dev {
+    struct ringbuf rx;
+    hashmap_t udp_ports;
+    netselector_t selector;
+    netsocket_t wakesock1, wakesock2;
+    netsocket_t recvsock;
+    int flag;
+    uint16_t wakeport;
+    uint16_t recvport;
+    uint8_t mac[6];
+    bool is_up;
+};
+
 #endif
 
 typedef int (*pollevent_check_func)(void *arg);
