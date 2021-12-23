@@ -91,7 +91,6 @@ struct ps2_mouse
 	bool reporting; // data reporting enabled; needed for STATUS command
 
 	struct ringbuf cmdbuf;
-	spinlock_t lock;
 };
 
 static int8_t ps2_scale_coord(enum ps2_mouse_scale scale, int8_t n)
@@ -301,7 +300,6 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 	if (is_write)
 	{
 		//printf("ps2 mice cmd sent: %02x\n", (int)*val);
-		spin_lock(&dev->lock);
 		bool ret = false;
 		switch (dev->state)
 		{
@@ -356,12 +354,10 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
 
 out:
 		altps2_interrupt_unlocked(ps2dev);
-		spin_unlock(&dev->lock);
 		return ret;
 	}
 	else
 	{
-		spin_lock(&dev->lock);
 		size_t avail = dev->cmdbuf.consumed;
 		if (avail == 0)
 		{
@@ -372,7 +368,6 @@ out:
 		ringbuf_get_u8(&dev->cmdbuf, val);
 		//printf("ps2 mice cmd resp: %02x avail: %d\n", *val, (int)avail);
 out2:
-		spin_unlock(&dev->lock);
 		return (uint16_t)avail;
 	}
 }
@@ -386,7 +381,6 @@ struct ps2_device ps2_mouse_create()
 	/* big number is needed because it can overrun when interrupts aren't delivered
 	 * a long time */
 	ringbuf_create(&ptr->cmdbuf, 1024);
-	spin_init(&ptr->lock);
 	ps2_cmd_reset(ptr);
 
 	/* consume first ACK from command */
@@ -403,7 +397,7 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 	y = TRANSFORM_COORD(y);
 
 	struct ps2_mouse *dev = (struct ps2_mouse *)ps2mouse->data;
-	spin_lock(&dev->lock);
+	spin_lock(ps2mouse->lock);
 
 	if (x == 0 && y == 0
 			&& (btns == NULL
@@ -464,9 +458,9 @@ void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_bt
 
 	ps2_push_move_pkt(dev);
 	ps2_reset_counters(dev);
-	spin_unlock(&dev->lock);
-	altps2_interrupt(ps2mouse);
+	altps2_interrupt_unlocked(ps2mouse);
+	spin_unlock(ps2mouse->lock);
 	return;
 out:
-	spin_unlock(&dev->lock);
+	spin_unlock(ps2mouse->lock);
 }

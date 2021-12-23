@@ -63,7 +63,6 @@ struct ps2_keyboard
 	// TODO: disable typematic, make, break keycodes
 
 	struct ringbuf cmdbuf;
-	spinlock_t lock;
 };
 
 static void ps2_set_sample_rate(struct ps2_keyboard *dev, uint8_t rate)
@@ -158,7 +157,6 @@ static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is
 	if (is_write)
 	{
 		//printf("ps2 kbd cmd sent: %02x\n", (int)*val);
-		spin_lock(&dev->lock);
 		bool ret = false;
 		switch (dev->state)
 		{
@@ -214,12 +212,10 @@ static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is
 
 out:
 		altps2_interrupt_unlocked(ps2dev);
-		spin_unlock(&dev->lock);
 		return ret;
 	}
 	else
 	{
-		spin_lock(&dev->lock);
 		size_t avail = dev->cmdbuf.consumed;
 		if (avail == 0)
 		{
@@ -230,7 +226,6 @@ out:
 		ringbuf_get_u8(&dev->cmdbuf, val);
 		//printf("ps2 kbd cmd resp: %02x avail: %d\n", *val, (int)avail);
 out2:
-		spin_unlock(&dev->lock);
 		return (uint16_t)avail;
 	}
 }
@@ -244,7 +239,6 @@ struct ps2_device ps2_keyboard_create()
 	/* big number is needed because it can overrun when interrupts aren't delivered
 	 * a long time */
 	ringbuf_create(&ptr->cmdbuf, 1024);
-	spin_init(&ptr->lock);
 	ps2_cmd_reset(ptr);
 
 	/* consume first ACK from command */
@@ -319,7 +313,7 @@ static void ps2_handle_typematic(struct ps2_device *ps2keyboard)
 	dev->sample_timer.timecmp = 10;
 
 	ringbuf_put(&dev->cmdbuf, dev->lastkey.keycode, dev->lastkey.len);
-	altps2_interrupt(ps2keyboard);
+	altps2_interrupt_unlocked(ps2keyboard);
 }
 
 // Send key to the PS/2 keyboard
@@ -329,7 +323,7 @@ static void ps2_handle_typematic(struct ps2_device *ps2keyboard)
 void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool pressed)
 {
 	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
-	spin_lock(&dev->lock);
+	spin_lock(ps2keyboard->lock);
 
 	if (key == NULL)
 	{
@@ -413,9 +407,9 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	}
 
 	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
-	spin_unlock(&dev->lock);
+	spin_unlock(ps2keyboard->lock);
 	altps2_interrupt(ps2keyboard);
 	return;
 out:
-	spin_unlock(&dev->lock);
+	spin_unlock(ps2keyboard->lock);
 }

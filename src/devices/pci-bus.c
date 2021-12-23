@@ -17,8 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #ifdef USE_PCI
+#include <assert.h>
+
 #include "pci-bus.h"
 #include "bit_ops.h"
+#include "mem_ops.h"
 #include "plic.h"
 
 static void pci_bus_remove(rvvm_mmio_dev_t *dev)
@@ -119,6 +122,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
     uint8_t bus = offset >> list->bus_shift;
 
     rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus, dev, fun, reg, size);
+    assert(size == 4);
 
     if (bus >= list->count) {
         return pci_bus_read_invalid(reg, dest, size);
@@ -139,22 +143,19 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
     switch (reg) {
         case PCI_REG_DEV_VEN_ID:
             {
-                uint32_t reg = func->desc->vendor_id | (uint32_t)func->desc->device_id << 16;
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, func->desc->vendor_id | (uint32_t)func->desc->device_id << 16);
                 goto out;
             }
         case PCI_REG_STATUS_CMD:
             {
                 /* idk why '| 3' is needed, kernel should set these bits... */
-                uint32_t reg = func->status << 16 | func->command | 3;
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, func->status << 16 | func->command | 3);
                 goto out;
             }
         case PCI_REG_CLASS_REV:
             {
-                uint32_t reg = func->desc->class_code << 16
-                   | (uint32_t)func->desc->prog_if << 8;
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, func->desc->class_code << 16
+                        | (uint32_t)func->desc->prog_if << 8);
                 goto out;
             }
         case PCI_REG_BIST_HDR_LATENCY_CACHE:
@@ -169,8 +170,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
                     }
                 }
 
-                uint32_t reg = (uint32_t)mf << 23;
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, (uint32_t)mf << 23);
                 goto out;
             }
         case PCI_REG_CAP_PTR: /* currently no capabilities supported */
@@ -182,8 +182,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
             goto out;
         case PCI_REG_IRQ_PIN_LINE:
             {
-                uint32_t reg = func->irq_line | (uint32_t)func->desc->irq_pin << 8;
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, func->irq_line | (uint32_t)func->desc->irq_pin << 8);
                 goto out;
             }
         case PCI_REG_BAR0:
@@ -206,8 +205,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, 
                     goto out;
                 }
 
-                uint32_t reg = (uint32_t)bar_dev->begin | pci_bar_is_io(&func->desc->bar[bar_num]);
-                memcpy(dest, &reg, size);
+                write_uint32_le(dest, (uint32_t)bar_dev->begin | pci_bar_is_io(&func->desc->bar[bar_num]));
                 goto out;
             }
     }
@@ -228,6 +226,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
     uint8_t bus = offset >> list->bus_shift;
 
     rvvm_info("PCI write %x:%x.%x reg 0x%x size %d", bus, dev, fun, reg, size);
+    assert(size == 4);
 
     if (bus >= list->count) {
         return pci_bus_write_invalid(reg, dest, size);
@@ -252,8 +251,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
             goto out;
         case PCI_REG_STATUS_CMD:
             {
-                uint32_t val;
-                memcpy(&val, dest, size);
+                uint32_t val = read_uint32_le(dest);
                 func->command = val & 0xff;
                 goto out;
             }
@@ -270,8 +268,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
                     goto out;
                 }
 
-                uint32_t addr;
-                memcpy(&addr, dest, size);
+                uint32_t addr = read_uint32_le(dest);
                 uint32_t mask = (addr & 1) ? ~(uint32_t)3 : ~(uint32_t)15;
                 addr &= mask;
                 if (~(uint32_t)0 - addr < len) {
@@ -293,8 +290,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset,
             }
         case PCI_REG_IRQ_PIN_LINE:
             {
-                uint32_t val;
-                memcpy(&val, dest, size);
+                uint32_t val = read_uint32_le(dest);
                 func->irq_line = val & 0xff;
                 goto out;
             }

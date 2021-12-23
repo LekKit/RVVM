@@ -147,6 +147,8 @@ void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, ui
 {
 	struct altps2 *ptr = safe_calloc(1, sizeof (struct altps2));
 
+	spin_init(&ptr->lock);
+	child->lock = &ptr->lock;
 	ptr->child = child;
 	ptr->mach = machine;
 	ptr->intc_data = intc_data;
@@ -154,32 +156,31 @@ void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, ui
 
 	child->port_data = ptr;
 
-	spin_init(&ptr->lock);
-
-    rvvm_mmio_dev_t altps2 = {0};
-    altps2.min_op_size = 4;
-    altps2.max_op_size = 4;
-    altps2.read = altps2_mmio_read_handler;
-    altps2.write = altps2_mmio_write_handler;
-    altps2.type = &altps2_dev_type;
-    altps2.begin = base_addr;
-    altps2.end = base_addr + ALTERA_REG_SIZE;
-    altps2.data = ptr;
-    rvvm_attach_mmio(machine, &altps2);
+	rvvm_mmio_dev_t altps2 = {
+		.min_op_size = 4,
+		.max_op_size = 4,
+		.read = altps2_mmio_read_handler,
+		.write = altps2_mmio_write_handler,
+		.type = &altps2_dev_type,
+		.begin = base_addr,
+		.end = base_addr + ALTERA_REG_SIZE,
+		.data = ptr,
+	};
+	rvvm_attach_mmio(machine, &altps2);
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic == NULL) {
-        rvvm_warn("Missing nodes in FDT!");
-        return;
-    }
-    
-    struct fdt_node* ps2 = fdt_node_create_reg("ps2", base_addr);
-    fdt_node_add_prop_reg(ps2, "reg", base_addr, ALTERA_REG_SIZE);
-    fdt_node_add_prop_str(ps2, "compatible", "altr,ps2-1.0");
-    fdt_node_add_prop_u32(ps2, "interrupt-parent", fdt_node_get_phandle(plic));
-    fdt_node_add_prop_u32(ps2, "interrupts", irq);
-    fdt_node_add_child(soc, ps2);
+	struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
+	struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+	if (plic == NULL) {
+		rvvm_warn("Missing nodes in FDT!");
+		return;
+	}
+
+	struct fdt_node* ps2 = fdt_node_create_reg("ps2", base_addr);
+	fdt_node_add_prop_reg(ps2, "reg", base_addr, ALTERA_REG_SIZE);
+	fdt_node_add_prop_str(ps2, "compatible", "altr,ps2-1.0");
+	fdt_node_add_prop_u32(ps2, "interrupt-parent", fdt_node_get_phandle(plic));
+	fdt_node_add_prop_u32(ps2, "interrupts", irq);
+	fdt_node_add_child(soc, ps2);
 #endif
 }
 
