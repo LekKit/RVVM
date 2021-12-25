@@ -36,6 +36,13 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     // Initialize decoder to illegal instructions
     for (size_t i=0; i<512; ++i) vm->decoder.opcodes[i] = riscv_illegal_insn;
     for (size_t i=0; i<32; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
+
+#ifdef USE_JIT
+    // 16M JIT cache per hart
+    rvjit_ctx_init(&vm->jit, 16 << 20);
+    vm->jit_enabled = true;
+#endif
+
 #ifdef USE_RV64
     vm->rv64 = rv64;
     if (rv64) {
@@ -47,6 +54,9 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
         vm->csr.isa = CSR_MISA_RV32;
         riscv_decoder_init_rv32(vm);
     }
+#ifdef USE_JIT
+    rvjit_set_rv64(&vm->jit, rv64);
+#endif
 #else
     if (rv64) rvvm_error("Requested RV64 in RV32-only build");
     vm->csr.isa = CSR_MISA_RV32;
@@ -192,6 +202,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
     vm->trap = true;
     riscv_switch_priv(vm, priv);
+    riscv_jit_discard(vm);
 #ifdef USE_SJLJ
     longjmp(vm->unwind, 1);
 #else
@@ -251,6 +262,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 }
                 //rvvm_info("Hart %p irq to %08"PRIxXLEN", cause %x", vm, vm->registers[REGISTER_PC], i);
                 riscv_switch_priv(vm, priv);
+                riscv_jit_discard(vm);
 #ifdef USE_SJLJ
                 longjmp(vm->unwind, 1);
 #endif

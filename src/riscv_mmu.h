@@ -51,6 +51,10 @@ void riscv_free_ram(rvvm_ram_t* mem);
 void riscv_tlb_flush(rvvm_hart_t* vm);
 void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr);
 
+#ifdef USE_JIT
+void riscv_jit_tlb_flush(rvvm_hart_t* vm);
+#endif
+
 /*
  * Non-inlined slow memory operations, perform MMU translation,
  * call MMIO handlers if needed.

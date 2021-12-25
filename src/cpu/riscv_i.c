@@ -29,6 +29,8 @@ static void riscv_i_lui(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rds = bit_cut(instruction, 7, 5);
     sxlen_t imm = sign_extend(instruction & 0xFFFFF000, 32);
 
+    rvjit_li(rds, imm, 4);
+
     riscv_write_register(vm, rds, imm);
 }
 
@@ -38,6 +40,8 @@ static void riscv_i_auipc(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rds = bit_cut(instruction, 7, 5);
     sxlen_t imm = sign_extend(instruction & 0xFFFFF000, 32);
     xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+    rvjit_auipc(rds, imm, 4);
 
     riscv_write_register(vm, rds, pc + imm);
 }
@@ -60,6 +64,8 @@ static void riscv_i_jal(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = decode_jal_imm(instruction);
     xlen_t pc = riscv_read_register(vm, REGISTER_PC);
 
+    rvjit_jal(rds, offset, 4);
+
     riscv_write_register(vm, rds, pc + 4);
     riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
 }
@@ -75,8 +81,10 @@ static void riscv_i_srli_srai(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 20 + SHAMT_BITS, 12 - SHAMT_BITS);
     
     if (funct7 == (0x400 >> SHAMT_BITS)) {
+        rvjit_srai(rds, rs1, shamt, 4);
         riscv_write_register(vm, rds, ((sxlen_t)src_reg) >> shamt);
     } else if (likely(funct7 == 0x0)) {
+        rvjit_srli(rds, rs1, shamt, 4);
         riscv_write_register(vm, rds, src_reg >> shamt);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -94,8 +102,10 @@ static void riscv_i_add_sub(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 25, 7);
 
     if (funct7 == 0x20) {
+        rvjit_sub(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, reg1 - reg2);
     } else if (likely(funct7 == 0x0)) {
+        rvjit_add(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, reg1 + reg2);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -114,8 +124,10 @@ static void riscv_i_srl_sra(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 25, 7);
     
     if (funct7 == 0x20) {
+        rvjit_sra(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, ((sxlen_t)reg1) >> (reg2 & bit_mask(SHAMT_BITS)));
     } else if (likely(funct7 == 0x0)) {
+        rvjit_srl(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, reg1 >> (reg2 & bit_mask(SHAMT_BITS)));
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -130,6 +142,8 @@ static void riscv_i_jalr(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t offset = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t pc = riscv_read_register(vm, REGISTER_PC);
     xlen_t jmp_addr = riscv_read_register(vm, rs1);
+
+    rvjit_jalr(rds, rs1, offset, 4);
 
     riscv_write_register(vm, rds, pc + 4);
     riscv_write_register(vm, REGISTER_PC, ((jmp_addr + offset)&(~(xlen_t)1)) - 4);
@@ -150,13 +164,16 @@ static void riscv_i_beq(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 == rs2
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register(vm, rs1) == riscv_read_register(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_beq(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_bne(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -165,13 +182,16 @@ static void riscv_i_bne(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 != rs2
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register(vm, rs1) != riscv_read_register(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_bne(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_beq(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -180,13 +200,16 @@ static void riscv_i_blt(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 < rs2 (signed)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register_s(vm, rs1) < riscv_read_register_s(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_blt(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_bge(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -195,13 +218,16 @@ static void riscv_i_bge(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 >= rs2 (signed)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register_s(vm, rs1) >= riscv_read_register_s(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_bge(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_blt(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -210,13 +236,16 @@ static void riscv_i_bltu(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 < rs2
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register(vm, rs1) < riscv_read_register(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_bltu(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_bgeu(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -225,13 +254,16 @@ static void riscv_i_bgeu(rvvm_hart_t *vm, const uint32_t instruction)
     // Conditional jump when rs1 >= rs2
     regid_t rs1 = bit_cut(instruction, 15, 5);
     regid_t rs2 = bit_cut(instruction, 20, 5);
-    xlen_t pc;
-    sxlen_t offset;
+    sxlen_t offset = decode_branch_imm(instruction);
 
     if (riscv_read_register(vm, rs1) >= riscv_read_register(vm, rs2)) {
-        offset = decode_branch_imm(instruction);
-        pc = riscv_read_register(vm, REGISTER_PC);
+        xlen_t pc = riscv_read_register(vm, REGISTER_PC);
+
+        rvjit_bgeu(rs1, rs2, offset, 4, 4);
+
         riscv_write_register(vm, REGISTER_PC, pc + offset - 4);
+    } else {
+        rvjit_bltu(rs1, rs2, 4, offset, 4);
     }
 }
 
@@ -244,6 +276,8 @@ static void riscv_i_lb(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lb(rds, rs1, offset, 4);
+
     riscv_load_s8(vm, addr, rds);
 }
 
@@ -256,6 +290,8 @@ static void riscv_i_lh(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lh(rds, rs1, offset, 4);
+
     riscv_load_s16(vm, addr, rds);
 }
 
@@ -268,6 +304,8 @@ static void riscv_i_lw(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lw(rds, rs1, offset, 4);
+
     riscv_load_s32(vm, addr, rds);
 }
 
@@ -280,6 +318,8 @@ static void riscv_i_lbu(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lbu(rds, rs1, offset, 4);
+
     riscv_load_u8(vm, addr, rds);
 }
 
@@ -292,6 +332,8 @@ static void riscv_i_lhu(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lhu(rds, rs1, offset, 4);
+
     riscv_load_u16(vm, addr, rds);
 }
 
@@ -305,6 +347,8 @@ static void riscv_i_sb(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_sb(rs2, rs1, offset, 4);
+
     riscv_store_u8(vm, addr, rs2);
 }
 
@@ -318,6 +362,8 @@ static void riscv_i_sh(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_sh(rs2, rs1, offset, 4);
+
     riscv_store_u16(vm, addr, rs2);
 }
 
@@ -331,6 +377,8 @@ static void riscv_i_sw(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_sw(rs2, rs1, offset, 4);
+
     riscv_store_u32(vm, addr, rs2);
 }
 
@@ -341,6 +389,8 @@ static void riscv_i_addi(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     sxlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t src_reg = riscv_read_register(vm, rs1);
+
+    rvjit_addi(rds, rs1, imm, 4);
 
     riscv_write_register(vm, rds, src_reg + imm);
 }
@@ -353,6 +403,8 @@ static void riscv_i_slti(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     sxlen_t src_reg = riscv_read_register_s(vm, rs1);
 
+    rvjit_slti(rds, rs1, imm, 4);
+
     riscv_write_register(vm, rds, (src_reg < imm) ? 1 : 0);
 }
 
@@ -363,6 +415,8 @@ static void riscv_i_sltiu(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     xlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t src_reg = riscv_read_register(vm, rs1);
+
+    rvjit_sltiu(rds, rs1, imm, 4);
 
     riscv_write_register(vm, rds, (src_reg < imm) ? 1 : 0);
 }
@@ -375,6 +429,8 @@ static void riscv_i_xori(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t src_reg = riscv_read_register(vm, rs1);
 
+    rvjit_xori(rds, rs1, imm, 4);
+
     riscv_write_register(vm, rds, src_reg ^ imm);
 }
 
@@ -385,6 +441,8 @@ static void riscv_i_ori(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     sxlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t src_reg = riscv_read_register(vm, rs1);
+
+    rvjit_ori(rds, rs1, imm, 4);
 
     riscv_write_register(vm, rds, src_reg | imm);
 }
@@ -397,6 +455,8 @@ static void riscv_i_andi(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     xlen_t src_reg = riscv_read_register(vm, rs1);
 
+    rvjit_andi(rds, rs1, imm, 4);
+
     riscv_write_register(vm, rds, src_reg & imm);
 }
 
@@ -407,6 +467,8 @@ static void riscv_i_slli(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     uint8_t shamt = bit_cut(instruction, 20, SHAMT_BITS);
     xlen_t src_reg = riscv_read_register(vm, rs1);
+
+    rvjit_slli(rds, rs1, shamt, 4);
 
     riscv_write_register(vm, rds, src_reg << shamt);
 }
@@ -420,6 +482,8 @@ static void riscv_i_sll(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
+    rvjit_sll(rds, rs1, rs2, 4);
+
     riscv_write_register(vm, rds, reg1 << (reg2 & bit_mask(SHAMT_BITS)));
 }
 
@@ -431,6 +495,8 @@ static void riscv_i_slt(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     sxlen_t reg1 = riscv_read_register_s(vm, rs1);
     sxlen_t reg2 = riscv_read_register_s(vm, rs2);
+
+    rvjit_slt(rds, rs1, rs2, 4);
 
     riscv_write_register(vm, rds, (reg1 < reg2) ? 1 : 0);
 }
@@ -444,6 +510,8 @@ static void riscv_i_sltu(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
+    rvjit_sltu(rds, rs1, rs2, 4);
+
     riscv_write_register(vm, rds, (reg1 < reg2) ? 1 : 0);
 }
 
@@ -455,6 +523,8 @@ static void riscv_i_xor(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
+
+    rvjit_xor(rds, rs1, rs2, 4);
 
     riscv_write_register(vm, rds, reg1 ^ reg2);
 }
@@ -468,6 +538,8 @@ static void riscv_i_or(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
+    rvjit_or(rds, rs1, rs2, 4);
+
     riscv_write_register(vm, rds, reg1 | reg2);
 }
 
@@ -479,6 +551,8 @@ static void riscv_i_and(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
+
+    rvjit_and(rds, rs1, rs2, 4);
 
     riscv_write_register(vm, rds, reg1 & reg2);
 }
@@ -492,6 +566,8 @@ static void riscv64i_slliw(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs1 = bit_cut(instruction, 15, 5);
     uint8_t shamt = bit_cut(instruction, 20, 5);
     uint32_t src_reg = vm->registers[rs1];
+
+    rvjit_slliw(rds, rs1, shamt, 4);
 
     vm->registers[rds] = (int32_t)(src_reg << shamt);
 }
@@ -507,8 +583,10 @@ static void riscv64i_srliw_sraiw(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 25, 7);
     
     if (funct7 == 0x20) {
+        rvjit_sraiw(rds, rs1, shamt, 4);
         vm->registers[rds] = (int32_t)(((int32_t)src_reg) >> shamt);
     } else if (likely(funct7 == 0x0)) {
+        rvjit_srliw(rds, rs1, shamt, 4);
         vm->registers[rds] = (int32_t)(src_reg >> shamt);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -527,8 +605,10 @@ static void riscv64i_addw_subw(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 25, 7);
 
     if (funct7 == 0x20) {
+        rvjit_subw(rds, rs1, rs2, 4);
         vm->registers[rds] = (int32_t)(reg1 - reg2);
     } else if (likely(funct7 == 0x0)) {
+        rvjit_addw(rds, rs1, rs2, 4);
         vm->registers[rds] = (int32_t)(reg1 + reg2);
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -543,6 +623,8 @@ static void riscv64i_sllw(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     uint32_t reg1 = riscv_read_register(vm, rs1);
     uint32_t reg2 = riscv_read_register(vm, rs2);
+
+    rvjit_sllw(rds, rs1, rs2, 4);
 
     vm->registers[rds] = (int32_t)(reg1 << (reg2 & bit_mask(5)));
 }
@@ -559,8 +641,10 @@ static void riscv64i_srlw_sraw(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t funct7 = bit_cut(instruction, 25, 7);
     
     if (instruction >> 25) {
+        rvjit_sraw(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, ((int32_t)reg1) >> (reg2 & bit_mask(5)));
     } else if (likely(funct7 == 0x0)) {
+        rvjit_srlw(rds, rs1, rs2, 4);
         riscv_write_register(vm, rds, (int32_t)(reg1 >> (reg2 & bit_mask(5))));
     } else {
         riscv_illegal_insn(vm, instruction);
@@ -575,6 +659,8 @@ static void riscv64i_addiw(rvvm_hart_t *vm, const uint32_t instruction)
     uint32_t imm = sign_extend(bit_cut(instruction, 20, 12), 12);
     uint32_t src_reg = riscv_read_register(vm, rs1);
 
+    rvjit_addiw(rds, rs1, imm, 4);
+
     vm->registers[rds] = (int32_t)(src_reg + imm);
 }
 
@@ -587,6 +673,8 @@ static void riscv64i_lwu(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_lwu(rds, rs1, offset, 4);
+
     riscv_load_u32(vm, addr, rds);
 }
 
@@ -599,6 +687,8 @@ static void riscv64i_ld(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_ld(rds, rs1, offset, 4);
+
     riscv_load_u64(vm, addr, rds);
 }
 
@@ -612,6 +702,8 @@ static void riscv64i_sd(rvvm_hart_t *vm, const uint32_t instruction)
 
     xaddr_t addr = riscv_read_register(vm, rs1) + offset;
     
+    rvjit_sd(rs2, rs1, offset, 4);
+
     riscv_store_u64(vm, addr, rs2);
 }
 

@@ -223,13 +223,8 @@ endif
 endif
 
 ifeq ($(USE_JIT),1)
-# Not the best way of checking x86, but it'll do for now
-ifneq (,$(findstring 86,$(ARCH)))
 SRC_depbuild += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
-override CFLAGS += -DUSE_RVJIT
-else
-USE_JIT = 0
-endif
+override CFLAGS += -DUSE_JIT
 endif
 
 ifeq ($(USE_NET),1)

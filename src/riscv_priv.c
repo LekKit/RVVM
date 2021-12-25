@@ -123,9 +123,13 @@ static void riscv_i_fence(rvvm_hart_t* vm, const uint32_t instruction)
 
 static void riscv_i_zifence(rvvm_hart_t* vm, const uint32_t instruction)
 {
-    UNUSED(vm);
     UNUSED(instruction);
-    // In future should flush RVJIT cache
+#ifdef USE_JIT
+    riscv_jit_tlb_flush(vm);
+    rvjit_flush_cache(&vm->jit);
+#else
+    UNUSED(vm);
+#endif
 }
 
 static void riscv_zicsr_csrrw(rvvm_hart_t* vm, const uint32_t instruction)

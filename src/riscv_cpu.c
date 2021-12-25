@@ -67,8 +67,89 @@ void riscv_install_opcode_C(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_c_t fun
     vm->decoder.opcodes_c[opcode] = func;
 }
 
+#ifdef USE_JIT
+
+/*
+ * When returning from recompiled blocks, hart state
+ * stays consistent, thus allowing to switch between
+ * trace-interpret-compile and trace-execute states
+ */
+
+static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, rvjit_func_t block)
+{
+    vaddr_t entry = (vaddr >> 1) & TLB_MASK;
+    vm->jtlb[entry].pc = vaddr;
+    vm->jtlb[entry].block = block;
+}
+
+NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
+{
+    /*
+     * Translate virtual address into physical.
+     * We are tracing address already fetched from,
+     * thus a pagefault isn't possible
+     */
+    vaddr_t virt_pc = vm->registers[REGISTER_PC];
+    vmptr_t ptr = riscv_vma_translate_e(vm, virt_pc);
+    // Lookup in the hashmap, cache in JTLB
+    if (ptr) {
+        paddr_t phys_pc = (size_t)(ptr - vm->mem.data) + vm->mem.begin;
+        rvjit_func_t block = rvjit_block_lookup(&vm->jit, phys_pc);
+        if (block) {
+            riscv_jit_tlb_put(vm, virt_pc, block);
+            block(vm);
+            return true;
+        }
+
+        /*
+         * No valid block compiled for this location,
+         * make a new one and enable compiler
+         */
+        rvjit_block_init(&vm->jit);
+        vm->jit.pc_off = 0;
+        vm->jit.virt_pc = virt_pc;
+        vm->jit.phys_pc = phys_pc;
+
+        vm->jit_compiling = true;
+        vm->block_ends = false;
+    }
+    return false;
+}
+
+static void riscv_jit_finalize(rvvm_hart_t* vm)
+{
+    if (rvjit_block_nonempty(&vm->jit)) {
+        rvjit_func_t block = rvjit_block_finalize(&vm->jit);
+
+        if (block) {
+            riscv_jit_tlb_put(vm, vm->jit.virt_pc, block);
+        } else {
+            // Our cache is full, flush it
+            riscv_jit_tlb_flush(vm);
+            rvjit_flush_cache(&vm->jit);
+        }
+    }
+
+    vm->jit_compiling = false;
+}
+
+#endif
+
 static inline void riscv_emulate(rvvm_hart_t *vm, uint32_t instruction)
 {
+#ifdef USE_JIT
+    if (unlikely(vm->jit_compiling)) {
+        /*
+         * If we hit non-compilable instruction or cross page boundaries,
+         * the block is finalized.
+         */
+        if (vm->block_ends
+        || (vm->jit.virt_pc >> PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
+            riscv_jit_finalize(vm);
+        }
+        vm->block_ends = true;
+    }
+#endif
     if ((instruction & RV_OPCODE_MASK) != RV_OPCODE_MASK) {
         vm->decoder.opcodes_c[riscv_c_funcid(instruction)](vm, instruction);
         // FYI: Any jump instruction implementation should take care of PC increment

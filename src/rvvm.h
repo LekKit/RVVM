@@ -28,6 +28,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "vector.h"
 #include "utils.h"
 
+#ifdef USE_JIT
+#include "rvjit/rvjit.h"
+#endif
+
 #ifdef USE_FDT
 #include "fdtlib.h"
 #endif
@@ -157,6 +161,21 @@ typedef struct {
 #endif
 } rvvm_tlb_entry_t;
 
+#ifdef USE_JIT
+typedef struct {
+    // Pointer to code block
+    rvjit_func_t block;
+#if !defined(HOST_64BIT) && defined(USE_RV64)
+    size_t align;
+#endif
+    // Virtual PC of this entry
+    vaddr_t pc;
+#if defined(HOST_64BIT) && !defined(USE_RV64)
+    vaddr_t align;
+#endif
+} rvvm_jtlb_entry_t;
+#endif
+
 typedef struct {
     void (*init)(rvvm_mmio_dev_t* dev, bool reset);
     void (*remove)(rvvm_mmio_dev_t* dev);
@@ -212,6 +231,9 @@ struct rvvm_hart_t {
     
     // We want short offsets from vmptr to tlb
     rvvm_tlb_entry_t tlb[TLB_SIZE];
+#ifdef USE_JIT
+    rvvm_jtlb_entry_t jtlb[TLB_SIZE];
+#endif
     rvvm_decoder_t decoder;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
@@ -239,7 +261,13 @@ struct rvvm_hart_t {
     } csr;
     maxlen_t lrsc_cas;
     bool lrsc;
-    
+#ifdef USE_JIT
+    rvjit_block_t jit;
+    bool jit_enabled;
+    bool jit_compiling;
+    bool block_ends;
+    bool ldst_trace;
+#endif
     thread_handle_t thread;
     rvtimer_t timer;
     uint32_t pending_irqs;

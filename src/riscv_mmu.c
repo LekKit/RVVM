@@ -66,6 +66,14 @@ void riscv_free_ram(rvvm_ram_t* mem)
     mem->size = 0;
 }
 
+#ifdef USE_JIT
+void riscv_jit_tlb_flush(rvvm_hart_t* vm)
+{
+    memset(vm->jtlb, 0, sizeof(vm->jtlb));
+    vm->jtlb[0].pc = -1;
+}
+#endif
+
 void riscv_tlb_flush(rvvm_hart_t* vm)
 {
     // Any lookup to nonzero page fails as VPN is zero
@@ -74,6 +82,9 @@ void riscv_tlb_flush(rvvm_hart_t* vm)
     vm->tlb[0].r = -1;
     vm->tlb[0].w = -1;
     vm->tlb[0].e = -1;
+#ifdef USE_JIT
+    riscv_jit_tlb_flush(vm);
+#endif
     riscv_restart_dispatch(vm);
 }
 
