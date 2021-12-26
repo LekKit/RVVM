@@ -103,6 +103,10 @@ static inline size_t hashmap_get(const hashmap_t* map, size_t key)
         if (map->buckets[index].key == key) {
             return map->buckets[index].val;
         }
+        if (map->buckets[index].val == 0) {
+            // Upon hitting unallocated entry, there is no need to search further
+            return 0;
+        }
     }
     return 0;
 }
@@ -116,6 +120,16 @@ static inline void hashmap_remove(hashmap_t* map, size_t key)
         if (map->buckets[index].key == key) {
             map->buckets[index].val = 0;
             map->entries--;
+
+            // Rebalance colliding trailing entries
+            for (size_t j=index; j<HASHMAP_MAX_PROBES; ++j) {
+                if (map->buckets[j & map->size].key == key && map->buckets[j & map->size].val) {
+                    map->buckets[index] = map->buckets[j & map->size];
+                    map->buckets[j & map->size].val = 0;
+                    break;;
+                }
+            }
+            break;
         }
     }
     if (map->entries < (map->size >> 2)) {
