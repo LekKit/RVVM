@@ -171,7 +171,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         paddr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
                         paddr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
-                        if (unlikely(pte_shift & (vmask & pmask)))
+                        if (unlikely(pte_shift & vmask & PAGE_PNMASK))
                             return false;
                         // Atomically update A/D flags
                         if (pte != pte_flags) atomic_cas_uint32_le(pte_addr, pte, pte_flags);
@@ -231,7 +231,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         paddr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
                         paddr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
-                        if (unlikely(pte_shift & (vmask & pmask)))
+                        if (unlikely(pte_shift & vmask & PAGE_PNMASK))
                             return false;
                         // Atomically update A/D flags
                         if (pte != pte_flags) atomic_cas_uint64_le(pte_addr, pte, pte_flags);
