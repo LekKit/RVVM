@@ -143,10 +143,22 @@ static bool riscv_csr_zero(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(op);
+    bool read = false;
+    // Writing a hardwired zero CSR should trap
+    switch (op) {
+        case CSR_SWAP:
+            read = false;
+            break;
+        case CSR_SETBITS:
+            read = (*dest == 0);
+            break;
+        case CSR_CLEARBITS:
+            read = true;
+            break;
+    }
     *dest = 0;
-    return true;
+    return read;
 }
-
 
 /*
  * Machine CSRs
