@@ -214,8 +214,8 @@ void riscv_decoder_enable_fpu(rvvm_hart_t* vm, bool enable)
  */
 void riscv_run_till_event(rvvm_hart_t* vm)
 {
+    size_t inst_ptr = 0;  // Updated before any read
     uint32_t instruction;
-    const void* inst_ptr = NULL;  // Updated before any read
     // page_addr should always mismatch pc by at least 1 page before execution
     vaddr_t inst_addr, page_addr = vm->registers[REGISTER_PC] + 0x1000;
 
@@ -224,11 +224,11 @@ void riscv_run_till_event(rvvm_hart_t* vm)
         vm->registers[REGISTER_ZERO] = 0;
         inst_addr = vm->registers[REGISTER_PC];
         if (likely(inst_addr - page_addr < 0xFFD)) {
-            riscv_emulate(vm, read_uint32_le_m((vmptr_t)inst_ptr + TLB_VADDR(inst_addr)));
+            riscv_emulate(vm, read_uint32_le_m((vmptr_t)(size_t)(inst_ptr + TLB_VADDR(inst_addr))));
         } else {
             if (likely(riscv_fetch_inst(vm, inst_addr, &instruction))) {
                 // Update pointer to the current page in real memory
-                inst_ptr = (void*)vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].ptr;
+                inst_ptr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].ptr;
                 // If we are executing code from MMIO, direct memory fetch fails
                 page_addr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].e << PAGE_SHIFT;
                 riscv_emulate(vm, instruction);
@@ -241,11 +241,11 @@ void riscv_run_till_event(rvvm_hart_t* vm)
         vm->registers[REGISTER_ZERO] = 0;
         inst_addr = vm->registers[REGISTER_PC];
         if (likely(inst_addr - page_addr < 0xFFD)) {
-            riscv_emulate(vm, read_uint32_le_m((vmptr_t)inst_ptr + TLB_VADDR(inst_addr)));
+            riscv_emulate(vm, read_uint32_le_m((vmptr_t)(size_t)(inst_ptr + TLB_VADDR(inst_addr))));
         } else {
             if (likely(riscv_fetch_inst(vm, inst_addr, &instruction))) {
                 // Update pointer to the current page in real memory
-                inst_ptr = (void*)vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].ptr;
+                inst_ptr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].ptr;
                 // If we are executing code from MMIO, direct memory fetch fails
                 page_addr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].e << PAGE_SHIFT;
                 riscv_emulate(vm, instruction);
@@ -254,4 +254,3 @@ void riscv_run_till_event(rvvm_hart_t* vm)
 #endif
     }
 }
-
