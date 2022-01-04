@@ -32,7 +32,7 @@ riscv_csr_handler_t riscv_csr_list[4096];
 #define CSR_MARCHID 0x5256564D // 'RVVM'
 
 // no N extension, U_x bits are hardwired to 0
-#define CSR_MSTATUS_MASK 0x7E79CC
+#define CSR_MSTATUS_MASK 0x7E79AA
 #define CSR_SSTATUS_MASK 0x0C6122
 
 #define CSR_STATUS_FS_MASK 0x6000
