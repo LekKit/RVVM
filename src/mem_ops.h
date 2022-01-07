@@ -274,4 +274,25 @@ static inline float read_float_nanbox(const void* addr) {
 #endif
 }
 
+// Reads a host-endian nan-boxed float, normalizes invalid values to NaN
+static inline float read_float_normalize(const void* addr) {
+#ifdef HOST_LITTLE_ENDIAN
+    if (unlikely(((const uint32_t*)addr)[1] != 0xFFFFFFFF)) {
+        float ret;
+        uint32_t val = 0x7fc00000;
+        memcpy(&ret, &val, sizeof(ret));
+        return ret;
+    }
+    return ((const float*)addr)[0];
+#else
+    if (unlikely(((const uint32_t*)addr)[0] != 0xFFFFFFFF)) {
+        float ret;
+        uint32_t val = 0x7fc00000;
+        memcpy(&ret, &val, sizeof(ret));
+        return ret;
+    }
+    return ((const float*)addr)[1];
+#endif
+}
+
 #endif

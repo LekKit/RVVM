@@ -40,7 +40,7 @@ typedef _Complex double _C_double_complex;
 typedef _Complex float _C_float_complex;
 typedef _Complex long double _C_ldouble_complex;
 #endif
-#include <tgmath.h>
+#include <math.h>
 
 #ifdef RVD
     #define SIGNIFICAND_SIZE DBL_MANT_DIG /* used for sNaN/qNaN classification */
@@ -55,6 +55,13 @@ typedef _Complex long double _C_ldouble_complex;
     #define fpu_write_register fpu_write_register64
     #define riscv_store_fnative riscv_store_double
     #define riscv_load_fnative riscv_load_double
+    #define fpu_copysign copysign
+    #define fpu_modf modf
+    #define fpu_trunc trunc
+    #define fpu_floor floor
+    #define fpu_ceil ceil
+    #define fpu_round round
+    #define fpu_rint rint
 #else
     #define SIGNIFICAND_SIZE FLT_MANT_DIG /* used for sNaN/qNaN classification */
     /* current native float type, might be replaced with softfloat later */
@@ -68,6 +75,13 @@ typedef _Complex long double _C_ldouble_complex;
     #define fpu_write_register fpu_write_register32
     #define riscv_store_fnative riscv_store_float
     #define riscv_load_fnative riscv_load_float
+    #define fpu_copysign copysignf
+    #define fpu_modf modff
+    #define fpu_trunc truncf
+    #define fpu_floor floorf
+    #define fpu_ceil ceilf
+    #define fpu_round roundf
+    #define fpu_rint rintf
 #endif
 
 /* handlers for FPU operations, to be replaced with JIT or softfpu? */
@@ -77,14 +91,11 @@ typedef _Complex long double _C_ldouble_complex;
 #define fpu_div(x, y)      canonize_nan((fnative_t)(x) / (fnative_t)(y))
 #define fpu_neg(x)         canonize_nan(-(fnative_t)(x))
 #define fpu_sqrt(x)        canonize_nan(sqrt((fnative_t)(x)))
-#define fpu_min(x, y)      fpu_min_impl(x, y)
-#define fpu_max(x, y)      fpu_max_impl(x, y)
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
 #define fpu_lt(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <  (fnative_t)(y))
 #define fpu_le(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <= (fnative_t)(y))
 #define fpu_sign_check(x)             (signbit(x))
-#define fpu_sign_set(x, s) (fnative_t)((s) ? copysign((fnative_t)(x), (fnative_t)(-1.0)) : copysign((fnative_t)(x), (fnative_t)(1.0)))
-#define fpu_fp2int(t, x)   (sxlen_t)(fpu_fp2int_##t(x))
+#define fpu_sign_set(x, s) (fnative_t)((s) ? fpu_copysign((fnative_t)(x), (fnative_t)(-1.0)) : fpu_copysign((fnative_t)(x), (fnative_t)(1.0)))
 #define fpu_int2fp(t, i)   canonize_nan((t) (i))
 #define fpu_fp2fp(t, x)    canonize_nan((t)(x))
 #define fpu_fclass(x)                 fpu_fclass_impl(x)
@@ -104,7 +115,7 @@ enum {
 
 static inline void check_nan(fnative_t x)
 {
-    if (isnan(x)) {
+    if (unlikely(isnan(x))) {
         feraiseexcept(FE_INVALID);
     }
 }
@@ -117,15 +128,15 @@ static inline uint8_t fpu_fclass_impl(fnative_t x)
         case FP_SUBNORMAL: return fpu_sign_check(x) ? FCL_NEG_SUBNORMAL : FCL_POS_SUBNORMAL;
         case FP_ZERO: return fpu_sign_check(x) ? FCL_NEG_ZERO : FCL_POS_ZERO;
         case FP_NAN: {
-                         /* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
-                         uint8_t tmp[sizeof(fnative_t)];
-                         write_fpu(tmp, x);
-                         if (bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8)) {
-                             return FCL_NAN_QUIET;
-                         } else {
-                             return FCL_NAN_SIG;
-                         }
-                     }
+            /* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
+            uint8_t tmp[sizeof(fnative_t)] = {0};
+            write_fpu(tmp, x);
+            if (bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8)) {
+                return FCL_NAN_QUIET;
+            } else {
+                return FCL_NAN_SIG;
+            }
+        }
     }
 
     /* never reached */
@@ -148,117 +159,118 @@ static inline fnative_t canonize_nan(fnative_t x)
     return x;
 }
 
-static inline int32_t fpu_fp2int_uint32_t(fnative_t x)
-{
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    feclearexcept(FE_ALL_EXCEPT);
-    uint32_t ret;
-    if (isinf(x)) {
-        exc |= FE_INVALID;
-        ret = fpu_sign_check(x) ? 0 : ~(uint32_t)0;
-    } else if (isnan(x)) {
-        exc |= FE_INVALID;
-        ret = ~(uint32_t)0;
-    } else if (fabs(x) < 1.0f) {
-        exc |= FE_INEXACT;
-        ret = 0;
-    } else if (x < 0.0f) {
-        exc |= FE_INVALID;
-        ret = 0;
-    } else if (x > nextafter(~(uint32_t)0, 0)) {
-        exc |= FE_INVALID;
-        ret = ~(uint32_t)0;
+static inline fnative_t fpu_round_even(fnative_t val) {
+    fnative_t even;
+    fnative_t frac = fpu_modf(val, &even);
+    if (frac < 0.5 && frac > -0.5) {
+        return even;
     } else {
-        ret = (uint32_t)llrint(x);
+        return even + (even > 0.0 ? 1.0 : -1.0);
     }
-    feraiseexcept(exc);
+}
+
+/*
+ * This probably should be done using softfp, since dynamic RM
+ * could mess with libm internals
+ */
+static inline fnative_t fpu_round_to_rm(fnative_t x, uint8_t rm)
+{
+    fnative_t ret;
+    int exc = fetestexcept(FE_ALL_EXCEPT);
+    switch (rm) {
+        case RM_RNE: ret = fpu_round_even(x); break;
+        case RM_RTZ: ret = fpu_trunc(x);      break;
+        case RM_RDN: ret = fpu_floor(x);      break;
+        case RM_RUP: ret = fpu_ceil(x);       break;
+        case RM_RMM: ret = fpu_round(x);      break;
+        default:     ret = fpu_rint(x);       break;
+    }
+
+    /*
+     * Some libm implementations omit implementing FE_INEXACT flag
+     * We check if we need to fix this at all first, since writing an exception
+     * stalls the host pipeline, and is generally expensive.
+     *
+     * Another option could be "exception overlays" in hart context,
+     * combined with host exceptions in fcsr.
+     */
+    if (unlikely(ret != x && fetestexcept(FE_ALL_EXCEPT) != (exc | FE_INEXACT))) {
+        feraiseexcept(FE_INEXACT);
+    }
+
     return ret;
 }
 
-static inline int32_t fpu_fp2int_int32_t(fnative_t x)
+static inline int32_t fpu_fp2int_uint32_t(fnative_t x, uint8_t rm)
 {
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    feclearexcept(FE_ALL_EXCEPT);
-    int32_t ret;
-    if (isinf(x)) {
-        exc |= FE_INVALID;
-        ret = fpu_sign_check(x) ? ~(~(uint32_t)0 >> 1) : ~(uint32_t)0 >> 1;
-    } else if (isnan(x)) {
-        exc |= FE_INVALID;
-        ret = ~(uint32_t)0 >> 1;
-    } else if (fabs(x) < 1.0f) {
-        exc |= FE_INEXACT;
-        ret = 0;
-    } else if (x < nextafter((int32_t)~(~(uint32_t)0 >> 1), 0)) {
-        exc |= FE_INVALID;
-        ret = ~(~(uint32_t)0 >> 1);
-    } else if (x > nextafter((int32_t)(~(uint32_t)0 >> 1), 0)) {
-        exc |= FE_INVALID;
-        ret = ~(uint32_t)0 >> 1;
-    } else {
-        ret = (int32_t)llrint(x);
+    fnative_t ret = fpu_round_to_rm(x, rm);
+    bool isinvalid = isnan(ret) || ret < 0 || ret > (~(uint32_t)0);
+    if (unlikely(isinvalid)) {
+        feraiseexcept(FE_INVALID);
+        if (isnan(x) || !fpu_sign_check(x)) {
+            return ~(uint32_t)0;
+        } else {
+            return 0;
+        }
     }
-    feraiseexcept(exc);
-    return ret;
+
+    return (uint32_t)ret;
+}
+
+static inline int32_t fpu_fp2int_int32_t(fnative_t x, uint8_t rm)
+{
+    fnative_t ret = fpu_round_to_rm(x, rm);
+    bool isinvalid = isnan(ret)
+                  || (ret < (int32_t)~(~(uint32_t)0 >> 1))
+                  || (ret > (int32_t)(~(uint32_t)0 >> 1));
+    if (unlikely(isinvalid)) {
+        feraiseexcept(FE_INVALID);
+        if (isnan(x) || !fpu_sign_check(x)) {
+            return ~(uint32_t)0 >> 1;
+        } else {
+            return ~(~(uint32_t)0 >> 1);
+        }
+    }
+    return (int32_t)ret;
 }
 
 #ifdef RV64
-static inline int64_t fpu_fp2int_uint64_t(fnative_t x)
+static inline int64_t fpu_fp2int_uint64_t(fnative_t x, uint8_t rm)
 {
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    feclearexcept(FE_ALL_EXCEPT);
-    uint64_t ret;
-    if (isinf(x)) {
-        exc |= FE_INVALID;
-        ret = fpu_sign_check(x) ? 0 : ~(uint64_t)0;
-    } else if (isnan(x)) {
-        exc |= FE_INVALID;
-        ret = ~(uint64_t)0;
-    } else if (fabs(x) < 1.0f) {
-        exc |= FE_INEXACT;
-        ret = 0;
-    } else if (x < 0.0f) {
-        exc |= FE_INVALID;
-        ret = 0;
-    } else if (x > nextafter(~(uint64_t)0, 0)) {
-        exc |= FE_INVALID;
-        ret = ~(uint64_t)0;
-    } else {
-        ret = (uint64_t)llrint(x);
+    fnative_t ret = fpu_round_to_rm(x, rm);
+    bool isinvalid = isnan(ret) || ret < 0 || ret > (~(uint64_t)0);
+    if (unlikely(isinvalid)) {
+        feraiseexcept(FE_INVALID);
+        if (isnan(x) || !fpu_sign_check(x)) {
+            return ~(uint64_t)0;
+        } else {
+            return 0;
+        }
     }
-    feraiseexcept(exc);
-    return ret;
+
+    return (uint64_t)ret;
 }
 
-static inline int64_t fpu_fp2int_int64_t(fnative_t x)
+static inline int64_t fpu_fp2int_int64_t(fnative_t x, uint8_t rm)
 {
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    feclearexcept(FE_ALL_EXCEPT);
-    int64_t ret;
-    if (isinf(x)) {
-        exc |= FE_INVALID;
-        ret = fpu_sign_check(x) ? ~(~(uint64_t)0 >> 1) : ~(uint64_t)0 >> 1;
-    } else if (isnan(x)) {
-        exc |= FE_INVALID;
-        ret = ~(uint64_t)0 >> 1;
-    } else if (fabs(x) < 1.0f) {
-        exc |= FE_INEXACT;
-        ret = 0;
-    } else if (x < nextafter((int64_t)~(~(uint64_t)0 >> 1), 0)) {
-        exc |= FE_INVALID;
-        ret = ~(~(uint64_t)0 >> 1);
-    } else if (x > nextafter((int64_t)(~(uint64_t)0 >> 1), 0)) {
-        exc |= FE_INVALID;
-        ret = ~(uint64_t)0 >> 1;
-    } else {
-        ret = (int64_t)llrint(x);
+    fnative_t ret = fpu_round_to_rm(x, rm);
+    bool isinvalid = isnan(ret)
+                  || (ret < (int64_t)~(~(uint64_t)0 >> 1))
+                  || (ret > (int64_t)(~(uint64_t)0 >> 1));
+    if (unlikely(isinvalid)) {
+        feraiseexcept(FE_INVALID);
+        if (isnan(x) || !fpu_sign_check(x)) {
+            return ~(uint64_t)0 >> 1;
+        } else {
+            return ~(~(uint64_t)0 >> 1);
+        }
     }
-    feraiseexcept(exc);
-    return ret;
+
+    return (int64_t)ret;
 }
 #endif
 
-static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
+static inline fnative_t fpu_min(fnative_t x, fnative_t y)
 {
     if (fabs(x) == 0.0 || fabs(y) == 0.0) {
         return fpu_sign_check(x) ? x : y;
@@ -266,10 +278,12 @@ static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
 
     int exc = fetestexcept(FE_ALL_EXCEPT);
     fnative_t res = fmin(x, y);
-    feclearexcept(FE_ALL_EXCEPT);
-    feraiseexcept(exc);
+    if (unlikely(exc != fetestexcept(FE_ALL_EXCEPT))) {
+        feclearexcept(FE_ALL_EXCEPT);
+        feraiseexcept(exc);
+    }
 
-    if (isnan(res)) {
+    if (unlikely(isnan(res))) {
         if (!isnan(x)) {
             return x;
         } else if (!isnan(y)) {
@@ -282,7 +296,7 @@ static inline fnative_t fpu_min_impl(fnative_t x, fnative_t y)
     return res;
 }
 
-static inline fnative_t fpu_max_impl(fnative_t x, fnative_t y)
+static inline fnative_t fpu_max(fnative_t x, fnative_t y)
 {
     if (fabs(x) == 0.0 || fabs(y) == 0.0) {
         return fpu_sign_check(x) ? y : x;
@@ -290,10 +304,12 @@ static inline fnative_t fpu_max_impl(fnative_t x, fnative_t y)
 
     int exc = fetestexcept(FE_ALL_EXCEPT);
     fnative_t res = fmax(x, y);
-    feclearexcept(FE_ALL_EXCEPT);
-    feraiseexcept(exc);
+    if (unlikely(exc != fetestexcept(FE_ALL_EXCEPT))) {
+        feclearexcept(FE_ALL_EXCEPT);
+        feraiseexcept(exc);
+    }
 
-    if (isnan(res)) {
+    if (unlikely(isnan(res))) {
         if (!isnan(x)) {
             return x;
         } else if (!isnan(y)) {
@@ -497,15 +513,6 @@ static inline void riscv_f_fmax(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid
     fpu_write_register(vm, rd, fpu_max(fpu_read_register(vm, rs1), fpu_read_register(vm, rs2)));
 }
 
-static inline void riscv_f_fcvt_w_s(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
-{
-    if (is_unsigned) {
-        riscv_write_register(vm, rd, fpu_fp2int(uint32_t, fpu_read_register(vm, rs1)));
-    } else {
-        riscv_write_register(vm, rd, fpu_fp2int(int32_t, fpu_read_register(vm, rs1)));
-    }
-}
-
 static inline void riscv_f_fcvt_s_w(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
 {
     if (is_unsigned) {
@@ -516,15 +523,6 @@ static inline void riscv_f_fcvt_s_w(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bo
 }
 
 #ifdef RV64
-static inline void riscv_f_fcvt_l_s(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
-{
-    if (is_unsigned) {
-        riscv_write_register(vm, rd, fpu_fp2int(uint64_t, fpu_read_register(vm, rs1)));
-    } else {
-        riscv_write_register(vm, rd, fpu_fp2int(int64_t, fpu_read_register(vm, rs1)));
-    }
-}
-
 static inline void riscv_f_fcvt_s_l(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bool is_unsigned)
 {
     if (is_unsigned) {
@@ -538,8 +536,10 @@ static inline void riscv_f_fcvt_s_l(rvvm_hart_t *vm, regid_t rs1, regid_t rd, bo
 #ifndef RVD
 static inline void riscv_f_fmv_x_w(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    fnative_t val = fpu_read_register(vm, rs1);
-    riscv_write_register(vm, rd, (sxlen_t) (int32_t) read_uint32_le(&val));
+    int32_t ival;
+    float fval = read_float_nanbox(&vm->fpu_registers[rs1]);
+    memcpy(&ival, &fval, sizeof(ival));
+    riscv_write_register(vm, rd, ival);
 }
 
 static inline void riscv_f_fmv_w_x(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
@@ -692,26 +692,27 @@ static void riscv_f_other(rvvm_hart_t *vm, const uint32_t insn)
             }
             break;
         case FT7_FCVT_W_S:
-            rm = fpu_set_rm(vm, rm);
-            if (unlikely(rm == RM_INVALID)) {
-                riscv_illegal_insn(vm, insn);
-                return;
-            }
-
 #ifdef RV64
             if (rs2 < 2) {
 #else
             if (likely(rs2 < 2)) {
 #endif
-                riscv_f_fcvt_w_s(vm, rs1, rd, rs2 == 1);
+                if (rs2 == 1) {
+                    riscv_write_register(vm, rd, fpu_fp2int_uint32_t(fpu_read_register(vm, rs1), rm));
+                } else {
+                    riscv_write_register(vm, rd, fpu_fp2int_int32_t(fpu_read_register(vm, rs1), rm));
+                }
 #ifdef RV64
             } else if (likely(rs2 < 4)) {
-                riscv_f_fcvt_l_s(vm, rs1, rd, rs2 == 3);
+                if (rs2 == 3) {
+                    riscv_write_register(vm, rd, fpu_fp2int_uint64_t(fpu_read_register(vm, rs1), rm));
+                } else {
+                    riscv_write_register(vm, rd, fpu_fp2int_int64_t(fpu_read_register(vm, rs1), rm));
+                }
 #endif
             } else {
                 riscv_illegal_insn(vm, insn);
             }
-            fpu_set_rm(vm, rm);
             break;
 #ifndef RVD
         case FT7_FMV_X_W:

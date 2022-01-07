@@ -386,7 +386,7 @@ static inline void riscv_write_register(rvvm_hart_t *vm, regid_t reg, xlen_t dat
 static inline float fpu_read_register32(rvvm_hart_t *vm, regid_t reg)
 {
     assert(reg < FPU_REGISTERS_MAX);
-    return read_float_nanbox(&vm->fpu_registers[reg]);
+    return read_float_normalize(&vm->fpu_registers[reg]);
 }
 
 static inline void fpu_write_register32(rvvm_hart_t *vm, regid_t reg, float val)

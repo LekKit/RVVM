@@ -142,22 +142,29 @@ static bool riscv_csr_illegal(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_zero(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(vm);
-    UNUSED(op);
-    bool read = false;
+    bool csr_read = false;
     // Writing a hardwired zero CSR should trap
     switch (op) {
         case CSR_SWAP:
-            read = false;
+            csr_read = false;
             break;
         case CSR_SETBITS:
-            read = (*dest == 0);
+            csr_read = (*dest == 0);
             break;
         case CSR_CLEARBITS:
-            read = true;
+            csr_read = true;
             break;
     }
     *dest = 0;
-    return read;
+    return csr_read;
+}
+
+static bool riscv_csr_zero_rw(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+{
+    UNUSED(vm);
+    UNUSED(op);
+    *dest = 0;
+    return true;
 }
 
 /*
@@ -432,8 +439,10 @@ static bool riscv_csr_fflags(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     maxlen_t val = fpu_get_exceptions();
     maxlen_t oldval = val;
     csr_helper(&val, dest, op);
-    if (val != oldval) fpu_set_fs(vm, FS_DIRTY);
-    fpu_set_exceptions(val);
+    if (val != oldval) {
+        fpu_set_fs(vm, FS_DIRTY);
+        fpu_set_exceptions(val);
+    }
     vm->csr.fcsr &= ~((1 << 5) - 1);
     vm->csr.fcsr |= val;
     vm->csr.fcsr &= 0xff;
@@ -449,8 +458,10 @@ static bool riscv_csr_frm(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     maxlen_t val = vm->csr.fcsr >> 5;
     maxlen_t oldval = val;
     csr_helper(&val, dest, op);
-    if (val != oldval) fpu_set_fs(vm, FS_DIRTY);
-    fpu_set_rm(vm, val & ((1 << 3) - 1));
+    if (val != oldval) {
+        fpu_set_fs(vm, FS_DIRTY);
+        fpu_set_rm(vm, val & ((1 << 3) - 1));
+    }
     vm->csr.fcsr = (vm->csr.fcsr & ((1 << 5) - 1)) | (val << 5);
     vm->csr.fcsr &= 0xff;
     *dest &= 0x7;
@@ -465,9 +476,11 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     maxlen_t val = vm->csr.fcsr | fpu_get_exceptions();
     maxlen_t oldval = val;
     csr_helper(&val, dest, op);
-    if (val != oldval) fpu_set_fs(vm, FS_DIRTY);
-    fpu_set_rm(vm, bit_cut(val, 5, 3));
-    fpu_set_exceptions(val);
+    if (val != oldval) {
+        fpu_set_fs(vm, FS_DIRTY);
+        fpu_set_rm(vm, bit_cut(val, 5, 3));
+        fpu_set_exceptions(val);
+    }
     vm->csr.fcsr = val;
     vm->csr.fcsr &= 0xff;
     *dest &= 0xff;
@@ -508,7 +521,7 @@ void riscv_csr_global_init()
     riscv_csr_list[0x303] = riscv_csr_mideleg;  // mideleg
     riscv_csr_list[0x304] = riscv_csr_mie;      // mie
     riscv_csr_list[0x305] = riscv_csr_mtvec;    // mtvec
-    riscv_csr_list[0x306] = riscv_csr_zero;     // mcounteren
+    riscv_csr_list[0x306] = riscv_csr_zero_rw;  // mcounteren
 
     // Machine Trap Handling
     riscv_csr_list[0x340] = riscv_csr_mscratch; // mscratch
@@ -519,9 +532,9 @@ void riscv_csr_global_init()
 
     // Machine Memory Protection
     for (size_t i=0x3A0; i<0x3A4; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // pmpcfg
+        riscv_csr_list[i] = riscv_csr_zero_rw;  // pmpcfg
     for (size_t i=0x3B0; i<0x3C0; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // pmpaddr
+        riscv_csr_list[i] = riscv_csr_zero_rw;  // pmpaddr
 
     // Machine Counter/Timers
     riscv_csr_list[0xB00] = riscv_csr_zero;     // mcycle
@@ -534,7 +547,7 @@ void riscv_csr_global_init()
         riscv_csr_list[i] = riscv_csr_zero;     // mhpmcounterh
 
     // Machine Counter Setup
-    riscv_csr_list[0x320] = riscv_csr_zero;     // mcountinhibit
+    riscv_csr_list[0x320] = riscv_csr_zero_rw;  // mcountinhibit
     for (size_t i=0x323; i<0x340; ++i)
         riscv_csr_list[i] = riscv_csr_zero;     // mhpmevent
 
@@ -546,7 +559,7 @@ void riscv_csr_global_init()
     riscv_csr_list[0x103] = riscv_csr_illegal;  // sideleg
     riscv_csr_list[0x104] = riscv_csr_sie;      // sie
     riscv_csr_list[0x105] = riscv_csr_stvec;    // stvec
-    riscv_csr_list[0x106] = riscv_csr_zero;     // scounteren
+    riscv_csr_list[0x106] = riscv_csr_zero_rw;  // scounteren
 
     // Supervisor Trap Handling
     riscv_csr_list[0x140] = riscv_csr_sscratch; // sscratch
