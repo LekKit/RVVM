@@ -56,6 +56,7 @@ typedef _Complex long double _C_ldouble_complex;
     #define riscv_store_fnative riscv_store_double
     #define riscv_load_fnative riscv_load_double
     #define fpu_copysign copysign
+    #define fpu_sqrt sqrt
     #define fpu_modf modf
     #define fpu_trunc trunc
     #define fpu_floor floor
@@ -76,6 +77,7 @@ typedef _Complex long double _C_ldouble_complex;
     #define riscv_store_fnative riscv_store_float
     #define riscv_load_fnative riscv_load_float
     #define fpu_copysign copysignf
+    #define fpu_sqrt sqrtf
     #define fpu_modf modff
     #define fpu_trunc truncf
     #define fpu_floor floorf
@@ -119,6 +121,14 @@ static inline void check_nan(fnative_t x)
     }
 }
 
+/* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
+static inline bool fpu_is_snan(fnative_t x)
+{
+    uint8_t tmp[sizeof(fnative_t)] = {0};
+    write_fpu(tmp, x);
+    return isnan(x) && !bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8);
+}
+
 static inline uint8_t fpu_fclass_impl(fnative_t x)
 {
     switch (fpclassify(x)) {
@@ -127,13 +137,10 @@ static inline uint8_t fpu_fclass_impl(fnative_t x)
         case FP_SUBNORMAL: return fpu_sign_check(x) ? FCL_NEG_SUBNORMAL : FCL_POS_SUBNORMAL;
         case FP_ZERO: return fpu_sign_check(x) ? FCL_NEG_ZERO : FCL_POS_ZERO;
         case FP_NAN: {
-            /* Bitwise fuckery to check for sNaN/qNaN because C API is so awesome */
-            uint8_t tmp[sizeof(fnative_t)] = {0};
-            write_fpu(tmp, x);
-            if (bit_check(tmp[(SIGNIFICAND_SIZE-2) / 8], (SIGNIFICAND_SIZE-2) % 8)) {
-                return FCL_NAN_QUIET;
-            } else {
+            if (fpu_is_snan(x)) {
                 return FCL_NAN_SIG;
+            } else {
+                return FCL_NAN_QUIET;
             }
         }
     }
@@ -268,8 +275,8 @@ static inline int64_t fpu_fp2int_int64_t(fnative_t x, uint8_t rm)
 }
 #endif
 
-static inline fnative_t fpu_sqrt(fnative_t val) {
-    fnative_t ret = canonize_nan(sqrt(val));
+static inline fnative_t fpu_fsqrt(fnative_t val) {
+    fnative_t ret = canonize_nan(fpu_sqrt(val));
 
     if (unlikely(val < 0 && !fetestexcept(FE_INVALID))) {
         feraiseexcept(FE_INVALID);
@@ -279,54 +286,46 @@ static inline fnative_t fpu_sqrt(fnative_t val) {
 
 static inline fnative_t fpu_min(fnative_t x, fnative_t y)
 {
-    if (fabs(x) == 0.0 || fabs(y) == 0.0) {
+    if (unlikely(isnan(x))) {
+        // If any inputs is sNaN, raise FE_INVALID
+        if (fpu_is_snan(x) || fpu_is_snan(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return canonize_nan(y);
+    } else if (unlikely(isnan(y))) {
+        if (fpu_is_snan(x) || fpu_is_snan(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return canonize_nan(x);
+    } else if (x < y) {
+        return x;
+    } else if (y < x) {
+        return y;
+    } else {
+        // -0.0 is less than 0.0
         return fpu_sign_check(x) ? x : y;
     }
-
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    fnative_t res = fmin(x, y);
-    if (unlikely(exc != fetestexcept(FE_ALL_EXCEPT))) {
-        feclearexcept(FE_ALL_EXCEPT);
-        feraiseexcept(exc);
-    }
-
-    if (unlikely(isnan(res))) {
-        if (!isnan(x)) {
-            return x;
-        } else if (!isnan(y)) {
-            return y;
-        } else {
-            return canonize_nan(res);
-        }
-    }
-
-    return res;
 }
 
 static inline fnative_t fpu_max(fnative_t x, fnative_t y)
 {
-    if (fabs(x) == 0.0 || fabs(y) == 0.0) {
+    if (unlikely(isnan(x))) {
+        if (fpu_is_snan(x) || fpu_is_snan(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return canonize_nan(y);
+    } else if (unlikely(isnan(y))) {
+        if (fpu_is_snan(x) || fpu_is_snan(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return canonize_nan(x);
+    } else if (x > y) {
+        return x;
+    } else if (y > x) {
+        return y;
+    } else {
         return fpu_sign_check(x) ? y : x;
     }
-
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    fnative_t res = fmax(x, y);
-    if (unlikely(exc != fetestexcept(FE_ALL_EXCEPT))) {
-        feclearexcept(FE_ALL_EXCEPT);
-        feraiseexcept(exc);
-    }
-
-    if (unlikely(isnan(res))) {
-        if (!isnan(x)) {
-            return x;
-        } else if (!isnan(y)) {
-            return y;
-        } else {
-            return canonize_nan(res);
-        }
-    }
-
-    return res;
 }
 
 /* type for rounding mode */
@@ -491,7 +490,7 @@ static inline void riscv_f_fdiv(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid
 
 static inline void riscv_f_fsqrt(rvvm_hart_t *vm, regid_t rs1, regid_t rd)
 {
-    fpu_write_register(vm, rd, fpu_sqrt(fpu_read_register(vm, rs1)));
+    fpu_write_register(vm, rd, fpu_fsqrt(fpu_read_register(vm, rs1)));
 }
 
 static inline void riscv_f_fsgnj(rvvm_hart_t *vm, regid_t rs1, regid_t rs2, regid_t rd)
