@@ -209,7 +209,7 @@ static inline fnative_t fpu_round_to_rm(fnative_t x, uint8_t rm)
 static inline int32_t fpu_fp2int_uint32_t(fnative_t x, uint8_t rm)
 {
     fnative_t ret = fpu_round_to_rm(x, rm);
-    bool isinvalid = isnan(ret) || ret < 0 || ret > (~(uint32_t)0);
+    bool isinvalid = isnan(ret) || ret < 0.0 || ret >= 4294967296.0;
     if (unlikely(isinvalid)) {
         feraiseexcept(FE_INVALID);
         if (isnan(x) || !fpu_sign_check(x)) {
@@ -226,8 +226,8 @@ static inline int32_t fpu_fp2int_int32_t(fnative_t x, uint8_t rm)
 {
     fnative_t ret = fpu_round_to_rm(x, rm);
     bool isinvalid = isnan(ret)
-                  || (ret < (int32_t)~(~(uint32_t)0 >> 1))
-                  || (ret > (int32_t)(~(uint32_t)0 >> 1));
+                  || (ret < -2147483648.0)
+                  || (ret >= 2147483648.0);
     if (unlikely(isinvalid)) {
         feraiseexcept(FE_INVALID);
         if (isnan(x) || !fpu_sign_check(x)) {
@@ -243,7 +243,7 @@ static inline int32_t fpu_fp2int_int32_t(fnative_t x, uint8_t rm)
 static inline int64_t fpu_fp2int_uint64_t(fnative_t x, uint8_t rm)
 {
     fnative_t ret = fpu_round_to_rm(x, rm);
-    bool isinvalid = isnan(ret) || ret < 0 || ret > (~(uint64_t)0);
+    bool isinvalid = isnan(ret) || ret < 0.0 || ret >= 18446744073709551616.0;
     if (unlikely(isinvalid)) {
         feraiseexcept(FE_INVALID);
         if (isnan(x) || !fpu_sign_check(x)) {
@@ -260,8 +260,8 @@ static inline int64_t fpu_fp2int_int64_t(fnative_t x, uint8_t rm)
 {
     fnative_t ret = fpu_round_to_rm(x, rm);
     bool isinvalid = isnan(ret)
-                  || (ret < (int64_t)~(~(uint64_t)0 >> 1))
-                  || (ret > (int64_t)(~(uint64_t)0 >> 1));
+                  || (ret < -9223372036854775808.0)
+                  || (ret >= 9223372036854775808.0);
     if (unlikely(isinvalid)) {
         feraiseexcept(FE_INVALID);
         if (isnan(x) || !fpu_sign_check(x)) {
