@@ -90,7 +90,6 @@ typedef _Complex long double _C_ldouble_complex;
 #define fpu_mul(x, y)      canonize_nan((fnative_t)(x) * (fnative_t)(y))
 #define fpu_div(x, y)      canonize_nan((fnative_t)(x) / (fnative_t)(y))
 #define fpu_neg(x)         canonize_nan(-(fnative_t)(x))
-#define fpu_sqrt(x)        canonize_nan(sqrt((fnative_t)(x)))
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
 #define fpu_lt(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <  (fnative_t)(y))
 #define fpu_le(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <= (fnative_t)(y))
@@ -176,7 +175,6 @@ static inline fnative_t fpu_round_even(fnative_t val) {
 static inline fnative_t fpu_round_to_rm(fnative_t x, uint8_t rm)
 {
     fnative_t ret;
-    int exc = fetestexcept(FE_ALL_EXCEPT);
     switch (rm) {
         case RM_RNE: ret = fpu_round_even(x); break;
         case RM_RTZ: ret = fpu_trunc(x);      break;
@@ -194,7 +192,7 @@ static inline fnative_t fpu_round_to_rm(fnative_t x, uint8_t rm)
      * Another option could be "exception overlays" in hart context,
      * combined with host exceptions in fcsr.
      */
-    if (unlikely(ret != x && fetestexcept(FE_ALL_EXCEPT) != (exc | FE_INEXACT))) {
+    if (unlikely(ret != x && !fetestexcept(FE_INEXACT))) {
         feraiseexcept(FE_INEXACT);
     }
 
@@ -269,6 +267,15 @@ static inline int64_t fpu_fp2int_int64_t(fnative_t x, uint8_t rm)
     return (int64_t)ret;
 }
 #endif
+
+static inline fnative_t fpu_sqrt(fnative_t val) {
+    fnative_t ret = canonize_nan(sqrt(val));
+
+    if (unlikely(val < 0 && !fetestexcept(FE_INVALID))) {
+        feraiseexcept(FE_INVALID);
+    }
+    return ret;
+}
 
 static inline fnative_t fpu_min(fnative_t x, fnative_t y)
 {
