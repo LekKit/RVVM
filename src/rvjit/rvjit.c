@@ -161,14 +161,35 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 
 #endif
 
-// Instruction cache is usually non-coherent on non-x86 hosts
-#if defined(GNU_EXTS) && !defined(RVJIT_X86)
-void flush_icache(void* addr, size_t size)
+#if defined(RVJIT_RISCV) && defined(__linux__)
+/*
+ * Clang doesn't seem to implement __builtin___clear_cache properly
+ * on RISC-V, wreaking havok on hosts with non-coherent icache
+ * (RVVM is also affected, heh), hence we make a direct syscall
+ */
+#include <sys/syscall.h>
+#ifndef __NR_riscv_flush_icache
+#define __NR_riscv_flush_icache 259
+#endif
+static void flush_icache(void* addr, size_t size)
 {
-    __builtin___clear_cache(addr, ((char*)addr) + size);
+    syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
+}
+#elif defined(GNU_EXTS)
+static void flush_icache(void* addr, size_t size)
+{
+    __builtin___clear_cache((char*)addr, ((char*)addr) + size);
+}
+#elif defined(_WIN32)
+static void flush_icache(void* addr, size_t size)
+{
+    FlushInstructionCache(GetCurrentProcess(), addr, size);
 }
 #else
-void flush_icache(void* addr, size_t size)
+#ifndef RVJIT_X86
+#error No flush_icache support!
+#endif
+static void flush_icache(void* addr, size_t size)
 {
     UNUSED(addr);
     UNUSED(size);
@@ -188,7 +209,9 @@ void rvjit_ctx_init(rvjit_block_t* block, size_t size)
         if (!rvjit_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
             rvvm_fatal("RVJIT heap allocation failure!");
         }
+        flush_icache(block->heap.code, block->heap.size);
     }
+    flush_icache(block->heap.data, block->heap.size);
 
     block->heap.size = size_to_page(size);
     block->heap.curr = 0;
@@ -244,9 +267,8 @@ void rvjit_flush_cache(rvjit_block_t* block)
 {
     if (block->heap.code) {
         flush_icache(block->heap.code, block->heap.curr);
-    } else {
-        flush_icache(block->heap.data, block->heap.curr);
     }
+    flush_icache(block->heap.data, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
     block->heap.curr = 0;
