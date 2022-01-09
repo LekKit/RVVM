@@ -87,7 +87,6 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 
 #ifdef __linux__
 #include <sys/syscall.h>
-#include <linux/memfd.h>
 #endif
 
 static inline int rvjit_virt_flags(uint8_t flags)
@@ -109,7 +108,7 @@ static int rvjit_anon_memfd()
 {
 #if defined(__NR_memfd_create)
     // If we are running on older kernel, should return -ENOSYS
-    int memfd = syscall(__NR_memfd_create, "rvjit_heap", MFD_CLOEXEC);
+    int memfd = syscall(__NR_memfd_create, "rvjit_heap", 1);
 #elif defined(__FreeBSD__)
     int memfd = shm_open(SHM_ANON, O_RDWR, 0);
 #elif defined(__OpenBSD__)
@@ -123,7 +122,7 @@ static int rvjit_anon_memfd()
     int memfd = -1;
     rvvm_info("No RVJIT anon memfd support for this platform");
 #endif
-    if (memfd == -1) {
+    if (memfd < 0) {
         rvvm_info("Falling back to RVJIT shmem");
         char shm_file[] = "/shm-rvjit";
         memfd = shm_open(shm_file, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
