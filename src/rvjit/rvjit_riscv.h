@@ -61,7 +61,7 @@ static inline size_t rvjit_native_abireclaim_hregmask()
 
 static inline bool rvjit_is_valid_imm(int32_t imm)
 {
-    return ((((int32_t)((uint32_t)imm) << 20)) >> 20) == imm;
+    return (((int32_t)(((uint32_t)imm) << 20)) >> 20) == imm;
 }
 
 // Load [31:12] bits of the register from 20-bit imm, signextend & zero lower bits
