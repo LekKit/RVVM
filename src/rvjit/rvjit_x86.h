@@ -370,18 +370,26 @@ static inline void rvjit_x86_3reg_op(rvjit_block_t* block, uint8_t opcode, regid
 
 static inline void rvjit_x86_2reg_imm_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, int32_t imm, bool bits_64)
 {
-    if (opcode == X86_AND_IMM && imm == 0xFF && x86_byte_reg_usable(hrs1)) {
-        // Optimize andi r1, r2, 0xFF -> movzxb r1, r2
-        rvjit_x86_movzxb(block, hrds, hrs1);
-        return;
-    }
-    if (opcode == X86_ADD_IMM && imm && hrds != hrs1) {
+    if (opcode == X86_AND_IMM) {
+        if (imm == 0) {
+            // Optimize andi r1, r2, 0 -> xor r1, r1
+            rvjit_x86_2reg_op(block, X86_XOR, hrds, hrds, false);
+            return;
+        } else if (imm == 0xFF && x86_byte_reg_usable(hrs1)) {
+            // Optimize andi r1, r2, 0xFF -> movzxb r1, r2
+            rvjit_x86_movzxb(block, hrds, hrs1);
+            return;
+        } else if (imm > 0) {
+            // Remove REX.W prefix for unsigned andi imm
+            bits_64 = false;
+        }
+    } else if (opcode == X86_ADD_IMM && imm && hrds != hrs1) {
         // addi r1, r2, imm -> lea r1, [r2 + imm]
         rvjit_x86_lea_addi(block, hrds, hrs1, imm, bits_64);
         return;
     }
     if (hrds != hrs1) rvjit_x86_mov(block, hrds, hrs1, bits_64);
-    if (imm || opcode == X86_AND_IMM) rvjit_x86_r_imm_op(block, opcode, hrds, imm, bits_64);
+    if (imm) rvjit_x86_r_imm_op(block, opcode, hrds, imm, bits_64);
 }
 
 static inline void rvjit_x86_2reg_imm_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, uint8_t imm, bool bits_64)
