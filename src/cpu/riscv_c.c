@@ -24,8 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_mmu.h"
 #include "compiler.h"
 
-#include "rvjit/rvjit_emit.h"
-
 // Decode c.j / c.jal offset
 static inline sxlen_t decode_jal_imm(uint16_t imm)
 {
