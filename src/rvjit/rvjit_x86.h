@@ -292,12 +292,12 @@ static inline void rvjit_x86_memory_ref(rvjit_block_t* block, regid_t dest, regi
         code[1] = 0x24;
         inst_size++;
     }
-    if (!x86_is_byte_imm(off) || addr == X64_R13) {
+    if (!x86_is_byte_imm(off)) {
         // Huge offset
         code[0] |= X86_MEM_OFFW;
         write_uint32_le_m(code + inst_size, off);
         inst_size += 4;
-    } else if (off) {
+    } else if (off || addr == X64_R13) {
         // 1-byte offset
         code[0] |= X86_MEM_OFFB;
         code[inst_size] = off;
