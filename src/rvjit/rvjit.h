@@ -34,7 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVJIT_REGISTERS 32
 #define RVJIT_REGISTER_ZERO 0
 
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(_M_AMD64)
     #ifdef _WIN32
         #ifdef __MINGW64__
             #define RVJIT_CALL __attribute__((sysv_abi))
@@ -48,7 +48,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     #endif
     #define RVJIT_NATIVE_64BIT 1
     #define RVJIT_X86 1
-#elif __i386__
+#elif defined(__i386__) || defined(_M_IX86)
     #ifdef _WIN32
         #ifdef __MINGW32__
             #define RVJIT_CALL __attribute__((fastcall))
@@ -64,10 +64,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     #if __riscv_xlen == 64
         #define RVJIT_NATIVE_64BIT 1
     #elif __riscv_xlen != 32
-        #error Only RV32 and RV64 hosts support JIT!
+        #error No JIT support for RV128!
     #endif
     #define RVJIT_ABI_SYSV 1
     #define RVJIT_RISCV 1
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    #define RVJIT_NATIVE_64BIT 1
+    #define RVJIT_ABI_SYSV 1
+    #define RVJIT_ARM64 1
+#elif defined(__arm__) || defined(_M_ARM)
+    #define RVJIT_ABI_SYSV 1
+    #define RVJIT_ARM 1
 #else
     #error No JIT support for the target platform!!!
 #endif
@@ -77,7 +84,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVJIT_CALL
 #endif
 
-typedef RVJIT_CALL void (*rvjit_func_t)(void* vm);
+typedef void (* RVJIT_CALL rvjit_func_t)(void* vm);
 typedef uint8_t regid_t;
 typedef uint8_t regflags_t;
 typedef size_t  branch_t;

@@ -23,6 +23,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvjit_x86.h"
 #elif  RVJIT_RISCV
 #include "rvjit_riscv.h"
+#elif  RVJIT_ARM64
+#include "rvjit_arm64.h"
+#elif  RVJIT_ARM
+#include "rvjit_arm.h"
 #endif
 
 #define REG_SRC    0x1
