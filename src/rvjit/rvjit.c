@@ -252,6 +252,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
     }
 
     memcpy(dest, block->code, block->size);
+    flush_icache(code, block->size);
     block->heap.curr += block->size;
     hashmap_put(&block->heap.blocks, block->phys_pc, (size_t)code);
 
