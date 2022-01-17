@@ -82,25 +82,48 @@ static inline void rvjit_riscv_lui(rvjit_block_t* block, regid_t reg, int32_t im
 #define RISCV_R_SRA   0x40005033
 #define RISCV_R_SLT   0x00002033
 #define RISCV_R_SLTU  0x00003033
+#define RISCV_R_MUL   0x02000033
+#define RISCV_R_MULH  0x02001033
+#define RISCV_R_MULHS 0x02002033
+#define RISCV_R_MULHU 0x02003033
+#define RISCV_R_DIV   0x02004033
+#define RISCV_R_DIVU  0x02005033
+#define RISCV_R_REM   0x02006033
+#define RISCV_R_REMU  0x02007033
 
 #define RISCV_R_ADDW  0x0000003B
 #define RISCV_R_SUBW  0x4000003B
 #define RISCV_R_SLLW  0x0000103B
 #define RISCV_R_SRLW  0x0000503B
 #define RISCV_R_SRAW  0x4000503B
+#define RISCV_R_MULW  0x0200003B
+#define RISCV_R_DIVW  0x0200403B
+#define RISCV_R_DIVUW 0x0200503B
+#define RISCV_R_REMW  0x0200603B
+#define RISCV_R_REMUW 0x0200703B
 
 #ifdef RVJIT_NATIVE_64BIT
-#define RISCV32_R_ADD RISCV_R_ADDW
-#define RISCV32_R_SUB RISCV_R_SUBW
-#define RISCV32_R_SLL RISCV_R_SLLW
-#define RISCV32_R_SRL RISCV_R_SRLW
-#define RISCV32_R_SRA RISCV_R_SRAW
+#define RISCV32_R_ADD  RISCV_R_ADDW
+#define RISCV32_R_SUB  RISCV_R_SUBW
+#define RISCV32_R_SLL  RISCV_R_SLLW
+#define RISCV32_R_SRL  RISCV_R_SRLW
+#define RISCV32_R_SRA  RISCV_R_SRAW
+#define RISCV32_R_MUL  RISCV_R_MULW
+#define RISCV32_R_DIV  RISCV_R_DIVW
+#define RISCV32_R_DIVU RISCV_R_DIVUW
+#define RISCV32_R_REM  RISCV_R_REMW
+#define RISCV32_R_REMU RISCV_R_REMUW
 #else
-#define RISCV32_R_ADD RISCV_R_ADD
-#define RISCV32_R_SUB RISCV_R_SUB
-#define RISCV32_R_SLL RISCV_R_SLL
-#define RISCV32_R_SRL RISCV_R_SRL
-#define RISCV32_R_SRA RISCV_R_SRA
+#define RISCV32_R_ADD  RISCV_R_ADD
+#define RISCV32_R_SUB  RISCV_R_SUB
+#define RISCV32_R_SLL  RISCV_R_SLL
+#define RISCV32_R_SRL  RISCV_R_SRL
+#define RISCV32_R_SRA  RISCV_R_SRA
+#define RISCV32_R_MUL  RISCV_R_MUL
+#define RISCV32_R_DIV  RISCV_R_DIV
+#define RISCV32_R_DIVU RISCV_R_DIVU
+#define RISCV32_R_REM  RISCV_R_REM
+#define RISCV32_R_REMU RISCV_R_REMU
 #endif
 
 // R-type operation
@@ -337,21 +360,26 @@ static inline void rvjit_native_callreg(rvjit_block_t* block, regid_t reg)
 static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, bool target)
 {
     if (target) {
-        if (handle) {
-            // Patch jump offset
+        // This is a jump label
+        if (handle == BRANCH_NEW) {
+            // Backward jump: Save label address
+            return block->size;
+        } else {
+            // Forward jump: Patch jump offset
             rvjit_riscv_jal_patch(block->code + handle, block->size - handle);
             return BRANCH_NEW;
-        } else {
-            return block->size;
         }
     } else {
-        if (handle) {
-            rvjit_riscv_jal(block, RISCV_REG_ZERO, handle - block->size);
-            return BRANCH_NEW;
-        } else {
+        // This is a jump entry
+        if (handle == BRANCH_NEW) {
+            // Forward jump: Emit instruction, patch it later
             branch_t tmp = block->size;
             rvjit_riscv_jal(block, RISCV_REG_ZERO, 0);
             return tmp;
+        } else {
+            // Backward jump: Emit instruction using label address
+            rvjit_riscv_jal(block, RISCV_REG_ZERO, handle - block->size);
+            return BRANCH_NEW;
         }
     }
 }
@@ -564,6 +592,71 @@ static inline branch_t rvjit32_native_bltu(rvjit_block_t* block, regid_t hrs1, r
 static inline branch_t rvjit32_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     return rvjit_riscv_branch(block, RISCV_B_BGEU, hrs1, hrs2, handle, target);
+}
+
+static inline void rvjit32_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV32_R_MUL, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+#ifdef RVJIT_NATIVE_64BIT
+    rvjit_riscv_r_op(block, RISCV_R_MUL, hrds, hrs1, hrs2);
+    rvjit_riscv_i_op(block, RISCV_I_SRAI, hrds, hrds, 32);
+#else
+    rvjit_riscv_r_op(block, RISCV_R_MULH, hrds, hrs1, hrs2);
+#endif
+}
+
+static inline void rvjit32_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+#ifdef RVJIT_NATIVE_64BIT
+    regid_t zrs1 = rvjit_claim_hreg(block);
+    regid_t zrs2 = rvjit_claim_hreg(block);
+    rvjit_riscv_i_op(block, RISCV_I_SLLI, zrs1, hrs1, 32);
+    rvjit_riscv_i_op(block, RISCV_I_SLLI, zrs2, hrs2, 32);
+    rvjit_riscv_r_op(block, RISCV_R_MULHU, hrds, zrs1, zrs2);
+    rvjit_riscv_i_op(block, RISCV_I_SRAI, hrds, hrds, 32);
+    rvjit_free_hreg(block, zrs1);
+    rvjit_free_hreg(block, zrs2);
+#else
+    rvjit_riscv_r_op(block, RISCV_R_MULHU, hrds, hrs1, hrs2);
+#endif
+}
+
+static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+#ifdef RVJIT_NATIVE_64BIT
+    regid_t zrs2 = rvjit_claim_hreg(block);
+    rvjit_riscv_i_op(block, RISCV_I_SLLI, zrs2, hrs2, 32);
+    rvjit_riscv_i_op(block, RISCV_I_SRLI, zrs2, zrs2, 32);
+    rvjit_riscv_r_op(block, RISCV_R_MUL, hrds, hrs1, zrs2);
+    rvjit_riscv_i_op(block, RISCV_I_SRAI, hrds, hrds, 32);
+    rvjit_free_hreg(block, zrs2);
+#else
+    rvjit_riscv_r_op(block, RISCV_R_MULHS, hrds, hrs1, hrs2);
+#endif
+}
+
+static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV32_R_DIV, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV32_R_DIVU, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV32_R_REM, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV32_R_REMU, hrds, hrs1, hrs2);
 }
 
 /*
@@ -803,6 +896,71 @@ static inline branch_t rvjit64_native_bltu(rvjit_block_t* block, regid_t hrs1, r
 static inline branch_t rvjit64_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     return rvjit_riscv_branch(block, RISCV_B_BGEU, hrs1, hrs2, handle, target);
+}
+
+static inline void rvjit64_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_MUL, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_MULH, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_MULHU, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_MULHS, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_DIV, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_DIVU, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_REM, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_REMU, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_mulw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_MULW, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_divw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_DIVW, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_divuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_DIVUW, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_REMW, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_riscv_r_op(block, RISCV_R_REMUW, hrds, hrs1, hrs2);
 }
 
 #endif
