@@ -43,17 +43,17 @@ void fb_close_window(struct fb_data *data);
 void fb_update(struct fb_data *data);
 #else
 /* dummy functions when no window system available */
-inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) {
+static inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) {
     UNUSED(data);
     UNUSED(width);
     UNUSED(height);
     UNUSED(name);
 }
-inline void fb_close_window(struct fb_data *data) {
+static inline void fb_close_window(struct fb_data *data) {
     // Free a dummy framebuffer
     free(data->framebuffer);
 }
-inline void fb_update(struct fb_data *data) {
+static inline void fb_update(struct fb_data *data) {
     UNUSED(data);
 }
 #endif
