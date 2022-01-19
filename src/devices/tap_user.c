@@ -23,6 +23,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "networking.h"
 #include <string.h>
 
+#include "ringbuf.h"
+#include "hashmap.h"
+#include "networking.h"
+
+struct tap_dev_user {
+    struct ringbuf rx;
+    hashmap_t udp_ports;
+    netselector_t selector;
+    netsocket_t wakesock1, wakesock2;
+    netsocket_t recvsock;
+    int flag;
+    uint16_t wakeport;
+    uint16_t recvport;
+    uint8_t mac[6];
+    bool is_up;
+};
+
 #define GATEWAY_MAC ((const uint8_t*)"\x13\x37\xDE\xAD\xBE\xEF")
 #define GATEWAY_IP  ((const uint8_t*)"\xC0\xA8\x00\x01")
 
@@ -70,8 +87,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define DHCP_REQUEST    0x3
 #define DHCP_ACK        0x5
 
-static void eth_send(struct tap_dev *td, vmptr_t buffer, size_t size)
+static void eth_send(struct tap_dev *dev, vmptr_t buffer, size_t size)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     if (size < 65536) {
         /*for (size_t i=0; i<size; ++i) printf("%02x", buffer[i]);
         printf("\n");*/
@@ -81,8 +99,9 @@ static void eth_send(struct tap_dev *td, vmptr_t buffer, size_t size)
     }
 }
 
-static uint8_t* create_eth_frame(struct tap_dev *td, uint8_t *frame, size_t size, uint16_t ether_type)
+static uint8_t* create_eth_frame(struct tap_dev *dev, uint8_t *frame, size_t size, uint16_t ether_type)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     memcpy(frame, td->mac, HLEN_ETHER);
     memcpy(frame + HLEN_ETHER, GATEWAY_MAC, HLEN_ETHER);
     write_uint16_be_m(frame + 12, ether_type);
@@ -90,8 +109,9 @@ static uint8_t* create_eth_frame(struct tap_dev *td, uint8_t *frame, size_t size
     return frame + 14;
 }
 
-static void create_arp_frame(struct tap_dev *td, uint8_t *frame, const uint8_t *req_ip)
+static void create_arp_frame(struct tap_dev *dev, uint8_t *frame, const uint8_t *req_ip)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     write_uint16_be_m(frame, HTYPE_ETHER);
     write_uint16_be_m(frame + 2, PTYPE_IPv4);
     frame[4] = HLEN_ETHER;
@@ -258,8 +278,9 @@ static void handle_dhcp(struct tap_dev *td, vmptr_t buffer, size_t size, uint16_
     eth_send(td, frame, 273 + UDP_WRAP_SIZE + IPv4_WRAP_SIZE + ETH2_WRAP_SIZE);
 }
 
-static void handle_udp(struct tap_dev *td, vmptr_t buffer, size_t size)
+static void handle_udp(struct tap_dev *dev, vmptr_t buffer, size_t size)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     if (unlikely(size < IPv4_WRAP_SIZE + UDP_WRAP_SIZE)) {
         rvvm_warn("Malformed UDP datagram!");
         return;
@@ -276,7 +297,7 @@ static void handle_udp(struct tap_dev *td, vmptr_t buffer, size_t size)
     }
 
     if (dst_port == 67 && (read_uint32_be_m(buffer + 12) == 0)) {
-        handle_dhcp(td, udb_buff, udp_size, src_port);
+        handle_dhcp(dev, udb_buff, udp_size, src_port);
         return;
     }
 
@@ -361,9 +382,9 @@ static void handle_arp(struct tap_dev *td, vmptr_t buffer, size_t size)
     }
 }
 
-ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
+static ptrdiff_t tap_user_send(struct tap_dev *td, const void* buf, size_t len)
 {
-    vmptr_t buffer = buf;
+    vmptr_t buffer = (vmptr_t) buf;
     len += 4;
     if (unlikely(len < ETH2_WRAP_SIZE)) {
         rvvm_warn("Malformed ETH2 frame!");
@@ -387,8 +408,9 @@ ptrdiff_t tap_send(struct tap_dev *td, void* buf, size_t len)
     return len;
 }
 
-ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
+static ptrdiff_t tap_user_recv(struct tap_dev *dev, void* buf, size_t len)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     vmptr_t buffer = buf;
     if (td->recvsock != NET_SOCK_INVALID) {
         if (unlikely(len < (ETH2_WRAP_SIZE + IPv4_WRAP_SIZE + UDP_WRAP_SIZE))) {
@@ -407,7 +429,7 @@ ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
             write_uint32_be_m(ip_buf, ip);
             rvvm_info("Received packet from %d.%d.%d.%d:%d, size %u", ip_buf[0], ip_buf[1], ip_buf[2], ip_buf[3], port, (uint32_t)udp_size);
 
-            uint8_t* ipv4 = create_eth_frame(td, buffer, udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
+            uint8_t* ipv4 = create_eth_frame(dev, buffer, udp_size + UDP_WRAP_SIZE + IPv4_WRAP_SIZE, ETH2_IPv4);
             uint8_t* udp  = create_ipv4_frame(ipv4, udp_size + UDP_WRAP_SIZE, IP_PROTO_UDP, ip_buf, CLIENT_IP);
             create_udp_datagram(udp, udp_size, port, td->recvport);
 
@@ -444,32 +466,42 @@ ptrdiff_t tap_recv(struct tap_dev *td, void* buf, size_t len)
     return rx_len;
 }
 
-bool tap_is_up(struct tap_dev *td)
+bool tap_user_is_up(struct tap_dev *dev)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     return td->is_up;
 }
 
-bool tap_set_up(struct tap_dev *td, bool up)
+bool tap_user_set_up(struct tap_dev *dev, bool up)
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     td->is_up = up;
     return true;
 }
 
-bool tap_get_mac(struct tap_dev *td, uint8_t mac[static 6])
+bool tap_user_get_mac(struct tap_dev *dev, uint8_t mac[6])
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     memcpy(mac, td->mac, 6);
     return true;
 }
 
-bool tap_set_mac(struct tap_dev *td, uint8_t mac[static 6])
+bool tap_user_set_mac(struct tap_dev *dev, const uint8_t mac[6])
 {
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
     rvvm_info("MAC set to %02x::%02x::%02x::%02x::%02x::%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     memcpy(td->mac, mac, 6);
     return true;
 }
 
-int tap_open(const char* dev, struct tap_dev *ret)
+bool tap_user_open(const char* dev, struct tap_dev *td)
 {
+    struct tap_dev_user *ret = (struct tap_dev_user*) malloc(sizeof(struct tap_dev_user));
+    if (ret == NULL) {
+        return false;
+    }
+
+    td->data = ret;
     rvvm_info("TAP open on \"%s\"", dev);
     ret->is_up = true;
     ret->flag = TAPPOLL_OUT;
@@ -482,58 +514,73 @@ int tap_open(const char* dev, struct tap_dev *ret)
     ret->wakeport = net_udp_port(ret->wakesock1);
     net_selector_add(ret->selector, ret->wakesock1);
     ret->recvsock = NET_SOCK_INVALID;
-    return 0;
+    return true;
 }
 
-void* tap_workthread(void *arg)
+void tap_user_wake(struct tap_dev *dev)
 {
-    struct tap_pollevent_cb *pollev = (struct tap_pollevent_cb *) arg;
-    struct tap_dev *td = &pollev->dev;
-    while (true) {
-        if (net_selector_wait(pollev->dev.selector)) {
-            if (net_selector_ready(td->selector, td->wakesock1)) {
-                // Clear the wake event
-                uint32_t ip;
-                uint16_t port;
-                uint8_t tmp;
-                net_udp_recv(td->wakesock1, &tmp, 1, &ip, &port);
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
+    uint8_t tmp = 0;
+    net_udp_send(td->wakesock2, &tmp, 1, NET_IP_LOCAL, td->wakeport);
+}
 
-                // Check events
-                int req = pollev->pollevent_check(pollev->pollevent_arg);
-                if (req != TAPPOLL_ERR) {
-                    pollev->pollevent(req & pollev->dev.flag, pollev->pollevent_arg);
-                }
-            }
+static enum tap_poll_result tap_user_poll(struct tap_dev *dev, enum tap_poll_result req, int timeout)
+{
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
+    UNUSED(timeout);
+    enum tap_poll_result result = TAPPOLL_NONE;
+    if (net_selector_wait(td->selector)) {
+        if (net_selector_ready(td->selector, td->wakesock1)) {
+            // Clear the wake event
+            uint32_t ip;
+            uint16_t port;
+            uint8_t tmp;
+            net_udp_recv(td->wakesock1, &tmp, 1, &ip, &port);
+            result = req & td->flag;
+        }
 
-            hashmap_foreach(&td->udp_ports, port, sock) {
-                if (net_selector_ready(td->selector, sock)) {
-                    td->recvsock = sock;
-                    td->recvport = port;
+        hashmap_foreach(&td->udp_ports, port, sock) {
+            if (net_selector_ready(td->selector, sock)) {
+                td->recvsock = sock;
+                td->recvport = port;
 
-                    int req = pollev->pollevent_check(pollev->pollevent_arg);
-                    if (req != TAPPOLL_ERR && (req & TAPPOLL_IN)) {
-                        pollev->pollevent(TAPPOLL_IN, pollev->pollevent_arg);
-                    } else {
-                        // Eventloop throttle to prevent 100% CPU usage
-                        sleep_ms(1);
-                    }
+                if (req != TAPPOLL_ERR && (req & TAPPOLL_IN)) {
+                    return result |= TAPPOLL_IN;
+                } else {
+                    break;
                 }
             }
         }
     }
-    return arg;
+
+    return result;
 }
 
-void tap_wake(struct tap_pollevent_cb *pollev)
+void tap_user_close(struct tap_dev *dev)
 {
-    uint8_t tmp = 0;
-    net_udp_send(pollev->dev.wakesock2, &tmp, 1, NET_IP_LOCAL, pollev->dev.wakeport);
+    struct tap_dev_user *td = (struct tap_dev_user*) dev->data;
+    tap_user_set_up(dev, false);
+    net_close(td->wakesock1);
+    net_close(td->wakesock2);
+    hashmap_foreach(&td->udp_ports, port, sock) {
+        UNUSED(port);
+        net_close(sock);
+    }
+    net_close_selector(td->selector);
+    hashmap_destroy(&td->udp_ports);
+    ringbuf_destroy(&td->rx);
+    free(td);
 }
 
-bool tap_pollevent_init(struct tap_pollevent_cb *pollcb, void *eth, pollevent_check_func pchk, pollevent_func pfunc)
-{
-    pollcb->pollevent_arg = (void*) eth;
-    pollcb->pollevent_check = pchk;
-    pollcb->pollevent = pfunc;
-    return true;
-}
+struct tap_ops tap_user_ops = {
+    .tap_open = tap_user_open,
+    .tap_wake = tap_user_wake,
+    .tap_poll = tap_user_poll,
+    .tap_send = tap_user_send,
+    .tap_recv = tap_user_recv,
+    .tap_is_up = tap_user_is_up,
+    .tap_set_up = tap_user_set_up,
+    .tap_get_mac = tap_user_get_mac,
+    .tap_set_mac = tap_user_set_mac,
+    .tap_close = tap_user_close,
+};

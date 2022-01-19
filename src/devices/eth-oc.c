@@ -184,7 +184,10 @@ struct ethoc_dev
 {
     struct bd bdbuf[ETHOC_BD_BUFSIZ / sizeof(struct bd)];
     struct mdio mdio;
-    struct tap_pollevent_cb pollev;
+    struct tap_dev *tap;
+    spinlock_t lock;
+    thread_handle_t dma_thread;
+    uint32_t kill_thread; /* Thanks to the awesome thread API we have to use this */
     rvvm_machine_t* machine; /* Machine to send IRQ to, also used as memory to send/recv packets */
     void *intc_data;
     uint32_t irq;
@@ -243,8 +246,7 @@ static void ethoc_reset(struct ethoc_dev *eth)
 
 static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-    if (offset < 0x400 && (offset % 4 != 0 || size != 4))
-    {
+    if (offset < 0x400 && (offset % 4 != 0 || size != 4)) {
         /* TODO: misalign */
         return false;
     }
@@ -255,7 +257,7 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, pad
     struct ethoc_dev *eth = (struct ethoc_dev *) device->data;
     uint32_t *data = (uint32_t*) memory_data;
 
-    spin_lock(&eth->pollev.lock);
+    spin_lock(&eth->lock);
     switch (offset)
     {
         case ETHOC_MODER:
@@ -307,14 +309,14 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, pad
             *data = eth->miistatus;
             break;
         case ETHOC_MAC_ADDR0:
-            tap_get_mac(&eth->pollev.dev, eth->macaddr);
+            tap_get_mac(eth->tap, eth->macaddr);
             *data = eth->macaddr[5]
                 | (eth->macaddr[4] << 8)
                 | (eth->macaddr[3] << 16)
                 | ((uint32_t)eth->macaddr[4]) << 24;
             break;
         case ETHOC_MAC_ADDR1:
-            tap_get_mac(&eth->pollev.dev, eth->macaddr);
+            tap_get_mac(eth->tap, eth->macaddr);
             *data = eth->macaddr[1] | (eth->macaddr[0] << 8);
             break;
         case ETHOC_ETH_HASH0_ADR:
@@ -334,10 +336,10 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, pad
             memcpy(memory_data, (uint8_t*)&eth->bdbuf + offset - ETHOC_BD_ADDR, size);
     }
 
-    spin_unlock(&eth->pollev.lock);
+    spin_unlock(&eth->lock);
     return true;
 err:
-    spin_unlock(&eth->pollev.lock);
+    spin_unlock(&eth->lock);
     return false;
 }
 
@@ -356,7 +358,7 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, pa
     uint32_t *data = (uint32_t*) memory_data;
     bool wake = false;
 
-    spin_lock(&eth->pollev.lock);
+    spin_lock(&eth->lock);
     switch (offset)
     {
         case ETHOC_MODER:
@@ -441,12 +443,12 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, pa
             eth->macaddr[4] = (*data >> 8) & 0xff;
             eth->macaddr[3] = (*data >> 16) & 0xff;
             eth->macaddr[2] = (*data >> 24) & 0xff;
-            tap_set_mac(&eth->pollev.dev, eth->macaddr);
+            tap_set_mac(eth->tap, eth->macaddr);
             break;
         case ETHOC_MAC_ADDR1:
             eth->macaddr[1] = *data & 0xff;
             eth->macaddr[0] = (*data >> 8) & 0xff;
-            tap_set_mac(&eth->pollev.dev, eth->macaddr);
+            tap_set_mac(eth->tap, eth->macaddr);
             break;
         case ETHOC_ETH_HASH0_ADR:
             eth->hash[0] = *data;
@@ -469,151 +471,173 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, pa
             }
     }
 
-    spin_unlock(&eth->pollev.lock);
-    if (wake) tap_wake(&eth->pollev);
+    spin_unlock(&eth->lock);
+    if (wake) tap_wake(eth->tap);
     return true;
 err:
-    spin_unlock(&eth->pollev.lock);
+    spin_unlock(&eth->lock);
     return false;
 }
 
-static void ethoc_pollevent(int poll_status, void *arg)
+static void* ethoc_workthread(void *arg)
 {
-    struct ethoc_dev *eth = (struct ethoc_dev *) arg;
-    //printf("in pollevent\n");
+    struct ethoc_dev* eth = (struct ethoc_dev*) arg;
+    spin_lock(&eth->lock);
 
-    spin_lock(&eth->pollev.lock);
+    while (!atomic_load_uint32(&eth->kill_thread)) {
+        enum tap_poll_result poll_for = TAPPOLL_IN;
 
-    if (poll_status & TAPPOLL_IN && eth->moder & ETHOC_MODER_RXEN) {
-        /* Some data arrived */
-        uint32_t prevbd = eth->cur_rxbd;
-        struct bd *bd;
-        do {
-            bd = &eth->bdbuf[eth->cur_rxbd];
-
-            if (bd->data & ETHOC_BD_WR || eth->cur_rxbd == ETHOC_BD_BUFSIZ / sizeof(struct bd)) {
-                eth->cur_rxbd = eth->tx_bd_num;
-            } else {
-                ++eth->cur_rxbd;
+        if (eth->moder & ETHOC_MODER_TXEN) {
+            /* Set OUT flag only if we have something to send */
+            struct bd *bd = &eth->bdbuf[eth->cur_txbd];
+            if (bd->data & ETHOC_TXBD_RD) {
+                poll_for |= TAPPOLL_OUT;
             }
+        }
 
-            if (prevbd == eth->cur_rxbd) {
-                /* No free buffers when receiving a frame - ignore it.
-                 * Hopefully it will be read later... */
-                goto err_read;
-            }
-        } while (!(bd->data & ETHOC_RXBD_E));
+        struct bd *rxbd;
+        if (eth->moder & ETHOC_MODER_RXEN) {
+            /* Find a free BD for incoming data */
+            uint32_t prevbd = eth->cur_rxbd;
 
-        bd->data &= ~ETHOC_RXBD_E;
+            for (rxbd = &eth->bdbuf[eth->cur_rxbd];
+                    !(rxbd->data & ETHOC_RXBD_E);
+                    rxbd = &eth->bdbuf[eth->cur_rxbd]) {
 
-        void* buffer = safe_malloc(1536);
-        ptrdiff_t read = tap_recv(&eth->pollev.dev, buffer, 1536);
-        if (read < 0) {
-            /* Set Invalid Symbol flag on error - there's no generic error flag, but
-                * this is close enough */
-            bd->data |= ETHOC_RXBD_IS;
-            ethoc_interrupt(eth, ETHOC_INT_TXE);
+                if (rxbd->data & ETHOC_BD_WR || eth->cur_rxbd == ETHOC_BD_BUFSIZ / sizeof(struct bd)) {
+                    eth->cur_rxbd = eth->tx_bd_num;
+                } else {
+                    ++eth->cur_rxbd;
+                }
+
+                if (prevbd == eth->cur_rxbd) {
+                    /* No free buffers when receiving a frame - ignore it.
+                     * Hopefully it will be read later... */
+                    poll_for &= ~TAPPOLL_IN;
+                    break;
+                }
+            } 
         } else {
-            if (rvvm_write_ram(eth->machine, bd->ptr, buffer, read)) {
-                bd->data |= (read & 0xffff) << 16;
+            poll_for &= ~TAPPOLL_IN;
+        }
+
+        spin_unlock(&eth->lock);
+
+        enum tap_poll_result poll_result = tap_poll(eth->tap, poll_for, -1);
+        if (poll_result == TAPPOLL_ERR) {
+            continue;
+        }
+
+        spin_lock(&eth->lock);
+
+        if (poll_result & TAPPOLL_IN && eth->moder & ETHOC_MODER_RXEN) {
+            /* Some data arrived */
+            rxbd->data &= ~ETHOC_RXBD_E;
+
+            void* buffer = safe_malloc(1536);
+            ptrdiff_t read = tap_recv(eth->tap, buffer, 1536);
+            if (read < 0) {
+                /* Set Invalid Symbol flag on error - there's no generic error flag, but
+                 * this is close enough */
+                rxbd->data |= ETHOC_RXBD_IS;
+                ethoc_interrupt(eth, ETHOC_INT_TXE);
+                goto err_read;
             } else {
-                /* Where does this thing point to? Anyway, set some error flag... */
-                bd->data |= ETHOC_RXBD_OR;
+                if (rvvm_write_ram(eth->machine, rxbd->ptr, buffer, read)) {
+                    rxbd->data |= (read & 0xffff) << 16;
+                } else {
+                    /* Where does this thing point to? Anyway, set some error flag... */
+                    rxbd->data |= ETHOC_RXBD_OR;
+                    ethoc_interrupt(eth, ETHOC_INT_TXE);
+                }
+            }
+            free(buffer);
+
+            //printf("rx bd: %d read: %zd\n", eth->cur_rxbd, read);
+
+            if ((size_t)read > (eth->packetlen & 0xffff)) {
+                rxbd->data |= ETHOC_RXBD_TL;
+                ethoc_interrupt(eth, ETHOC_INT_TXE);
+            } else if (!(eth->moder & ETHOC_MODER_PAD) && !(eth->moder & ETHOC_MODER_RECSMALL) && (size_t)read < ((eth->packetlen >> 16) & 0xffff)) {
+                rxbd->data |= ETHOC_RXBD_SF;
                 ethoc_interrupt(eth, ETHOC_INT_TXE);
             }
-        }
-        free(buffer);
 
-        //printf("rx bd: %d read: %zd\n", eth->cur_rxbd, read);
-
-        if (read > (eth->packetlen & 0xffff)) {
-            bd->data |= ETHOC_RXBD_TL;
-            ethoc_interrupt(eth, ETHOC_INT_TXE);
-        } else if (!(eth->moder & ETHOC_MODER_PAD) && !(eth->moder & ETHOC_MODER_RECSMALL) && read < ((eth->packetlen >> 16) & 0xffff)) {
-            bd->data |= ETHOC_RXBD_SF;
-            ethoc_interrupt(eth, ETHOC_INT_TXE);
+            if (rxbd->data & ETHOC_BD_IRQ) {
+                ethoc_interrupt(eth, ETHOC_INT_RXB);
+            }
         }
-
-        if (bd->data & ETHOC_BD_IRQ) {
-            ethoc_interrupt(eth, ETHOC_INT_RXB);
-        }
-    }
 err_read:
 
-    if (poll_status & TAPPOLL_OUT && eth->moder & ETHOC_MODER_TXEN) {
-        /* Ready to send something */
-        struct bd *bd = &eth->bdbuf[eth->cur_txbd];
-        if (!(bd->data & ETHOC_TXBD_RD)) {
-            /* Nothing to send */
-            goto err_send;
-        }
+        if (poll_result & TAPPOLL_OUT && eth->moder & ETHOC_MODER_TXEN) {
+            /* Ready to send something */
+            struct bd *bd = &eth->bdbuf[eth->cur_txbd];
+            if (!(bd->data & ETHOC_TXBD_RD)) {
+                /* Nothing to send */
+                goto err_send;
+            }
 
-        //printf("tx bd: %d bd num: %d to write: %d\n", eth->cur_txbd, eth->tx_bd_num, (bd->data >> 16) & 0xffff);
+            //printf("tx bd: %d bd num: %d to write: %d\n", eth->cur_txbd, eth->tx_bd_num, (bd->data >> 16) & 0xffff);
 
-        if (bd->data & ETHOC_BD_WR || eth->cur_txbd == eth->tx_bd_num) {
-            eth->cur_txbd = 0;
-        } else {
-            ++eth->cur_txbd;
-        }
+            if (bd->data & ETHOC_BD_WR || eth->cur_txbd == eth->tx_bd_num) {
+                eth->cur_txbd = 0;
+            } else {
+                ++eth->cur_txbd;
+            }
 
-        uint16_t to_write = (bd->data >> 16) & 0xffff;
-        void* buffer = safe_malloc(to_write);
-        if (rvvm_read_ram(eth->machine, buffer, bd->ptr, to_write)) {
-            ptrdiff_t written = tap_send(&eth->pollev.dev, buffer, to_write);
-            bd->data &= ~ETHOC_TXBD_RD;
-            if (written < 0) {
-                bd->data |= ETHOC_TXBD_RL;
-                ethoc_interrupt(eth, ETHOC_INT_TXE);
-            } else if (written < to_write) {
-                bd->data |= ETHOC_TXBD_UR;
+            uint16_t to_write = (bd->data >> 16) & 0xffff;
+            void* buffer = safe_malloc(to_write);
+            if (rvvm_read_ram(eth->machine, buffer, bd->ptr, to_write)) {
+                ptrdiff_t written = tap_send(eth->tap, buffer, to_write);
+                bd->data &= ~ETHOC_TXBD_RD;
+                if (written < 0) {
+                    bd->data |= ETHOC_TXBD_RL;
+                    ethoc_interrupt(eth, ETHOC_INT_TXE);
+                } else if (written < to_write) {
+                    bd->data |= ETHOC_TXBD_UR;
+                    ethoc_interrupt(eth, ETHOC_INT_TXE);
+                }
+            } else {
+                bd->data &= ~ETHOC_TXBD_RD;
+                bd->data |= ETHOC_TXBD_CS;
                 ethoc_interrupt(eth, ETHOC_INT_TXE);
             }
-        } else {
-            bd->data &= ~ETHOC_TXBD_RD;
-            bd->data |= ETHOC_TXBD_CS;
-            ethoc_interrupt(eth, ETHOC_INT_TXE);
-        }
-        free(buffer);
+            free(buffer);
 
-        if (bd->data & ETHOC_BD_IRQ) {
-            ethoc_interrupt(eth, ETHOC_INT_TXB);
+            if (bd->data & ETHOC_BD_IRQ) {
+                ethoc_interrupt(eth, ETHOC_INT_TXB);
+            }
         }
+err_send: ;
     }
-err_send:
-    spin_unlock(&eth->pollev.lock);
-    return;
+
+    spin_unlock(&eth->lock);
+    return NULL;
 }
 
-static int ethoc_pollevent_check(void *arg) {
-    struct ethoc_dev *eth = (struct ethoc_dev *) arg;
-    int ret = 0;
-    spin_lock(&eth->pollev.lock);
-
-    if (eth->moder & ETHOC_MODER_TXEN) {
-        /* Set OUT flag only if we have something to send */
-        struct bd *bd = &eth->bdbuf[eth->cur_txbd];
-        if (bd->data & ETHOC_TXBD_RD) {
-            ret |= TAPPOLL_OUT;
-        }
-    }
-
-    if (eth->moder & ETHOC_MODER_RXEN) {
-        ret |= TAPPOLL_IN;
-    }
-
-    spin_unlock(&eth->pollev.lock);
-    return ret;
+static void ethoc_remove(rvvm_mmio_dev_t* device)
+{
+    struct ethoc_dev *eth = (struct ethoc_dev *) device->data;
+    atomic_store_uint32(&eth->kill_thread, true);
+    tap_wake(eth->tap);
+    thread_join(eth->dma_thread);
+    tap_close(eth->tap);
 }
 
 static rvvm_mmio_type_t ethoc_dev_type = {
     .name = "ethernet_oc",
+    .remove = ethoc_remove,
 };
 
 void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
-    int err = tap_open(NULL/*tap_name*/, &eth->pollev.dev);
-    if (err < 0) {
+#ifdef USE_TAP_LINUX
+    eth->tap = tap_open(NULL /* TAP name */, &tap_linux_ops);
+#else
+    eth->tap = tap_open(NULL /* TAP name */, &tap_user_ops);
+#endif
+    if (eth->tap == NULL) {
         free(eth);
         return;
     }
@@ -625,27 +649,28 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uin
     eth->irq = irq;
     eth->machine = machine;
 
-    if (!tap_pollevent_init(&eth->pollev, eth, ethoc_pollevent_check, ethoc_pollevent)) {
-        free(eth);
+    eth->mdio.phyid = 0;
+    eth->mdio.dev = eth->tap;
+
+    rvvm_mmio_dev_t ethoc_dev = {
+        .min_op_size = 4,
+        .max_op_size = 4,
+        .read = ethoc_data_mmio_read,
+        .write = ethoc_data_mmio_write,
+        .type = &ethoc_dev_type,
+        .begin = base_addr,
+        .end = base_addr + 0x800,
+        .data = eth,
+    };
+    rvvm_attach_mmio(machine, &ethoc_dev);
+    
+    eth->dma_thread = thread_create(ethoc_workthread, eth);
+    if (!eth->dma_thread) {
+        rvvm_detach_mmio(machine, ethoc_dev.begin);
+        /* remove() will be called on machine shutdown */
         return;
     }
 
-    eth->mdio.phyid = 0;
-    eth->mdio.dev = &eth->pollev.dev;
-
-    rvvm_mmio_dev_t ethoc_dev = {0};
-    ethoc_dev.min_op_size = 4;
-    ethoc_dev.max_op_size = 4;
-    ethoc_dev.read = ethoc_data_mmio_read;
-    ethoc_dev.write = ethoc_data_mmio_write;
-    ethoc_dev.type = &ethoc_dev_type;
-    ethoc_dev.begin = base_addr;
-    ethoc_dev.end = base_addr + 0x800;
-    ethoc_dev.data = eth;
-    rvvm_attach_mmio(machine, &ethoc_dev);
-    
-    // TODO: this leaks thread handle, needs proper managing
-    thread_create(tap_workthread, &eth->pollev);
 #ifdef USE_FDT
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
     struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;

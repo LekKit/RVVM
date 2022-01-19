@@ -22,69 +22,97 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef USE_NET
 #include "rvvm_types.h"
 #include "spinlock.h"
+#include "riscv.h"
 
-#ifdef USE_TAP_LINUX
-#include <net/if.h>
-
-struct tap_dev {
-    int _fd;
-    int _sockfd; /* For stuff like setting the interface up */
-    char _ifname[IFNAMSIZ];
-};
-#else
-#include "ringbuf.h"
-#include "hashmap.h"
-#include "networking.h"
-
-struct tap_dev {
-    struct ringbuf rx;
-    hashmap_t udp_ports;
-    netselector_t selector;
-    netsocket_t wakesock1, wakesock2;
-    netsocket_t recvsock;
-    int flag;
-    uint16_t wakeport;
-    uint16_t recvport;
-    uint8_t mac[6];
-    bool is_up;
-};
-
-#endif
-
+#if 0
 typedef int (*pollevent_check_func)(void *arg);
 typedef void (*pollevent_func)(int poll_status, void *arg);
 
 struct tap_pollevent_cb
 {
-    spinlock_t lock;
-    pollevent_check_func pollevent_check;
-    pollevent_func pollevent;
-    void *pollevent_arg;
-    struct tap_dev dev;
-
-    /* Private; used to wake up the poll thread for tx operation */
-    int _wakefds[2];
 };
+#endif
 
 enum tap_poll_result
 {
+    TAPPOLL_NONE = 0,
     TAPPOLL_IN = (1 << 0), /* New data available */
     TAPPOLL_OUT = (1 << 1), /* Data can be sent again, or needs to be sent */
     TAPPOLL_ERR = -1 /* Error occured */
 };
 
-int tap_open(const char* dev, struct tap_dev *ret);
-void tap_wake(struct tap_pollevent_cb *pollev);
+struct tap_ops;
+struct tap_dev
+{
+    // spinlock_t lock;
+    struct tap_ops *ops;
+    void* data;
+};
+
+struct tap_ops
+{
+    bool (*tap_open)(const char* dev, struct tap_dev *td);
+    void (*tap_wake)(struct tap_dev *dev);
+    enum tap_poll_result (*tap_poll)(struct tap_dev *dev, enum tap_poll_result request, int timeout);
+    void (*tap_close)(struct tap_dev *td);
+
+    ptrdiff_t (*tap_send)(struct tap_dev *td, const void *buf, size_t len);
+    ptrdiff_t (*tap_recv)(struct tap_dev *td, void *buf, size_t len);
+
+    bool (*tap_is_up)(struct tap_dev *td);
+    bool (*tap_set_up)(struct tap_dev *td, bool up);
+    bool (*tap_get_mac)(struct tap_dev *td, uint8_t mac[6]);
+    bool (*tap_set_mac)(struct tap_dev *td, const uint8_t mac[6]);
+};
+
+static inline struct tap_dev* tap_open(const char* dev, struct tap_ops *ops)
+{
+    struct tap_dev *td = malloc(sizeof(struct tap_dev));
+    if (td == NULL) {
+        return NULL;
+    }
+
+    td->ops = ops;
+    if (!ops->tap_open(dev, td)) {
+        free(td);
+        return NULL;
+    }
+
+    return td;
+}
+
+static inline void tap_close(struct tap_dev *dev)
+{
+    dev->ops->tap_close(dev);
+    free(dev);
+}
+
+static inline void tap_wake(struct tap_dev *dev) { return dev->ops->tap_wake(dev); }
+static inline enum tap_poll_result tap_poll(struct tap_dev *dev, enum tap_poll_result request, int timeout)
+{
+    return dev->ops->tap_poll(dev, request, timeout);
+}
+
+static inline ptrdiff_t tap_send(struct tap_dev *td, const void *buf, size_t len) { return td->ops->tap_send(td, buf, len); }
+static inline ptrdiff_t tap_recv(struct tap_dev *td, void *buf, size_t len) { return td->ops->tap_recv(td, buf, len); }
+
+static inline bool tap_is_up(struct tap_dev *td) { return td->ops->tap_is_up(td); }
+static inline bool tap_set_up(struct tap_dev *td, bool up) { return td->ops->tap_set_up(td, up); }
+static inline bool tap_get_mac(struct tap_dev *td, uint8_t mac[6]) { return td->ops->tap_get_mac(td, mac); }
+static inline bool tap_set_mac(struct tap_dev *td, const uint8_t mac[6]) { return td->ops->tap_set_mac(td, mac); }
+
+#ifdef USE_TAP_LINUX
+extern struct tap_ops tap_linux_ops;
+#else
+extern struct tap_ops tap_user_ops;
+#endif
+
+
+#if 0
 void* tap_workthread(void *arg);
 bool tap_pollevent_init(struct tap_pollevent_cb *pollcb, void *eth, pollevent_check_func pchk, pollevent_func pfunc);
+#endif
 
-ptrdiff_t tap_send(struct tap_dev *td, void *buf, size_t len);
-ptrdiff_t tap_recv(struct tap_dev *td, void *buf, size_t len);
-
-bool tap_is_up(struct tap_dev *td);
-bool tap_set_up(struct tap_dev *td, bool up);
-bool tap_get_mac(struct tap_dev *td, uint8_t mac[static 6]);
-bool tap_set_mac(struct tap_dev *td, uint8_t mac[static 6]);
 #endif
 
 #endif
