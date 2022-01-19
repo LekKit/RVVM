@@ -666,16 +666,16 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
             return BRANCH_NEW;
         }
     } else {
-        if (handle) {
+        if (handle == BRANCH_NEW) {
+            branch_t tmp = block->size;
+            rvjit_put_code(block, "\xE9\xFB\xFF\xFF\xFF", 5);
+            return tmp;
+        } else {
             uint8_t code[5];
             code[0] = 0xE9;
             write_uint32_le_m(code + 1, handle - block->size - 5);
             rvjit_put_code(block, code, 5);
             return BRANCH_NEW;
-        } else {
-            branch_t tmp = block->size;
-            rvjit_put_code(block, "\xE9\xFB\xFF\xFF\xFF", 5);
-            return tmp;
         }
     }
 }
@@ -707,7 +707,7 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
 #define X86_BGEU X86_JNB
 
 
-static branch_t rvjit_x86_branch_entry(rvjit_block_t* block, uint8_t opcode, branch_t handle)
+static inline branch_t rvjit_x86_branch_entry(rvjit_block_t* block, uint8_t opcode, branch_t handle)
 {
 #ifdef RVJIT_FAR_BRANCHES
     uint8_t code[6];
@@ -739,7 +739,7 @@ static branch_t rvjit_x86_branch_entry(rvjit_block_t* block, uint8_t opcode, bra
 #endif
 }
 
-static branch_t rvjit_x86_branch_target(rvjit_block_t* block, branch_t handle)
+static inline branch_t rvjit_x86_branch_target(rvjit_block_t* block, branch_t handle)
 {
     if (handle == BRANCH_NEW) {
         return block->size;
@@ -772,6 +772,272 @@ static inline branch_t rvjit_x86_branch_imm(rvjit_block_t* block, uint8_t opcode
         rvjit_x86_r_imm_op(block, X86_CMP_IMM, hrs1, imm, bits_64);
         return rvjit_x86_branch_entry(block, opcode, handle);
     }
+}
+
+/*
+ * Multiply/divide internal functions
+ */
+
+// imul r1, r2, used for mul/mulw
+static inline void rvjit_x86_imul_2reg_op(rvjit_block_t* block, regid_t dest, regid_t src, bool bits_64)
+{
+    uint8_t code[4];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0x0F;
+    code[2] = 0xAF;
+    code[3] = X86_2_REGS;
+    if (dest >= X64_R8) {
+        code[0] |= X64_REX_R;
+        code[3] += (dest - X64_R8) << 3;
+    } else {
+        code[3] += dest << 3;
+    }
+    if (src >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[3] += src - X64_R8;
+    } else {
+        code[3] += src;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
+}
+
+#define X86_MUL  0xE0
+#define X86_IMUL 0xE8
+#define X86_DIV  0xF0
+#define X86_IDIV 0xF8
+
+// mul/imul EDX:EAX = EAX * src, used for mulh
+// div/idiv EAX = EDX:EAX / src; EDX = EDX:EAX % src, used for div
+static inline void rvjit_x86_muldiv_1reg_op(rvjit_block_t* block, uint8_t opcode, regid_t src, bool bits_64)
+{
+    uint8_t code[3];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0xF7;
+    code[2] = opcode;
+    if (src >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[2] |= src - X64_R8;
+    } else {
+        code[2] |= src;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 3 : 2);
+}
+
+// Sign-extend EAX to EDX:EAX
+static inline void rvjit_x86_cdq(rvjit_block_t* block, bool bits_64)
+{
+    if (bits_64) rvjit_put_code(block, "\x48", 1);
+    rvjit_put_code(block, "\x99", 1);
+}
+
+static inline void rvjit_x86_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    if (hrds == hrs1) {
+        rvjit_x86_imul_2reg_op(block, hrds, hrs2, bits_64);
+    } else if (hrds == hrs2) {
+        rvjit_x86_imul_2reg_op(block, hrds, hrs1, bits_64);
+    } else {
+        rvjit_x86_mov(block, hrds, hrs1, bits_64);
+        rvjit_x86_imul_2reg_op(block, hrds, hrs2, bits_64);
+    }
+}
+
+// mulh:  X86_IMUL, rem = true
+// mulhu: X86_MUL,  rem = true
+static inline void rvjit_x86_mulh_div_rem(rvjit_block_t* block, uint8_t opcode, bool rem, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    regid_t output_reg = rem ? X86_EDX : X86_EAX;
+    regid_t second_reg = rem ? X86_EAX : X86_EDX;
+    regid_t s2_reg = hrs2;
+
+    if (hrds != output_reg) rvjit_native_push(block, output_reg);
+    if (hrds != second_reg) rvjit_native_push(block, second_reg);
+
+    if (hrs2 == X86_EAX || hrs2 == X86_EDX) {
+        // Search for any non-clobbering register
+        s2_reg = X86_ECX;
+        while (s2_reg == X86_EAX || s2_reg == X86_EDX || s2_reg == hrs1 || s2_reg == hrs2) s2_reg++;
+        rvjit_native_push(block, s2_reg);
+        rvjit_x86_mov(block, s2_reg, hrs2, bits_64);
+    }
+
+    if (hrs1 != X86_EAX) {
+        rvjit_x86_mov(block, X86_EAX, hrs1, bits_64);
+    }
+
+    if (opcode == X86_DIV) {
+        // On unsigned division, EDX input is zero
+        rvjit_native_zero_reg(block, X86_EDX);
+    } else if (opcode == X86_IDIV) {
+        // On signed division, EDX input is a sign-extension of EAX
+        rvjit_x86_cdq(block, bits_64);
+    }
+
+    rvjit_x86_muldiv_1reg_op(block, opcode, s2_reg, bits_64);
+
+    if (s2_reg != hrs2) rvjit_native_pop(block, s2_reg);
+    if (hrds != second_reg) rvjit_native_pop(block, second_reg);
+    if (hrds != output_reg) {
+        rvjit_x86_mov(block, hrds, output_reg, bits_64);
+        rvjit_native_pop(block, output_reg);
+    }
+}
+
+static inline void rvjit_x86_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    regid_t second_reg = X86_EAX;
+    rvjit_x86_mulh_div_rem(block, X86_MUL, true, hrds, hrs1, hrs2, bits_64);
+    // Search for any non-clobbering register
+    while (second_reg == hrds || second_reg == hrs1 || second_reg == hrs2) second_reg++;
+    rvjit_native_push(block, second_reg);
+    rvjit_x86_2reg_imm_shift_op(block, X86_SRA, second_reg, hrs1, bits_64 ? 63 : 31, bits_64);
+    rvjit_x86_imul_2reg_op(block, second_reg, hrs2, bits_64);
+    rvjit_x86_3reg_op(block, X86_ADD, hrds, hrds, second_reg, bits_64);
+    rvjit_native_pop(block, second_reg);
+}
+
+// div:   X86_IDIV, rem = false
+// divu:  X86_DIV,  rem = false
+// rem:   X86_IDIV, rem = true
+// remu:  X86_DIV,  rem = true
+static inline void rvjit_x86_divu_remu(rvjit_block_t* block, bool rem, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    branch_t l1 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, 0, BRANCH_NEW, false, bits_64);
+    if (rem) {
+        if (hrds != hrs1) rvjit_x86_mov(block, hrds, hrs1, bits_64);
+    } else {
+        rvjit_native_setreg32s(block, hrds, -1);
+    }
+    branch_t l2 = rvjit_native_jmp(block, BRANCH_NEW, false);
+    rvjit_x86_branch_imm(block, X86_BNE, hrs1, 0, l1, true, bits_64);
+    rvjit_x86_mulh_div_rem(block, X86_DIV, rem, hrds, hrs1, hrs2, bits_64);
+    rvjit_native_jmp(block, l2, true);
+}
+
+static inline void rvjit_x86_div_rem(rvjit_block_t* block, bool rem, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    regid_t cmp_reg = X86_EAX;
+    branch_t l1;
+
+    // Overflow check (rs1 != 0x80000000... && rs2 != -1)
+    if (bits_64) {
+        // Search for any non-clobbering register
+        //while (cmp_reg == hrds || cmp_reg == hrs1 || cmp_reg == hrs2) cmp_reg++;
+        //rvjit_native_push(block, cmp_reg);
+        cmp_reg = rvjit_claim_hreg(block);
+        rvjit_native_setregw(block, cmp_reg, (size_t)0x8000000000000000ULL);
+        l1 = rvjit_x86_branch(block, X86_BNE, hrs2, cmp_reg, BRANCH_NEW, false, bits_64);
+    } else {
+        l1 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, 0x80000000U, BRANCH_NEW, false, bits_64);
+    }
+
+    branch_t l2 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, -1, BRANCH_NEW, false, bits_64);
+
+    // Overflow check fallthrough
+    if (rem) {
+        rvjit_native_setreg32(block, hrds, 0);
+    } else {
+        if (bits_64) {
+            rvjit_x86_mov(block, hrds, cmp_reg, bits_64);
+        } else {
+            rvjit_native_setreg32(block, hrds, 0x80000000U);
+        }
+    }
+    branch_t l3 = rvjit_native_jmp(block, BRANCH_NEW, false); // goto exit
+
+    // Overflow check pass
+    rvjit_x86_branch(block, X86_BNE, cmp_reg, hrs2, l1, true, bits_64);
+    rvjit_x86_branch_imm(block, X86_BNE, hrs2, -1, l2, true, bits_64);
+
+    // Division by zero check
+    branch_t l4 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, 0, BRANCH_NEW, false, bits_64);
+
+    // Division by zero fallthrough
+    if (rem) {
+        if (hrds != hrs1) rvjit_x86_mov(block, hrds, hrs1, bits_64);
+    } else {
+        rvjit_native_setreg32s(block, hrds, -1);
+    }
+    branch_t l5 = rvjit_native_jmp(block, BRANCH_NEW, false); // goto exit
+
+    // Division by zero check pass
+    rvjit_x86_branch_imm(block, X86_BNE, hrs2, 0, l4, true, bits_64);
+
+    rvjit_x86_mulh_div_rem(block, X86_IDIV, rem, hrds, hrs1, hrs2, bits_64);
+
+    // Exit label
+    rvjit_native_jmp(block, l3, true);
+    rvjit_native_jmp(block, l5, true);
+
+    //if (bits_64) rvjit_native_pop(block, cmp_reg);
+    if (bits_64) rvjit_free_hreg(block, cmp_reg);
+}
+
+/*
+ * Linker routines
+ */
+
+static inline size_t rvjit_x86_cmp_bnez_mem(rvjit_block_t* block, regid_t addr, bool bits_64)
+{
+    uint8_t code[4];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0x83;
+    code[2] = 0x38;
+    code[3] = 0;
+    if (addr >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[2] |= addr - X64_R8;
+    } else {
+        code[2] |= addr;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
+    return code[0] ? 4 : 3;
+}
+
+// Emit jump instruction (may return false if offset cannot be encoded)
+static inline bool rvjit_tail_jmp(rvjit_block_t* block, int32_t offset)
+{
+    uint8_t code[5];
+    code[0] = 0xE9;
+    write_uint32_le_m(code + 1, ((uint32_t)offset) - 5);
+    rvjit_put_code(block, code, 5);
+    return true;
+}
+
+// Emit patchable ret instruction
+static inline void rvjit_patchable_ret(rvjit_block_t* block)
+{
+    uint8_t code[5];
+    code[0] = 0xC3;
+    write_uint32_le_m(code + 1, -5);
+    rvjit_put_code(block, code, 5);
+}
+
+// Jump if word pointed to by addr is nonzero (may emit nothing if the offset cannot be encoded)
+// Used to check interrupts in block linkage
+static inline void rvjit_tail_bnez(rvjit_block_t* block, regid_t addr, int32_t offset)
+{
+    size_t cmp_size = rvjit_x86_cmp_bnez_mem(block, addr, false);
+    uint8_t code[6];
+    code[0] = 0x0F;
+    code[1] = 0x85;
+    write_uint32_le_m(code + 2, ((uint32_t)offset) - (6 + cmp_size));
+    rvjit_put_code(block, code, 6);
+}
+
+// Patch instruction at addr into ret
+static inline void rvjit_patch_ret(void* addr)
+{
+    *(uint8_t*)addr = 0xC3;
+}
+
+// Patch jump instruction at addr
+static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
+{
+    uint8_t* code = (uint8_t*)addr;
+    code[0] = 0xE9;
+    write_uint32_le_m(code + 1, ((uint32_t)offset) - 5);
+    return true;
 }
 
 /*
@@ -950,6 +1216,46 @@ static inline branch_t rvjit32_native_bltu(rvjit_block_t* block, regid_t hrs1, r
 static inline branch_t rvjit32_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     return rvjit_x86_branch(block, X86_BGEU, hrs1, hrs2, handle, target, false);
+}
+
+static inline void rvjit32_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mul(block, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulh_div_rem(block, X86_IMUL, true, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulh_div_rem(block, X86_MUL, true, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulhsu(block, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, false, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, false, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, true, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, true, hrds, hrs1, hrs2, false);
 }
 
 /*
@@ -1214,6 +1520,76 @@ static inline branch_t rvjit64_native_bltu(rvjit_block_t* block, regid_t hrs1, r
 static inline branch_t rvjit64_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     return rvjit_x86_branch(block, X86_BGEU, hrs1, hrs2, handle, target, true);
+}
+
+static inline void rvjit64_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mul(block, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulh_div_rem(block, X86_IMUL, true, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulh_div_rem(block, X86_MUL, true, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mulhsu(block, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, false, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, false, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, true, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, true, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit64_native_mulw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_mul(block, hrds, hrs1, hrs2, false);
+    rvjit_x86_movsxd(block, hrds, hrds);
+}
+
+static inline void rvjit64_native_divw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, false, hrds, hrs1, hrs2, false);
+    rvjit_x86_movsxd(block, hrds, hrds);
+}
+
+static inline void rvjit64_native_divuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, false, hrds, hrs1, hrs2, false);
+    rvjit_x86_movsxd(block, hrds, hrds);
+}
+
+static inline void rvjit64_native_remw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_div_rem(block, true, hrds, hrs1, hrs2, false);
+    rvjit_x86_movsxd(block, hrds, hrds);
+}
+
+static inline void rvjit64_native_remuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_x86_divu_remu(block, true, hrds, hrs1, hrs2, false);
+    rvjit_x86_movsxd(block, hrds, hrds);
 }
 
 #endif
