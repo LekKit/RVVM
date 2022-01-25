@@ -383,70 +383,70 @@ static inline void rvjit_a64_logical_imm(rvjit_block_t* block, enum a64_logical_
 
 static inline bool rvjit_a64_ispow2(unsigned long long x)
 {
-	return x != 0 && (x & (x - 1)) == 0;
+    return x != 0 && (x & (x - 1)) == 0;
 }
 
 // Checks that immediate value is suitable for use in logical operation
 bool rvjit_a64_check_logical_imm64(uint64_t val, unsigned *rot, unsigned *len)
 {
-	unsigned rotation, count;
-	if ((int64_t)val < 0)
-	{
-		val = ~val;
+    unsigned rotation, count;
+    if ((int64_t)val < 0)
+    {
+        val = ~val;
         if (val == 0) return false;
-		rotation = __builtin_clzll(val);
-		count = rotation + __builtin_ctzll(val);
-		if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1))
-		{
-			return false;
-		}
-	}
-	else
-	{
+        rotation = __builtin_clzll(val);
+        count = rotation + __builtin_ctzll(val);
+        if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1))
+        {
+            return false;
+        }
+    }
+    else
+    {
         if (val == 0) return false;
-		rotation = (sizeof(val) * 8 - __builtin_ctzll(val));
-		count = rotation - __builtin_clzll(val);
+        rotation = (sizeof(val) * 8 - __builtin_ctzll(val));
+        count = rotation - __builtin_clzll(val);
         rotation &= sizeof(val) * 8 - 1;
-		if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1))
-		{
-			return false;
-		}
-	}
+        if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1))
+        {
+            return false;
+        }
+    }
 
     *rot = rotation;
     *len = count - 1;
-	return true;
+    return true;
 }
 
 bool rvjit_a64_check_logical_imm32(uint32_t val, unsigned *rot, unsigned *len)
 {
-	unsigned rotation, count;
-	if ((int32_t)val < 0)
-	{
-		val = ~val;
+    unsigned rotation, count;
+    if ((int32_t)val < 0)
+    {
+        val = ~val;
         if (val == 0) return false;
-		rotation = __builtin_clzl(val);
-		count = rotation + __builtin_ctzl(val);
-		if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1))
-		{
-			return false;
-		}
-	}
-	else
-	{
+        rotation = __builtin_clzl(val);
+        count = rotation + __builtin_ctzl(val);
+        if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1))
+        {
+            return false;
+        }
+    }
+    else
+    {
         if (val == 0) return false;
-		rotation = (sizeof(val) * 8 - __builtin_ctzl(val));
-		count = rotation - __builtin_clzl(val);
+        rotation = (sizeof(val) * 8 - __builtin_ctzl(val));
+        count = rotation - __builtin_clzl(val);
         rotation &= sizeof(val) * 8 - 1;
-		if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1))
-		{
-			return false;
-		}
-	}
+        if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1))
+        {
+            return false;
+        }
+    }
 
     *rot = rotation;
     *len = count - 1;
-	return true;
+    return true;
 }
 
 static enum a64_logical_shifted rvjit_a64_logical_imm_to_shifted(enum a64_logical_imm opc)
