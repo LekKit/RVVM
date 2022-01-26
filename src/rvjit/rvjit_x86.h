@@ -18,6 +18,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvjit.h"
 #include "mem_ops.h"
+#include "compiler.h"
+#include "utils.h"
+
+#if defined(RVJIT_NATIVE_64BIT) && defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #ifndef RVJIT_X86_H
 #define RVJIT_X86_H
@@ -350,6 +356,24 @@ static inline void rvjit_x86_movzxb(rvjit_block_t* block, regid_t dest, regid_t 
     rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
 }
 
+// x86 substitute for 3-operand add instruction
+static inline void rvjit_x86_lea_add(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t hrs2, bool bits_64)
+{
+    uint8_t code[5] = {0x00, 0x8D, 0x04, 0x00, 0x00};
+    uint8_t inst_size = 3;
+    code[0] = bits_64 ? X64_REX_W : 0;
+    if (hrds >= X64_R8) code[0] |= X64_REX_R;
+    if (hrs1 >= X64_R8) code[0] |= X64_REX_B;
+    if (hrs2 >= X64_R8) code[0] |= X64_REX_X;
+    if (hrs1 == X64_R13) {
+        code[2] |= X86_MEM_OFFB;
+        inst_size++;
+    }
+    code[2] |= (hrds & 0x7) << 3;
+    code[3] |= (hrs1 & 0x7) | ((hrs2 & 0x7) << 3);
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), inst_size + (code[0] ? 1 : 0));
+}
+
 static inline void rvjit_x86_3reg_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
 {
     if (hrds == hrs1) {
@@ -363,6 +387,11 @@ static inline void rvjit_x86_3reg_op(rvjit_block_t* block, uint8_t opcode, regid
             rvjit_x86_2reg_op(block, opcode, hrds, hrs1, bits_64);
         }
     } else {
+        if (opcode == X86_ADD) {
+            // add r1, r2, r3 -> lea r1, [r2 + r3]
+            rvjit_x86_lea_add(block, hrds, hrs1, hrs2, bits_64);
+            return;
+        }
         rvjit_x86_mov(block, hrds, hrs1, bits_64);
         rvjit_x86_2reg_op(block, opcode, hrds, hrs2, bits_64);
     }
@@ -398,13 +427,88 @@ static inline void rvjit_x86_2reg_imm_shift_op(rvjit_block_t* block, uint8_t opc
     if (imm) rvjit_x86_shift_op(block, opcode, hrds, imm, bits_64);
 }
 
+#define X86_VEX_RI 0x80
+#define X86_VEX_BI 0x20
+#define X86_VEX_W  0x80
+
+// Orthogonal 3-operand shlx/shrx/sarx from BMI2 extension
+static inline void rvjit_x86_vex_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
+{
+    uint8_t code[5] = {0xC4, 0x42, 0x00, 0xF7, 0xC0};
+    code[2] |= ((~hrs2) & 0xF) << 3;
+    code[4] |= (hrs1 & 0x7) | ((hrds & 0x7) << 3);
+    if (bits_64) code[2] |= X86_VEX_W;
+    if (hrds < X64_R8) code[1] |= X86_VEX_RI;
+    if (hrs1 < X64_R8) code[1] |= X86_VEX_BI;
+    switch (opcode) {
+        case X86_SLL: code[2] |= 0x1; break;
+        case X86_SRL: code[2] |= 0x3; break;
+        case X86_SRA: code[2] |= 0x2; break;
+    }
+    rvjit_put_code(block, code, 5);
+}
+
+static void rvjit_x86_cpuid_internal(uint32_t eax, uint32_t ecx, uint32_t* regs)
+{
+#if defined(RVJIT_NATIVE_64BIT) && defined(GNU_EXTS)
+    __asm__ __volatile__ (
+        "cpuid"
+        : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(eax), "c"(ecx));
+#elif defined(RVJIT_NATIVE_64BIT) && defined(_MSC_VER)
+    __cpuidex(regs, eax, ecx);
+#else
+    // Don't bother checking fancy extensions on i386 or exotic compilers
+    UNUSED(eax);
+    UNUSED(ecx);
+    memset(regs, 0, sizeof(uint32_t) * 4);
+#endif
+}
+
+static void rvjit_x86_cpuid(uint32_t eax, uint32_t ecx, uint32_t* regs)
+{
+    static bool init = false;
+    static uint32_t func_max = 0;
+    if (!init) {
+        // Check maximum allowed EAX value for cpuid
+        uint32_t regs[4];
+        init = true;
+        rvjit_x86_cpuid_internal(0, 0, regs);
+        func_max = regs[0];
+    }
+
+    if (eax <= func_max) {
+        rvjit_x86_cpuid_internal(eax, ecx, regs);
+    } else {
+        memset(regs, 0, sizeof(uint32_t) * 4);
+    }
+}
+
+static inline bool rvjit_x86_has_bmi2()
+{
+    static bool init = false, bmi2 = false;
+    if (!init) {
+        uint32_t regs[4];
+        init = true;
+        rvjit_x86_cpuid(7, 0, regs);
+        bmi2 = !!(regs[1] & 0x100);
+        if (bmi2) rvvm_info("RVJIT detected x86 BMI2 extension");
+    }
+     return bmi2;
+}
+
 static inline void rvjit_x86_3reg_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
 {
-    /* Shift by register is insane on x86, practically a 1-operand instruction,
+    /* Shift by register is insane on i386, practically a 1-operand instruction,
      * with CL hardcoded as shift amount reg.
-     * This function implements a proper 3-operand intrinsic,
-     * register allocator will support us in generating efficient code.
+     * This function implements a proper 3-operand intrinsic.
      */
+    if (rvjit_x86_has_bmi2()) {
+        // On BMI2 hardware, we have 1:1 instruction mappings into shlx/shrx/sarx
+        rvjit_x86_vex_shift_op(block, opcode, hrds, hrs1, hrs2, bits_64);
+        return;
+    }
+
     if (hrds == hrs1) {
         if (hrs2 != X86_ECX) {
             rvjit_x86_xchg(block, X86_ECX, hrs2);
@@ -1009,7 +1113,7 @@ static inline void rvjit_patchable_ret(rvjit_block_t* block)
 {
     uint8_t code[5];
     code[0] = 0xC3;
-    write_uint32_le_m(code + 1, -5);
+    memset(code + 1, 0x90, 4);
     rvjit_put_code(block, code, 5);
 }
 
@@ -1591,6 +1695,62 @@ static inline void rvjit64_native_remuw(rvjit_block_t* block, regid_t hrds, regi
     rvjit_x86_divu_remu(block, true, hrds, hrs1, hrs2, false);
     rvjit_x86_movsxd(block, hrds, hrds);
 }
+
+#endif
+
+#ifdef RVJIT_NATIVE_FPU
+
+#define SSE2_MOVAPSD 0x28
+#define SSE2_FADD    0x58
+
+static inline void rvjit_sse2_rex_prefix(rvjit_block_t* block, regid_t hrd, regid_t hrs)
+{
+    uint8_t rex = 0;
+    if (hrd >= X64_R8) rex |= X64_REX_R;
+    if (hrs >= X64_R8) rex |= X64_REX_B;
+    if (rex) rvjit_put_code(block, &rex, 1); // REX operand override prefix
+}
+
+static inline void rvjit_sse2_2reg_op_raw(rvjit_block_t* block, uint8_t opcode, regid_t hrd, regid_t hrs)
+{
+    uint8_t code[3] = {0x0F, 0x00, 0xC0};
+    code[1] = opcode;
+    code[2] |= (hrs & 0x7) | ((hrd & 0x7) << 3);
+    rvjit_put_code(block, code, 3);
+}
+
+static inline void rvjit_sse2_movapsd(rvjit_block_t* block, regid_t dest, regid_t src, bool fpu_d)
+{
+    if (fpu_d) rvjit_put_code(block, "\x66", 1); // SSE2 movapsd prefix
+    rvjit_sse2_rex_prefix(block, dest, src);
+    rvjit_sse2_2reg_op_raw(block, SSE2_MOVAPSD, dest, src);
+}
+
+static inline void rvjit_sse2_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dest, regid_t src, bool fpu_d)
+{
+    if (fpu_d) {
+        rvjit_put_code(block, "\xF2", 1); // SSE2 Double-precision prefix
+    } else {
+        rvjit_put_code(block, "\xF3", 1); // SSE2 Single-precision prefix
+    }
+    rvjit_sse2_rex_prefix(block, dest, src);
+    rvjit_sse2_2reg_op_raw(block, opcode, dest, src);
+}
+
+static inline void rvjit_sse2_3reg_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, hrs2, bool fpu_d)
+{
+    if (hrds == hrs1) {
+        rvjit_sse2_2reg_op(block, opcode, hrds, hrs2, fpu_d);
+    } else if (hrds == hrs2) {
+        // TODO: handle non-reversible operands
+        rvjit_sse2_2reg_op(block, opcode, hrds, hrs1, fpu_d);
+    } else {
+        rvjit_sse2_movapsd(block, hrds, hrs1, fpu_d);
+        rvjit_sse2_2reg_op(block, opcode, hrds, hrs2, fpu_d);
+    }
+}
+
+static inline void rvjit_native_fmv_s()
 
 #endif
 
