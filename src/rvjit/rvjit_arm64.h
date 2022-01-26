@@ -106,7 +106,7 @@ enum a64_movw_off
 
 static inline void rvjit_a64_movw(rvjit_block_t* block, enum a64_movw_opcs opc, regid_t rd, uint16_t imm, enum a64_movw_off off)
 {
-    rvjit_a64_insn32(block, (opc << 29) | (0x25 << 23) | (off << 21) | (imm << 5) | rd);
+    rvjit_a64_insn32(block, ((uint32_t)opc << 29) | (0x25 << 23) | (off << 21) | (imm << 5) | rd);
 }
 
 enum a64_addsub_shifted
@@ -138,7 +138,7 @@ static inline void rvjit_a64_addsub_shifted(rvjit_block_t* block,
         enum a64_addsub_shift shift,
         uint8_t amount)
 {
-    rvjit_a64_insn32(block, (opc << 29) | (0xB << 24) | (shift << 22) | (rm << 16) | (amount << 10) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, ((uint32_t)opc << 29) | (0xB << 24) | (shift << 22) | (rm << 16) | (amount << 10) | (rn << 5) | rd);
 }
 
 static inline void rvjit_native_zero_reg(rvjit_block_t* block, regid_t reg)
@@ -173,7 +173,7 @@ enum a64_bitfield_opcs
 
 static inline void rvjit_a64_bitfield(rvjit_block_t* block, enum a64_bitfield_opcs opc, regid_t rd, regid_t rn, uint8_t immr, uint8_t imms)
 {
-    rvjit_a64_insn32(block, (opc << 29) | (0x26 << 23) | ((opc >= 4) << 22) | (immr << 16) | (imms << 10) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, ((uint32_t)opc << 29) | (0x26 << 23) | ((opc >= 4) << 22) | (immr << 16) | (imms << 10) | (rn << 5) | rd);
 }
 
 #define RVJIT_NATIVE_ZEROEXT 1
@@ -215,17 +215,17 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
 {
     if (label) {
         // We want to set a label for a branch
-        if (handle) {
+        if (handle == BRANCH_NEW) {
+            // We don't have a handle - just set the label. This is a backward jump.
+            return block->size;
+        } else {
             // We have an instruction handle - this is a forward jump, relocate the address.
             rvjit_a64_b_reloc(block->code + handle, block->size - handle);
             return BRANCH_NEW;
-        } else {
-            // We don't have a handle - just set the label. This is a backward jump.
-            return block->size;
         }
     } else {
         // We want to emit a branch instruction
-        if (handle) {
+        if (handle == BRANCH_NEW) {
             // We have a branch address - emit a full instruction. This is a backward jump.
             rvjit_a64_b(block, handle - block->size);
             return BRANCH_NEW;
@@ -250,22 +250,22 @@ static inline void rvjit32_native_sub(rvjit_block_t* block, regid_t hrds, regid_
 
 enum a64_logical_shifted
 {
-    A64_ANDW  = (0 << 29) | (0 << 21),
-    A64_BICW  = (0 << 29) | (1 << 21),
-    A64_ORRW  = (1 << 29) | (0 << 21),
-    A64_ORNW  = (1 << 29) | (1 << 21),
-    A64_EORW  = (2 << 29) | (0 << 21),
-    A64_EONW  = (2 << 29) | (1 << 21),
-    A64_ANDSW = (3 << 29) | (0 << 21),
-    A64_BICSW = (3 << 29) | (1 << 21),
-    A64_AND   = (4 << 29) | (0 << 21),
-    A64_BIC   = (4 << 29) | (1 << 21),
-    A64_ORR   = (5 << 29) | (0 << 21),
-    A64_ORN   = (5 << 29) | (1 << 21),
-    A64_EOR   = (6 << 29) | (0 << 21),
-    A64_EON   = (6 << 29) | (1 << 21),
-    A64_ANDS  = (7 << 29) | (0 << 21),
-    A64_BICS  = (7 << 29) | (1 << 21),
+    A64_ANDW  = (0u << 29) | (0 << 21),
+    A64_BICW  = (0u << 29) | (1 << 21),
+    A64_ORRW  = (1u << 29) | (0 << 21),
+    A64_ORNW  = (1u << 29) | (1 << 21),
+    A64_EORW  = (2u << 29) | (0 << 21),
+    A64_EONW  = (2u << 29) | (1 << 21),
+    A64_ANDSW = (3u << 29) | (0 << 21),
+    A64_BICSW = (3u << 29) | (1 << 21),
+    A64_AND   = (4u << 29) | (0 << 21),
+    A64_BIC   = (4u << 29) | (1 << 21),
+    A64_ORR   = (5u << 29) | (0 << 21),
+    A64_ORN   = (5u << 29) | (1 << 21),
+    A64_EOR   = (6u << 29) | (0 << 21),
+    A64_EON   = (6u << 29) | (1 << 21),
+    A64_ANDS  = (7u << 29) | (0 << 21),
+    A64_BICS  = (7u << 29) | (1 << 21),
 };
 
 static inline void rvjit_a64_logical_shifted(rvjit_block_t* block,
@@ -276,7 +276,7 @@ static inline void rvjit_a64_logical_shifted(rvjit_block_t* block,
         enum a64_addsub_shift shift,
         uint8_t amount)
 {
-    rvjit_a64_insn32(block, opc | (0xA << 24) | (shift << 22) | (rm << 16) | (amount << 10) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, (uint32_t)opc | (0xA << 24) | (shift << 22) | (rm << 16) | (amount << 10) | (rn << 5) | rd);
 }
 
 static inline void rvjit32_native_or(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
@@ -296,23 +296,23 @@ static inline void rvjit32_native_xor(rvjit_block_t* block, regid_t hrds, regid_
 
 enum a64_dp_2src
 {
-    A64_UDIVW = (0 << 31) | (0 << 29) | (2  << 10),
-    A64_SDIVW = (0 << 31) | (0 << 29) | (3  << 10),
-    A64_LSLVW = (0 << 31) | (0 << 29) | (8  << 10),
-    A64_LSRVW = (0 << 31) | (0 << 29) | (9  << 10),
-    A64_ASRVW = (0 << 31) | (0 << 29) | (10 << 10),
-    A64_RORVW = (0 << 31) | (0 << 29) | (11 << 10),
-    A64_UDIV  = (1 << 31) | (0 << 29) | (2  << 10),
-    A64_SDIV  = (1 << 31) | (0 << 29) | (3  << 10),
-    A64_LSLV  = (1 << 31) | (0 << 29) | (8  << 10),
-    A64_LSRV  = (1 << 31) | (0 << 29) | (9  << 10),
-    A64_ASRV  = (1 << 31) | (0 << 29) | (10 << 10),
-    A64_RORV  = (1 << 31) | (0 << 29) | (11 << 10),
+    A64_UDIVW = (0u << 31) | (0 << 29) | (2  << 10),
+    A64_SDIVW = (0u << 31) | (0 << 29) | (3  << 10),
+    A64_LSLVW = (0u << 31) | (0 << 29) | (8  << 10),
+    A64_LSRVW = (0u << 31) | (0 << 29) | (9  << 10),
+    A64_ASRVW = (0u << 31) | (0 << 29) | (10 << 10),
+    A64_RORVW = (0u << 31) | (0 << 29) | (11 << 10),
+    A64_UDIV  = (1u << 31) | (0 << 29) | (2  << 10),
+    A64_SDIV  = (1u << 31) | (0 << 29) | (3  << 10),
+    A64_LSLV  = (1u << 31) | (0 << 29) | (8  << 10),
+    A64_LSRV  = (1u << 31) | (0 << 29) | (9  << 10),
+    A64_ASRV  = (1u << 31) | (0 << 29) | (10 << 10),
+    A64_RORV  = (1u << 31) | (0 << 29) | (11 << 10),
 };
 
 static inline void rvjit_a64_dp_2src(rvjit_block_t* block, enum a64_dp_2src opc, regid_t rd, regid_t rn, regid_t rm)
 {
-    rvjit_a64_insn32(block, opc | (0xD6 << 21) | (rm << 16) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, (uint32_t)opc | (0xD6 << 21) | (rm << 16) | (rn << 5) | rd);
 }
 
 static inline void rvjit32_native_sra(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
@@ -344,7 +344,7 @@ enum a64_addsub_imm
 
 static inline void rvjit_a64_addsub_imm(rvjit_block_t* block, enum a64_addsub_imm opc, regid_t rd, regid_t rn, uint16_t imm, bool shift)
 {
-    rvjit_a64_insn32(block, (opc << 29) | (0x22 << 23) | (shift << 22) | (imm << 10) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, ((uint32_t)opc << 29) | (0x22 << 23) | (shift << 22) | (imm << 10) | (rn << 5) | rd);
 }
 
 static inline void rvjit32_native_addi(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
@@ -377,7 +377,7 @@ enum a64_logical_imm
 
 static inline void rvjit_a64_logical_imm(rvjit_block_t* block, enum a64_logical_imm opc, regid_t rd, regid_t rn, uint8_t immr, uint8_t imms)
 {
-    rvjit_a64_insn32(block, (opc << 29) | (0x24 << 23) | ((opc >= 4) << 22) | (immr << 16) | (imms << 10) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, ((uint32_t)opc << 29) | (0x24 << 23) | ((opc >= 4) << 22) | (immr << 16) | (imms << 10) | (rn << 5) | rd);
 }
 
 
@@ -542,14 +542,14 @@ static inline void rvjit32_native_slli(rvjit_block_t* block, regid_t hrds, regid
 
 enum a64_csel
 {
-    A64_CSELW  = (0 << 29) | (0 << 10),
-    A64_CSINCW = (0 << 29) | (1 << 10),
-    A64_CSINVW = (2 << 29) | (0 << 10),
-    A64_CSNEGW = (2 << 29) | (1 << 10),
-    A64_CSEL   = (4 << 29) | (0 << 10),
-    A64_CSINC  = (4 << 29) | (1 << 10),
-    A64_CSINV  = (6 << 29) | (0 << 10),
-    A64_CSNEG  = (6 << 29) | (1 << 10),
+    A64_CSELW  = (0u << 29) | (0 << 10),
+    A64_CSINCW = (0u << 29) | (1 << 10),
+    A64_CSINVW = (2u << 29) | (0 << 10),
+    A64_CSNEGW = (2u << 29) | (1 << 10),
+    A64_CSEL   = (4u << 29) | (0 << 10),
+    A64_CSINC  = (4u << 29) | (1 << 10),
+    A64_CSINV  = (6u << 29) | (0 << 10),
+    A64_CSNEG  = (6u << 29) | (1 << 10),
 };
 
 enum a64_cc
@@ -566,7 +566,7 @@ enum a64_cc
 
 static inline void rvjit_a64_csel(rvjit_block_t* block, enum a64_csel opc, regid_t rd, regid_t rn, regid_t rm, enum a64_cc cc)
 {
-    rvjit_a64_insn32(block, opc | (0xD4 << 21) | (rm << 16) | (cc << 12) | (rn << 5) | rd);
+    rvjit_a64_insn32(block, (uint32_t)opc | (0xD4 << 21) | (rm << 16) | (cc << 12) | (rn << 5) | rd);
 }
 
 static inline void rvjit32_native_slti(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm)
@@ -605,25 +605,25 @@ static inline void rvjit32_native_sltu(rvjit_block_t* block, regid_t hrds, regid
 
 enum a64_ldst_imm_unsigned
 {
-    A64_STRB   = (0 << 30) | (0 << 26) | (0 << 22),
-    A64_LDRB   = (0 << 30) | (0 << 26) | (1 << 22),
-    A64_LDRSB  = (0 << 30) | (0 << 26) | (2 << 22),
-    A64_LDRSBW = (0 << 30) | (0 << 26) | (3 << 22),
-    A64_STRH   = (1 << 30) | (0 << 26) | (0 << 22),
-    A64_LDRH   = (1 << 30) | (0 << 26) | (1 << 22),
-    A64_LDRSH  = (1 << 30) | (0 << 26) | (2 << 22),
-    A64_LDRSHW = (1 << 30) | (0 << 26) | (3 << 22),
-    A64_STRW   = (2 << 30) | (0 << 26) | (0 << 22),
-    A64_LDRW   = (2 << 30) | (0 << 26) | (1 << 22),
-    A64_LDRSW  = (2 << 30) | (0 << 26) | (2 << 22),
-    A64_STR    = (3 << 30) | (0 << 26) | (0 << 22),
-    A64_LDR    = (3 << 30) | (0 << 26) | (1 << 22),
-    A64_PRFUM  = (3 << 30) | (0 << 26) | (2 << 22),
+    A64_STRB   = (0u << 30) | (0 << 26) | (0 << 22),
+    A64_LDRB   = (0u << 30) | (0 << 26) | (1 << 22),
+    A64_LDRSB  = (0u << 30) | (0 << 26) | (2 << 22),
+    A64_LDRSBW = (0u << 30) | (0 << 26) | (3 << 22),
+    A64_STRH   = (1u << 30) | (0 << 26) | (0 << 22),
+    A64_LDRH   = (1u << 30) | (0 << 26) | (1 << 22),
+    A64_LDRSH  = (1u << 30) | (0 << 26) | (2 << 22),
+    A64_LDRSHW = (1u << 30) | (0 << 26) | (3 << 22),
+    A64_STRW   = (2u << 30) | (0 << 26) | (0 << 22),
+    A64_LDRW   = (2u << 30) | (0 << 26) | (1 << 22),
+    A64_LDRSW  = (2u << 30) | (0 << 26) | (2 << 22),
+    A64_STR    = (3u << 30) | (0 << 26) | (0 << 22),
+    A64_LDR    = (3u << 30) | (0 << 26) | (1 << 22),
+    A64_PRFUM  = (3u << 30) | (0 << 26) | (2 << 22),
 };
 
 static inline void rvjit_a64_ldst_imm_unsigned(rvjit_block_t* block, enum a64_ldst_imm_unsigned opc, regid_t rt, regid_t rn, uint16_t imm)
 {
-    rvjit_a64_insn32(block, opc | (0x39 << 24) | (imm << 10) | (rn << 5) | rt);
+    rvjit_a64_insn32(block, (uint32_t)opc | (0x39 << 24) | (imm << 10) | (rn << 5) | rt);
 }
 
 static inline void rvjit64_native_addi(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t imm);
@@ -1065,6 +1065,231 @@ static inline branch_t rvjit64_native_bgeu(rvjit_block_t* block, regid_t hrs1, r
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
     return rvjit_a64_bcc(block, A64_CS, handle, target);
+}
+
+enum a64_dp_3src
+{
+    A64_MADDW   = (0u << 31) | (0 << 29) | (0 << 21) | (0 << 15),
+    A64_MSUBW   = (0u << 31) | (0 << 29) | (0 << 21) | (1 << 15),
+    A64_MADD    = (1u << 31) | (0 << 29) | (0 << 21) | (0 << 15),
+    A64_MSUB    = (1u << 31) | (0 << 29) | (0 << 21) | (1 << 15),
+    A64_SMADDL  = (1u << 31) | (0 << 29) | (1 << 21) | (0 << 15),
+    A64_SMSUBL  = (1u << 31) | (0 << 29) | (1 << 21) | (1 << 15),
+    A64_SMULH   = (1u << 31) | (0 << 29) | (2 << 21) | (0 << 15),
+    A64_UMADDL  = (1u << 31) | (0 << 29) | (5 << 21) | (0 << 15),
+    A64_UMSUBL  = (1u << 31) | (0 << 29) | (5 << 21) | (1 << 15),
+    A64_UMULH   = (1u << 31) | (0 << 29) | (6 << 21) | (0 << 15),
+};
+
+static inline void rvjit_a64_dp_3src(rvjit_block_t* block, enum a64_dp_3src opc, regid_t rd, regid_t rn, regid_t rm, regid_t ra)
+{
+    rvjit_a64_insn32(block, (uint32_t)opc | (0x1B << 24) | (rm << 16) | (ra << 10) | (rn << 5) | rd);
+}
+
+static inline void rvjit64_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_MADD, hrds, hrs1, hrs2, A64_XZR);
+}
+
+static inline void rvjit64_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_SMULH, hrds, hrs1, hrs2, A64_XZR);
+}
+
+static inline void rvjit64_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_UMULH, hrds, hrs1, hrs2, A64_XZR);
+}
+
+static inline void rvjit64_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    regid_t hrs1h = rvjit_claim_hreg(block);
+    rvjit64_native_srai(block, hrs1h, hrs1, 63);
+    regid_t hrdsu = rvjit_claim_hreg(block);
+    rvjit64_native_mulhu(block, hrdsu, hrs2, hrs1);
+    rvjit_a64_dp_3src(block, A64_MADD, hrds, hrs2, hrs1h, hrdsu);
+    rvjit_free_hreg(block, hrs1h);
+    rvjit_free_hreg(block, hrdsu);
+}
+
+static inline void rvjit_a64_native_div(rvjit_block_t* block, enum a64_dp_2src divopc, bool is32bit, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    branch_t ifzero = rvjit64_native_beqz(block, hrs2, BRANCH_NEW, false);
+
+    regid_t hrmostneg = rvjit_claim_hreg(block);
+    rvjit_a64_movw(block, is32bit ? A64_MOVNW : A64_MOVN, hrmostneg, 0, A64_MOV_0);
+    branch_t ifmin1 = rvjit64_native_bne(block, hrs2, hrmostneg, BRANCH_NEW, false);
+
+    if (!(divopc & (1u << 31))) {
+        rvjit_native_setregw(block, hrmostneg, (uintptr_t)1 << 63);
+    } else {
+        rvjit_a64_movw(block, is32bit ? A64_MOVZW : A64_MOVZ, hrmostneg, 1 << 15, A64_MOV_16);
+        if (!is32bit) rvjit_native_signext(block, hrmostneg);
+    }
+    branch_t ifmin2 = rvjit64_native_bne(block, hrs1, hrmostneg, BRANCH_NEW, false);
+
+    rvjit_a64_addsub_shifted(block, is32bit ? A64_ADDW : A64_ADD, hrds, hrmostneg, A64_XZR, A64_LSL, 0);
+    branch_t skipdiv = rvjit_native_jmp(block, BRANCH_NEW, false);
+
+    rvjit64_native_bne(block, hrs2, hrmostneg, ifmin1, true);
+    rvjit64_native_bne(block, hrs2, hrmostneg, ifmin2, true);
+    rvjit_a64_dp_2src(block, divopc, hrds, hrs1, hrs2);
+    if (!is32bit && !(divopc & (1u << 31))) {
+        rvjit_native_signext(block, hrds);
+    }
+
+    rvjit_native_jmp(block, skipdiv, true);
+    rvjit_free_hreg(block, hrmostneg);
+    branch_t toend = rvjit_native_jmp(block, BRANCH_NEW, false);
+    rvjit64_native_beqz(block, hrs2, ifzero, true);
+    rvjit_a64_movw(block, is32bit ? A64_MOVNW : A64_MOVN, hrds, 0, A64_MOV_0);
+    rvjit_native_jmp(block, toend, true);
+}
+
+static inline void rvjit64_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_div(block, A64_SDIV, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit_a64_native_divu(rvjit_block_t* block, enum a64_dp_2src divopc, bool is32bit, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    branch_t ifzero = rvjit64_native_beqz(block, hrs2, BRANCH_NEW, false);
+
+    rvjit_a64_dp_2src(block, divopc, hrds, hrs1, hrs2);
+    if (!is32bit && !(divopc & (1u << 31))) {
+        rvjit_native_signext(block, hrds);
+    }
+
+    branch_t toend = rvjit_native_jmp(block, BRANCH_NEW, false);
+    rvjit64_native_beqz(block, hrs2, ifzero, true);
+    rvjit_a64_movw(block, A64_MOVN, hrds, 0, A64_MOV_0);
+    rvjit_native_jmp(block, toend, true);
+}
+
+static inline void rvjit64_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_divu(block, A64_UDIV, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit_a64_native_rem(rvjit_block_t* block, enum a64_dp_2src divopc, enum a64_dp_3src mulopc, bool is32bit, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    branch_t ifzero = rvjit64_native_beqz(block, hrs2, BRANCH_NEW, false);
+
+    regid_t hrmostneg = rvjit_claim_hreg(block);
+    rvjit_a64_movw(block, is32bit ? A64_MOVNW : A64_MOVN, hrmostneg, 0, A64_MOV_0);
+    branch_t ifmin1 = rvjit64_native_bne(block, hrs2, hrmostneg, BRANCH_NEW, false);
+
+    if (!(divopc & (1u << 31))) {
+        rvjit_native_setregw(block, hrmostneg, (uintptr_t)1 << 63);
+    } else {
+        rvjit_a64_movw(block, is32bit ? A64_MOVZW : A64_MOVZ, hrmostneg, 1 << 15, A64_MOV_16);
+        if (!is32bit) rvjit_native_signext(block, hrmostneg);
+    }
+    branch_t ifmin2 = rvjit64_native_bne(block, hrs1, hrmostneg, BRANCH_NEW, false);
+
+    rvjit_native_zero_reg(block, hrds);
+    branch_t skipdiv = rvjit_native_jmp(block, BRANCH_NEW, false);
+
+    rvjit64_native_bne(block, hrs2, hrmostneg, ifmin1, true);
+    rvjit64_native_bne(block, hrs2, hrmostneg, ifmin2, true);
+
+    rvjit_a64_dp_2src(block, divopc, hrmostneg, hrs1, hrs2);
+    rvjit_a64_dp_3src(block, mulopc, hrds, hrmostneg, hrs2, hrs1);
+    if (!is32bit && !(divopc & (1u << 31))) {
+        rvjit_native_signext(block, hrds);
+    }
+
+    rvjit_native_jmp(block, skipdiv, true);
+    rvjit_free_hreg(block, hrmostneg);
+    branch_t toend = rvjit_native_jmp(block, BRANCH_NEW, false);
+    rvjit64_native_beqz(block, hrs2, ifzero, true);
+    rvjit_a64_addsub_shifted(block, is32bit ? A64_ADDW : A64_ADD, hrds, hrs1, A64_XZR, A64_LSL, 0);
+    rvjit_native_jmp(block, toend, true);
+}
+
+static inline void rvjit64_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_SDIV, A64_MSUB, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_UDIV, A64_MSUB, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_mulw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_MADDW, hrds, hrs1, hrs2, A64_XZR);
+    rvjit_native_signext(block, hrds);
+}
+
+static inline void rvjit64_native_divw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_div(block, A64_SDIVW, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_divuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_divu(block, A64_UDIVW, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_SDIVW, A64_MSUBW, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit64_native_remuw(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_UDIVW, A64_MSUBW, false, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_MADDW, hrds, hrs1, hrs2, A64_XZR);
+}
+
+static inline void rvjit32_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_SMADDL, hrds, hrs1, hrs2, A64_XZR);
+    rvjit64_native_srli(block, hrds, hrds, 32);
+}
+
+static inline void rvjit32_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_dp_3src(block, A64_UMADDL, hrds, hrs1, hrs2, A64_XZR);
+    rvjit64_native_srli(block, hrds, hrds, 32);
+}
+
+static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    regid_t hrsext = rvjit_claim_hreg(block);
+    rvjit_a64_bitfield(block, A64_SBFM, hrsext, hrs1, 0, 31);
+    regid_t hrzext = rvjit_claim_hreg(block);
+    rvjit_a64_addsub_shifted(block, A64_ADDW, hrzext, hrs2, A64_XZR, A64_LSL, 0);
+    rvjit64_native_mul(block, hrsext, hrzext, hrsext);
+    rvjit64_native_srli(block, hrds, hrsext, 32);
+    rvjit_free_hreg(block, hrsext);
+    rvjit_free_hreg(block, hrzext);
+}
+
+static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_div(block, A64_SDIVW, true, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_divu(block, A64_UDIVW, true, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_SDIVW, A64_MSUB, true, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a64_native_rem(block, A64_UDIVW, A64_MSUB, true, hrds, hrs1, hrs2);
 }
 
 #endif
