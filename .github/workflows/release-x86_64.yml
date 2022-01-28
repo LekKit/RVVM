@@ -17,12 +17,10 @@ env:
 jobs:
   macos:
     runs-on: macos-latest
-    env:
-      nproc: sysctl -n hw.ncpu
     steps:
       - uses: actions/checkout@v2
       - name: Compile release
-        run: make -j$nproc
+        run: make -j4
       - name: Pack artifact into zip
         run: zip rvvm_x86_64.zip release.darwin.x86_64/rvvm_x86_64
       - name: Upload Artifact
