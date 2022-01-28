@@ -64,12 +64,23 @@ static inline bool rvjit_is_valid_imm(int32_t imm)
     return (((int32_t)(((uint32_t)imm) << 20)) >> 20) == imm;
 }
 
+static inline void rvjit_riscv_20imm_op(rvjit_block_t* block, uint32_t opcode, regid_t reg, int32_t imm)
+{
+    uint8_t code[4];
+    write_uint32_le_m(code, opcode | (reg << 7) | (imm & 0xFFFFF000));
+    rvjit_put_code(block, code, 4);
+}
+
 // Load [31:12] bits of the register from 20-bit imm, signextend & zero lower bits
 static inline void rvjit_riscv_lui(rvjit_block_t* block, regid_t reg, int32_t imm)
 {
-    uint8_t code[4];
-    write_uint32_le_m(code, 0x37 | (reg << 7) | (imm & 0xFFFFF000));
-    rvjit_put_code(block, code, 4);
+    rvjit_riscv_20imm_op(block, 0x37, reg, imm);
+}
+
+// Load PC + [31:12] imm to register
+static inline void rvjit_riscv_auipc(rvjit_block_t* block, regid_t reg, int32_t imm)
+{
+    rvjit_riscv_20imm_op(block, 0x17, reg, imm);
 }
 
 #define RISCV_R_ADD   0x00000033
@@ -266,9 +277,9 @@ static inline void rvjit_riscv_s_op(rvjit_block_t* block, uint32_t opcode, regid
 static inline void rvjit_riscv_b_op(rvjit_block_t* block, uint32_t opcode, regid_t rs1, regid_t rs2, int32_t offset)
 {
     uint8_t code[4];
-    if (unlikely(!rvjit_is_valid_imm(offset))) rvvm_fatal("Illegal branch offset in RVJIT!");
+    if (unlikely(!rvjit_is_valid_imm(offset >> 1))) rvvm_fatal("Illegal branch offset in RVJIT!");
     write_uint32_le_m(code, opcode | (rs1 << 15) | (rs2 << 20) | ((offset & 0x1E) << 7) | ((offset & 0x800) >> 4)
-                                   | (((uint32_t)offset & 0x3E0) << 20) | (((uint32_t)offset & 0x1000) << 19));
+                                   | (((uint32_t)offset & 0x7E0) << 20) | (((uint32_t)offset & 0x1000) << 19));
     rvjit_put_code(block, code, 4);
 }
 
@@ -288,14 +299,14 @@ static inline void rvjit_riscv_jal(rvjit_block_t* block, regid_t reg, int32_t of
 static inline void rvjit_riscv_branch_patch(void* addr, int32_t offset)
 {
     uint32_t opcode = read_uint32_le_m(addr) & 0x1FFF07F;
-    if (unlikely(!rvjit_is_valid_imm(offset))) rvvm_fatal("Illegal branch patch offset in RVJIT!");
+    if (unlikely(!rvjit_is_valid_imm(offset >> 1))) rvvm_fatal("Illegal branch patch offset in RVJIT!");
     write_uint32_le_m(addr, opcode | (((uint32_t)offset & 0x1E) << 7) | ((offset & 0x800) >> 4)
-                                   | (((uint32_t)offset & 0x3E0) << 20) | (((uint32_t)offset & 0x1000) << 19));
+                                   | (((uint32_t)offset & 0x7E0) << 20) | (((uint32_t)offset & 0x1000) << 19));
 }
 
 static inline void rvjit_riscv_jal_patch(void* addr, int32_t offset)
 {
-    uint32_t opcode = read_uint32_le_m(addr) & 0xFFF;
+    uint32_t opcode = 0x6F | (read_uint32_le_m(addr) & 0xFFF);
     write_uint32_le_m(addr, opcode | (((offset >> 1) & 0x3FF) << 21)
                                    | (((offset >> 11) & 0x1)  << 20)
                                    | (((offset >> 12) & 0xFF) << 12)
@@ -413,6 +424,83 @@ static inline branch_t rvjit_riscv_branch(rvjit_block_t* block, uint32_t opcode,
         return rvjit_riscv_branch_target(block, handle);
     } else {
         return rvjit_riscv_branch_entry(block, opcode, hrs1, hrs2, handle);
+    }
+}
+
+/*
+ * Linker routines
+ */
+
+static inline bool rvjit_is_valid_jal_imm(int32_t imm)
+{
+    return (((int32_t)(((uint32_t)imm) << 11)) >> 11) == imm;
+}
+
+// Emit jump instruction (may return false if offset cannot be encoded)
+static inline bool rvjit_tail_jmp(rvjit_block_t* block, int32_t offset)
+{
+    if (rvjit_is_valid_jal_imm(offset)) {
+        rvjit_riscv_jal(block, RISCV_REG_ZERO, offset);
+    } else {
+        regid_t tmp = rvjit_claim_hreg(block);
+        rvjit_riscv_auipc(block, tmp, offset + ((offset & 0x800) << 1));
+        rvjit_riscv_i_op_internal(block, RISCV_I_JALR, RISCV_REG_ZERO, tmp, offset & 0xFFF);
+        rvjit_free_hreg(block, tmp);
+    }
+    return true;
+}
+
+// Emit patchable ret instruction
+static inline void rvjit_patchable_ret(rvjit_block_t* block)
+{
+    // Always 4-bytes, same as JAL
+    rvjit_riscv_i_op(block, RISCV_I_JALR, RISCV_REG_ZERO, RISCV_REG_RA, 0);
+}
+
+// Jump if word pointed to by addr is nonzero (may emit nothing if the offset cannot be encoded)
+// Used to check interrupts in block linkage
+static inline void rvjit_tail_bnez(rvjit_block_t* block, regid_t addr, int32_t offset)
+{
+    size_t offset_fixup = block->size;
+    int32_t off;
+    regid_t tmp = rvjit_claim_hreg(block);
+    rvjit_riscv_i_op(block, RISCV_I_LW, tmp, addr, 0);
+
+    off = offset - (block->size - offset_fixup);
+    if (rvjit_is_valid_imm(off >> 1)) {
+        // Offset fits into branch instruction
+        rvjit_riscv_b_op(block, RISCV_B_BNE, RISCV_REG_ZERO, tmp, off);
+    } else {
+        // Use jal for 21-bit offset or auipc + jalr for full 32-bit offset
+        branch_t l1 = rvjit_riscv_branch(block, RISCV_B_BEQ, RISCV_REG_ZERO, tmp, BRANCH_NEW, false);
+        off = offset - (block->size - offset_fixup);
+        if (rvjit_is_valid_jal_imm(off)) {
+            rvjit_riscv_jal(block, RISCV_REG_ZERO, off);
+        } else {
+            rvjit_riscv_auipc(block, tmp, off + ((off & 0x800) << 1));
+            rvjit_riscv_i_op_internal(block, RISCV_I_JALR, RISCV_REG_ZERO, tmp, off & 0xFFF);
+        }
+        rvjit_riscv_branch(block, RISCV_B_BEQ, RISCV_REG_ZERO, tmp, l1, true);
+    }
+
+    rvjit_free_hreg(block, tmp);
+}
+
+// Patch instruction at addr into ret
+static inline void rvjit_patch_ret(void* addr)
+{
+    write_uint32_le_m(addr, 0x00008067);
+}
+
+// Patch jump instruction at addr (may return false if offset cannot be encoded)
+static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
+{
+    if (rvjit_is_valid_jal_imm(offset)) {
+        write_uint32_le_m(addr, 0);
+        rvjit_riscv_jal_patch(addr, offset);
+        return true;
+    } else {
+        return false;
     }
 }
 
