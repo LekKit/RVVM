@@ -17,6 +17,8 @@ env:
 jobs:
   macos:
     runs-on: macos-latest
+    env:
+      nproc: sysctl -n hw.ncpu
     steps:
       - uses: actions/checkout@v2
       - name: Compile release
