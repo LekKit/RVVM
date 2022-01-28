@@ -24,8 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string.h>
 #include "utils.h"
 
-#ifndef VECTOR_GROW_FACTOR
-#define VECTOR_GROW_FACTOR 1.5
+#ifndef VECTOR_GROW_AMOUNT
+#define VECTOR_GROW_AMOUNT(x) (x >> 1)
 #endif
 
 #define vector_t(type) struct {type* data; size_t size; size_t count;}
@@ -55,7 +55,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define vector_grow(vec) \
 { \
     if ((vec).count >= (vec).size) { \
-        (vec).size *= VECTOR_GROW_FACTOR; \
+        (vec).size += VECTOR_GROW_AMOUNT((vec).size); \
         (vec).data = safe_realloc((vec).data, (vec).size * sizeof(*(vec).data)); \
     } \
 }
