@@ -23,9 +23,11 @@ jobs:
     - uses: actions/checkout@v2
     - name: Compile release
       run: make -j2
+    - name: Pack artifact into tar
+      run: tar -cvf rvvm_x86_64.tar release.linux.x86_64/rvvm_x86_64
     - name: Upload Artifact
       uses: actions/upload-artifact@v2
       with:
         name: rvvm-x86_64-rv64
-        path: release.linux.x86_64/rvvm_x86_64
+        path: rvvm_x86_64.tar
 
