@@ -1,0 +1,31 @@
+name: RVVM X86_64 RV64 Release Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  BUILD_TYPE: release
+  USE_RV64: 1
+  USE_JIT: 1
+  USE_FPU: 1
+  USE_PCI: 1
+  USE_FB: 1
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Compile release
+      run: make -j2
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: rvvm-x86_64-rv64
+        path: ./release.linux.x86_64/rvvm_x86_64
+
