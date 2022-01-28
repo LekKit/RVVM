@@ -15,19 +15,31 @@ env:
   USE_FB: 1
 
 jobs:
-  build:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Compile release
+        run: make -j$(nproc)
+      - name: Pack artifact into zip
+        run: zip rvvm_x86_64.zip release.darwin.x86_64/rvvm_x86_64
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: rvvm-darwin-x86_64
+          path: rvvm_x86_64.zip
 
+  linux:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - name: Compile release
       run: make -j$(nproc)
-    - name: Pack artifact into tar
-      run: tar -cvf rvvm_x86_64.tar release.linux.x86_64/rvvm_x86_64
+    - name: Pack artifact into zip
+      run: zip rvvm_x86_64.zip release.linux.x86_64/rvvm_x86_64
     - name: Upload Artifact
       uses: actions/upload-artifact@v2
       with:
-        name: rvvm-x86_64
-        path: rvvm_x86_64.tar
+        name: rvvm-linux-x86_64
+        path: rvvm_x86_64.zip
 
