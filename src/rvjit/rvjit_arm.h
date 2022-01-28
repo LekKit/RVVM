@@ -120,6 +120,35 @@ enum a32_dp_opcs
     A32_MVNS = (15 << 21) | (1 << 20),
 };
 
+enum a32_ma_opcs
+{
+    A32_MUL  =   (0 << 21) | (0 << 20),
+    A32_MULS =   (0 << 21) | (1 << 20),
+    /*NOTE: MLA/MLAS use rdlo as ra and rdhi as rds*/
+    A32_MLA  =   (1 << 21) | (0 << 20),
+    A32_MLAS =   (1 << 21) | (1 << 20),
+    /*NOTE: UMAAL use rdhi and rdlo for accumulate accumulate*/
+    A32_UMAAL =  (2 << 21) | (0 << 20),
+    /*NOTE: MLS use rdlo as ra and rdhi as rds*/
+    A32_MLS =    (3 << 21) | (0 << 20),
+    A32_UMULL =  (4 << 21) | (0 << 20),
+    A32_UMULLS = (4 << 21) | (1 << 20),
+    /*NOTE: UMLAL/UMLALS use rdhi:rdlo for accumulate*/
+    A32_UMLAL =  (5 << 21) | (0 << 20),
+    A32_UMLALS = (5 << 21) | (1 << 20),
+    A32_SMULL =  (6 << 21) | (0 << 20),
+    A32_SMULLS = (6 << 21) | (1 << 20),
+    /*NOTE: SMLAL/SMLALS use rdhi:rdlo for accumulate*/
+    A32_SMLAL =  (7 << 21) | (0 << 20),
+    A32_SMLALS = (7 << 21) | (0 << 20),
+};
+
+enum a32_md_opcs
+{
+    A32_SDIV = (0x71 << 20),
+    A32_UDIV = (0x73 << 20),
+};
+
 static inline void rvjit_a32_insn32(rvjit_block_t* block, uint32_t insn)
 {
     uint8_t code[sizeof(insn)];
@@ -201,6 +230,34 @@ static inline void rvjit_a32_dp(rvjit_block_t* block, enum a32_dp_opcs op, enum 
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((rn & ~15) == 0);
     rvjit_a32_insn32(block, (cc << 28) | op | shifter | (rn << 16) | (rd << 12));
+}
+
+static inline void rvjit_a32_ma(rvjit_block_t *block, enum a32_ma_opcs op, enum a32_cc cc, regid_t rdlo, regid_t rdhi, regid_t rn, regid_t rm)
+{
+    rvjit_a32_assert((rdhi & ~15) == 0);
+    rvjit_a32_assert((rdlo & ~15) == 0);
+    rvjit_a32_assert((rn & ~15) == 0);
+    rvjit_a32_assert((rm & ~15) == 0);
+    rvjit_a32_assert((rdhi != rdlo));
+    rvjit_a32_insn32(block, (cc << 28) | op | (rdhi << 16) | (rdlo << 12) | (rm << 8) | (1 << 7) | (1 << 4) | rn);
+}
+
+static inline void rvjit_a32_ma2(rvjit_block_t *block, enum a32_ma_opcs op, enum a32_cc cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
+{
+    rvjit_a32_assert((rd & ~15) == 0);
+    rvjit_a32_assert((ra & ~15) == 0);
+    rvjit_a32_assert((rn & ~15) == 0);
+    rvjit_a32_assert((rm & ~15) == 0);
+    rvjit_a32_insn32(block, (cc << 28) | op | (rd << 16) | (ra << 12) | (rm << 8) | (1 << 7) | (1 << 4) | rn);
+}
+
+//NOTE: work only with udiv and sdiv
+static inline void rvjit_a32_md(rvjit_block_t *block, enum a32_md_opcs op, enum a32_cc cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
+{
+    rvjit_a32_assert((rd & ~15) == 0);
+    rvjit_a32_assert((rn & ~15) == 0);
+    rvjit_a32_assert((rm & ~15) == 0);
+    rvjit_a32_insn32(block, (cc << 28) | op | (rd << 16) | (ra << 12) | (rm << 8) | (1 << 4) | rn);
 }
 
 static inline void rvjit_a32_bx_reg(rvjit_block_t* block, enum a32_cc cc,regid_t rm)
@@ -663,6 +720,112 @@ static inline branch_t rvjit32_native_bltu(rvjit_block_t* block, regid_t hrs1, r
 static inline branch_t rvjit32_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     return rvjit_a32_bcc(block, A32_CS, hrs1, rvjit_a32_shifter_reg_imm(hrs2, A32_LSL, 0), handle, target);
+}
+
+static inline void rvjit32_native_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_a32_ma(block, A32_MUL, A32_AL, 0, hrds, hrs1, hrs2);
+}
+
+static inline void rvjit32_native_mulh(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    regid_t trash = rvjit_claim_hreg(block);
+    rvjit_a32_ma(block, A32_SMULL, A32_AL, trash, hrds, hrs1, hrs2);
+    rvjit_free_hreg(block, trash);
+}
+
+static inline void rvjit32_native_mulhu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    regid_t trash = rvjit_claim_hreg(block);
+    rvjit_a32_ma(block, A32_UMULL, A32_AL, trash, hrds, hrs1, hrs2);
+    rvjit_free_hreg(block, trash);
+}
+
+static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    regid_t sign = rvjit_claim_hreg(block);
+    regid_t rdhi = rvjit_claim_hreg(block);
+    regid_t rdlo = rvjit_claim_hreg(block);
+    rvjit_a32_dp(block, A32_MOV, A32_AL, sign, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_ASR, 31)); // extract flag we get -1 if its negative
+    rvjit_a32_ma(block, A32_UMULL, A32_AL, rdlo, rdhi, hrs1, hrs2); // rdlo:rdhi = (hrs1 * hrs2)
+    rvjit_a32_ma2(block, A32_MLA, A32_AL, hrds, rdhi, hrs2, sign); // hrds = rdhi + (hrs2 * sign)
+    rvjit_free_hreg(block, sign);
+    rvjit_free_hreg(block, rdhi);
+    rvjit_free_hreg(block, rdlo);
+}
+
+//NOTE: aarch32 generate for overflow same behavor just need to check for divide by zero
+static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    bool need_allocate = (hrds == hrs1 || hrds == hrs2);
+    regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
+    rvjit_native_setreg32s(block, tmphrds, -1);
+    rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
+    rvjit_a32_md(block, A32_SDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
+
+    if(need_allocate) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
+        rvjit_free_hreg(block, tmphrds);
+    }
+}
+
+static inline void rvjit32_native_divu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    bool need_allocate = (hrds == hrs1 || hrds == hrs2);
+    regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
+
+    rvjit_native_setreg32s(block, tmphrds, -1);
+    rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
+    rvjit_a32_md(block, A32_UDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
+
+    if(need_allocate) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
+        rvjit_free_hreg(block, tmphrds);
+    }
+}
+
+// need to hrds = hrs1 - ((hrs1 / hrs2) * hrs2)
+// its cool we need just check for zero and after then for INT_MIN in div result
+static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    bool need_allocate = (hrds == hrs1 || hrds == hrs2);
+    regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
+    regid_t tmp = rvjit_claim_hreg(block);
+
+    rvjit_a32_dp(block, A32_MOV, A32_AL, tmphrds, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_LSL, 0));
+    branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
+    rvjit_a32_md(block, A32_SDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 sdiv hrs2)
+    rvjit_a32_dp(block, A32_CMP, A32_AL, 0, hrs1, rvjit_a32_shifter_reg_imm(tmp, A32_LSL, 0)); // cmp(hrs1, tmp)
+    rvjit_a32_dp(block, A32_MOV, A32_EQ, tmphrds, 0, rvjit_a32_shifter_imm(0, 0)); // if (tmp == cmpreg) { hrds = 0; }
+    rvjit_a32_ma2(block, A32_MLS, A32_NE, tmphrds, hrs1, tmp, hrs2); // else { hrds = (hrs1 - (tmp * hrs2)); }
+    rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
+
+    if(need_allocate) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
+        rvjit_free_hreg(block, tmphrds);
+    }
+
+    rvjit_free_hreg(block, tmp);
+}
+
+static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    bool need_allocate = (hrds == hrs1 || hrds == hrs2);
+    regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
+    regid_t tmp = rvjit_claim_hreg(block);
+
+    rvjit_a32_dp(block, A32_MOV, A32_AL, tmphrds, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_LSL, 0));
+    branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
+    rvjit_a32_md(block, A32_UDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 divu hrs2)
+    rvjit_a32_ma2(block, A32_MLS, A32_AL, tmphrds, hrs1, tmp, hrs2); // hrds = hrs1 - (tmp * hrs2)
+    rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
+
+    if(need_allocate) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
+        rvjit_free_hreg(block, tmphrds);
+    }
+
+    rvjit_free_hreg(block, tmp);
 }
 
 #endif
