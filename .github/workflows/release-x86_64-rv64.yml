@@ -1,4 +1,4 @@
-name: RVVM X86_64 RV64 Release Build
+name: RVVM X86_64 Release Build
 
 on:
   push:
@@ -22,12 +22,12 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Compile release
-      run: make -j2
+      run: make -j$(nproc)
     - name: Pack artifact into tar
       run: tar -cvf rvvm_x86_64.tar release.linux.x86_64/rvvm_x86_64
     - name: Upload Artifact
       uses: actions/upload-artifact@v2
       with:
-        name: rvvm-x86_64-rv64
+        name: rvvm-x86_64
         path: rvvm_x86_64.tar
 
