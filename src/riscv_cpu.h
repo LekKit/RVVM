@@ -103,7 +103,7 @@ static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
 }
 
 // Block unrolling configuration
-#define BRANCH_MAX_BLOCK_SIZE 4096
+#define BRANCH_MAX_BLOCK_SIZE 256
 
 // Wraps trace-compile-trace-execute
 #define RVVM_RVJIT_TRACE(intrinsic, inst_size) \
@@ -236,6 +236,21 @@ do { \
 #define rvjit_bltu(rs1, rs2, t, f, i)    RVVM_RVJIT_BRANCH(rvjit64_bltu(&vm->jit, rs1, rs2), t, f, i)
 #define rvjit_bgeu(rs1, rs2, t, f, i)    RVVM_RVJIT_BRANCH(rvjit64_bgeu(&vm->jit, rs1, rs2), t, f, i)
 
+#define rvjit_mul(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit64_mul(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulh(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_mulh(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulhu(rds, rs1, rs2, size)  RVVM_RVJIT_TRACE(rvjit64_mulhu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulhsu(rds, rs1, rs2, size) RVVM_RVJIT_TRACE(rvjit64_mulhsu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_div(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit64_div(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_divu(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_divu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_rem(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit64_rem(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_remu(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_remu(&vm->jit, rds, rs1, rs2), size)
+
+#define rvjit_mulw(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_mulw(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_divw(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_divw(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_divuw(rds, rs1, rs2, size)  RVVM_RVJIT_TRACE(rvjit64_divuw(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_remw(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit64_remw(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_remuw(rds, rs1, rs2, size)  RVVM_RVJIT_TRACE(rvjit64_remuw(&vm->jit, rds, rs1, rs2), size)
+
 #elif !defined(RV64)
 
 #define rvjit_add(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit32_add(&vm->jit, rds, rs1, rs2), size)
@@ -277,6 +292,15 @@ do { \
 #define rvjit_bge(rs1, rs2, t, f, i)     RVVM_RVJIT_BRANCH(rvjit32_bge(&vm->jit, rs1, rs2), t, f, i)
 #define rvjit_bltu(rs1, rs2, t, f, i)    RVVM_RVJIT_BRANCH(rvjit32_bltu(&vm->jit, rs1, rs2), t, f, i)
 #define rvjit_bgeu(rs1, rs2, t, f, i)    RVVM_RVJIT_BRANCH(rvjit32_bgeu(&vm->jit, rs1, rs2), t, f, i)
+
+#define rvjit_mul(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit32_mul(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulh(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit32_mulh(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulhu(rds, rs1, rs2, size)  RVVM_RVJIT_TRACE(rvjit32_mulhu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_mulhsu(rds, rs1, rs2, size) RVVM_RVJIT_TRACE(rvjit32_mulhsu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_div(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit32_div(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_divu(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit32_divu(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_rem(rds, rs1, rs2, size)    RVVM_RVJIT_TRACE(rvjit32_rem(&vm->jit, rds, rs1, rs2), size)
+#define rvjit_remu(rds, rs1, rs2, size)   RVVM_RVJIT_TRACE(rvjit32_remu(&vm->jit, rds, rs1, rs2), size)
 
 #endif
 
@@ -338,6 +362,21 @@ do { \
 #define rvjit_bge(rs1, rs2, t, f, i)
 #define rvjit_bltu(rs1, rs2, t, f, i)
 #define rvjit_bgeu(rs1, rs2, t, f, i)
+
+#define rvjit_mul(rds, rs1, rs2, size)
+#define rvjit_mulh(rds, rs1, rs2, size)
+#define rvjit_mulhu(rds, rs1, rs2, size)
+#define rvjit_mulhsu(rds, rs1, rs2, size)
+#define rvjit_div(rds, rs1, rs2, size)
+#define rvjit_divu(rds, rs1, rs2, size)
+#define rvjit_rem(rds, rs1, rs2, size)
+#define rvjit_remu(rds, rs1, rs2, size)
+
+#define rvjit_mulw(rds, rs1, rs2, size)
+#define rvjit_divw(rds, rs1, rs2, size)
+#define rvjit_divuw(rds, rs1, rs2, size)
+#define rvjit_remw(rds, rs1, rs2, size)
+#define rvjit_remuw(rds, rs1, rs2, size)
 
 #endif
 

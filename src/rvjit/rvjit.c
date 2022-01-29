@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvjit.h"
 #include "rvjit_emit.h"
 #include "utils.h"
+#include "vector.h"
 
 #define RVJIT_MEM_EXEC 0x1
 #define RVJIT_MEM_RDWR 0x2
@@ -219,18 +220,36 @@ void rvjit_ctx_init(rvjit_block_t* block, size_t size)
     block->rv64 = false;
 
     hashmap_init(&block->heap.blocks, 64);
+    hashmap_init(&block->heap.block_links, 64);
+    vector_init(block->links);
+}
+
+static void rvjit_linker_cleanup(rvjit_block_t* block)
+{
+    vector_t(void*)* linked_blocks;
+    hashmap_foreach(&block->heap.block_links, k, v) {
+        UNUSED(k);
+        linked_blocks = (void*)v;
+        vector_free(*linked_blocks);
+        free(linked_blocks);
+    }
 }
 
 void rvjit_ctx_free(rvjit_block_t* block)
 {
     rvjit_munmap(block->heap.data, block->heap.size);
+    rvjit_linker_cleanup(block);
     hashmap_destroy(&block->heap.blocks);
+    hashmap_destroy(&block->heap.block_links);
+    vector_free(block->links);
     free(block->code);
 }
 
 void rvjit_block_init(rvjit_block_t* block)
 {
     block->size = 0;
+    block->linkage = true;
+    vector_clear(block->links);
     rvjit_emit_init(block);
 }
 
@@ -244,7 +263,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         code = block->heap.code + block->heap.curr;
     }
 
-    rvjit_emit_end(block);
+    rvjit_emit_end(block, block->linkage);
 
     if (block->heap.curr + block->size > block->heap.size) {
         // The cache is full
@@ -253,8 +272,38 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 
     memcpy(dest, block->code, block->size);
     flush_icache(code, block->size);
+    //block->heap.curr = (block->heap.curr + block->size + 31) & ~31ULL;
     block->heap.curr += block->size;
+
     hashmap_put(&block->heap.blocks, block->phys_pc, (size_t)code);
+
+#ifdef RVJIT_NATIVE_LINKER
+    vector_t(void*)* linked_blocks;
+    paddr_t k;
+    size_t v;
+    vector_foreach(block->links, i) {
+        k = vector_at(block->links, i).dest;
+        v = vector_at(block->links, i).ptr;
+        linked_blocks = (void*)hashmap_get(&block->heap.block_links, k);
+        if (!linked_blocks) {
+            linked_blocks = calloc(sizeof(vector_t(void*)), 1);
+            vector_init(*linked_blocks);
+            hashmap_put(&block->heap.block_links, k, (size_t)linked_blocks);
+        }
+        vector_push_back(*linked_blocks, (void*)v);
+    }
+
+    linked_blocks = (void*)hashmap_get(&block->heap.block_links, block->phys_pc);
+    if (linked_blocks) {
+        vector_foreach(*linked_blocks, i) {
+            void* jptr = vector_at(*linked_blocks, i);
+            rvjit_linker_patch_jmp(jptr, ((size_t)code) - ((size_t)jptr));
+        }
+        vector_free(*linked_blocks);
+        free(linked_blocks);
+        hashmap_remove(&block->heap.block_links, block->phys_pc);
+    }
+#endif
 
     return (rvjit_func_t)code;
 }
@@ -273,4 +322,7 @@ void rvjit_flush_cache(rvjit_block_t* block)
 
     hashmap_clear(&block->heap.blocks);
     block->heap.curr = 0;
+
+    rvjit_linker_cleanup(block);
+    hashmap_clear(&block->heap.block_links);
 }
