@@ -30,6 +30,8 @@ static void riscv_m_mul(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
+    rvjit_mul(rds, rs1, rs2, 4);
+
     riscv_write_register(vm, rds, reg1 * reg2);
 }
 
@@ -40,6 +42,8 @@ static void riscv_m_mulh(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     sxlen_t reg1 = riscv_read_register_s(vm, rs1);
     sxlen_t reg2 = riscv_read_register_s(vm, rs2);
+
+    rvjit_mulh(rds, rs1, rs2, 4);
 
 #ifdef RV64
 #ifdef INT128_SUPPORT
@@ -60,6 +64,8 @@ static void riscv_m_mulhsu(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t reg1 = riscv_read_register_s(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
 
+    rvjit_mulhsu(rds, rs1, rs2, 4);
+
 #ifdef RV64
 #ifdef INT128_SUPPORT
     riscv_write_register(vm, rds, ((int128_t)reg1 * (uint128_t)reg2) >> 64);
@@ -78,6 +84,8 @@ static void riscv_m_mulhu(rvvm_hart_t *vm, const uint32_t instruction)
     regid_t rs2 = bit_cut(instruction, 20, 5);
     xlen_t reg1 = riscv_read_register(vm, rs1);
     xlen_t reg2 = riscv_read_register(vm, rs2);
+
+    rvjit_mulhu(rds, rs1, rs2, 4);
 
 #ifdef RV64
 #ifdef INT128_SUPPORT
@@ -99,6 +107,8 @@ static void riscv_m_div(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t reg2 = riscv_read_register_s(vm, rs2);
     sxlen_t result = -1;
 
+    rvjit_div(rds, rs1, rs2, 4);
+
     // overflow
     if (reg1 == DIV_OVERFLOW_RS1 && reg2 == -1) {
         result = DIV_OVERFLOW_RS1;
@@ -119,6 +129,8 @@ static void riscv_m_divu(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg2 = riscv_read_register(vm, rs2);
     xlen_t result = (sxlen_t)-1;
 
+    rvjit_divu(rds, rs1, rs2, 4);
+
     // division by zero check (we already setup result var for error)
     if (reg2 != 0) {
         result = reg1 / reg2;
@@ -135,6 +147,8 @@ static void riscv_m_rem(rvvm_hart_t *vm, const uint32_t instruction)
     sxlen_t reg1 = riscv_read_register_s(vm, rs1);
     sxlen_t reg2 = riscv_read_register_s(vm, rs2);
     sxlen_t result = reg1;
+
+    rvjit_rem(rds, rs1, rs2, 4);
 
     // overflow
     if (reg1 == DIV_OVERFLOW_RS1 && reg2 == -1) {
@@ -156,6 +170,8 @@ static void riscv_m_remu(rvvm_hart_t *vm, const uint32_t instruction)
     xlen_t reg2 = riscv_read_register(vm, rs2);
     xlen_t result = reg1;
 
+    rvjit_remu(rds, rs1, rs2, 4);
+
     // division by zero check (we already setup result var for error)
     if (reg2 != 0) {
         result = reg1 % reg2;
@@ -174,6 +190,8 @@ static void riscv64m_mulw(rvvm_hart_t *vm, const uint32_t instruction)
     uint32_t reg1 = riscv_read_register_s(vm, rs1);
     uint32_t reg2 = riscv_read_register_s(vm, rs2);
 
+    rvjit_mulw(rds, rs1, rs2, 4);
+
     vm->registers[rds] = (int32_t)(reg1 * reg2);
 }
 
@@ -185,6 +203,8 @@ static void riscv64m_divw(rvvm_hart_t *vm, const uint32_t instruction)
     int32_t reg1 = riscv_read_register_s(vm, rs1);
     int32_t reg2 = riscv_read_register_s(vm, rs2);
     int32_t result = -1;
+
+    rvjit_divw(rds, rs1, rs2, 4);
 
     // overflow
     if (reg1 == ((int32_t)0x80000000U) && reg2 == -1) {
@@ -205,6 +225,8 @@ static void riscv64m_divuw(rvvm_hart_t *vm, const uint32_t instruction)
     uint32_t reg2 = riscv_read_register_s(vm, rs2);
     uint32_t result = -1;
 
+    rvjit_divuw(rds, rs1, rs2, 4);
+
     // overflow
     if (reg2 != 0) {
         result = reg1 / reg2;
@@ -220,6 +242,8 @@ static void riscv64m_remw(rvvm_hart_t *vm, const uint32_t instruction)
     int32_t reg1 = riscv_read_register_s(vm, rs1);
     int32_t reg2 = riscv_read_register_s(vm, rs2);
     int32_t result = reg1;
+
+    rvjit_remw(rds, rs1, rs2, 4);
 
     // overflow
     if (reg1 == ((int32_t)0x80000000U) && reg2 == -1) {
@@ -240,6 +264,8 @@ static void riscv64m_remuw(rvvm_hart_t *vm, const uint32_t instruction)
     uint32_t reg1 = riscv_read_register(vm, rs1);
     uint32_t reg2 = riscv_read_register(vm, rs2);
     uint32_t result = reg1;
+
+    rvjit_remuw(rds, rs1, rs2, 4);
 
     // division by zero check (we already setup result var for error)
     if (reg2 != 0) {

@@ -25,6 +25,17 @@ ARCH := i386
 endif
 endif
 
+else
+
+# Automatically parallelize build on *nix
+ifeq ($(OS),Darwin)
+JOBS ?= $(shell sysctl hw.ncpu | awk '{print $$2}')
+else
+JOBS ?= $(shell nproc)
+endif
+
+MAKEFLAGS += -j $(JOBS) -l $(JOBS)
+
 endif
 
 
@@ -114,11 +125,11 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS += -O3 -flto -pthread -frounding-math -fvisibility=hidden
+override CFLAGS += -O3 -flto=auto -pthread -frounding-math -fvisibility=hidden
 else
 ifeq ($(CC_TYPE),clang)
 # Many clang versions lack -frounding-math, and it doesn't need it in fact
-override CFLAGS += -O3 -flto -pthread -fvisibility=hidden
+override CFLAGS += -O3 -flto=auto -pthread -fvisibility=hidden
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS += -O2

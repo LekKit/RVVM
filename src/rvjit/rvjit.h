@@ -23,10 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "utils.h"
 #include "hashmap.h"
+#include "vector.h"
 #include <string.h>
-
-// Explicitly protect/unprotect memory on each JIT invocation
-#define RVJIT_PARANOID
 
 #define REG_ILL 0xFF // Register is not allocated
 
@@ -47,6 +45,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         #define RVJIT_ABI_SYSV 1
     #endif
     #define RVJIT_NATIVE_64BIT 1
+    #define RVJIT_NATIVE_LINKER 1
     #define RVJIT_X86 1
 #elif defined(__i386__) || defined(_M_IX86)
     #ifdef _WIN32
@@ -59,6 +58,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         #define RVJIT_CALL __attribute__((fastcall))
     #endif
     #define RVJIT_ABI_FASTCALL 1
+    #define RVJIT_NATIVE_LINKER 1
     #define RVJIT_X86 1
 #elif defined(__riscv)
     #if __riscv_xlen == 64
@@ -67,6 +67,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         #error No JIT support for RV128!
     #endif
     #define RVJIT_ABI_SYSV 1
+    #define RVJIT_NATIVE_LINKER 1
     #define RVJIT_RISCV 1
 #elif defined(__aarch64__) || defined(_M_ARM64)
     #define RVJIT_NATIVE_64BIT 1
@@ -99,17 +100,19 @@ typedef struct {
     size_t curr;
     size_t size;
     hashmap_t blocks;
-    hashmap_t blocks_writeback;
+    hashmap_t block_links;
 } rvjit_heap_t;
 
 typedef struct {
     size_t last_used;   // Last usage of register for LRU reclaim
+    int32_t auipc_off;
     regid_t hreg;       // Claimed host register, REG_ILL if not mapped
     regflags_t flags;   // Register allocation details
 } rvjit_reginfo_t;
 
 typedef struct {
     rvjit_heap_t heap;
+    vector_t(struct {paddr_t dest; size_t ptr;}) links;
     uint8_t* code;
     size_t size;
     size_t space;
@@ -120,6 +123,7 @@ typedef struct {
     paddr_t phys_pc;
     int32_t pc_off;
     bool rv64;
+    bool linkage;
 } rvjit_block_t;
 
 // Creates JIT context, sets upper limit on cache size
@@ -162,7 +166,7 @@ void rvjit_flush_cache(rvjit_block_t* block);
 // Internal APIs
 
 void rvjit_emit_init(rvjit_block_t* block);
-void rvjit_emit_end(rvjit_block_t* block);
+void rvjit_emit_end(rvjit_block_t* block, bool link);
 
 regid_t rvjit_reclaim_hreg(rvjit_block_t* block);
 

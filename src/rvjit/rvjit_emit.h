@@ -22,6 +22,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVJIT_EMIT_H
 #define RVJIT_EMIT_H
 
+void rvjit_linker_patch_jmp(void* addr, int32_t offset);
+void rvjit_linker_patch_ret(void* addr);
+
 void rvjit32_add(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_sub(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_or(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -60,6 +63,15 @@ void rvjit32_blt(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit32_bge(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit32_bltu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit32_bgeu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
+
+void rvjit32_mul(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_mulh(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_mulhu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_mulhsu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_div(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_divu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_rem(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit32_remu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 
 
 
@@ -114,5 +126,20 @@ void rvjit64_blt(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit64_bge(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit64_bltu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit64_bgeu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
+
+void rvjit64_mul(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_mulh(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_mulhu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_mulhsu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_div(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_divu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_rem(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_remu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+
+void rvjit64_mulw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_divw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_divuw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_remw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
+void rvjit64_remuw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 
 #endif
