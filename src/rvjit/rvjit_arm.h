@@ -20,6 +20,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "bit_ops.h"
 
+#if defined(__linux__)
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+#else
+#warning No arm cpu flags detection for target os
+#endif
+
 #ifndef RVJIT_ARM_H
 #define RVJIT_ARM_H
 
@@ -28,6 +35,60 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #else
 #define rvjit_a32_assert(expr) (void)0
 #endif
+
+#if defined(__GNUC__) || defined(__clang__)
+/* gcc/clang? builtin functions */
+extern int __aeabi_idiv (int, int);
+extern unsigned __aeabi_uidiv (unsigned, unsigned);
+#endif
+
+static uint32_t rvjit_a32_hwcaps = 0;
+
+// maybe copy-paste for internal use linux hwcaps is a bad idea
+#define HWCAP_A32_SWP       (1 << 0)
+#define HWCAP_A32_HALF      (1 << 1)
+#define HWCAP_A32_THUMB     (1 << 2)
+#define HWCAP_A32_26BIT     (1 << 3)	/* Play it safe */
+#define HWCAP_A32_FAST_MULT	(1 << 4)
+#define HWCAP_A32_FPA       (1 << 5)
+#define HWCAP_A32_VFP       (1 << 6)
+#define HWCAP_A32_EDSP      (1 << 7)
+#define HWCAP_A32_JAVA      (1 << 8)
+#define HWCAP_A32_IWMMXT	(1 << 9)
+#define HWCAP_A32_CRUNCH	(1 << 10)	/* Obsolete */
+#define HWCAP_A32_THUMBEE	(1 << 11)
+#define HWCAP_A32_NEON      (1 << 12)
+#define HWCAP_A32_VFPv3     (1 << 13)
+#define HWCAP_A32_VFPv3D16	(1 << 14)	/* also set for VFPv4-D16 */
+#define HWCAP_A32_TLS       (1 << 15)
+#define HWCAP_A32_VFPv4     (1 << 16)
+#define HWCAP_A32_IDIVA     (1 << 17)
+#define HWCAP_A32_IDIVT     (1 << 18)
+#define HWCAP_A32_VFPD32	(1 << 19)	/* set if VFP has 32 regs (not 16) */
+#define HWCAP_A32_IDIV      (HWCAP_ARM_IDIVA | HWCAP_ARM_IDIVT)
+#define HWCAP_A32_LPAE      (1 << 20)
+#define HWCAP_A32_EVTSTRM	(1 << 21)
+
+static inline void rvjit_a32_test_cpu()
+{
+    if( rvjit_a32_hwcaps == 0 )
+    {
+#if defined(__linux__)
+        rvjit_a32_hwcaps = getauxval(AT_HWCAP);
+
+        if( rvjit_a32_hwcaps & HWCAP_A32_IDIV )
+            rvvm_info("RVJIT detected arm IDIV/UDIV instructions extension");
+#else
+        rvjit_a32_hwcaps = 1;
+#endif
+    }
+}
+
+static bool rvjit_a32_check_div()
+{
+    rvjit_a32_test_cpu();
+    return !!(rvjit_a32_hwcaps & HWCAP_ARM_IDIVA);
+}
 
 static bool check_imm_bits(int32_t val, bitcnt_t bits)
 {
@@ -260,7 +321,12 @@ static inline void rvjit_a32_md(rvjit_block_t *block, enum a32_md_opcs op, enum 
     rvjit_a32_insn32(block, (cc << 28) | op | (rd << 16) | (ra << 12) | (rm << 8) | (1 << 4) | rn);
 }
 
-static inline void rvjit_a32_bx_reg(rvjit_block_t* block, enum a32_cc cc,regid_t rm)
+static inline void rvjit_a32_blx_reg(rvjit_block_t* block, enum a32_cc cc, regid_t rm)
+{
+    rvjit_a32_dp(block, A32_BX, cc, A32_PC, A32_PC, rvjit_a32_shifter_reg_reg(rm, A32_LSR, A32_PC));
+}
+
+static inline void rvjit_a32_bx_reg(rvjit_block_t* block, enum a32_cc cc, regid_t rm)
 {
     rvjit_a32_dp(block, A32_BX, cc, A32_PC, A32_PC, rvjit_a32_shifter_reg_reg(rm, A32_LSL, A32_PC));
 }
@@ -275,6 +341,8 @@ enum a32_mem_opcs
     A32_LDRSH = (0 << 26) | (1 << 20) | (1 << 6) | (1 << 5) | (1 << 7) | (1 << 4),
     A32_LDRH  = (0 << 26) | (1 << 20) | (0 << 6) | (1 << 5) | (1 << 7) | (1 << 4),
     A32_STRH  = (0 << 26) | (0 << 20) | (0 << 6) | (1 << 5) | (1 << 7) | (1 << 4),
+    A32_STRM  = (1 << 27) | (0 << 20) | (0 << 22),
+    A32_LDRM  = (1 << 27) | (1 << 20) | (0 << 22)
 };
 
 enum a32_addrmode
@@ -311,12 +379,29 @@ static inline uint32_t rvjit_a32_addrmode3_reg(bool add, regid_t rm, enum a32_ad
     return (0 << 22) | am | (add << 23) | rm;
 }
 
+static inline uint32_t rvjit_a32_addrmode_multiple_reg(enum a32_addrmode am, uint16_t regsmask)
+{
+    rvjit_a32_assert(__builtin_popcount(regsmask) > 1); // one register in mask is undefined behavor
+    rvjit_a32_assert((regsmask & (1u << 13)) == 0);
+    rvjit_a32_assert((regsmask & (1u << 15)) == 0);
+    return (0 << 22) | am | regsmask;
+}
+
 static inline void rvjit_a32_mem_op(rvjit_block_t* block, enum a32_mem_opcs op, enum a32_cc cc, regid_t rd, regid_t rn, uint32_t addrmode)
 {
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((rn & ~15) == 0);
     rvjit_a32_insn32(block, (cc << 28) | op | addrmode | (rn << 16) | (rd << 12));
 }
+
+/*
+static inline void rvjit_a32_push_multiple(rvjit_block_t *block, enum a32_mem_opcs, enum a32_cc cc, regid_t rn, uint16_t regmask)
+{
+    rvjit_a32_assert((rn & ~15) == 0);
+
+    rvjit_a32_insn32(block, (cc << 28) | op | addrmode | (rn << 16) | (rd << 12));
+}
+*/
 
 static inline void rvjit_native_push(rvjit_block_t* block, regid_t reg)
 {
@@ -754,16 +839,71 @@ static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, reg
     rvjit_free_hreg(block, rdlo);
 }
 
+static inline void rvjit_a32_soft_div_divu(rvjit_block_t* block, enum a32_md_opcs op, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    bool badreg  = (hrds <= 3);
+
+    if (unlikely(badreg))
+        rvjit_native_push(block, 4); // lazy to find free reg
+
+    //rvjit_a32_op_bkpt(block);
+    rvjit_native_push(block, 0);
+    rvjit_native_push(block, 1);
+    rvjit_native_push(block, 2);
+    rvjit_native_push(block, 3);
+    rvjit_native_push(block, A32_IP);
+
+    rvjit_a32_dp(block, A32_MOV, A32_AL, 0, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_LSL, 0));
+    if (unlikely(hrs2 != 1))
+        rvjit_a32_dp(block, A32_MOV, A32_AL, 1, 0, rvjit_a32_shifter_reg_imm(hrs2, A32_LSL, 0));
+
+    if (likely(op == A32_SDIV)) {
+        rvjit_native_setreg32(block, A32_IP, (unsigned)__aeabi_idiv);
+    } else if (likely(op == A32_UDIV)) {
+        rvjit_native_setreg32(block, A32_IP, (unsigned)__aeabi_uidiv);
+    }
+
+    rvjit_native_push(block, A32_LR);
+    rvjit_a32_blx_reg(block, A32_AL, A32_IP);
+    rvjit_native_pop(block, A32_LR);
+
+    // god save me
+    if (unlikely(badreg)) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, 4, 0, rvjit_a32_shifter_reg_imm(0, A32_LSL, 0));
+    } else {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(0, A32_LSL, 0));
+    }
+
+    rvjit_native_pop(block, A32_IP);
+    rvjit_native_pop(block, 3);
+    rvjit_native_pop(block, 2);
+    rvjit_native_pop(block, 1);
+    rvjit_native_pop(block, 0);
+
+    if (unlikely(badreg)) {
+        rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(4, A32_LSL, 0));
+        rvjit_native_pop(block, 4);
+    }
+}
+
 //NOTE: aarch32 generate for overflow same behavor just need to check for divide by zero
 static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
     bool need_allocate = (hrds == hrs1 || hrds == hrs2);
     regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
-    rvjit_native_setreg32s(block, tmphrds, -1);
-    rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
-    rvjit_a32_md(block, A32_SDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
 
-    if(need_allocate) {
+    rvjit_native_setreg32s(block, tmphrds, -1);
+
+    if (likely(rvjit_a32_check_div())) {
+        rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
+        rvjit_a32_md(block, A32_SDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
+    } else {
+        branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
+        rvjit_a32_soft_div_divu(block, A32_SDIV, tmphrds, hrs1, hrs2);
+        rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
+    }
+
+    if (need_allocate) {
         rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
         rvjit_free_hreg(block, tmphrds);
     }
@@ -775,10 +915,17 @@ static inline void rvjit32_native_divu(rvjit_block_t* block, regid_t hrds, regid
     regid_t tmphrds = need_allocate ? rvjit_claim_hreg(block) : hrds;
 
     rvjit_native_setreg32s(block, tmphrds, -1);
-    rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
-    rvjit_a32_md(block, A32_UDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
 
-    if(need_allocate) {
+    if (likely(rvjit_a32_check_div())) {
+        rvjit_a32_dp(block, A32_CMP, A32_AL, hrs2, 0x0, rvjit_a32_shifter_imm(0,0));
+        rvjit_a32_md(block, A32_UDIV, A32_NE, tmphrds, 0xf, hrs1, hrs2);
+    } else {
+        branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
+        rvjit_a32_soft_div_divu(block, A32_UDIV, tmphrds, hrs1, hrs2);
+        rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
+    }
+
+    if (need_allocate) {
         rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
         rvjit_free_hreg(block, tmphrds);
     }
@@ -794,13 +941,19 @@ static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_
 
     rvjit_a32_dp(block, A32_MOV, A32_AL, tmphrds, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_LSL, 0));
     branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
-    rvjit_a32_md(block, A32_SDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 sdiv hrs2)
+
+    if (likely(rvjit_a32_check_div())) {
+        rvjit_a32_md(block, A32_SDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 sdiv hrs2)
+    } else {
+        rvjit_a32_soft_div_divu(block, A32_SDIV, tmp, hrs1, hrs2);
+    }
+
     rvjit_a32_dp(block, A32_CMP, A32_AL, 0, hrs1, rvjit_a32_shifter_reg_imm(tmp, A32_LSL, 0)); // cmp(hrs1, tmp)
     rvjit_a32_dp(block, A32_MOV, A32_EQ, tmphrds, 0, rvjit_a32_shifter_imm(0, 0)); // if (tmp == cmpreg) { hrds = 0; }
     rvjit_a32_ma2(block, A32_MLS, A32_NE, tmphrds, hrs1, tmp, hrs2); // else { hrds = (hrs1 - (tmp * hrs2)); }
     rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
 
-    if(need_allocate) {
+    if (need_allocate) {
         rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
         rvjit_free_hreg(block, tmphrds);
     }
@@ -816,11 +969,17 @@ static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid
 
     rvjit_a32_dp(block, A32_MOV, A32_AL, tmphrds, 0, rvjit_a32_shifter_reg_imm(hrs1, A32_LSL, 0));
     branch_t zerocheck = rvjit32_native_beqz(block, hrs2, BRANCH_NEW, BRANCH_ENTRY);
-    rvjit_a32_md(block, A32_UDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 divu hrs2)
+
+    if (likely(rvjit_a32_check_div())) {
+        rvjit_a32_md(block, A32_UDIV, A32_AL, tmp, 0xf, hrs1, hrs2); // tmp = (hrs1 divu hrs2)
+    } else {
+        rvjit_a32_soft_div_divu(block, A32_UDIV, tmp, hrs1, hrs2);
+    }
+
     rvjit_a32_ma2(block, A32_MLS, A32_AL, tmphrds, hrs1, tmp, hrs2); // hrds = hrs1 - (tmp * hrs2)
     rvjit32_native_beqz(block, hrs2, zerocheck, BRANCH_TARGET);
 
-    if(need_allocate) {
+    if (need_allocate) {
         rvjit_a32_dp(block, A32_MOV, A32_AL, hrds, 0, rvjit_a32_shifter_reg_imm(tmphrds, A32_LSL, 0));
         rvjit_free_hreg(block, tmphrds);
     }
