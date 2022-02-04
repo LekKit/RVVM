@@ -325,4 +325,6 @@ void rvjit_flush_cache(rvjit_block_t* block)
 
     rvjit_linker_cleanup(block);
     hashmap_clear(&block->heap.block_links);
+
+    rvjit_block_init(block);
 }
