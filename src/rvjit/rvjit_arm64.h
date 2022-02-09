@@ -226,14 +226,14 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
     } else {
         // We want to emit a branch instruction
         if (handle == BRANCH_NEW) {
-            // We have a branch address - emit a full instruction. This is a backward jump.
-            rvjit_a64_b(block, handle - block->size);
-            return BRANCH_NEW;
-        } else {
             // We don't have an address - it will be patched in the future. This is a forward jump.
             branch_t tmp = block->size;
             rvjit_a64_b(block, 0);
             return tmp;
+        } else {
+            // We have a branch address - emit a full instruction. This is a backward jump.
+            rvjit_a64_b(block, handle - block->size);
+            return BRANCH_NEW;
         }
     }
 }
@@ -425,8 +425,8 @@ bool rvjit_a64_check_logical_imm32(uint32_t val, unsigned *rot, unsigned *len)
     {
         val = ~val;
         if (val == 0) return false;
-        rotation = __builtin_clzl(val);
-        count = rotation + __builtin_ctzl(val);
+        rotation = __builtin_clz(val);
+        count = rotation + __builtin_ctz(val);
         if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1))
         {
             return false;
@@ -435,8 +435,8 @@ bool rvjit_a64_check_logical_imm32(uint32_t val, unsigned *rot, unsigned *len)
     else
     {
         if (val == 0) return false;
-        rotation = (sizeof(val) * 8 - __builtin_ctzl(val));
-        count = rotation - __builtin_clzl(val);
+        rotation = (sizeof(val) * 8 - __builtin_ctz(val));
+        count = rotation - __builtin_clz(val);
         rotation &= sizeof(val) * 8 - 1;
         if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1))
         {
