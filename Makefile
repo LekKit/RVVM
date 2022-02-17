@@ -74,7 +74,9 @@ ifeq ($(OS),windows)
 override CFLAGS += -mwindows -static
 PROGRAMEXT := .exe
 else
+ifneq ($(OS),android)
 override LDFLAGS += -lpthread
+endif
 endif
 
 
