@@ -123,6 +123,9 @@ static int rvjit_anon_memfd()
     int memfd = -1;
     rvvm_info("No RVJIT anon memfd support for this platform");
 #endif
+#if defined(ANDROID) || defined(__ANDROID__)
+    rvvm_warn("No RVJIT shmem support on Android");
+#else
     if (memfd < 0) {
         rvvm_info("Falling back to RVJIT shmem");
         char shm_file[] = "/shm-rvjit";
@@ -132,6 +135,7 @@ static int rvjit_anon_memfd()
             memfd = -1;
         }
     }
+#endif
     return memfd;
 }
 
