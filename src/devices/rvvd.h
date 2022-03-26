@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVVD_H
 #define RVVD_H
 
-#define RVVD_VERSION       0x0
-#define RVVD_MIN_VERSION   0x0
+#define RVVD_VERSION       0x1
+#define RVVD_MIN_VERSION   0x1
 
 #define DISK_TYPE_RVVD     0x1
 

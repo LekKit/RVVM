@@ -58,7 +58,7 @@ int rvvd_init_overlay(struct rvvd_disk* disk, const char* base_filename, const c
 
     struct rvvd_disk* base_disk = safe_malloc(sizeof(struct rvvd_disk));
 
-    if (!rvvd_open(base_disk, base_filename)) {
+    if (rvvd_open(base_disk, base_filename)) {
         rvvm_error("RVVD ERROR: Could not open base disk file!");
         return -1;
     }
@@ -253,7 +253,7 @@ void blk_write(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
 
     if (!offset) offset = rvvd_sector_get_offset(disk, sec_id);
 
-    for (int i = 0; i < 512/sizeof(size_t); i++) {
+    for (size_t i = 0; i < 512/sizeof(size_t); i++) {
         if (((const size_t*)data)[i] && !offset) {
             blk_allocate(disk, data, sec_id);
             return;
@@ -335,4 +335,10 @@ void rvvd_sector_read(struct rvvd_disk* disk, void* buffer, uint64_t offset) {
 
 void rvvd_sector_read_recursive(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
     blk_read(disk, buffer, sec_id);
+}
+
+int rvvd_strlen(const char* string) {
+    int size = 0;
+    while (string[size] != '\0') size ++;
+    return size;
 }
