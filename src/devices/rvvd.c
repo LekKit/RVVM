@@ -106,7 +106,7 @@ int rvvd_init_from_image(struct rvvd_disk* disk, const char* image_filename, con
     uint8_t bufferspace[1024*1024] = {0};
     for (size_t i = 0; i < size/(1024*1024); i++) {
         fread(bufferspace, 1024*1024, 1, img_fd);
-        for (size_t y = 0; y < 1024*1024/512; y++) blk_write(disk, bufferspace+512*y, y);
+        for (size_t y = 0; y < 1024*1024/512; y++) rvvd_write(disk, bufferspace+512*y, y);
         memset(bufferspace, 0, 1024*1024);
     }
 
@@ -183,6 +183,7 @@ void rvvd_close(struct rvvd_disk* disk) {
     }
 
     fclose(disk->_fd);
+    free(disk->blk_desc);
     free(disk);
 }
 
@@ -216,14 +217,14 @@ void rvvd_convert_to_solid(struct rvvd_disk* disk) {
         memset(tmpbuf, 0, 512);
         offset = read_uint64_le(sector_table+i);
         rvvd_sector_read_recursive(disk, tmpbuf, i);
-        blk_write(disk, tmpbuf, i);
+        rvvd_write(disk, tmpbuf, i);
         rvvd_sector_read(disk, tmpbuf, offset);
-        blk_write(disk, tmpbuf, i);
+        rvvd_write(disk, tmpbuf, i);
     }
 
 }
 
-void blk_read(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
+void rvvd_read(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
     uint8_t data[512] = {0};
 
     uint64_t offset = rvvd_get_sector_cache_entry(disk, sec_id);
@@ -233,7 +234,7 @@ void blk_read(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
     if (disk->disk_type != DTYPE_OVERLAY ) {
         if (offset) rvvd_sector_read(disk, data, offset);
     } else {
-        if (!offset) blk_read(disk->base_disk, data, sec_id);
+        if (!offset) rvvd_read(disk->base_disk, data, sec_id);
         else rvvd_sector_read(disk, data, offset);
     }
 
@@ -243,7 +244,7 @@ void blk_read(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
 
 }
 
-void blk_write(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
+void rvvd_write(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
     /*
     Writing in the disk file. If sector isn't allocated and write data not full of zeros,
     allocates it
@@ -255,7 +256,7 @@ void blk_write(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
 
     for (size_t i = 0; i < 512/sizeof(size_t); i++) {
         if (((const size_t*)data)[i] && !offset) {
-            blk_allocate(disk, data, sec_id);
+            rvvd_allocate(disk, data, sec_id);
             return;
         }
     }
@@ -267,7 +268,7 @@ void blk_write(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
 
 }
 
-void blk_allocate(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
+void rvvd_allocate(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
     // Allocates block in the disk file
 
     fseek(disk->_fd, 0, 2);
@@ -281,11 +282,11 @@ void blk_allocate(struct rvvd_disk* disk, void* data, uint64_t sec_id) {
 
 }
 
-void blk_sync(struct rvvd_disk* disk) {
+void rvvd_sync(struct rvvd_disk* disk) {
     fflush(disk->_fd);
 }
 
-// void blk_trim(struct rvvd_disk* disk, uint64_t sec_id) {
+// void rvvd_trim(struct rvvd_disk* disk, uint64_t sec_id) {
 //     uint64_t offset = rvvd_get_sector_cache_entry(disk, sec_id);
 //     if (!offset) offset = rvvd_sector_get_offset(disk, sec_id);
 //     if (!offset) {
@@ -334,11 +335,68 @@ void rvvd_sector_read(struct rvvd_disk* disk, void* buffer, uint64_t offset) {
 }
 
 void rvvd_sector_read_recursive(struct rvvd_disk* disk, void* buffer, uint64_t sec_id) {
-    blk_read(disk, buffer, sec_id);
+    rvvd_read(disk, buffer, sec_id);
 }
 
-int rvvd_strlen(const char* string) {
-    int size = 0;
-    while (string[size] != '\0') size ++;
-    return size;
+// int rvvd_strlen(const char* string) {
+//     int size = 0;
+//     while (string[size] != '\0') size ++;
+//     return size;
+// }
+
+void blk_open(void* drive) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_open(disk, disk->filename);
+}
+
+void blk_close(void* drive) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_close(disk);
+}
+
+void blk_allocate(void* drive, void* data, uint64_t sec_id) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_allocate(disk, data, sec_id);
+}
+
+void blk_read(void* drive, void* buffer, uint64_t sec_id) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_read(disk);
+}
+
+void blk_write(void* drive, void* data, uint64_t sec_id) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_write(disk, data, sec_id);
+}
+
+void blk_trim(void* drive, uint64_t sec_id) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_trim(disk, sec_id);
+}
+
+void blk_sync(void* drive) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    rvvd_sync(disk);
+}
+
+size_t blk_size(void* drive) {
+    struct rvvd_disk* disk = (struct rvvd_disk*)drive;
+    return disk->size;
+}
+
+void rvvd_describe(struct rvvd_disk* disk) {
+
+    blk_description* ata_blk_desc = safe_malloc(sizeof(blk_description));
+
+    ata_blk_desc->blk_open = blk_open;
+    ata_blk_desc->blk_close = blk_close;
+    ata_blk_desc->blk_allocate = blk_allocate;
+    ata_blk_desc->blk_read = blk_read;
+    ata_blk_desc->blk_write = blk_write;
+    ata_blk_desc->blk_trim = blk_trim;
+    ata_blk_desc->blk_sync = blk_sync;
+    ata_blk_desc->blk_size = blk_size;
+
+    disk->blk_desc = ata_blk_desc;
+
 }
