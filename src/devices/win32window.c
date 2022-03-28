@@ -97,7 +97,7 @@ static void init_keycodes()
     init_keycode(0x14, 0x58, 1);
     init_keycode(0x10, 0x12, 1);
     init_keycode(0x11, 0x14, 1);
-    init_keycode(0x5B, 0xE01F, 2);
+    init_keycode(0x5B, 0x1FE0, 2);
     init_keycode(0x12, 0x11, 1);
     init_keycode(0xA1, 0x59, 1);
     init_keycode(0xA3, 0x14E0, 2);
