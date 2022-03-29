@@ -36,31 +36,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm_types.h"
 // #include "vector.h"
-#include "drive.h"
+#include "blk_dev.h"
 
 #include <stdio.h>
-
-// typedef struct {
-//     uint64_t id;
-//     uint64_t offset;
-//     // uint8_t ref_count;
-//
-//     // bool is_reference;
-//     // bool is_edited;
-//
-// } rvvd_sector;
 
 typedef struct {
     uint64_t id;
     uint64_t offset;
 } sector_cache_entry;
 
-struct rvvd_disk {
+struct rvvd_dev {
     // blk functions api
-    blk_description* blk_desc;
+    blk_dev* blk_dev;
 
     char filename[256];
-    struct rvvd_disk* base_disk;
+    struct rvvd_dev* base_disk;
     uint64_t size;
     uint32_t version;
 
@@ -78,25 +68,25 @@ struct rvvd_disk {
 
 };
 
-void rvvd_describe(struct rvvd_disk* disk);
+blk_dev* rvvd_dev(const char* filename);
 
 // Disk creation moment
-int rvvd_init(struct rvvd_disk* disk, const char* filename, uint64_t size); // Creates new disk
-int rvvd_init_overlay(struct rvvd_disk* disk, const char* base_filename, const char* filename); // Creates new disk in overlay mode on other disk
-int rvvd_init_from_image(struct rvvd_disk* disk, const char* image_filename, const char* filename); // Converts disk image to rvvd disk format
+int rvvd_init(struct rvvd_dev* disk, const char* filename, uint64_t size); // Creates new disk
+int rvvd_init_overlay(struct rvvd_dev* disk, const char* base_filename, const char* filename); // Creates new disk in overlay mode on other disk
+int rvvd_init_from_image(struct rvvd_dev* disk, const char* image_filename, const char* filename); // Converts disk image to rvvd disk format
 
-int rvvd_open(struct rvvd_disk* disk, const char* filename);
-void rvvd_close(struct rvvd_disk* disk);
+int rvvd_open(struct rvvd_dev* disk, const char* filename);
+void rvvd_close(struct rvvd_dev* disk);
 
 // Disk settings
-void rvvd_migrate_to_current_version(struct rvvd_disk* disk); // Converts disk in current disk version
-void rvvd_convert_to_solid(struct rvvd_disk* disk); // Converts disk overlay in solid disk type
-void rvvd_change_compression_type(struct rvvd_disk* disk, int compression_type);
-bool rvvd_change_size(struct rvvd_disk* disk, size_t new_size);
-void rvvd_deduplicate(struct rvvd_disk* disk);
+void rvvd_migrate_to_current_version(struct rvvd_dev* disk); // Converts disk in current disk version
+void rvvd_convert_to_solid(struct rvvd_dev* disk); // Converts disk overlay in solid disk type
+void rvvd_change_compression_type(struct rvvd_dev* disk, int compression_type);
+bool rvvd_change_size(struct rvvd_dev* disk, size_t new_size);
+void rvvd_deduplicate(struct rvvd_dev* disk);
 
 // Blk API
-void blk_open(void* drive, const char* filename);
+void blk_open(void* drive);
 void blk_close(void* drive);
 void blk_allocate(void* drive, void* data, uint64_t sec_id);
 void blk_read(void* drive, void* buffer, uint64_t sec_id);
@@ -106,20 +96,20 @@ void blk_sync(void* drive);
 size_t blk_size(void* drive);
 
 // RVVD API
-void rvvd_allocate(struct rvvd_disk* disk, void* data, uint64_t sec_id);
-void rvvd_read(struct rvvd_disk* disk, void* buffer, uint64_t sec_id);
-void rvvd_write(struct rvvd_disk* disk, void* data, uint64_t sec_id);
-void rvvd_trim(struct rvvd_disk* disk, uint64_t sec_id);
-void rvvd_sync(struct rvvd_disk* disk);
+void rvvd_allocate(struct rvvd_dev* disk, void* data, uint64_t sec_id);
+void rvvd_read(struct rvvd_dev* disk, void* buffer, uint64_t sec_id);
+void rvvd_write(struct rvvd_dev* disk, void* data, uint64_t sec_id);
+void rvvd_trim(struct rvvd_dev* disk, uint64_t sec_id);
+void rvvd_sync(struct rvvd_dev* disk);
 
 //Sector table cache operations
-void rvvd_push_sector_cache(struct rvvd_disk* disk, uint64_t sec_id, uint64_t offset);
-uint64_t rvvd_get_sector_cache_entry(struct rvvd_disk* disk, uint64_t sec_id);
+void rvvd_push_sector_cache(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset);
+uint64_t rvvd_get_sector_cache_entry(struct rvvd_dev* disk, uint64_t sec_id);
 
-uint64_t rvvd_sector_get_offset(struct rvvd_disk* disk, uint64_t sec_id);
-void rvvd_sector_write(struct rvvd_disk* disk, void* data, uint64_t offset);
-void rvvd_sector_read(struct rvvd_disk* disk, void* buffer, uint64_t offset);
-void rvvd_sector_read_recursive(struct rvvd_disk* disk, void* buffer, uint64_t sec_id);
-void rvvd_reverse_sector_lookup(struct rvvd_disk* disk, uint64_t offset);
+uint64_t rvvd_sector_get_offset(struct rvvd_dev* disk, uint64_t sec_id);
+void rvvd_sector_write(struct rvvd_dev* disk, void* data, uint64_t offset);
+void rvvd_sector_read(struct rvvd_dev* disk, void* buffer, uint64_t offset);
+void rvvd_sector_read_recursive(struct rvvd_dev* disk, void* buffer, uint64_t sec_id);
+void rvvd_reverse_sector_lookup(struct rvvd_dev* disk, uint64_t offset);
 
 #endif

@@ -19,13 +19,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef DRIVE_H
 #define DRIVE_H
-#endif
+
 
 #define DISK_TYPE_NOEX  -0x1
 #define DISK_TYPE_NONE  0x0
 #define DISK_TYPE_RVVD  0x1
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "rvvm_types.h"
 
 typedef struct {
@@ -37,20 +38,12 @@ typedef struct {
     void (*blk_trim)(void*,uint64_t); // (void* drive, uint64_t sector_id)
     void (*blk_sync)(void*); // (void* drive)
     size_t (*blk_size)(void*);
-} blk_description;
 
-int get_drive_type(const char* filename) {
-    FILE* fp = fopen(filename, "rb");
-    if (fp == NULL){
-        return DISK_TYPE_NOEX;
-    }
-#ifdef USE_RVVD
-    uint8_t tmpbuf[4] = {0};
-    fread(tmpbuf, 4, 1, fp);
-    if (!memcmp(tmpbuf, "RVVD", 4)) {
-        return DISK_TYPE_RVVD;
-    }
-#endif
+    void* internal_drive;
+} blk_dev;
 
-    return DISK_TYPE_NONE;
+static inline void blk_destroy(blk_dev* blk_device) {
+    free(blk_device->internal_drive);
 }
+
+#endif
