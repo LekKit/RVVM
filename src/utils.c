@@ -220,7 +220,7 @@ bool rvvm_getarg_bool(const char* arg)
     return false;
 }
 
-size_t rvvm_getarg_int(const char* arg)
+int rvvm_getarg_int(const char* arg)
 {
     const char* argvalue = rvvm_getarg(arg);
     if (argvalue == NULL) return 0;

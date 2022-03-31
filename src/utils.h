@@ -50,7 +50,6 @@ PRINT_FORMAT void rvvm_error(const char* str, ...);
 void rvvm_fatal(const char* str); // Aborts the process
 
 // These never return NULL
-
 SAFE_MALLOC void* safe_malloc(size_t size);
 SAFE_CALLOC void* safe_calloc(size_t size, size_t n);
 SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
@@ -64,12 +63,12 @@ void rvvm_set_args(int _argc, const char** _argv);
 bool rvvm_has_arg(const char* arg);
 const char* rvvm_getarg(const char* arg);
 bool rvvm_getarg_bool(const char* arg);
-size_t rvvm_getarg_int(const char* arg);
-size_t rvvm_getarg_size(const char* arg);
+int rvvm_getarg_int(const char* arg);
+uint64_t rvvm_getarg_size(const char* arg);
 
 // Portable string.h replacement
 size_t rvvm_strlen(const char* string);
-bool rvvm_strcmp(const char* __value1, const char*  __value2);
+bool rvvm_strcmp(const char* s1, const char* s2);
 
 static inline size_t mem_suffix_shift(char suffix)
 {
