@@ -784,24 +784,19 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
     }
 }
 
-//#define RVJIT_FAR_BRANCHES
+/*
+ * Forward branches are dynamically resized,
+ * however this may introduce problems with cross-branching code.
+ * RVVM currently generates linear code with no branch intersections,
+ * so this isn't a concern, but might be revised.
+ */
 
-// Needs testing if we aren't violating offset constraints
-#ifdef RVJIT_FAR_BRANCHES
-#define X86_JB   0x82
-#define X86_JNB  0x83
-#define X86_JE   0x84
-#define X86_JNE  0x85
-#define X86_JL   0x8C
-#define X86_JGE  0x8D
-#else
 #define X86_JB   0x72
 #define X86_JNB  0x73
 #define X86_JE   0x74
 #define X86_JNE  0x75
 #define X86_JL   0x7C
 #define X86_JGE  0x7D
-#endif
 
 #define X86_BEQ  X86_JE
 #define X86_BNE  X86_JNE
@@ -810,37 +805,36 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
 #define X86_BLTU X86_JB
 #define X86_BGEU X86_JNB
 
+#define X86_FAR_BRANCH 0x0F
+#define X86_FAR_BRANCH_MASK 0x10
 
 static inline branch_t rvjit_x86_branch_entry(rvjit_block_t* block, uint8_t opcode, branch_t handle)
 {
-#ifdef RVJIT_FAR_BRANCHES
     uint8_t code[6];
-    code[0] = 0x0F;
-    code[1] = opcode;
-    if (handle == BRANCH_NEW) {
-        branch_t tmp = block->size;
-        write_uint32_le_m(code + 2, 0xFFFFFFFC);
-        rvjit_put_code(block, code, 6);
-        return tmp;
-    } else {
-        write_uint32_le_m(code + 2, handle - block->size - 6);
-        rvjit_put_code(block, code, 6);
-        return BRANCH_NEW;
-    }
-#else
-    uint8_t code[2];
     code[0] = opcode;
     if (handle == BRANCH_NEW) {
+        // Forward branch, migh relocate code after it
         branch_t tmp = block->size;
+        code[0] = opcode;
         code[1] = 0xFE;
         rvjit_put_code(block, code, 2);
         return tmp;
     } else {
-        code[1] = handle - block->size - 2;
-        rvjit_put_code(block, code, 2);
+        // Backward branch, no need for relocations
+        int32_t offset = handle - block->size - 2;
+        if (x86_is_byte_imm(offset)) {
+            code[0] = opcode;
+            code[1] = offset;
+            rvjit_put_code(block, code, 2);
+        } else {
+            // Far branch
+            code[0] = X86_FAR_BRANCH;
+            code[1] = opcode + X86_FAR_BRANCH_MASK;
+            write_uint32_le_m(code + 2, offset - 4);
+            rvjit_put_code(block, code, 6);
+        }
         return BRANCH_NEW;
     }
-#endif
 }
 
 static inline branch_t rvjit_x86_branch_target(rvjit_block_t* block, branch_t handle)
@@ -848,12 +842,19 @@ static inline branch_t rvjit_x86_branch_target(rvjit_block_t* block, branch_t ha
     if (handle == BRANCH_NEW) {
         return block->size;
     } else {
+        int32_t offset = block->size - handle - 2;
         // Patch jump offset
-#ifdef RVJIT_FAR_BRANCHES
-        write_uint32_le_m(block->code + handle + 2, block->size - handle - 6);
-#else
-        block->code[handle + 1] = block->size - handle - 2;
-#endif
+        if (x86_is_byte_imm(offset)) {
+            // Offset fits into 1 byte
+            block->code[handle + 1] = offset;
+        } else {
+            // Far branch required, reserve space & relocate the code
+            rvjit_put_code(block, "\xCC\xCC\xCC\xCC", 4);
+            memmove(block->code + handle + 6, block->code + handle + 2, offset);
+            block->code[handle + 1] = block->code[handle] + X86_FAR_BRANCH_MASK;
+            block->code[handle] = X86_FAR_BRANCH;
+            write_uint32_le_m(block->code + handle + 2, offset);
+        }
         return BRANCH_NEW;
     }
 }
@@ -1142,6 +1143,48 @@ static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
     code[0] = 0xE9;
     write_uint32_le_m(code + 1, ((uint32_t)offset) - 5);
     return true;
+}
+
+// Indirect jump by register
+static inline void rvjit_jmp_reg(rvjit_block_t* block, regid_t reg)
+{
+    uint8_t code[3] = {0x41, 0xFF, 0xE0};
+    code[2] += reg & 0x7;
+    rvjit_put_code(block, code + (reg >= X64_R8 ? 0 : 1), reg >= X64_R8 ? 3 : 2);
+}
+
+/*
+ * For shorter block PC updates in RVVM.
+ * Theoretically, this could be done by optimizing the IR into memrefs,
+ * but that's too expensive & complicated for now
+ */
+static inline void rvjit_x86_memref_addi(rvjit_block_t* block, regid_t addr, int32_t offset, int32_t imm, bool bits_64)
+{
+    size_t inst_size = 3;
+    uint8_t code[11] = {0x00, 0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    code[2] = addr & 0x7;
+    if (bits_64) code[0] |= X64_REX_W;
+    if (addr >= X64_R8) code[0] |= X64_REX_B;
+    if (offset) {
+        if (x86_is_byte_imm(offset)) {
+            code[inst_size] = offset;
+            code[2] |= 0x40;
+            inst_size++;
+        } else {
+            write_uint32_le_m(code + inst_size, offset);
+            code[2] |= 0x80;
+            inst_size += 4;
+        }
+    }
+    if (x86_is_byte_imm(imm)) {
+        code[inst_size] = imm;
+        code[1] |= 0x2;
+        inst_size++;
+    } else {
+        write_uint32_le_m(code + inst_size, imm);
+        inst_size += 4;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), inst_size - (code[0] ? 0 : 1));
 }
 
 /*
