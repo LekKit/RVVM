@@ -33,9 +33,9 @@ typedef struct {
     void (*blk_open)(void*); // (void* drive)
     void (*blk_close)(void*); // (void* drive)
     void (*blk_allocate)(void*,void*,uint64_t); // (void* drive, void* data, uint64_t sector_id)
-    void (*blk_read)(void*,void*,uint64_t); // (void* drive, void* dest_buffer, uint64_t sector_id)
-    void (*blk_write)(void*,void*,uint64_t); // (void* drive, void* data, uint64_t sector_id)
-    void (*blk_trim)(void*,uint64_t); // (void* drive, uint64_t sector_id)
+    void (*blk_read)(void*,void*,uint64_t,uint32_t); // (void* drive, void* dest_buffer, uint64_t offset, uint64 len)
+    void (*blk_write)(void*,void*,uint64_t,uint32_t); // (void* drive, void* data, uint64_t offset, uint64 len)
+    void (*blk_trim)(void*,uint64_t,uint32_t); // (void* drive, uint64, uint64_t offset, uint64 len)
     void (*blk_sync)(void*); // (void* drive)
     size_t (*blk_size)(void*);
 

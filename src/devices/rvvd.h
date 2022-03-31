@@ -22,8 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVVD_VERSION       0x1
 #define RVVD_MIN_VERSION   0x1
 
-#define DTYPE_SOLID        0x0
-#define DTYPE_OVERLAY      0x1
+#define DOPT_OVERLAY       0x1
 
 #define DCOMPESSION_NONE   0x0
 #define DCOMPESSION_LZMA   0x1
@@ -56,11 +55,12 @@ struct rvvd_dev {
 
     //Options
     uint16_t compression_type;
-    uint16_t disk_type;
+    bool overlay;
 
     //Sectors
     uint64_t sector_table_size;
     sector_cache_entry sector_cache[SECTOR_CACHE_SIZE];
+    uint64_t next_sector_offset;
     // vector_t(sector_cache_entry*) dirty_sectors;
 
     //For internal usage
@@ -84,14 +84,15 @@ void rvvd_convert_to_solid(struct rvvd_dev* disk); // Converts disk overlay in s
 void rvvd_change_compression_type(struct rvvd_dev* disk, int compression_type);
 bool rvvd_change_size(struct rvvd_dev* disk, size_t new_size);
 void rvvd_deduplicate(struct rvvd_dev* disk);
+void rvvd_dump_to_image(struct rvvd_dev* disk, const char* filename);
 
 // Blk API
 void blk_open(void* drive);
 void blk_close(void* drive);
-void blk_allocate(void* drive, void* data, uint64_t sec_id);
-void blk_read(void* drive, void* buffer, uint64_t sec_id);
-void blk_write(void* drive, void* data, uint64_t sec_id);
-void blk_trim(void* drive, uint64_t sec_id);
+void blk_allocate(void* drive, void* data, uint64_t sector_id);
+void blk_read(void* drive, void* buffer, uint64_t offset, uint32_t len);
+void blk_write(void* drive, void* data, uint64_t offset, uint32_t len);
+void blk_trim(void* drive, uint64_t offset, uint32_t len);
 void blk_sync(void* drive);
 size_t blk_size(void* drive);
 
@@ -103,8 +104,9 @@ void rvvd_trim(struct rvvd_dev* disk, uint64_t sec_id);
 void rvvd_sync(struct rvvd_dev* disk);
 
 //Sector table cache operations
-void rvvd_push_sector_cache(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset);
-uint64_t rvvd_get_sector_cache_entry(struct rvvd_dev* disk, uint64_t sec_id);
+void rvvd_sc_push(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset);
+void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32_t sector_count);
+uint64_t rvvd_sc_get(struct rvvd_dev* disk, uint64_t sec_id);
 
 uint64_t rvvd_sector_get_offset(struct rvvd_dev* disk, uint64_t sec_id);
 void rvvd_sector_write(struct rvvd_dev* disk, void* data, uint64_t offset);
