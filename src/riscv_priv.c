@@ -77,15 +77,32 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             * External interrupts are dropping CPU executor to scheduler,
             * where it gets ev_int flags and jumps into trap handler on it's own
             */
-            if (!rvtimer_pending(&vm->timer)) vm->csr.ip &= ~(1 << INTERRUPT_MTIMER);
+
             while (vm->wait_event) {
-                if (rvtimer_pending(&vm->timer)) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+                uint64_t timestamp = rvtimer_get(&vm->timer);
+
+                if (timestamp >= vm->timer.timecmp) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+
                 if (riscv_handle_irqs(vm, true)) {
                     // If we aren't unwinded to dispatch decrement PC by instruction size
                     vm->registers[REGISTER_PC] -= 4;
                     return;
+                } else {
+                    // Calculate sleep period
+                    if (vm->timer.timecmp > timestamp) {
+                        timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
+                        if (timestamp == 0) timestamp = 1;
+                        if (timestamp > 100) timestamp = 100;
+                        sleep_ms(timestamp);
+                    } else {
+                        /*
+                         * Timer interrupt is pending, but we are still here.
+                         * This most likely means that timer IRQs are disabled,
+                         * so we should sleep and wait for devices / IPI
+                         */
+                        sleep_ms(10);
+                    }
                 }
-                sleep_ms(10);
             }
             return;
     }
