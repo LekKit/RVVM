@@ -23,14 +23,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdbool.h>
 #include "compiler.h"
 
-#ifdef GNU_EXTS
-/* do nothing */
-#elif defined(__chibicc__)
+#if defined(__chibicc__)
 /* C11 atomics are broken on chibicc compiler, fallback silently */
 #define HOST_NO_ATOMICS
 #elif __STDC_VERSION__ >= 201112LL && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define C11_ATOMICS
+#elif GNU_EXTS
+/* do nothing */
 #elif _WIN32
 #include <windows.h>
 #else
