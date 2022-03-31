@@ -113,9 +113,9 @@ int rvvd_init_from_image(struct rvvd_dev* disk, const char* image_filename, cons
 
     // Getting file size;
     uint64_t size;
-    fseek(img_fd, 0, 2);
+    fseek(img_fd, 0, SEEK_END);
     size = ftell(img_fd);
-    fseek(img_fd, 0, 0);
+    fseek(img_fd, 0, SEEK_SET);
 
     if (rvvd_init(disk, filename, size)) {
         rvvm_error("RVVD ERROR: Could not create drive file!");
@@ -395,19 +395,19 @@ void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32
 }
 
 uint64_t rvvd_sector_get_offset(struct rvvd_dev* disk, uint64_t sec_id) {
-    fseek(disk->_fd, 512+sec_id*8, 0);
+    fseek(disk->_fd, 512+sec_id*8, SEEK_SET);
     uint8_t offsetbuf[8] = {0};
     fread(offsetbuf, 8, 1, disk->_fd);
     return read_uint64_le(offsetbuf);
 }
 
 void rvvd_sector_write(struct rvvd_dev* disk, void* data, uint64_t offset) {
-    fseek(disk->_fd, offset, 0);
+    fseek(disk->_fd, offset, SEEK_SET);
     fwrite(data, 512, 1, disk->_fd);
 }
 
 void rvvd_sector_read(struct rvvd_dev* disk, void* buffer, uint64_t offset) {
-    fseek(disk->_fd, offset, 0);
+    fseek(disk->_fd, offset, SEEK_SET);
     fread(buffer, 512, 1, disk->_fd);
 }
 
