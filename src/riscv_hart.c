@@ -41,11 +41,13 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     vm->jit_enabled = !rvvm_has_arg("nojit");
     if (vm->jit_enabled) {
         if (rvvm_getarg_size("jitcache")) {
-            rvjit_ctx_init(&vm->jit, rvvm_getarg_size("jitcache"));
+            vm->jit_enabled = rvjit_ctx_init(&vm->jit, rvvm_getarg_size("jitcache"));
         } else {
             // 16M JIT cache per hart
-            rvjit_ctx_init(&vm->jit, 16 << 20);
+            vm->jit_enabled = rvjit_ctx_init(&vm->jit, 16 << 20);
         }
+
+        if (!vm->jit_enabled) rvvm_warn("RVJIT failed to initialize, falling back to interpreter");
     }
 #endif
 

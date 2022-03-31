@@ -383,6 +383,9 @@ static void rvjit_link_block(rvjit_block_t* block)
         next_block = (size_t)(block->heap.data + block->heap.curr);
     } else {
         next_block = hashmap_get(&block->heap.blocks, next_pc);
+        if (next_block && block->heap.code) {
+            next_block += (size_t)(block->heap.data) - (size_t)(block->heap.code);
+        }
     }
 
     if ((next_pc >> 12) == (block->phys_pc >> 12)) {

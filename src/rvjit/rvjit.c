@@ -25,25 +25,34 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVJIT_MEM_RDWR 0x2
 #define RVJIT_MEM_RWX  0x3
 
+static size_t page_mask();
+
 // Align block size/address to page boundaries for mmap/mprotect
 static inline size_t size_to_page(size_t size)
 {
-    return (size + 0xFFFULL) & (~0xFFFULL);
+    return (size + page_mask()) & (~page_mask());
 }
 
 static inline void* ptr_to_page(void* ptr)
 {
-    return (void*)(size_t)(((size_t)ptr) & (~0xFFFULL));
+    return (void*)(size_t)(((size_t)ptr) & (~page_mask()));
 }
 
 static inline size_t ptrsize_to_page(void* ptr, size_t size)
 {
-    return (size + (((size_t)ptr) & 0xFFF) + 0xFFF) & (~0xFFFULL);
+    return (size + (((size_t)ptr) & page_mask()) + page_mask()) & (~page_mask());
 }
 
 #ifdef _WIN32
 #include <windows.h>
 #include <memoryapi.h>
+
+static size_t page_mask()
+{
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return info.dwPageSize - 1;
+}
 
 static inline DWORD rvjit_virt_flags(uint8_t flags)
 {
@@ -90,6 +99,11 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #include <sys/syscall.h>
 #endif
 
+static size_t page_mask()
+{
+    return sysconf(_SC_PAGESIZE) - 1;
+}
+
 static inline int rvjit_virt_flags(uint8_t flags)
 {
     switch (flags) {
@@ -102,7 +116,9 @@ static inline int rvjit_virt_flags(uint8_t flags)
 
 void* rvjit_mmap(size_t size, uint8_t flags)
 {
-    return mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (tmp == MAP_FAILED) tmp = NULL;
+    return tmp;
 }
 
 static int rvjit_anon_memfd()
@@ -139,19 +155,26 @@ static int rvjit_anon_memfd()
     return memfd;
 }
 
-bool rvjit_multi_mmap(void** rw, void** ex, size_t size)
+bool rvjit_multi_mmap(void** rw, void** exec, size_t size)
 {
     // Try creating anonymous memfd and mapping onto different virtual mappings
     int memfd = rvjit_anon_memfd();
-    if (memfd == -1) return false;
-    if (ftruncate(memfd, size_to_page(size))) {
-        close(memfd);
+    if (memfd == -1 || ftruncate(memfd, size_to_page(size))) {
+        rvvm_warn("RVJIT memfd creation failed");
+        if (memfd != -1) close(memfd);
         return false;
     }
     *rw = mmap(NULL, size_to_page(size), PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    *ex = *rw != NULL ? mmap(NULL, size_to_page(size), PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0) : NULL;
+    if (*rw != MAP_FAILED) {
+        *exec = mmap(NULL, size_to_page(size), PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0);
+        if (*exec == MAP_FAILED) *exec = NULL;
+    } else {
+        *rw = NULL;
+        *exec = NULL;
+    }
     close(memfd);
-    return *ex != NULL;
+
+    return *exec != NULL;
 }
 
 void rvjit_munmap(void* addr, size_t size)
@@ -176,17 +199,17 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #ifndef __NR_riscv_flush_icache
 #define __NR_riscv_flush_icache 259
 #endif
-static void flush_icache(void* addr, size_t size)
+static void flush_icache(const void* addr, size_t size)
 {
     syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
 }
 #elif defined(GNU_EXTS)
-static void flush_icache(void* addr, size_t size)
+static void flush_icache(const void* addr, size_t size)
 {
     __builtin___clear_cache((char*)addr, ((char*)addr) + size);
 }
 #elif defined(_WIN32)
-static void flush_icache(void* addr, size_t size)
+static void flush_icache(const void* addr, size_t size)
 {
     FlushInstructionCache(GetCurrentProcess(), addr, size);
 }
@@ -194,29 +217,39 @@ static void flush_icache(void* addr, size_t size)
 #ifndef RVJIT_X86
 #error No flush_icache support!
 #endif
-static void flush_icache(void* addr, size_t size)
+static void flush_icache(const void* addr, size_t size)
 {
     UNUSED(addr);
     UNUSED(size);
 }
 #endif
 
-void rvjit_ctx_init(rvjit_block_t* block, size_t size)
+bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
 {
-    block->space = 1024;
-    block->code = safe_malloc(block->space);
-
-    block->heap.data = rvjit_mmap(size, RVJIT_MEM_RWX);
+    block->heap.data = NULL;
     block->heap.code = NULL;
-    if (block->heap.data == NULL) {
+
+    if (rvvm_has_arg("rvjit_disable_rwx")) {
+        rvvm_info("RWX disabled, allocating W^X multi-mmap RVJIT heap");
+    } else {
+        block->heap.data = rvjit_mmap(size, RVJIT_MEM_RWX);
+
         // Possible on Linux PaX (hardened) or OpenBSD
-        rvvm_info("Failed to allocate RWX mapping, falling back to multi-mmap");
+        if (block->heap.data == NULL) rvvm_info("Failed to allocate RWX RVJIT heap, falling back to W^X multi-mmap");
+    }
+
+    if (block->heap.data == NULL) {
         if (!rvjit_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
-            rvvm_fatal("RVJIT heap allocation failure!");
+            rvvm_warn("RVJIT heap allocation failure!");
+            return false;
         }
         flush_icache(block->heap.code, block->heap.size);
     }
+
     flush_icache(block->heap.data, block->heap.size);
+
+    block->space = 1024;
+    block->code = safe_malloc(block->space);
 
     block->heap.size = size_to_page(size);
     block->heap.curr = 0;
@@ -226,6 +259,7 @@ void rvjit_ctx_init(rvjit_block_t* block, size_t size)
     hashmap_init(&block->heap.blocks, 64);
     hashmap_init(&block->heap.block_links, 64);
     vector_init(block->links);
+    return true;
 }
 
 static void rvjit_linker_cleanup(rvjit_block_t* block)
@@ -261,7 +295,7 @@ void rvjit_block_init(rvjit_block_t* block)
 rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 {
     uint8_t* dest = block->heap.data + block->heap.curr;
-    uint8_t* code;
+    const uint8_t* code;
     if (block->heap.code == NULL) {
         code = dest;
     } else {
@@ -302,7 +336,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
     if (linked_blocks) {
         vector_foreach(*linked_blocks, i) {
             uint8_t* jptr = vector_at(*linked_blocks, i);
-            rvjit_linker_patch_jmp(jptr, ((size_t)code) - ((size_t)jptr));
+            rvjit_linker_patch_jmp(jptr, ((size_t)dest) - ((size_t)jptr));
         }
         vector_free(*linked_blocks);
         free(linked_blocks);
