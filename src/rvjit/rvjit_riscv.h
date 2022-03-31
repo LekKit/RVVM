@@ -306,11 +306,11 @@ static inline void rvjit_riscv_b_op(rvjit_block_t* block, uint32_t opcode, regid
 static inline void rvjit_riscv_jal(rvjit_block_t* block, regid_t reg, int32_t offset)
 {
     uint8_t code[4];
-    write_uint32_le_m(code, 0x6F | (reg << 7)
-                                 | (((offset >> 1) & 0x3FF) << 21)
-                                 | (((offset >> 11) & 0x1)  << 20)
-                                 | (((offset >> 12) & 0xFF) << 12)
-                                 | (((offset >> 20) & 0x1)  << 31));
+    write_uint32_le_m(code, 0x6F | ((uint32_t)reg << 7)
+                                 | (((uint32_t)(offset >> 1) & 0x3FF) << 21)
+                                 | (((uint32_t)(offset >> 11) & 0x1)  << 20)
+                                 | (((uint32_t)(offset >> 12) & 0xFF) << 12)
+                                 | (((uint32_t)(offset >> 20) & 0x1)  << 31));
     rvjit_put_code(block, code, 4);
 }
 
@@ -326,10 +326,10 @@ static inline void rvjit_riscv_branch_patch(void* addr, int32_t offset)
 static inline void rvjit_riscv_jal_patch(void* addr, int32_t offset)
 {
     uint32_t opcode = 0x6F | (read_uint32_le_m(addr) & 0xFFF);
-    write_uint32_le_m(addr, opcode | (((offset >> 1) & 0x3FF) << 21)
-                                   | (((offset >> 11) & 0x1)  << 20)
-                                   | (((offset >> 12) & 0xFF) << 12)
-                                   | (((offset >> 20) & 0x1)  << 31));
+    write_uint32_le_m(addr, opcode | (((uint32_t)(offset >> 1) & 0x3FF) << 21)
+                                   | (((uint32_t)(offset >> 11) & 0x1)  << 20)
+                                   | (((uint32_t)(offset >> 12) & 0xFF) << 12)
+                                   | (((uint32_t)(offset >> 20) & 0x1)  << 31));
 }
 
 #ifdef RVJIT_NATIVE_64BIT
