@@ -488,10 +488,14 @@ static inline bool rvjit_x86_has_bmi2()
 {
     static bool init = false, bmi2 = false;
     if (!init) {
-        uint32_t regs[4];
         init = true;
-        rvjit_x86_cpuid(7, 0, regs);
-        bmi2 = !!(regs[1] & 0x100);
+        if (rvvm_has_arg("rvjit_force_bmi2")) {
+            bmi2 = rvvm_getarg_bool("rvjit_force_bmi2");
+        } else {
+            uint32_t regs[4];
+            rvjit_x86_cpuid(7, 0, regs);
+            bmi2 = !!(regs[1] & 0x100);
+        }
         if (bmi2) rvvm_info("RVJIT detected x86 BMI2 extension");
     }
      return bmi2;
