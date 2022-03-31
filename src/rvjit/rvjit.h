@@ -72,6 +72,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #elif defined(__aarch64__) || defined(_M_ARM64)
     #define RVJIT_NATIVE_64BIT 1
     #define RVJIT_ABI_SYSV 1
+    #define RVJIT_NATIVE_LINKER 1
     #define RVJIT_ARM64 1
 #elif defined(__arm__) || defined(_M_ARM)
     #define RVJIT_ABI_SYSV 1
@@ -93,6 +94,10 @@ typedef size_t  branch_t;
 #define BRANCH_NEW ((branch_t)-1)
 #define BRANCH_ENTRY  false
 #define BRANCH_TARGET true
+
+#define LINKAGE_NONE 0
+#define LINKAGE_TAIL 1
+#define LINKAGE_JMP  2
 
 typedef struct {
     uint8_t* data;
@@ -123,7 +128,7 @@ typedef struct {
     paddr_t phys_pc;
     int32_t pc_off;
     bool rv64;
-    bool linkage;
+    uint8_t linkage;
 } rvjit_block_t;
 
 // Creates JIT context, sets upper limit on cache size
@@ -166,7 +171,7 @@ void rvjit_flush_cache(rvjit_block_t* block);
 // Internal APIs
 
 void rvjit_emit_init(rvjit_block_t* block);
-void rvjit_emit_end(rvjit_block_t* block, bool link);
+void rvjit_emit_end(rvjit_block_t* block, uint8_t linkage);
 
 regid_t rvjit_reclaim_hreg(rvjit_block_t* block);
 

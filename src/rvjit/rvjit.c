@@ -237,6 +237,7 @@ static void rvjit_linker_cleanup(rvjit_block_t* block)
         vector_free(*linked_blocks);
         free(linked_blocks);
     }
+    hashmap_clear(&block->heap.block_links);
 }
 
 void rvjit_ctx_free(rvjit_block_t* block)
@@ -252,7 +253,7 @@ void rvjit_ctx_free(rvjit_block_t* block)
 void rvjit_block_init(rvjit_block_t* block)
 {
     block->size = 0;
-    block->linkage = true;
+    block->linkage = LINKAGE_JMP;
     vector_clear(block->links);
     rvjit_emit_init(block);
 }
@@ -282,7 +283,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
     hashmap_put(&block->heap.blocks, block->phys_pc, (size_t)code);
 
 #ifdef RVJIT_NATIVE_LINKER
-    vector_t(void*)* linked_blocks;
+    vector_t(uint8_t*)* linked_blocks;
     paddr_t k;
     size_t v;
     vector_foreach(block->links, i) {
@@ -290,17 +291,17 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         v = vector_at(block->links, i).ptr;
         linked_blocks = (void*)hashmap_get(&block->heap.block_links, k);
         if (!linked_blocks) {
-            linked_blocks = calloc(sizeof(vector_t(void*)), 1);
+            linked_blocks = calloc(sizeof(vector_t(uint8_t*)), 1);
             vector_init(*linked_blocks);
             hashmap_put(&block->heap.block_links, k, (size_t)linked_blocks);
         }
-        vector_push_back(*linked_blocks, (void*)v);
+        vector_push_back(*linked_blocks, (uint8_t*)v);
     }
 
     linked_blocks = (void*)hashmap_get(&block->heap.block_links, block->phys_pc);
     if (linked_blocks) {
         vector_foreach(*linked_blocks, i) {
-            void* jptr = vector_at(*linked_blocks, i);
+            uint8_t* jptr = vector_at(*linked_blocks, i);
             rvjit_linker_patch_jmp(jptr, ((size_t)code) - ((size_t)jptr));
         }
         vector_free(*linked_blocks);
@@ -328,7 +329,6 @@ void rvjit_flush_cache(rvjit_block_t* block)
     block->heap.curr = 0;
 
     rvjit_linker_cleanup(block);
-    hashmap_clear(&block->heap.block_links);
 
     rvjit_block_init(block);
 }
