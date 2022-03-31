@@ -9,30 +9,30 @@ RISC-V CPU & System software implementation written in С
 ## What's working
 - Passes RISC-V compliance tests for both RV64 & RV32
 - OpenSBI, U-Boot, custom firmwares boot and execute properly
-- Linux kernel boots!
-- Linux userspace works, interactive shell through UART
-- Framebuffer graphics, working Xorg with mouse & keyboard
+- Linux, FreeBSD & other cool OSes fully work
+- Tracing JIT, multicore support, networking
+- Framebuffer graphics, working Xorg with mouse & keyboard, interactive shell through UART
 - Raw image mounted as rootfs
 
-## What's done so far
+## Tell me more...
 - Feature-complete RV64IMAFDC instruction set
-- Multicore support (SMP)
+- Multicore support (SMP), SV32/SV39/SV48/SV57 MMU
+- Tracing RVJIT with x86_64, i386, ARM64, ARM, RISC-V backends
+  (faster than QEMU, yay!)
 - Bootrom, kernel Image loading
 - DTB auto-generation, passing to firmware/kernel
 - RVVM Lib API for VM integration
-- MMU with SV32/SV39/SV48/SV57 virtual addressing
 - UART 16550a-compatible text console
 - PLIC/CLIC, timers
 - PS2 Altera Controller, PS2 keyboard & mouse
 - Graphical framebuffer through X11/WinAPI
 - Generic PCI Bus
-- ATA PIO hard drive
-- ATA BMDMA (IDE UDMA) over PCI
-- OpenCores Ethernet through Linux TAP
+- ATA hard drive (PIO / IDE UDMA over PCI)
+- OpenCores Ethernet through Linux TAP, WIP usernet
 - Poweroff/reset device
 
 ## Building
-Currently builds using GNU Make or CMake and tested on Linux, Windows and MacOS systems. More build targets are going to be supported.
+Currently builds using GNU Make or CMake and tested on Linux, Windows, FreeBSD and MacOS systems. More build targets are going to be supported.
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
@@ -43,8 +43,10 @@ To cross-compile, pass CC=target-gcc and OS=target-os if the target OS differs f
 
 Examples:
 ```
-make CC=x86_64-w64-mingw32-gcc OS=windows USE_JIT=1
-make CC=aarch64-linux-gnu-gcc OS=linux USE_FB=0 USE_NET=1 USE_JIT=0
+make CC=aarch64-linux-gnu-gcc OS=linux ARCH=arm64 USE_FB=0 USE_NET=1 USE_JIT=1
+make CC=aarch64-linux-android21-clang ARCH=arm64 OS=android USE_JIT=1
+make CC=x86_64-w64-mingw32-gcc OS=windows ARCH=x86_64 USE_JIT=1
+make ARCH=i386 CFLAGS=-m32
 ```
 Alternatively, you can use CMake (hint, build binaries are not host arch suffixed):
 ```
@@ -73,9 +75,10 @@ fw_jump.bin            Initial firmware, OpenSBI in this case
 Invoke "./rvvm_x86_64 -h" to see extended help.
 
 ## Our team
-- **LekKit**: RVVM API, interpreter, RV64IMAC ISA, RISC-V Hart/MMU/Privileged/CSR, codebase infrastructure, working on JIT
-- **cerg2010cerg2010**: Important fixes, initial RV64 work, PLIC/PS2/ATA/Ethernet, XCB window backend, FPU extensions, FDT lib, working on PCI
-- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART
+- **LekKit**: RVVM API, interpreter, RV64IMAFDC ISA, RISC-V Hart/MMU/Privileged/CSR, RVJIT Compiler, UART/RTC/FB/Syscon, codebase infrastructure
+- **cerg2010cerg2010**: Important fixes, initial RV64 work, PLIC/PS2/ATA/PCI/Ethernet/XCB window/FPU/FDT, ARM JIT backend
+- **Mr0maks**: Initial ideas, C/M extensions, VM debugger, CSR work, NS16550A UART, ARM mul intrinsics
+- **0xCatPKG**: Userspace network, new argument parser, extended testing & fixes 
 - *Hoping to see more contributors here*
 
 ## TODO
@@ -83,9 +86,10 @@ Invoke "./rvvm_x86_64 -h" to see extended help.
   (FreeBSD generic kernel boots but i have no idea how to mount rootfs,
   too lazy to look at Haiku)
 - Improve RVVM Lib public API
-- Working JIT infrastructure (many headaches from x86 backend)
-- SATA/SCSI
-- Sparse HDD image format, compression
+- Optimize RVJIT icache flush (zifence)
+  (Requires MMU W^X tracking, perpage cache invalidation, other tricks)
+- SATA/SCSI/NVME (Most likely NVME)
+- Sparse HDD image format, compression/deduplication?
 - Userspace networking, sound?
 - Maybe virtio devices
 - Other peripherals
