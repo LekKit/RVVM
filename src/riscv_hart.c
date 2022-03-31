@@ -73,6 +73,15 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     riscv_priv_init(vm);
 }
 
+void riscv_hart_free(rvvm_hart_t* vm)
+{
+#ifdef USE_JIT
+    if (vm->jit_enabled) rvjit_ctx_free(&vm->jit);
+#else
+    UNUSED(vm);
+#endif
+}
+
 void riscv_hart_run(rvvm_hart_t* vm)
 {
     uint32_t events;

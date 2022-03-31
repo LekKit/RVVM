@@ -300,6 +300,10 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     rvvm_mmio_dev_t* dev;
     if (machine->running) return;
     
+    vector_foreach(machine->harts, i) {
+        riscv_hart_free(&vector_at(machine->harts, i));
+    }
+
     vector_foreach(machine->mmio, i) {
         dev = &vector_at(machine->mmio, i);
         rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");

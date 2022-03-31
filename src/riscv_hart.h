@@ -27,6 +27,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Set up initial hart context
 void riscv_hart_init(rvvm_hart_t* vm, bool rv64);
 
+void riscv_hart_free(rvvm_hart_t* vm);
+
 /* Hart-thread routines */
 
 /*
