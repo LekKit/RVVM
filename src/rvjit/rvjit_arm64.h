@@ -206,9 +206,9 @@ static inline void rvjit_a64_b_reloc(void *addr, uint32_t offset)
 
 static inline void rvjit_a64_b(rvjit_block_t* block, uint32_t offset)
 {
-    uint32_t insn;
-    rvjit_a64_b_reloc((void*) &insn, offset);
-    rvjit_a64_insn32(block, insn);
+    uint8_t insn[4];
+    rvjit_a64_b_reloc(insn, offset);
+    rvjit_a64_insn32(block, read_uint32_le_m(insn));
 }
 
 static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, bool label)
@@ -699,20 +699,40 @@ static inline void rvjit32_native_sw(rvjit_block_t* block, regid_t src, regid_t 
     rvjit_a64_mem_op(block, A64_STRW, src, addr, off);
 }
 
-static inline void rvjit_a64_b_cond_reloc(void *addr, enum a64_cc cc, uint32_t offset)
+static inline bool rvjit_is_valid_branch_imm(int32_t imm)
 {
-    uint32_t insn = (0x54 << 24) | (offset << 3) | cc;
+    return check_imm_bits(imm, 21) && (imm & 0x3) == 0;
+}
+
+enum a64_b_cc
+{
+    A64_B_EQ = (0x54U << 24) | A64_EQ,
+    A64_B_NE = (0x54U << 24) | A64_NE,
+    A64_B_CS = (0x54U << 24) | A64_CS,
+    A64_B_CC = (0x54U << 24) | A64_CC,
+    A64_B_LT = (0x54U << 24) | A64_LT,
+    A64_B_GE = (0x54U << 24) | A64_GE,
+    A64_CBZ  = (0x34U << 24),
+    A64_CBNZ = (0x35U << 24),
+    A64_CBZW = (0xB4U << 24),
+    A64_CBNZW = (0xB5U << 24)
+};
+
+static inline void rvjit_a64_b_cond_reloc(void* addr, uint32_t opcode, int32_t offset)
+{
+    if (!rvjit_is_valid_branch_imm(offset)) rvvm_fatal("Illegal branch offset in RVJIT!");
+    uint32_t insn = opcode | ((offset << 3) & 0xFFFFE0);
     write_uint32_le_m(addr, insn);
 }
 
-static inline void rvjit_a64_b_cond(rvjit_block_t* block, enum a64_cc cc, uint32_t offset)
+static inline void rvjit_a64_b_cond(rvjit_block_t* block, uint32_t opcode, int32_t offset)
 {
     uint8_t insn[4];
-    rvjit_a64_b_cond_reloc((void*) &insn, cc, offset);
+    rvjit_a64_b_cond_reloc((void*) &insn, opcode, offset);
     rvjit_a64_insn32(block, read_uint32_le_m(insn));
 }
 
-static inline branch_t rvjit_a64_bcc(rvjit_block_t* block, enum a64_cc cc, branch_t handle, bool label)
+static inline branch_t rvjit_a64_bcc(rvjit_block_t* block, uint32_t opcode, branch_t handle, bool label)
 {
     if (label) {
         // We want to set a label for a branch
@@ -721,7 +741,7 @@ static inline branch_t rvjit_a64_bcc(rvjit_block_t* block, enum a64_cc cc, branc
             return block->size;
         } else {
             // We have an instruction handle - this is a forward jump, relocate the address.
-            rvjit_a64_b_cond_reloc(block->code + handle, read_uint8(block->code + handle) & 15, block->size - handle);
+            rvjit_a64_b_cond_reloc(block->code + handle, read_uint32_le_m(block->code + handle) & 0xFF00000F, block->size - handle);
             return BRANCH_NEW;
         }
     } else {
@@ -729,11 +749,11 @@ static inline branch_t rvjit_a64_bcc(rvjit_block_t* block, enum a64_cc cc, branc
         if (handle == BRANCH_NEW) {
             // We don't have an address - it will be patched in the future. This is a forward jump.
             branch_t tmp = block->size;
-            rvjit_a64_b_cond(block, cc, 0);
+            rvjit_a64_b_cond(block, opcode, 0);
             return tmp;
         } else {
             // We have a branch address - emit a full instruction. This is a backward jump.
-            rvjit_a64_b_cond(block, cc, handle - block->size);
+            rvjit_a64_b_cond(block, opcode, handle - block->size);
             return BRANCH_NEW;
         }
     }
@@ -742,49 +762,47 @@ static inline branch_t rvjit_a64_bcc(rvjit_block_t* block, enum a64_cc cc, branc
 static inline branch_t rvjit32_native_beq(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_EQ, handle, target);
+    return rvjit_a64_bcc(block, A64_B_EQ, handle, target);
 }
 
 static inline branch_t rvjit32_native_bne(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_NE, handle, target);
+    return rvjit_a64_bcc(block, A64_B_NE, handle, target);
 }
 
 static inline branch_t rvjit32_native_beqz(rvjit_block_t* block, regid_t hrs1, branch_t handle, bool target)
 {
-    if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, A64_WZR, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_EQ, handle, target);
+    return rvjit_a64_bcc(block, A64_CBZW | hrs1, handle, target);
 }
 
 static inline branch_t rvjit32_native_bnez(rvjit_block_t* block, regid_t hrs1, branch_t handle, bool target)
 {
-    if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, A64_WZR, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_NE, handle, target);
+    return rvjit_a64_bcc(block, A64_CBNZW | hrs1, handle, target);
 }
 
 static inline branch_t rvjit32_native_blt(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_LT, handle, target);
+    return rvjit_a64_bcc(block, A64_B_LT, handle, target);
 }
 
 static inline branch_t rvjit32_native_bge(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_GE, handle, target);
+    return rvjit_a64_bcc(block, A64_B_GE, handle, target);
 }
 
 static inline branch_t rvjit32_native_bltu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_CC, handle, target);
+    return rvjit_a64_bcc(block, A64_B_CC, handle, target);
 }
 
 static inline branch_t rvjit32_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBSW, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_CS, handle, target);
+    return rvjit_a64_bcc(block, A64_B_CS, handle, target);
 }
 
 
@@ -1022,49 +1040,47 @@ static inline void rvjit64_native_sd(rvjit_block_t* block, regid_t dest, regid_t
 static inline branch_t rvjit64_native_beq(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_EQ, handle, target);
+    return rvjit_a64_bcc(block, A64_B_EQ, handle, target);
 }
 
 static inline branch_t rvjit64_native_bne(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_NE, handle, target);
+    return rvjit_a64_bcc(block, A64_B_NE, handle, target);
 }
 
 static inline branch_t rvjit64_native_beqz(rvjit_block_t* block, regid_t hrs1, branch_t handle, bool target)
 {
-    if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, A64_WZR, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_EQ, handle, target);
+    return rvjit_a64_bcc(block, A64_CBZ | hrs1, handle, target);
 }
 
 static inline branch_t rvjit64_native_bnez(rvjit_block_t* block, regid_t hrs1, branch_t handle, bool target)
 {
-    if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, A64_WZR, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_NE, handle, target);
+    return rvjit_a64_bcc(block, A64_CBNZ | hrs1, handle, target);
 }
 
 static inline branch_t rvjit64_native_blt(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_LT, handle, target);
+    return rvjit_a64_bcc(block, A64_B_LT, handle, target);
 }
 
 static inline branch_t rvjit64_native_bge(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_GE, handle, target);
+    return rvjit_a64_bcc(block, A64_B_GE, handle, target);
 }
 
 static inline branch_t rvjit64_native_bltu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_CC, handle, target);
+    return rvjit_a64_bcc(block, A64_B_CC, handle, target);
 }
 
 static inline branch_t rvjit64_native_bgeu(rvjit_block_t* block, regid_t hrs1, regid_t hrs2, branch_t handle, bool target)
 {
     if (!target) rvjit_a64_addsub_shifted(block, A64_SUBS, A64_WZR, hrs1, hrs2, A64_LSL, 0);
-    return rvjit_a64_bcc(block, A64_CS, handle, target);
+    return rvjit_a64_bcc(block, A64_B_CS, handle, target);
 }
 
 enum a64_dp_3src
@@ -1290,6 +1306,82 @@ static inline void rvjit32_native_rem(rvjit_block_t* block, regid_t hrds, regid_
 static inline void rvjit32_native_remu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
     rvjit_a64_native_rem(block, A64_UDIVW, A64_MSUB, true, hrds, hrs1, hrs2);
+}
+
+/*
+* Linker routines
+*/
+
+static inline bool rvjit_a64_valid_reloc(int32_t offset)
+{
+    return check_imm_bits(offset, 28) && (offset & 0x3) == 0;
+}
+
+// Emit jump instruction (may return false if offset cannot be encoded)
+static inline bool rvjit_tail_jmp(rvjit_block_t* block, int32_t offset)
+{
+    if (rvjit_a64_valid_reloc(offset)) {
+        rvjit_a64_b(block, offset);
+        return true;
+    }
+    return false;
+}
+
+// Emit patchable ret instruction
+static inline void rvjit_patchable_ret(rvjit_block_t* block)
+{
+    // Always 4-bytes, same as jmp
+    rvjit_native_ret(block);
+}
+
+// Jump if word pointed to by addr is nonzero (may emit nothing if the offset cannot be encoded)
+// Used to check interrupts in block linkage
+static inline void rvjit_tail_bnez(rvjit_block_t* block, regid_t addr, int32_t offset)
+{
+    size_t offset_fixup = block->size;
+    int32_t off;
+    regid_t tmp = rvjit_claim_hreg(block);
+    rvjit32_native_lw(block, tmp, addr, 0);
+
+    off = offset - (block->size - offset_fixup);
+    if (rvjit_is_valid_branch_imm(off)) {
+        // Offset fits into branch instruction
+        rvjit_a64_b_cond(block, A64_CBNZW | tmp, off);
+    } else {
+        // Use A64_B for 28-bit offset
+        branch_t l1 = rvjit32_native_beqz(block, tmp, BRANCH_NEW, false);
+        off = offset - (block->size - offset_fixup);
+        if (rvjit_a64_valid_reloc(off)) {
+            rvjit_a64_b(block, off);
+        } else {
+            rvvm_warn("Unimplemented 32-bit relative jump in ARM64 RVJIT backend!");
+        }
+        rvjit32_native_beqz(block, tmp, l1, true);
+    }
+
+    rvjit_free_hreg(block, tmp);
+}
+
+// Patch instruction at addr into ret
+static inline void rvjit_patch_ret(void* addr)
+{
+    write_uint32_le_m(addr, 0xD65F03C0);
+}
+
+// Patch jump instruction at addr (may return false if offset cannot be encoded)
+static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
+{
+    if (rvjit_a64_valid_reloc(offset)) {
+        write_uint32_le_m(addr, 0);
+        rvjit_a64_b_reloc(addr, offset);
+        return true;
+    }
+    return false;
+}
+
+static inline void rvjit_jmp_reg(rvjit_block_t* block, regid_t reg)
+{
+    rvjit_a64_insn32(block, 0xD61F0000 | (reg << 5));
 }
 
 #endif
