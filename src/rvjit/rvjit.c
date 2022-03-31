@@ -167,7 +167,10 @@ bool rvjit_multi_mmap(void** rw, void** exec, size_t size)
     *rw = mmap(NULL, size_to_page(size), PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
     if (*rw != MAP_FAILED) {
         *exec = mmap(NULL, size_to_page(size), PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0);
-        if (*exec == MAP_FAILED) *exec = NULL;
+        if (*exec == MAP_FAILED) {
+            munmap(*rw, size_to_page(size));
+            *exec = NULL;
+        }
     } else {
         *rw = NULL;
         *exec = NULL;
