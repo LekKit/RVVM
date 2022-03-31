@@ -76,7 +76,7 @@ static size_t get_arg(const char** argv, const char** arg_name, const char** arg
                 return 1;
             }
         }
-        
+
         if (argv[1] == NULL || argv[1][0] == '-') {
             // Argument format -arg
             *arg_val = "";
@@ -90,17 +90,6 @@ static size_t get_arg(const char** argv, const char** arg_name, const char** arg
         *arg_name = "bootrom";
         *arg_val = argv[0];
         return 1;
-    }
-}
-
-static inline size_t mem_suffix_shift(char suffix)
-{
-    switch (suffix) {
-        case 'k': return 10;
-        case 'K': return 10;
-        case 'M': return 20;
-        case 'G': return 30;
-        default: return 0;
     }
 }
 
@@ -165,13 +154,13 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
     const char* arg_name = "";
     const char* arg_val = "";
     uint8_t argpair;
-    
+
     // Default params: 1 core, 256M ram, 640x480 screen
     args->smp = 1;
     args->mem = 256 << 20;
     args->fb_x = 640;
     args->fb_y = 480;
-    
+
     for (int i=1; i<argc;) {
         argpair = get_arg(argv + i, &arg_name, &arg_val);
         i += argpair;
@@ -230,25 +219,25 @@ static bool load_file_to_ram(rvvm_machine_t* machine, paddr_t addr, const char* 
     FILE* file = fopen(filename, "rb");
     size_t fsize;
     uint8_t* buffer;
-    
+
     if (file == NULL) {
         rvvm_error("Cannot open file %s", filename);
         return false;
     }
-    
+
     fseek(file, 0, SEEK_END);
     fsize = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     buffer = safe_malloc(fsize);
-    
+
     if (fread(buffer, 1, fsize, file) != fsize) {
         rvvm_error("File %s read error", filename);
         fclose(file);
         free(buffer);
         return false;
     }
-    
+
     if (!rvvm_write_ram(machine, addr, buffer, fsize)) {
         rvvm_error("File %s does not fit in RAM", filename);
         fclose(file);
@@ -279,7 +268,7 @@ static bool rvvm_run_with_args(vm_args_t args)
             rvvm_error("Failed to load DTB");
             return false;
         }
-        
+
         rvvm_info("Custom DTB loaded at 0x%08"PRIxXLEN, dtb_addr);
 
         // pass DTB address in a1 register of each hart
@@ -287,10 +276,10 @@ static bool rvvm_run_with_args(vm_args_t args)
             vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
         }
     }
-    
+
     if (args.kernel) {
         // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
-        
+
         // TODO: It's possible to move memory region 128k behind and put
         // patched OpenSBI there, to save those precious 4MB
         paddr_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
@@ -326,7 +315,7 @@ static bool rvvm_run_with_args(vm_args_t args)
 #endif
         }
     }
-    
+
 #ifdef USE_FB
     if (!args.nogui) {
         static struct ps2_device ps2_mouse;
@@ -336,7 +325,7 @@ static bool rvvm_run_with_args(vm_args_t args)
         static struct ps2_device ps2_keyboard;
         ps2_keyboard = ps2_keyboard_create();
         altps2_init(machine, 0x20001000, plic_data, 3, &ps2_keyboard);
-        
+
         init_fb(machine, 0x30000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
     } else {
 #else
@@ -372,7 +361,7 @@ static bool rvvm_run_with_args(vm_args_t args)
 #else
         rvvm_error("This build doesn't support FDT generation");
 #endif
-    }    
+    }
 
     rvvm_enable_builtin_eventloop(false);
 
@@ -381,18 +370,18 @@ static bool rvvm_run_with_args(vm_args_t args)
 
     bool reset = machine->needs_reset;
     rvvm_free_machine(machine);
-    
+
 /*
  * Example machine resetting code, but a few issues here:
  * - Devices dont't know about resetting at all, may wreak havoc with DMA, etc
- * 
+ *
  * - We need to reload bootrom & kernel images into ram,
  * but those may be not present after initial boot
- * 
+ *
  * - Moreover, this should be not done from API user viewpoint but instead wrapped
  * in some helper routine (issue #2 again)
- * 
- * 
+ *
+ *
     vector_foreach(machine->harts, i) {
         riscv_tlb_flush(&vector_at(machine->harts, i));
         vector_at(machine->harts, i).registers[REGISTER_PC] = machine->mem.begin;
@@ -405,7 +394,7 @@ static bool rvvm_run_with_args(vm_args_t args)
     load_file_to_ram(machine, machine->mem.begin + (machine->mem.size >> 1), args.dtb);
     load_file_to_ram(machine, machine->mem.begin + (args.rv64 ? (2 << 20) : (4 << 20)), args.kernel);
 */
-    
+
     return reset;
 }
 
@@ -413,7 +402,7 @@ int main(int argc, const char** argv)
 {
     vm_args_t args = {0};
     rvvm_set_loglevel(LOG_WARN);
-    
+
     // let the vm be run by simple double-click, heh
     if (!parse_args(argc, argv, &args)) return 0;
     if (args.bootrom == NULL) {
@@ -424,4 +413,3 @@ int main(int argc, const char** argv)
     while (rvvm_run_with_args(args));
     return 0;
 }
-
