@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm.h"
 #include "riscv_hart.h"
 #include "riscv_csr.h"
+#include "riscv_mmu.h"
 #include "mem_ops.h"
 #include "assert.h"
 
@@ -68,6 +69,19 @@ static inline void riscv_jit_compile(rvvm_hart_t* vm)
 {
 #ifdef USE_JIT
     vm->block_ends = true;
+#else
+    UNUSED(vm);
+#endif
+}
+
+static inline void riscv_jit_flush_cache(rvvm_hart_t* vm)
+{
+#ifdef USE_JIT
+    if (vm->jit_enabled) {
+        riscv_jit_discard(vm);
+        riscv_jit_tlb_flush(vm);
+        rvjit_flush_cache(&vm->jit);
+    }
 #else
     UNUSED(vm);
 #endif

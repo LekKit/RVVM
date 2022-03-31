@@ -206,9 +206,6 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
                  || cmp_arg(arg_name, "H")) {
             print_help();
             return false;
-        } else {
-            rvvm_error("Unknown argument \"%s\"\n", arg_name);
-            return false;
         }
     }
     return true;
@@ -402,8 +399,8 @@ int main(int argc, const char** argv)
 {
     vm_args_t args = {0};
     rvvm_set_loglevel(LOG_WARN);
+    rvvm_setargs(argc, argv);
 
-    // let the vm be run by simple double-click, heh
     if (!parse_args(argc, argv, &args)) return 0;
     if (args.bootrom == NULL) {
         printf("Usage: %s [-help] [-mem 256M] [-rv64] ... [bootrom]\n", argv[0]);

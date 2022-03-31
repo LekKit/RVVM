@@ -38,9 +38,15 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     for (size_t i=0; i<32; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
 
 #ifdef USE_JIT
-    // 16M JIT cache per hart
-    rvjit_ctx_init(&vm->jit, 16 << 20);
-    vm->jit_enabled = true;
+    vm->jit_enabled = !rvvm_has_arg("nojit");
+    if (vm->jit_enabled) {
+        if (rvvm_has_arg("jitcache")) {
+            rvjit_ctx_init(&vm->jit, rvvm_getarg_size("jitcache"));
+        } else {
+            // 16M JIT cache per hart
+            rvjit_ctx_init(&vm->jit, 16 << 20);
+        }
+    }
 #endif
 
 #ifdef USE_RV64
@@ -142,6 +148,11 @@ void riscv_update_xlen(rvvm_hart_t* vm)
             riscv_decoder_init_rv32(vm);
         }
         vm->rv64 = rv64;
+
+#ifdef USE_JIT
+        rvjit_set_rv64(&vm->jit, rv64);
+        riscv_jit_flush_cache(vm);
+#endif
     }
 }
 #endif
