@@ -23,6 +23,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 static int loglevel;
 
+static int argc;
+static const char** argv;
+
+
+size_t rvvm_strlen(const char* string) {
+    int size = 0;
+    while (string[size] != '\0') size ++;
+    return size;
+}
+
+bool rvvm_strcmp(const char* __value1, const char*  __value2) {
+    if (rvvm_strlen(__value1) != rvvm_strlen(__value2)) return false;
+    for (size_t i = 0; i < rvvm_strlen(__value2); i++) {
+        if (__value1[i] != __value2[i]) return false;
+    }
+    return true;
+}
+
 void rvvm_set_loglevel(int level)
 {
     loglevel = level;
@@ -104,12 +122,12 @@ size_t int_to_str_dec(char* str, size_t size, int val)
         str[len++] = ('0' + (val % 10));
         val /= 10;
     } while (val);
-    
+
     // Append sign
     if (len + 1 > size) return 0;
     if (neg) str[len++] = '-';
     str[len] = 0;
-    
+
     // Reverse the string
     for (size_t i=0; i<len / 2; ++i) {
         char tmp = str[i];
@@ -134,4 +152,80 @@ int str_to_int_dec(const char* str)
     }
     if (neg) val *= -1;
     return val;
+}
+
+
+void rvvm_setargs(int _argc, const char** _argv)
+{
+    argc = _argc;
+    argv = _argv;
+}
+
+bool rvvm_has_arg(const char* arg)
+{
+    for (int i = 0; i < argc; i++) {
+        size_t offset = 1;
+        if (argv[i] == NULL) continue;
+        if (argv[i][0] != '-' ) continue;
+        offset = (argv[i][1] == '-') ? 2 : 1;
+        size_t j = 0;
+        while (arg[j]
+               && argv[i][j + offset]
+               && argv[i][j + offset] != '='
+               && argv[i][j + offset] == arg[j]) j++;
+        if (arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) return true;
+    }
+    return false;
+}
+
+const char* rvvm_getarg(const char* arg)
+{
+    for (int i = 0; i < argc; i++) {
+        size_t offset = 1;
+        if (argv[i] == NULL) continue;
+        if (argv[i][0] != '-' ) continue;
+        offset = (argv[i][1] == '-') ? 2 : 1;
+        size_t j = 0;
+        while (arg[j]
+               && argv[i][j + offset]
+               && argv[i][j + offset] != '='
+               && argv[i][j + offset] == arg[j]) j++;
+        if (!(arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) ) continue;
+        if (argv[i][j + offset] == '=') {
+            offset += j+1;
+            return argv[i]+offset;
+        }
+        if (argv[i+1] == NULL || argv[i+1][0] == '-') continue;
+        i++;
+        return argv[i];
+
+    }
+    return NULL;
+}
+
+bool rvvm_getarg_bool(const char* arg)
+{
+    const char* argvalue = rvvm_getarg(arg);
+    if (argvalue == NULL) return rvvm_has_arg(arg);
+    else if (argvalue[0] == 0) return false;
+    if (rvvm_strcmp("on", argvalue) ||
+       rvvm_strcmp("true", argvalue) ||
+       rvvm_strcmp("1", argvalue)) return true;
+    return false;
+}
+
+size_t rvvm_getarg_int(const char* arg)
+{
+    const char* argvalue = rvvm_getarg(arg);
+    if (argvalue == NULL) return 0;
+    return str_to_int_dec(argvalue);
+}
+
+uint64_t rvvm_getarg_size(const char* arg)
+{
+    const char* argvalue = rvvm_getarg(arg);
+    // printf("SIZE: %s %c %ld %ld\n", argvalue, argvalue[rvvm_strlen(argvalue)-1],
+    //                         str_to_int_dec(argvalue), mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]));
+    if (argvalue == NULL) return 0;
+    return (uint64_t)str_to_int_dec(argvalue) << mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]);
 }

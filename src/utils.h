@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define LOG_ERROR 1
 #define LOG_WARN  2
@@ -57,5 +58,28 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 // Portable itoa/atoi replacement
 size_t int_to_str_dec(char* str, size_t size, int val);
 int str_to_int_dec(const char* str);
+
+// Global argparser
+void rvvm_setargs(int _argc, const char** _argv);
+bool rvvm_has_arg(const char* arg);
+const char* rvvm_getarg(const char* arg);
+bool rvvm_getarg_bool(const char* arg);
+size_t rvvm_getarg_int(const char* arg);
+size_t rvvm_getarg_size(const char* arg);
+
+// Portable string.h replacement
+size_t rvvm_strlen(const char* string);
+bool rvvm_strcmp(const char* __value1, const char*  __value2);
+
+static inline size_t mem_suffix_shift(char suffix)
+{
+    switch (suffix) {
+        case 'k': return 10;
+        case 'K': return 10;
+        case 'M': return 20;
+        case 'G': return 30;
+        default: return 0;
+    }
+}
 
 #endif
