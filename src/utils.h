@@ -60,7 +60,7 @@ size_t int_to_str_dec(char* str, size_t size, int val);
 int str_to_int_dec(const char* str);
 
 // Global argparser
-void rvvm_setargs(int _argc, const char** _argv);
+void rvvm_set_args(int _argc, const char** _argv);
 bool rvvm_has_arg(const char* arg);
 const char* rvvm_getarg(const char* arg);
 bool rvvm_getarg_bool(const char* arg);

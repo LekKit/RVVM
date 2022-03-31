@@ -21,24 +21,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdlib.h>
 #include <stdio.h>
 
-static int loglevel;
+static int loglevel = LOG_WARN;
 
-static int argc;
-static const char** argv;
+static int argc = 0;
+static const char** argv = NULL;
 
 
 size_t rvvm_strlen(const char* string) {
-    int size = 0;
-    while (string[size] != '\0') size ++;
+    size_t size = 0;
+    while (string[size]) size++;
     return size;
 }
 
-bool rvvm_strcmp(const char* __value1, const char*  __value2) {
-    if (rvvm_strlen(__value1) != rvvm_strlen(__value2)) return false;
-    for (size_t i = 0; i < rvvm_strlen(__value2); i++) {
-        if (__value1[i] != __value2[i]) return false;
-    }
-    return true;
+bool rvvm_strcmp(const char* s1, const char* s2) {
+    size_t i = 0;
+    while (s1[i] && s1[i] == s2[i]) i++;
+    return s1[i] == s2[i];
 }
 
 void rvvm_set_loglevel(int level)
@@ -155,50 +153,58 @@ int str_to_int_dec(const char* str)
 }
 
 
-void rvvm_setargs(int _argc, const char** _argv)
+void rvvm_set_args(int _argc, const char** _argv)
 {
     argc = _argc;
     argv = _argv;
+
+    if (rvvm_has_arg("v") || rvvm_has_arg("verbose")) {
+        rvvm_set_loglevel(LOG_INFO);
+    }
 }
 
 bool rvvm_has_arg(const char* arg)
 {
+    size_t offset, j;
     for (int i = 0; i < argc; i++) {
-        size_t offset = 1;
-        if (argv[i] == NULL) continue;
-        if (argv[i][0] != '-' ) continue;
-        offset = (argv[i][1] == '-') ? 2 : 1;
-        size_t j = 0;
-        while (arg[j]
+        if (argv[i] == NULL) return false;
+        if (argv[i][0] == '-') {
+            offset = (argv[i][1] == '-') ? 2 : 1;
+            j = 0;
+            while (arg[j]
                && argv[i][j + offset]
                && argv[i][j + offset] != '='
                && argv[i][j + offset] == arg[j]) j++;
-        if (arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) return true;
+            if (arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) {
+                return true;
+            }
+        }
     }
     return false;
 }
 
 const char* rvvm_getarg(const char* arg)
 {
+    size_t offset, j;
     for (int i = 0; i < argc; i++) {
-        size_t offset = 1;
-        if (argv[i] == NULL) continue;
-        if (argv[i][0] != '-' ) continue;
-        offset = (argv[i][1] == '-') ? 2 : 1;
-        size_t j = 0;
-        while (arg[j]
-               && argv[i][j + offset]
-               && argv[i][j + offset] != '='
-               && argv[i][j + offset] == arg[j]) j++;
-        if (!(arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) ) continue;
-        if (argv[i][j + offset] == '=') {
-            offset += j+1;
-            return argv[i]+offset;
+        if (argv[i] == NULL) return NULL;
+        if (argv[i][0] == '-') {
+            offset = (argv[i][1] == '-') ? 2 : 1;
+            j = 0;
+            while (arg[j]
+                && argv[i][j + offset]
+                && argv[i][j + offset] != '='
+                && argv[i][j + offset] == arg[j]) j++;
+            if (arg[j] == 0 && (argv[i][j + offset] == 0 || argv[i][j + offset] == '=')) {
+                if (argv[i + 1] != NULL && argv[i + 1][0] != '-') {
+                    return argv[i + 1];
+                }
+            }
+            if (argv[i][j + offset] == '=') {
+                offset += j+1;
+                return argv[i]+offset;
+            }
         }
-        if (argv[i+1] == NULL || argv[i+1][0] == '-') continue;
-        i++;
-        return argv[i];
-
     }
     return NULL;
 }
@@ -206,11 +212,11 @@ const char* rvvm_getarg(const char* arg)
 bool rvvm_getarg_bool(const char* arg)
 {
     const char* argvalue = rvvm_getarg(arg);
-    if (argvalue == NULL) return rvvm_has_arg(arg);
-    else if (argvalue[0] == 0) return false;
-    if (rvvm_strcmp("on", argvalue) ||
-       rvvm_strcmp("true", argvalue) ||
-       rvvm_strcmp("1", argvalue)) return true;
+    if (argvalue == NULL) return false;
+    if (rvvm_strcmp("on", argvalue)
+     || rvvm_strcmp("true", argvalue)
+     || rvvm_strcmp("y", argvalue)
+     || rvvm_strcmp("1", argvalue)) return true;
     return false;
 }
 
@@ -224,8 +230,6 @@ size_t rvvm_getarg_int(const char* arg)
 uint64_t rvvm_getarg_size(const char* arg)
 {
     const char* argvalue = rvvm_getarg(arg);
-    // printf("SIZE: %s %c %ld %ld\n", argvalue, argvalue[rvvm_strlen(argvalue)-1],
-    //                         str_to_int_dec(argvalue), mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]));
     if (argvalue == NULL) return 0;
-    return (uint64_t)str_to_int_dec(argvalue) << mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]);
+    return ((uint64_t)str_to_int_dec(argvalue)) << mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]);
 }
