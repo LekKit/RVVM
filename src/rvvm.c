@@ -146,7 +146,8 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
         
         fdt_node_add_prop_str(cpu, "device_type", "cpu");
         fdt_node_add_prop_u32(cpu, "reg", i);
-        fdt_node_add_prop_str(cpu, "compatible", "riscv");
+        fdt_node_add_prop(cpu, "compatible", "rvvm\0riscv", 10);
+        fdt_node_add_prop_u32(cpu, "clock-frequency", 3000000000);
 #ifdef USE_RV64
         if (vector_at(machine->harts, i).rv64) {
 #ifdef USE_FPU
