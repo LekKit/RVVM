@@ -712,10 +712,10 @@ enum a64_b_cc
     A64_B_CC = (0x54U << 24) | A64_CC,
     A64_B_LT = (0x54U << 24) | A64_LT,
     A64_B_GE = (0x54U << 24) | A64_GE,
-    A64_CBZ  = (0x34U << 24),
-    A64_CBNZ = (0x35U << 24),
-    A64_CBZW = (0xB4U << 24),
-    A64_CBNZW = (0xB5U << 24)
+    A64_CBZ  = (0xB4U << 24),
+    A64_CBNZ = (0xB5U << 24),
+    A64_CBZW = (0x34U << 24),
+    A64_CBNZW = (0x35U << 24)
 };
 
 static inline void rvjit_a64_b_cond_reloc(void* addr, uint32_t opcode, int32_t offset)
