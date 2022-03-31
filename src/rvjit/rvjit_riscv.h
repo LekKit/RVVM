@@ -224,7 +224,7 @@ static inline uint32_t riscv_i_to_r_op(uint32_t opcode)
 
 static inline bool riscv_is_load_op(uint32_t opcode)
 {
-    return (opcode & 0xFF) == 0;
+    return (opcode & 0xFF) == 0x03;
 }
 
 // I-type operation (sign-extended 32-bit immediate)
@@ -246,8 +246,14 @@ static inline void rvjit_riscv_i_op(rvjit_block_t* block, uint32_t opcode, regid
             rvjit_free_hreg(block, rtmp);
         }
     } else {
-        // It's a load instruction...
-        rvvm_fatal("Illegal load offset in RVJIT!");
+        regid_t rtmp = rvjit_claim_hreg(block);
+        rvjit_native_setreg32s(block, rtmp, imm);
+        rvjit_riscv_r_op(block, RISCV32_R_ADD, rs, rs, rtmp);
+        rvjit_riscv_i_op_internal(block, opcode, rds, rs, 0);
+        if (rds != rs) {
+            rvjit_riscv_r_op(block, RISCV32_R_SUB, rs, rs, rtmp);
+        }
+        rvjit_free_hreg(block, rtmp);
     }
 }
 
@@ -256,14 +262,27 @@ static inline void rvjit_riscv_i_op(rvjit_block_t* block, uint32_t opcode, regid
 #define RISCV_S_SW    0x00002023
 #define RISCV_S_SD    0x00003023
 
-// Store op (sign-extended 12-bit offset)
-static inline void rvjit_riscv_s_op(rvjit_block_t* block, uint32_t opcode, regid_t reg, regid_t addr, int32_t offset)
+static inline void rvjit_riscv_s_op_internal(rvjit_block_t* block, uint32_t opcode, regid_t reg, regid_t addr, int32_t offset)
 {
     uint8_t code[4];
-    if (unlikely(!rvjit_is_valid_imm(offset))) rvvm_fatal("Illegal store offset in RVJIT!");
     write_uint32_le_m(code, opcode | ((offset & 0x1F) << 7) | (addr << 15)
                                    | (reg << 20) | (((uint32_t)offset >> 5) << 25));
     rvjit_put_code(block, code, 4);
+}
+
+// Store op (sign-extended 12-bit offset)
+static inline void rvjit_riscv_s_op(rvjit_block_t* block, uint32_t opcode, regid_t reg, regid_t addr, int32_t offset)
+{
+    if (likely(rvjit_is_valid_imm(offset))) {
+        rvjit_riscv_s_op_internal(block, opcode, reg, addr, offset);
+    } else {
+        regid_t rtmp = rvjit_claim_hreg(block);
+        rvjit_native_setreg32s(block, rtmp, offset);
+        rvjit_riscv_r_op(block, RISCV32_R_ADD, addr, addr, rtmp);
+        rvjit_riscv_s_op_internal(block, opcode, reg, addr, 0);
+        rvjit_riscv_r_op(block, RISCV32_R_SUB, addr, addr, rtmp);
+        rvjit_free_hreg(block, rtmp);
+    }
 }
 
 #define RISCV_B_BEQ   0x00000063
@@ -352,10 +371,20 @@ static inline void rvjit_native_pop(rvjit_block_t* block, regid_t reg)
 // Set native register reg to wide imm
 static inline void rvjit_native_setregw(rvjit_block_t* block, regid_t reg, uintptr_t imm)
 {
-    UNUSED(block);
-    UNUSED(reg);
-    UNUSED(imm);
-    rvvm_fatal("Unimplemented rvjit_native_setregw for RISC-V backend");
+#ifdef RVJIT_NATIVE_64BIT
+    if (imm >> 32) {
+        regid_t tmp = rvjit_claim_hreg(block);
+        rvjit_native_setreg32(block, tmp, imm >> 32);
+        rvjit_riscv_i_op(block, RISCV_I_SLLI, tmp, tmp, 32);
+        rvjit_native_setreg32(block, reg, (imm << 32) >> 32);
+        rvjit_riscv_r_op(block, RISCV_R_OR, reg, reg, tmp);
+        rvjit_free_hreg(block, tmp);
+    } else {
+        rvjit_native_setreg32(block, reg, imm);
+    }
+#else
+    rvjit_native_setreg32(block, reg, imm);
+#endif
 }
 
 // Call a function pointed to by native register
@@ -502,6 +531,11 @@ static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
     } else {
         return false;
     }
+}
+
+static inline void rvjit_jmp_reg(rvjit_block_t* block, regid_t reg)
+{
+    rvjit_riscv_i_op(block, RISCV_I_JALR, RISCV_REG_ZERO, reg, 0);
 }
 
 /*
