@@ -19,11 +19,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef THREADING_H
 #define THREADING_H
 
+#include <stdbool.h>
+
 typedef void* thread_handle_t;
 typedef void* (*thread_func_t)(void*);
 
 thread_handle_t thread_create(thread_func_t func, void *arg);
 void* thread_join(thread_handle_t handle);
+bool thread_detach(thread_handle_t handle);
 
 // Deliver a signal with total memory ordering to the thread
 // Also immediately interrupts any sleep in a target thread

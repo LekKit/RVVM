@@ -73,7 +73,18 @@ void* thread_join(thread_handle_t handle)
     return ret;
 }
 
-
+bool thread_detach(thread_handle_t handle)
+{
+    if (handle == NULL) return false;
+    bool ret;
+#ifdef _WIN32
+    ret = CloseHandle(*(HANDLE*)handle);
+#else
+    ret = pthread_detach(*(pthread_t*)handle) == 0;
+#endif
+    free(handle);
+    return ret;
+}
 
 void thread_signal_membarrier(thread_handle_t handle)
 {
@@ -83,7 +94,7 @@ void thread_signal_membarrier(thread_handle_t handle)
 #else
     struct sigaction sa;
     sigaction(SIGUSR2, NULL, &sa);
-    
+
     if (sa.sa_handler != signal_membarrier) {
         if (sa.sa_handler != SIG_DFL && sa.sa_handler != SIG_IGN) {
             rvvm_warn("thread_signal_membarrier() failed: SIGUSR2 is already in use!");
