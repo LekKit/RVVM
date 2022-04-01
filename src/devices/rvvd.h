@@ -34,8 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 #include "rvvm_types.h"
-// #include "vector.h"
-#include "blk_dev.h"
 
 #include <stdio.h>
 
@@ -45,8 +43,6 @@ typedef struct {
 } sector_cache_entry;
 
 struct rvvd_dev {
-    // blk functions api
-    blk_dev* blk_dev;
 
     char filename[256];
     struct rvvd_dev* base_disk;
@@ -68,8 +64,6 @@ struct rvvd_dev {
 
 };
 
-blk_dev* rvvd_dev(const char* filename);
-
 // Disk creation moment
 int rvvd_init(struct rvvd_dev* disk, const char* filename, uint64_t size); // Creates new disk
 int rvvd_init_overlay(struct rvvd_dev* disk, const char* base_filename, const char* filename); // Creates new disk in overlay mode on other disk
@@ -85,16 +79,6 @@ void rvvd_change_compression_type(struct rvvd_dev* disk, int compression_type);
 bool rvvd_change_size(struct rvvd_dev* disk, size_t new_size);
 void rvvd_deduplicate(struct rvvd_dev* disk);
 void rvvd_dump_to_image(struct rvvd_dev* disk, const char* filename);
-
-// Blk API
-void blk_open(void* drive);
-void blk_close(void* drive);
-void blk_allocate(void* drive, void* data, uint64_t sector_id);
-void blk_read(void* drive, void* buffer, uint64_t offset, uint32_t len);
-void blk_write(void* drive, void* data, uint64_t offset, uint32_t len);
-void blk_trim(void* drive, uint64_t offset, uint32_t len);
-void blk_sync(void* drive);
-size_t blk_size(void* drive);
 
 // RVVD API
 void rvvd_allocate(struct rvvd_dev* disk, void* data, uint64_t sec_id);
