@@ -24,16 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "spinlock.h"
 
-/* On Windows, ftell/fseek use 32-bit offsets,
- * this breaks when mounting >=4GB images.
- * Using _fseeki64, _ftelli64 therefore
- */
-
-#ifdef _WIN32
-#define fseek _fseeki64
-#define ftell _ftelli64
-#endif
-
 /* Data registers */
 #define ATA_REG_DATA 0x00
 #define ATA_REG_ERR 0x01 /* or FEATURE */
@@ -111,7 +101,7 @@ typedef uint16_t atareg_t;
 struct ata_dev
 {
     struct {
-        FILE *fp;
+        rvfile_t *fp;
         size_t size; /* in sectors */
         uint16_t bytes_to_rw;
         uint16_t sectcount;
@@ -182,6 +172,22 @@ static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
 }
 
 #ifdef USE_PCI
+
+static void ata_handle_async(rvfile_t* file, void* data, uint8_t result)
+{
+    struct ata_dev* ata = (struct ata_dev*)data;
+    UNUSED(file);
+    if (result == ASYNC_IO_DONE) {
+        ata->dma_info.cmd &= ~(1 << 0);
+        ata->dma_info.status |= (1 << 2);
+        ata_send_interrupt(ata);
+    } else {
+        ata->dma_info.cmd &= ~(1 << 0);
+        ata->dma_info.status |= (1 << 2) | (1 << 1);
+        ata_send_interrupt(ata);
+    }
+}
+
 static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
 {
     /* No DMA transfer active */
@@ -192,7 +198,10 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
 
     bool is_read = bit_check(ata->dma_info.cmd, 3);
     size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
-    FILE *fp = ata->drive[ata->curdrive].fp;
+    rvfile_t* fp = ata->drive[ata->curdrive].fp;
+    uint64_t cursor = rvtell(fp);
+    rvaio_op_t iovec[16] = {0};
+    size_t iovec_size = 0;
     size_t processed = 0;
     while (1) {
         /* Read PRD */
@@ -211,28 +220,26 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
             buf_size = 64 * 1024;
         }
 
+        if (prd_physaddr < machine->mem.begin
+        || (prd_physaddr - machine->mem.begin + buf_size) > machine->mem.size) goto err;
+        void *buf = machine->mem.data + prd_physaddr - machine->mem.begin;
+
         /* Read/write data to/from RAM */
-        void *buf = safe_malloc(buf_size);
+        iovec[iovec_size].buffer = buf;
+        iovec[iovec_size].offset = cursor;
+        iovec[iovec_size].length = buf_size;
         if (is_read) {
-            if (1 != fread(buf, buf_size, 1, fp)) {
-                free(buf);
-                goto err;
-            }
-            if (!rvvm_write_ram(machine, (paddr_t) prd_physaddr, buf, buf_size)) {
-                free(buf);
-                goto err;
-            }
+            iovec[iovec_size].opcode = RVFILE_ASYNC_READ;
         } else {
-            if (!rvvm_read_ram(machine, buf, (paddr_t) prd_physaddr, buf_size)) {
-                free(buf);
-                goto err;
-            }
-            if (1 != fwrite(buf, buf_size, 1, fp)) {
-                free(buf);
-                goto err;
-            }
+            iovec[iovec_size].opcode = RVFILE_ASYNC_WRITE;
         }
-        free(buf);
+        cursor += buf_size;
+        iovec_size++;
+        if (iovec_size > 8) {
+            rvvm_warn("IOVEC too big!");
+        }
+        
+        rvasync_va(fp, iovec, iovec_size, ata_handle_async, ata);
 
         processed += buf_size;
 
@@ -248,10 +255,7 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
         /* All good, advance the pointer */
         ata->dma_info.prdt_addr += 8;
     }
-
-    ata->dma_info.cmd &= ~(1 << 0);
-    ata->dma_info.status |= (1 << 2);
-    ata_send_interrupt(ata);
+    rvseek(fp, cursor, RVFILE_SET);
     return;
 
 err:
@@ -315,10 +319,9 @@ static void ata_cmd_initialize_device_params(struct ata_dev *ata)
 static bool ata_read_buf(struct ata_dev *ata)
 {
     //printf("ATA fill next sector\n");
-    if (1 != fread(ata->drive[ata->curdrive].buf,
-                SECTOR_SIZE,
-                1,
-                ata->drive[ata->curdrive].fp)) {
+    if (!rvread(ata->drive[ata->curdrive].fp,
+                ata->drive[ata->curdrive].buf,
+                SECTOR_SIZE, RVFILE_CURPOS)) {
         return false;
     }
 
@@ -331,10 +334,9 @@ static bool ata_read_buf(struct ata_dev *ata)
 static bool ata_write_buf(struct ata_dev *ata)
 {
     //printf("ATA write buf\n");
-    if (1 != fwrite(ata->drive[ata->curdrive].buf,
-                SECTOR_SIZE,
-                1,
-                ata->drive[ata->curdrive].fp)) {
+    if (!rvwrite(ata->drive[ata->curdrive].fp,
+                 ata->drive[ata->curdrive].buf,
+                 SECTOR_SIZE, RVFILE_CURPOS)) {
         return false;
     }
 
@@ -353,9 +355,9 @@ static void ata_cmd_read_sectors(struct ata_dev *ata)
     //printf("ATA read sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
 
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (fseek(ata->drive[ata->curdrive].fp,
+    if (!rvseek(ata->drive[ata->curdrive].fp,
                 ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+                RVFILE_SET)) {
         goto err;
     }
 
@@ -379,9 +381,9 @@ static void ata_cmd_write_sectors(struct ata_dev *ata)
 
     //printf("ATA write sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (fseek(ata->drive[ata->curdrive].fp,
+    if (!rvseek(ata->drive[ata->curdrive].fp,
                 ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+                RVFILE_SET)) {
         goto err;
     }
 
@@ -408,9 +410,9 @@ static void ata_cmd_read_dma(struct ata_dev *ata)
             | ATA_STATUS_ERR);
 
     spin_lock(&ata->dma_info.lock);
-    if (fseek(ata->drive[ata->curdrive].fp,
+    if (!rvseek(ata->drive[ata->curdrive].fp,
                 ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+                RVFILE_SET)) {
         spin_unlock(&ata->dma_info.lock);
         goto err;
     }
@@ -438,9 +440,9 @@ static void ata_cmd_write_dma(struct ata_dev *ata)
             | ATA_STATUS_ERR);
 
     spin_lock(&ata->dma_info.lock);
-    if (fseek(ata->drive[ata->curdrive].fp,
+    if (!rvseek(ata->drive[ata->curdrive].fp,
                 ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+                RVFILE_SET)) {
         spin_unlock(&ata->dma_info.lock);
         goto err;
     }
@@ -794,30 +796,13 @@ err:
 }
 #endif
 
-static size_t get_img_size(FILE *fp)
-{
-    fseek(fp, 0, SEEK_END);
-
-    long long size = ftell(fp);
-    if (size < 0) {
-        printf("Unable to get ATA disk size\n");
-        return 0;
-    } else if (size == 0) {
-        printf("ATA disk is empty\n");
-        return 0;
-    }
-
-    fseek(fp, 0, SEEK_SET);
-    return size;
-}
-
 static void ata_data_remove(rvvm_mmio_dev_t* device)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
 
     for (size_t i = 0; i < sizeof(ata->drive) / sizeof(ata->drive[0]); ++i) {
         if (ata->drive[i].fp != NULL) {
-            fclose(ata->drive[i].fp);
+            rvclose(ata->drive[i].fp);
         }
     }
 
@@ -853,17 +838,16 @@ static rvvm_mmio_type_t ata_ctl_dev_type = {
     .remove = ata_remove_dummy,
 };
 
-void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* master, FILE* slave)
+void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, rvfile_t* master, rvfile_t* slave)
 {
-    assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
     ata->drive[0].fp = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(rvfilesize(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
         ata->drive[0].fp = NULL;
     }
     ata->drive[1].fp = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[1].fp), SECTOR_SIZE);
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(rvfilesize(ata->drive[1].fp), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
         ata->drive[1].fp = NULL;
     }
@@ -972,17 +956,17 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 #endif
 
 #ifdef USE_PCI
-void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave)
+void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, rvfile_t* master, rvfile_t* slave)
 {
     assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
     ata->drive[0].fp = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(rvfilesize(ata->drive[0].fp), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
         ata->drive[0].fp = NULL;
     }
     ata->drive[1].fp = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[1].fp), SECTOR_SIZE);
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(rvfilesize(ata->drive[1].fp), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
         ata->drive[1].fp = NULL;
     }

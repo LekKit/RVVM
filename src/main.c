@@ -305,7 +305,7 @@ static bool rvvm_run_with_args(vm_args_t args)
 #endif
 
     if (args.image) {
-        FILE *fp = fopen(args.image, "rb+");
+        rvfile_t* fp = rvopen(args.image, RVFILE_RW);
         if (fp == NULL) {
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
