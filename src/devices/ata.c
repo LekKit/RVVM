@@ -779,12 +779,13 @@ err:
 static void ata_data_remove(rvvm_mmio_dev_t* device)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
-
+    spin_lock(&ata->dma_info.lock);
     for (size_t i = 0; i < sizeof(ata->drive) / sizeof(ata->drive[0]); ++i) {
         if (ata->drive[i].fp != NULL) {
             rvclose(ata->drive[i].fp);
         }
     }
+    spin_unlock(&ata->dma_info.lock);
 
     free(ata);
 }
