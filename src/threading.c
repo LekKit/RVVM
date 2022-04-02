@@ -309,9 +309,8 @@ static void* threadpool_worker(void* data)
 static void thread_workers_terminate()
 {
     for (size_t i=0; i<THREAD_MAX_WORKERS; ++i) {
-        if (atomic_load_uint32(&threadpool[i].busy)) {
+        if (atomic_swap_uint32(&threadpool[i].busy, 0)) {
             condvar_wake(threadpool[i].cond);
-            thread_join(threadpool[i].thread);
         }
     }
 }
