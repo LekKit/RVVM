@@ -260,7 +260,7 @@ PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* sr
 {
     if (dest < machine->mem.begin
     || (dest - machine->mem.begin + size) > machine->mem.size) return false;
-    memcpy(machine->mem.data + dest - machine->mem.begin, src, size);
+    memcpy(machine->mem.data + (dest - machine->mem.begin), src, size);
     return true;
 }
 
@@ -268,8 +268,15 @@ PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, paddr_t src, size
 {
     if (src < machine->mem.begin
     || (src - machine->mem.begin + size) > machine->mem.size) return false;
-    memcpy(dest, machine->mem.data + src - machine->mem.begin, size);
+    memcpy(dest, machine->mem.data + (src - machine->mem.begin), size);
     return true;
+}
+
+PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, paddr_t addr, size_t size)
+{
+    if (addr < machine->mem.begin
+    || (addr - machine->mem.begin + size) > machine->mem.size) return NULL;
+    return machine->mem.data + (addr - machine->mem.begin);
 }
 
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
