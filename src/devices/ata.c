@@ -201,12 +201,10 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
         /* Read/write data to/from RAM */
         if (is_read) {
             if (rvread(fp, buf, buf_size, RVFILE_CURPOS) != buf_size) {
-                free(buf);
                 goto err;
             }
         } else {
             if (rvwrite(fp, buf, buf_size, RVFILE_CURPOS) != buf_size) {
-                free(buf);
                 goto err;
             }
         }
