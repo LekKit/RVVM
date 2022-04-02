@@ -18,6 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "threading.h"
 
+//#define AIO_LINUX
+
 #ifdef __unix__
 #include <unistd.h>
 #include <fcntl.h>
@@ -26,9 +28,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/file.h>
 
 #ifdef __linux__
-#include <linux/aio_abi.h> 
-#include <sys/syscall.h>
 int fallocate(int fd, int mode, off_t offset, off_t len);
+#ifdef AIO_LINUX
+#include <linux/aio_abi.h>
+#include <sys/syscall.h>
+#endif
 #endif
 #else
 #include <stdio.h>
@@ -45,9 +49,6 @@ int fallocate(int fd, int mode, off_t offset, off_t len);
 #define ftell _ftelli64
 #endif
 
-#define IO_MAX_OPS 512
-//#define AIO_LINUX
-
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
 #if defined(__unix__)
@@ -56,7 +57,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         if (mode & RVFILE_CREAT) open_flags |= O_CREAT;
         open_flags |= O_RDWR;
     } else open_flags |= O_RDONLY;
-    
+
     fd = open(filepath, open_flags, 0644);
     if (fd == -1) {
         return NULL;
@@ -66,11 +67,11 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         close(fd);
         return NULL;
     }
-    
+
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
     file->fd = fd;
 
-#if defined(__linux__)
+#if defined(__linux__) && defined(AIO_LINUX)
     aio_context_t* ctx = safe_calloc(sizeof(aio_context_t), 1);
     syscall(SYS_io_setup, IO_MAX_OPS, ctx);
     file->aio_context = (void*)ctx;
@@ -109,16 +110,16 @@ uint64_t rvfilesize(rvfile_t* file)
 #else
     uint64_t cur = ftell((FILE*)file);
     uint64_t size;
-    fseek((FILE*)fp, 0, SEEK_END);
-    size = ftell((FILE*)fp);
-    fseek((FILE*)fp, cur, SEEK_SET);
+    fseek((FILE*)file, 0, SEEK_END);
+    size = ftell((FILE*)file);
+    fseek((FILE*)file, cur, SEEK_SET);
     return size;
 #endif
 }
 
 #if defined(__linux__) && defined(AIO_LINUX)
 
-static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64_t* buffer, uint64_t offset, uint64_t count, rvfile_async_callback_t callback_handler, void* user_data) 
+static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64_t* buffer, uint64_t offset, uint64_t count, rvfile_async_callback_t callback_handler, void* user_data)
 {
     static uint64_t request_id = 0;
     struct iocb* op = safe_calloc(sizeof(struct iocb), 1);
@@ -127,7 +128,7 @@ static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64
     userdata->file = file;
     userdata->userdata = user_data;
     userdata->offset = offset;
-    userdata->lenght = length;
+    userdata->length = count;
     userdata->callback_handler = callback_handler;
     op->aio_data = (uint64_t)userdata;
     op->aio_lio_opcode = IOCB_CMD_PREAD;
@@ -138,7 +139,7 @@ static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64
     op->aio_nbytes = count;
     op->aio_resfd = file->resfd;
     op->aio_flags = IOCB_FLAG_RESFD;
-    return op;    
+    return op;
 }
 
 #else
@@ -195,14 +196,14 @@ static void* async_task(void* data)
                     return false;
             }
         }
-        
+
         free(iolist);
     } else {
-        result = async_task_run(task);
+        result = async_task_run(task) ? ASYNC_IO_DONE : ASYNC_IO_FAIL;
     }
 
     task->callback(task->file, task->userdata, result);
-    
+
     free(task);
     return NULL;
 }
@@ -232,8 +233,13 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
     if (res < 0) return 0;
     return res;
 #else
-    if (offset != RVFILE_CURPOS) fseek(file, offset, SEEK_SET);
-    return fread(destination, count, 1, (FILE*)file);
+    if (offset != RVFILE_CURPOS) {
+        uint64_t orig_pos = ftell((FILE*)file);
+        fseek((FILE*)file, offset, SEEK_SET);
+        size_t ret = fread(destination, 1, count, (FILE*)file);
+        fseek((FILE*)file, orig_pos, SEEK_SET);
+        return ret;
+    } else return fread(destination, 1, count, (FILE*)file);
 #endif
 }
 
@@ -247,8 +253,13 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
     if (res < 0) return 0;
     return res;
 #else
-    if (offset != RVFILE_CURPOS) fseek(file, offset, SEEK_SET);
-    return fwrite(source, count, 1, (FILE*)file);
+    if (offset != RVFILE_CURPOS) {
+        uint64_t orig_pos = ftell((FILE*)file);
+        fseek((FILE*)file, offset, SEEK_SET);
+        size_t ret = fwrite(source, 1, count, (FILE*)file);
+        fseek((FILE*)file, orig_pos, SEEK_SET);
+        return ret;
+    } else return fwrite(source, 1, count, (FILE*)file);
 #endif
 }
 
@@ -262,6 +273,7 @@ bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
     UNUSED(file);
     UNUSED(offset);
     UNUSED(count);
+    return false;
 #endif
 }
 
@@ -274,7 +286,7 @@ bool rvseek(rvfile_t* file, uint64_t offset, uint8_t startpos)
 #if defined(__unix__)
     return lseek(file->fd, offset, whence) != (off_t)-1;
 #else
-    return fseek((FILE*)file, offset, whence);
+    return fseek((FILE*)file, offset, whence) == 0;
 #endif
 }
 
@@ -294,6 +306,7 @@ bool rvflush(rvfile_t* file)
     return fsync(file->fd);
 #else
     UNUSED(file);
+    return false;
 #endif
 }
 
@@ -302,6 +315,8 @@ uint64_t rvtruncate(rvfile_t* file, uint64_t length)
 #if defined(__unix__)
     return ftruncate(file->fd, length);
 #else
+    UNUSED(file);
+    UNUSED(length);
     return 0;
 #endif
 }
@@ -359,7 +374,7 @@ bool rvfsync_async(rvfile_t* file)
 #endif
 }
 
-bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata) 
+bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata)
 {
     if (!file) return false;
 #if defined(__linux__) && defined(AIO_LINUX)
@@ -375,4 +390,3 @@ bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_c
     return create_async_task(file, RVFILE_ASYNC_VA, task_iolist, count, 0, callback, userdata);
 #endif
 }
-
