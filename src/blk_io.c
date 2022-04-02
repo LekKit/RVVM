@@ -106,7 +106,9 @@ uint64_t rvfilesize(rvfile_t* file)
 {
     if (!file) return 0;
 #if defined(__unix__)
-    return lseek(file->fd, 0, SEEK_END);
+    struct stat file_stat;
+    fstat(file->fd, &file_stat);
+    return file_stat.st_size;
 #else
     uint64_t cur = ftell((FILE*)file);
     uint64_t size;
@@ -208,7 +210,7 @@ static void* async_task(void* data)
     return NULL;
 }
 
-static bool create_async_task(rvfile_t* file, uint8_t opcode, void* buffer, size_t length, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
+static void create_async_task(rvfile_t* file, uint8_t opcode, void* buffer, size_t length, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
 {
     async_task_t* task = safe_calloc(sizeof(async_task_t), 1);
     task->file = file;
@@ -218,7 +220,7 @@ static bool create_async_task(rvfile_t* file, uint8_t opcode, void* buffer, size
     task->callback = callback;
     task->userdata = userdata;
     task->opcode = opcode;
-    return thread_detach(thread_create(async_task, task));
+    thread_create_task(async_task, task);
 }
 
 #endif
@@ -329,14 +331,7 @@ bool rvread_async(rvfile_t* file, void* destination, size_t count, uint64_t offs
     struct iocb* op = create_linux_request(file, IOCB_CMD_PREAD, (uint64_t*)destination, offset, count, callback, userdata);
     return syscall(SYS_io_submit, ctx, 1, op);
 #else
-    if (create_async_task(file, RVFILE_ASYNC_READ, destination, count, offset, callback, userdata)) {
-        return true;
-    }
-
-    // Fallback to sync IO
-    rvvm_warn("Falling back from async to sync IO");
-    size_t ret = rvread(file, destination, count, offset);
-    callback(file, userdata, (ret == count) ? ASYNC_IO_DONE : ASYNC_IO_FAIL);
+    create_async_task(file, RVFILE_ASYNC_READ, destination, count, offset, callback, userdata);
     return true;
 #endif
 }
@@ -349,14 +344,7 @@ bool rvwrite_async(rvfile_t* file, const void* source, size_t count, uint64_t of
     struct iocb* op = create_linux_request(file, IOCB_CMD_PWRITE, (uint64_t*)source, offset, count, callback, userdata);
     return syscall(SYS_io_submit, ctx, 1, op);
 #else
-    if (create_async_task(file, RVFILE_ASYNC_WRITE, (void*)source, count, offset, callback, userdata)) {
-        return true;
-    }
-
-    // Fallback to sync IO
-    rvvm_warn("Falling back from async to sync IO");
-    size_t ret = rvwrite(file, source, count, offset);
-    callback(file, userdata, (ret == count) ? ASYNC_IO_DONE : ASYNC_IO_FAIL);
+    create_async_task(file, RVFILE_ASYNC_WRITE, (void*)source, count, offset, callback, userdata);
     return true;
 #endif
 }
@@ -387,6 +375,7 @@ bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_c
 #else
     rvaio_op_t* task_iolist = safe_calloc(sizeof(rvaio_op_t), count);
     memcpy(task_iolist, iolist, sizeof(rvaio_op_t) * count);
-    return create_async_task(file, RVFILE_ASYNC_VA, task_iolist, count, 0, callback, userdata);
+    create_async_task(file, RVFILE_ASYNC_VA, task_iolist, count, 0, callback, userdata);
+    return true;
 #endif
 }
