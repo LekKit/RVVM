@@ -731,7 +731,7 @@ static void* ata_worker(void** data)
 static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
-    spin_lock(&ata->dma_info.lock);
+    bool process_prdt;
 
 #if 0
     printf("ATA BMDMA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
@@ -739,8 +739,12 @@ static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_d
     switch (offset)
     {
         case ATA_BMDMA_CMD:
-            if (size != 1) goto err;
-            if (!(ata->dma_info.cmd & 1) && (*(uint8_t*)memory_data & 1)) {
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
+            process_prdt = !(ata->dma_info.cmd & 1) && (*(uint8_t*)memory_data & 1);
+            ata->dma_info.cmd = *(uint8_t*)memory_data;
+            spin_unlock(&ata->dma_info.lock);
+            if (process_prdt) {
                 if (rvvm_has_arg("noasync")) {
                     ata_process_prdt(ata, device->machine);
                 } else {
@@ -748,31 +752,28 @@ static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_d
                     thread_create_task_va(ata_worker, req, 2);
                 }
             }
-            ata->dma_info.cmd = *(uint8_t*)memory_data;
             break;
         case ATA_BMDMA_STATUS:
-            if (size != 1) goto err;
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
             ata->dma_info.status &= ~(*(uint8_t*)memory_data & 6);
             if (!bit_check(ata->dma_info.status, 2)) {
                 ata_clear_interrupt(ata);
             }
+            spin_unlock(&ata->dma_info.lock);
             break;
         case ATA_BMDMA_PRDT:
-            {
-                if (size != 4) goto err;
-                ata->dma_info.prdt_addr = (paddr_t)*(uint32_t*) memory_data;
-                break;
-            }
+            if (size != 4) return false;
+            spin_lock(&ata->dma_info.lock);
+            ata->dma_info.prdt_addr = (paddr_t)*(uint32_t*) memory_data;
+            spin_unlock(&ata->dma_info.lock);
+            break;
         default:
             /* secondary controller not supported now */
-            goto err;
+            return false;
     }
 
-    spin_unlock(&ata->dma_info.lock);
     return true;
-err:
-    spin_unlock(&ata->dma_info.lock);
-    return false;
 }
 #endif
 
