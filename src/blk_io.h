@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define BLK_IO_H
 
 #include "rvvm_types.h"
-#include "vector.h"
+#include "spinlock.h"
 
 /*
  * File API
@@ -37,8 +37,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVFILE_CURPOS ((uint64_t)-1)
 
 typedef struct {
-    int fd, resfd;
-    void* aio_context;
+    uint64_t pos;
+    spinlock_t lock;
+    void* ptr;
+    int fd;
 } rvfile_t;
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode); // Returns NULL on failure
