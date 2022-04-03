@@ -27,6 +27,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/stat.h>
 #include <sys/file.h>
 
+static bool try_lock_fd(int fd)
+{
+    struct flock flk = {0};
+    flk.l_type = F_WRLCK;
+    flk.l_whence = SEEK_SET;
+    flk.l_start = 0;
+    flk.l_len = 0;
+    fcntl(fd, F_SETLK, &flk);
+    return errno != EACCES && errno != EAGAIN;
+}
+
 #ifdef __linux__
 int fallocate(int fd, int mode, off_t offset, off_t len);
 #ifdef AIO_LINUX
@@ -54,7 +65,10 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
 #if defined(__unix__)
     int fd, open_flags = 0;
     if (mode & RVFILE_RW) {
-        if (mode & RVFILE_CREAT) open_flags |= O_CREAT;
+        if (mode & RVFILE_CREAT) {
+            open_flags |= O_CREAT;
+            if (mode & RVFILE_EXCL) open_flags |= O_EXCL;
+        }
         open_flags |= O_RDWR;
     } else open_flags |= O_RDONLY;
 
@@ -63,7 +77,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         return NULL;
     }
 
-    if ((mode & RVFILE_EXCL) && flock(fd, LOCK_EX) == EWOULDBLOCK) {
+    if ((mode & RVFILE_EXCL) && !try_lock_fd(fd)) {
+        rvvm_error("File %s is busy", filepath);
         close(fd);
         return NULL;
     }
