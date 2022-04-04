@@ -99,6 +99,14 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #include <sys/syscall.h>
 #endif
 
+#ifndef MAP_JIT
+#define MAP_JIT 0
+#elif defined(__APPLE__)
+#include <libkern/OSCacheControl.h>
+#include <pthread.h>
+#define RVJIT_APPLE
+#endif
+
 static size_t page_mask()
 {
     return sysconf(_SC_PAGESIZE) - 1;
@@ -116,7 +124,7 @@ static inline int rvjit_virt_flags(uint8_t flags)
 
 void* rvjit_mmap(size_t size, uint8_t flags)
 {
-    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
     if (tmp == MAP_FAILED) tmp = NULL;
     return tmp;
 }
@@ -205,6 +213,11 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 static void flush_icache(const void* addr, size_t size)
 {
     syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
+}
+#elif defined(RVJIT_APPLE)
+static void flush_icache(const void* addr, size_t size)
+{
+    sys_icache_invalidate((void*)addr, size);
 }
 #elif defined(GNU_EXTS)
 static void flush_icache(const void* addr, size_t size)
@@ -312,6 +325,10 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         return NULL;
     }
 
+#ifdef RVJIT_APPLE
+    pthread_jit_write_protect_np(false);
+#endif
+
     memcpy(dest, block->code, block->size);
     flush_icache(code, block->size);
     //block->heap.curr = (block->heap.curr + block->size + 31) & ~31ULL;
@@ -345,6 +362,10 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         free(linked_blocks);
         hashmap_remove(&block->heap.block_links, block->phys_pc);
     }
+#endif
+
+#ifdef RVJIT_APPLE
+    pthread_jit_write_protect_np(true);
 #endif
 
     return (rvjit_func_t)code;
