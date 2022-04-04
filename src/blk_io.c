@@ -14,6 +14,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#define _FILE_OFFSET_BITS 64
+#define _LARGEFILE64_SOURCE
+
 #include <string.h>
 #include "blk_io.h"
 #include "utils.h"
@@ -40,26 +43,55 @@ static bool try_lock_fd(int fd)
 }
 
 #ifdef __linux__
-int fallocate(int fd, int mode, off_t offset, off_t len);
+#include <sys/syscall.h>
 #ifdef AIO_LINUX
 #include <linux/aio_abi.h>
-#include <sys/syscall.h>
 #endif
 #endif
+
 #else
 #include <stdio.h>
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+
 /*
- * On Windows, ftell/fseek use 32-bit offsets,
- * this breaks when mounting >=4GB images.
- * Using _fseeki64, _ftelli64 therefore
+ * On Windows, ftell/fseek use 32-bit offsets.
+ * Older releases of MinGW lack _fseeki64/_ftelli64,
+ * but provide GNU fseeko64/ftello64, these work fine as well.
  */
 
-#ifdef _WIN32
+#ifdef __MINGW32__
+#define fseek fseeko64
+#define ftell ftello64
+#else
 #define fseek _fseeki64
 #define ftell _ftelli64
 #endif
+
+static FILE* fopen_utf8(const char* name, const char* mode)
+{
+    size_t name_len = strlen(name);
+    wchar_t* u16_name = safe_calloc(sizeof(wchar_t), name_len + 1);
+    wchar_t u16_mode[16] = {0};
+    MultiByteToWideChar(CP_UTF8, 0, name, name_len, u16_name, name_len + 1);
+    MultiByteToWideChar(CP_UTF8, 0, mode, strlen(mode), u16_mode, 16);
+    FILE* file = _wfopen(u16_name, u16_mode);
+    free(u16_name);
+
+    // Retry opening existing file using system locale (oh...)
+    if (!file && mode[0] != 'w') file = fopen(name, mode);
+    return file;
+}
+#define fopen fopen_utf8
+#endif
+
+#define FILE_POS_INVALID 0
+#define FILE_POS_SEEK    1
+#define FILE_POS_READ    2
+#define FILE_POS_WRITE   3
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
@@ -110,8 +142,17 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         return NULL;
     }
 
+#ifdef _WIN32
+    if ((mode & RVFILE_EXCL) && !LockFile((HANDLE)_get_osfhandle(_fileno(fp)), 0, 0, 0, 0)) {
+        rvvm_error("File %s is busy", filepath);
+        fclose(fp);
+        return NULL;
+    }
+#endif
+
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
     file->pos = 0;
+    file->pos_state = FILE_POS_INVALID;
     file->ptr = (void*)fp;
     spin_init(&file->lock);
     return file;
@@ -143,6 +184,7 @@ uint64_t rvfilesize(rvfile_t* file)
     spin_lock(&file->lock);
     fseek((FILE*)file->ptr, 0, SEEK_END);
     uint64_t size = ftell((FILE*)file->ptr);
+    file->pos_state = FILE_POS_INVALID;
     spin_unlock(&file->lock);
     return size;
 #endif
@@ -258,21 +300,28 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 {
     if (!file) return 0;
 #if defined(__unix__)
-    int res = 0;
-    if (offset == RVFILE_CURPOS) res = read(file->fd, destination, count);
-    else res = pread(file->fd, destination, count, offset);
-    if (res < 0) return 0;
-    return res;
+    ssize_t ret = 0;
+    if (offset == RVFILE_CURPOS) {
+        ret = read(file->fd, destination, count);
+        file->pos += ret;
+    } else {
+        ret = pread(file->fd, destination, count, offset);
+    }
+    if (ret < 0) ret = 0;
+    return ret;
 #else
     spin_lock(&file->lock);
-    size_t ret;
     if (offset != RVFILE_CURPOS) {
         fseek((FILE*)file->ptr, offset, SEEK_SET);
-        ret = fread(destination, 1, count, (FILE*)file->ptr);
-    } else {
+    } else if (file->pos_state != FILE_POS_READ) {
         fseek((FILE*)file->ptr, file->pos, SEEK_SET);
-        ret = fread(destination, 1, count, (FILE*)file->ptr);
+    }
+    size_t ret = fread(destination, 1, count, (FILE*)file->ptr);
+    if (offset == RVFILE_CURPOS) {
+        file->pos_state = FILE_POS_READ;
         file->pos += ret;
+    } else {
+        file->pos_state = FILE_POS_INVALID;
     }
     spin_unlock(&file->lock);
     return ret;
@@ -283,21 +332,28 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 {
     if (!file) return 0;
 #if defined(__unix__)
-    int res = 0;
-    if (offset == RVFILE_CURPOS) res = write(file->fd, source, count);
-    else res = pwrite(file->fd, source, count, offset);
-    if (res < 0) return 0;
-    return res;
+    ssize_t ret = 0;
+    if (offset == RVFILE_CURPOS) {
+        ret = write(file->fd, source, count);
+        file->pos += ret;
+    } else {
+        ret = pwrite(file->fd, source, count, offset);
+    }
+    if (ret < 0) ret = 0;
+    return ret;
 #else
     spin_lock(&file->lock);
-    size_t ret;
     if (offset != RVFILE_CURPOS) {
         fseek((FILE*)file->ptr, offset, SEEK_SET);
-        ret = fwrite(source, 1, count, (FILE*)file);
-    } else {
+    } else if (file->pos_state != FILE_POS_WRITE) {
         fseek((FILE*)file->ptr, file->pos, SEEK_SET);
-        ret = fwrite(source, 1, count, (FILE*)file->ptr);
+    }
+    size_t ret = fwrite(source, 1, count, (FILE*)file->ptr);
+    if (offset == RVFILE_CURPOS) {
+        file->pos_state = FILE_POS_WRITE;
         file->pos += ret;
+    } else {
+        file->pos_state = FILE_POS_INVALID;
     }
     spin_unlock(&file->lock);
     return ret;
@@ -307,9 +363,9 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 {
     if (!file) return 0;
-#ifdef __linux__
+#if defined(__unix__) && defined(__linux__) && defined(__NR_fallocate)
     // FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE
-    return fallocate(file->fd, 0x3, offset, count) == 0;
+    return syscall(__NR_fallocate, file->fd, 0x3, offset, count) == 0;
 #else
     UNUSED(file);
     UNUSED(offset);
@@ -320,29 +376,31 @@ bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 
 bool rvseek(rvfile_t* file, uint64_t offset, uint8_t startpos)
 {
-    if (!file) return -1;
+    if (!file || startpos > RVFILE_END) return false;
     int whence = SEEK_SET;
     if (startpos == RVFILE_CUR) whence = SEEK_CUR;
     if (startpos == RVFILE_END) whence = SEEK_END;
 #if defined(__unix__)
-    return lseek(file->fd, offset, whence) != (off_t)-1;
+    if (startpos != RVFILE_SET || file->pos != offset) {
+        file->pos = lseek(file->fd, offset, whence);
+    }
+    return true;
 #else
     spin_lock(&file->lock);
-    bool ret = fseek((FILE*)file->ptr, offset, whence) == 0;
-    if (ret) file->pos = ftell((FILE*)file->ptr);
+    if (startpos != RVFILE_SET || file->pos != offset || file->pos_state == FILE_POS_INVALID) {
+        fseek((FILE*)file->ptr, offset, whence);
+        file->pos = ftell((FILE*)file->ptr);
+        file->pos_state = FILE_POS_SEEK;
+    }
     spin_unlock(&file->lock);
-    return ret;
+    return true;
 #endif
 }
 
 uint64_t rvtell(rvfile_t* file)
 {
     if (!file) return -1;
-#if defined(__unix__)
-    return lseek(file->fd, 0, SEEK_CUR);
-#else
     return file->pos;
-#endif
 }
 
 bool rvflush(rvfile_t* file)
@@ -354,14 +412,22 @@ bool rvflush(rvfile_t* file)
 #endif
 }
 
-uint64_t rvtruncate(rvfile_t* file, uint64_t length)
+bool rvtruncate(rvfile_t* file, uint64_t length)
 {
 #if defined(__unix__)
-    return ftruncate(file->fd, length);
+    return ftruncate(file->fd, length) == 0;
 #else
-    UNUSED(file);
-    UNUSED(length);
-    return 0;
+    char tmp = 0;
+    if (length) {
+        spin_lock(&file->lock);
+        fseek((FILE*)file->ptr, length - 1, SEEK_SET);
+        fread(&tmp, 1, 1, (FILE*)file->ptr);
+        fseek((FILE*)file->ptr, length - 1, SEEK_SET);
+        fwrite(&tmp, 1, 1, (FILE*)file->ptr);
+        file->pos_state = FILE_POS_INVALID;
+        spin_unlock(&file->lock);
+    }
+    return true;
 #endif
 }
 

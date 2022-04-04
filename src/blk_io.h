@@ -38,6 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct {
     uint64_t pos;
+    uint8_t pos_state;
     spinlock_t lock;
     void* ptr;
     int fd;
@@ -53,7 +54,7 @@ bool      rvtrim(rvfile_t* file, uint64_t offset, uint64_t count);
 bool      rvseek(rvfile_t* file, uint64_t offset, uint8_t startpos);
 uint64_t  rvtell(rvfile_t* file);
 bool      rvflush(rvfile_t* file);
-uint64_t  rvtruncate(rvfile_t* file, uint64_t length);
+bool      rvtruncate(rvfile_t* file, uint64_t length);
 
 #define ASYNC_IO_DONE      0
 #define ASYNC_IO_FAIL      1
