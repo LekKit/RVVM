@@ -303,7 +303,7 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
     ssize_t ret = 0;
     if (offset == RVFILE_CURPOS) {
         ret = read(file->fd, destination, count);
-        file->pos += ret;
+        if (ret > 0) file->pos += ret;
     } else {
         ret = pread(file->fd, destination, count, offset);
     }
@@ -335,7 +335,7 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
     ssize_t ret = 0;
     if (offset == RVFILE_CURPOS) {
         ret = write(file->fd, source, count);
-        file->pos += ret;
+        if (ret > 0) file->pos += ret;
     } else {
         ret = pwrite(file->fd, source, count, offset);
     }
