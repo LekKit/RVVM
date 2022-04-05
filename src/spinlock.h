@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "atomics.h"
 
+#define SPINLOCK_DBG_DEF_INFO "[not locked(?)]"
+
 typedef struct {
     uint32_t flag;
 #ifdef USE_SPINLOCK_DEBUG
@@ -28,20 +30,42 @@ typedef struct {
 #endif
 } spinlock_t;
 
-NOINLINE void spin_lock_slow(spinlock_t* lock, const char* info);
+NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite);
+NOINLINE void spin_lock_wake(spinlock_t* lock);
 
+// For static initialization
+#ifdef USE_SPINLOCK_DEBUG
+#define SPINLOCK_INIT {0, SPINLOCK_DBG_DEF_INFO}
+#else
+#define SPINLOCK_INIT {0}
+#endif
+
+// Initialize a lock
 static inline void spin_init(spinlock_t* lock)
 {
     lock->flag = 0;
 #ifdef USE_SPINLOCK_DEBUG
-    lock->lock_info = "[not locked(?)]";
+    lock->lock_info = SPINLOCK_DBG_DEF_INFO;
 #endif
 }
 
+// Perform locking on small critical section
+// Reports a deadlock upon waiting for too long
 static inline void _spin_lock(spinlock_t* lock, const char* info)
 {
-    if (atomic_swap_uint32(&lock->flag, 1)) {
-        spin_lock_slow(lock, info);
+    if (atomic_add_uint32(&lock->flag, 1)) {
+        spin_lock_wait(lock, info, false);
+    }
+#ifdef USE_SPINLOCK_DEBUG
+    lock->lock_info = info;
+#endif
+}
+
+// Perform locking around heavy operation, wait indefinitely
+static inline void _spin_lock_slow(spinlock_t* lock, const char* info)
+{
+    if (atomic_add_uint32(&lock->flag, 1)) {
+        spin_lock_wait(lock, info, true);
     }
 #ifdef USE_SPINLOCK_DEBUG
     lock->lock_info = info;
@@ -50,13 +74,24 @@ static inline void _spin_lock(spinlock_t* lock, const char* info)
 
 #ifdef USE_SPINLOCK_DEBUG
 #define spin_lock(lock) _spin_lock(lock, SOURCE_LINE)
+#define spin_lock_slow(lock) _spin_lock_slow(lock, SOURCE_LINE)
 #else
 #define spin_lock(lock) _spin_lock(lock, "[no debug]")
+#define spin_lock_slow(lock) _spin_lock_slow(lock, "[no debug]")
 #endif
 
+// Try to claim the lock, returns true on success
+static inline bool spin_try_lock(spinlock_t* lock)
+{
+    return !atomic_add_uint32(&lock->flag, 1);
+}
+
+// Release the lock
 static inline void spin_unlock(spinlock_t* lock)
 {
-    atomic_store_uint32(&lock->flag, 0);
+    if (atomic_swap_uint32(&lock->flag, 0) > 1) {
+        spin_lock_wake(lock);
+    }
 }
 
 #endif

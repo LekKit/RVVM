@@ -17,26 +17,57 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "spinlock.h"
-#include "rvtimer.h"
+#include "threading.h"
 #include "utils.h"
 
 // Maximum allowed lock time, warns and recovers the lock upon expiration
 #define SPINLOCK_MAX_MS 1000
+#define SPINLOCK_MAX_SLEEP 10
 
 // Attemts to claim the lock before sleep throttle
-#define SPINLOCK_RETRIES 10000
+#define SPINLOCK_RETRIES 100
 
-NOINLINE void spin_lock_slow(spinlock_t* lock, const char* info)
+// It might use Linux futex() at some point,
+// but let's just use a condvar for now
+static cond_var_t global_cond;
+static uint32_t global_cond_init = 0;
+
+static void spin_atexit()
 {
-    for (size_t ms=0; ms<SPINLOCK_MAX_MS; ++ms) {
-        for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
-            if (atomic_swap_uint32(&lock->flag, 1) == 0) return;
+    condvar_free(global_cond);
+}
+
+NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
+{
+    for (size_t i=0; SPINLOCK_RETRIES; ++i) {
+        if (atomic_swap_uint32(&lock->flag, 2) == 0) {
+            atomic_store_uint32(&lock->flag, 1);
+            return;
         }
-        sleep_ms(1);
     }
+
+    if (!atomic_swap_uint32(&global_cond_init, 1)) {
+        global_cond = condvar_create();
+        atexit(spin_atexit);
+    }
+
+    for (size_t i=0; infinite || i < SPINLOCK_MAX_MS / SPINLOCK_MAX_SLEEP; ++i) {
+        condvar_wait(global_cond, SPINLOCK_MAX_SLEEP);
+        if (atomic_swap_uint32(&lock->flag, 2) == 0) {
+            atomic_store_uint32(&lock->flag, 1);
+            return;
+        }
+    }
+
     rvvm_warn("Possible deadlock at %s", info);
 #ifdef USE_SPINLOCK_DEBUG
     rvvm_warn("The lock was previously held at %s", lock->lock_info);
 #endif
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
+}
+
+NOINLINE void spin_lock_wake(spinlock_t* lock)
+{
+    UNUSED(lock);
+    condvar_wake_all(global_cond);
 }
