@@ -51,7 +51,7 @@ uint64_t  rvfilesize(rvfile_t* file);
 size_t    rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset);
 size_t    rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset);
 bool      rvtrim(rvfile_t* file, uint64_t offset, uint64_t count);
-bool      rvseek(rvfile_t* file, uint64_t offset, uint8_t startpos);
+bool      rvseek(rvfile_t* file, int64_t offset, uint8_t startpos);
 uint64_t  rvtell(rvfile_t* file);
 bool      rvflush(rvfile_t* file);
 bool      rvtruncate(rvfile_t* file, uint64_t length);

@@ -89,9 +89,8 @@ static FILE* fopen_utf8(const char* name, const char* mode)
 #endif
 
 #define FILE_POS_INVALID 0
-#define FILE_POS_SEEK    1
-#define FILE_POS_READ    2
-#define FILE_POS_WRITE   3
+#define FILE_POS_READ    1
+#define FILE_POS_WRITE   2
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
@@ -166,7 +165,7 @@ void rvclose(rvfile_t *file)
     close(file->fd);
     free(file);
 #else
-    spin_lock(&file->lock);
+    spin_lock_slow(&file->lock);
     fclose((FILE*)file->ptr);
     spin_unlock(&file->lock);
     free(file);
@@ -181,7 +180,7 @@ uint64_t rvfilesize(rvfile_t* file)
     fstat(file->fd, &file_stat);
     return file_stat.st_size;
 #else
-    spin_lock(&file->lock);
+    spin_lock_slow(&file->lock);
     fseek((FILE*)file->ptr, 0, SEEK_END);
     uint64_t size = ftell((FILE*)file->ptr);
     file->pos_state = FILE_POS_INVALID;
@@ -302,7 +301,15 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 #if defined(__unix__)
     ssize_t ret = 0;
     if (offset == RVFILE_CURPOS) {
+#if 0
+        if (file->pos_state == FILE_POS_INVALID) {
+            lseek(file->fd, file->pos, SEEK_SET);
+            file->pos_state = FILE_POS_READ;
+        }
         ret = read(file->fd, destination, count);
+#else
+        ret = pread(file->fd, destination, count, file->pos);
+#endif
         if (ret > 0) file->pos += ret;
     } else {
         ret = pread(file->fd, destination, count, offset);
@@ -310,10 +317,10 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
     if (ret < 0) ret = 0;
     return ret;
 #else
-    spin_lock(&file->lock);
+    spin_lock_slow(&file->lock);
     if (offset != RVFILE_CURPOS) {
         fseek((FILE*)file->ptr, offset, SEEK_SET);
-    } else if (file->pos_state != FILE_POS_READ) {
+    } else if (!(file->pos_state & FILE_POS_READ)) {
         fseek((FILE*)file->ptr, file->pos, SEEK_SET);
     }
     size_t ret = fread(destination, 1, count, (FILE*)file->ptr);
@@ -334,7 +341,15 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 #if defined(__unix__)
     ssize_t ret = 0;
     if (offset == RVFILE_CURPOS) {
+#if 0
+        if (file->pos_state == FILE_POS_INVALID) {
+            lseek(file->fd, file->pos, SEEK_SET);
+            file->pos_state = FILE_POS_WRITE;
+        }
         ret = write(file->fd, source, count);
+#else
+        ret = pwrite(file->fd, source, count, file->pos);
+#endif
         if (ret > 0) file->pos += ret;
     } else {
         ret = pwrite(file->fd, source, count, offset);
@@ -342,10 +357,10 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
     if (ret < 0) ret = 0;
     return ret;
 #else
-    spin_lock(&file->lock);
+    spin_lock_slow(&file->lock);
     if (offset != RVFILE_CURPOS) {
         fseek((FILE*)file->ptr, offset, SEEK_SET);
-    } else if (file->pos_state != FILE_POS_WRITE) {
+    } else if (!(file->pos_state & FILE_POS_WRITE)) {
         fseek((FILE*)file->ptr, file->pos, SEEK_SET);
     }
     size_t ret = fwrite(source, 1, count, (FILE*)file->ptr);
@@ -374,27 +389,32 @@ bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 #endif
 }
 
-bool rvseek(rvfile_t* file, uint64_t offset, uint8_t startpos)
+bool rvseek(rvfile_t* file, int64_t offset, uint8_t startpos)
 {
     if (!file || startpos > RVFILE_END) return false;
     int whence = SEEK_SET;
     if (startpos == RVFILE_CUR) whence = SEEK_CUR;
     if (startpos == RVFILE_END) whence = SEEK_END;
-#if defined(__unix__)
-    if (startpos != RVFILE_SET || file->pos != offset) {
-        file->pos = lseek(file->fd, offset, whence);
+    if (startpos == RVFILE_CUR) {
+        offset = file->pos + offset;
+        if (offset < 0) return false;
     }
-    return true;
+    if (startpos == RVFILE_END) {
+#if defined(__unix__)
+        file->pos = lseek(file->fd, offset, whence);
+        file->pos_state = FILE_POS_READ | FILE_POS_WRITE;
 #else
-    spin_lock(&file->lock);
-    if (startpos != RVFILE_SET || file->pos != offset || file->pos_state == FILE_POS_INVALID) {
+        spin_lock_slow(&file->lock);
         fseek((FILE*)file->ptr, offset, whence);
         file->pos = ftell((FILE*)file->ptr);
-        file->pos_state = FILE_POS_SEEK;
-    }
-    spin_unlock(&file->lock);
-    return true;
+        file->pos_state = FILE_POS_READ | FILE_POS_WRITE;
+        spin_unlock(&file->lock);
 #endif
+    } else if (file->pos != (uint64_t)offset) {
+        file->pos = (uint64_t)offset;
+        file->pos_state = FILE_POS_INVALID;
+    }
+    return true;
 }
 
 uint64_t rvtell(rvfile_t* file)
@@ -419,7 +439,7 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
 #else
     char tmp = 0;
     if (length) {
-        spin_lock(&file->lock);
+        spin_lock_slow(&file->lock);
         fseek((FILE*)file->ptr, length - 1, SEEK_SET);
         fread(&tmp, 1, 1, (FILE*)file->ptr);
         fseek((FILE*)file->ptr, length - 1, SEEK_SET);
