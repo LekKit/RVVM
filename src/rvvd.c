@@ -22,10 +22,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "utils.h"
 
-int rvvd_init(struct rvvd_dev* disk, const char* filename, uint64_t size) {
+
+
+void rvvd_sector_write(struct rvvd_dev* disk, const void* data, uint64_t offset) {
+    rvwrite(disk->_fd, data, 512, offset);
+}
+
+void rvvd_sector_read(struct rvvd_dev* disk, void* buffer, uint64_t offset) {
+    rvread(disk->_fd, buffer, 512, offset);
+}
+
+void rvvd_sector_read_recursive(struct rvvd_dev* disk, void* buffer, uint64_t sec_id) {
+    rvvd_read(disk, buffer, sec_id);
+}
+
+
+struct rvvd_dev* rvvd_mkimg(const char* filename, uint64_t size) {
     // Creates new Risc-V Virtual Drive by filename & size
 
     rvvm_info("Creating RVVD drive \"%s\" with size %ld", filename, size);
+
+    struct rvvd_dev* disk = safe_calloc(sizeof(struct rvvd_dev), 1);
 
     size_t namelen = strlen(filename);
     if (namelen > 255) namelen = 255;
@@ -34,18 +51,18 @@ int rvvd_init(struct rvvd_dev* disk, const char* filename, uint64_t size) {
 
     disk->overlay = false;
     disk->compression_type = DCOMPESSION_NONE;
-    if ( !(disk->_fd = fopen(filename, "wb+")) ) {
-        rvvm_error("RVVD ERROR: Could not create drive file!");
-        return -1;
-    }
+
+    disk->_fd = rvopen(filename, RVFILE_RW | RVFILE_CREAT | RVFILE_EXCL);
+
+    if (!disk->_fd) return NULL;
 
     // Writing header
     uint8_t header[512] = {0};
     memcpy(header, "RVVD", 4);
     write_uint32_le(header+4, RVVD_VERSION);
     write_uint64_le(header+8, ((size + 511ULL) & ~511ULL)/512);
-    disk->sector_table_size = (size /512 *8 /512);
-    disk->size = size;
+    disk->size = ((size + 511ULL) & ~511ULL);
+    disk->sector_table_size = (disk->size /512 *8 /512);
     disk->version = RVVD_VERSION;
     write_uint64_le(header+16, 512+512*disk->sector_table_size);
     rvvd_sector_write(disk, header, 0);
@@ -54,30 +71,31 @@ int rvvd_init(struct rvvd_dev* disk, const char* filename, uint64_t size) {
     // Allocating sector table
     memset(header, 0, 512);
     for (size_t i=0; i < disk->sector_table_size; ++i) {
-        fwrite(header, 512, 1, disk->_fd);
+        rvwrite(disk->_fd, header, 512, 512+512*i);
     }
 
     memset(disk->sector_cache, 0, sizeof(disk->sector_cache));
     disk->sector_cache[0].id = -1;
 
-    return 0;
+    return disk;
 
 }
 
-int rvvd_init_overlay(struct rvvd_dev* disk, const char* base_filename, const char* filename){
+struct rvvd_dev* rvvd_mkoverlay(const char* base_filename, const char* filename){
     // Creates disk in overlay mode, using existing disk image
 
     rvvm_info("Creating RVVD drive overlay \"%s\" (base drive \"%s\")", filename, base_filename);
 
-    struct rvvd_dev* base_disk = safe_malloc(sizeof(struct rvvd_dev));
+    struct rvvd_dev* disk;
+    struct rvvd_dev* base_disk;
 
-    if (rvvd_open(base_disk, base_filename)) {
+    if (!(base_disk = rvvd_open(base_filename))) {
         rvvm_error("RVVD ERROR: Could not open base drive file!");
-        return -1;
+        return NULL;
     }
-    if (rvvd_init(disk, filename, base_disk->size)) {
+    if (!(disk = rvvd_mkimg(filename, base_disk->size))) {
         rvvm_error("RVVD ERROR: Could not create drive file!");
-        return -2;
+        return NULL;
     }
 
     rvvm_info("Changing drive type to DTYPE_OVERLAY");
@@ -95,31 +113,30 @@ int rvvd_init_overlay(struct rvvd_dev* disk, const char* base_filename, const ch
 
     rvvd_sector_write(disk, header, 0);
 
-    return 0;
+    return disk;
 
 }
 
-int rvvd_init_from_image(struct rvvd_dev* disk, const char* image_filename, const char* filename) {
+struct rvvd_dev* rvvd_mkimg_from_image(const char* image_filename, const char* filename) {
     // Creates disk from passed .img file
 
     rvvm_info("Creating RVVD drive \"%s\" from \"%s\"", filename, image_filename);
 
-    FILE* img_fd;
+    rvfile_t* img_fd;
 
-    if (!(img_fd = fopen(image_filename, "rb"))) {
+    if (!(img_fd = rvopen(image_filename, 0))) {
         rvvm_error("RVVD ERROR: Could not create drive from image: Can not open image file");
-        return -1;
+        return NULL;
     }
 
     // Getting file size;
-    uint64_t size;
-    fseek(img_fd, 0, SEEK_END);
-    size = ftell(img_fd);
-    fseek(img_fd, 0, SEEK_SET);
+    uint64_t size = rvfilesize(img_fd);
 
-    if (rvvd_init(disk, filename, size)) {
+    struct rvvd_dev* disk;
+
+    if (!(disk = rvvd_mkimg(filename, size))) {
         rvvm_error("RVVD ERROR: Could not create drive file!");
-        return -2;
+        return NULL;
     }
 
     rvvm_info("Writing drive image data to rvvd drive");
@@ -127,31 +144,35 @@ int rvvd_init_from_image(struct rvvd_dev* disk, const char* image_filename, cons
     uint8_t bufferspace[512] = {0};
     for (size_t i = 0; i < size/512; i++)
     {
-        fread(bufferspace, 512, 1, img_fd);
+        printf("%ld\n", rvtell(img_fd));
+        rvread(img_fd, bufferspace, 512, RVFILE_CURPOS);
         rvvd_write(disk, bufferspace, i);
         memset(bufferspace, 0, 512);
     }
 
-    fclose(img_fd);
-    return 0;
+    rvclose(img_fd);
+    return disk;
 }
 
-int rvvd_open(struct rvvd_dev* disk, const char* filename) {
+struct rvvd_dev* rvvd_open(const char* filename) {
     // Opens Risc-V Virtual Drive
 
     rvvm_info("Opening RVVD drive \"%s\"", filename);
 
-    if ( !(disk->_fd = fopen(filename, "rb+")) ) {
+    struct rvvd_dev* disk = safe_calloc(sizeof(struct rvvd_dev), 1);
+
+    if (!(disk->_fd = rvopen(filename, RVFILE_RW | RVFILE_EXCL)) ) {
         rvvm_error("RVVD ERROR: Could not open drive file!");
-        return -1;
+        return NULL;
     }
 
     // Initializing disk structure
     uint8_t header[512] = {0};
-    fread(header, 512, 1, disk->_fd);
+    rvread(disk->_fd, header, 512, 0);
+
     if (memcmp(header, "RVVD", 4)) {
-        rvvm_error("RVVD ERROR: Passed \"%s\" file is not RVVD drive image.", disk->filename);
-        return -2;
+        rvvm_error("RVVD ERROR: Passed \"%s\" file is not RVVD drive image.", filename);
+        return NULL;
     }
 
     size_t namelen = strlen(filename);
@@ -163,9 +184,9 @@ int rvvd_open(struct rvvd_dev* disk, const char* filename) {
 
     if (disk->version != RVVD_VERSION && (disk->version > RVVD_VERSION || disk->version < RVVD_MIN_VERSION)) {
         rvvm_error("RVVD ERROR: version mismatch: can't load newer version of drive image");
-        return -3;
+        return NULL;
     } else if (disk->version != RVVD_VERSION && disk->version < RVVD_VERSION) {
-        rvvm_warn("Drive \"%s\" version is outdated, consider update it to new version", disk->filename);
+        rvvm_warn("Drive \"%s\" version is outdated, consider update it to new version", filename);
     }
 
     disk->size = read_uint64_le(header+8)*512;
@@ -176,55 +197,98 @@ int rvvd_open(struct rvvd_dev* disk, const char* filename) {
 
         rvvm_info("Drive \"%s\" is overlay drive, opening base image...", filename);
 
-        struct rvvd_dev* base_disk = safe_malloc(sizeof(struct rvvd_dev));
+        struct rvvd_dev* base_disk;
 
-        // memcpy(base_disk->filename, header+18, 256);
-        size_t namelen = strlen((const char*)header+26);
-        if (namelen > 255) namelen = 255;
-        memcpy(base_disk->filename, header+26, namelen);
-        base_disk->filename[namelen] = 0;
-
-        if (!memcmp(base_disk->filename, disk->filename, 256)) {
+        if (!memcmp(header+26, disk->filename, 256)) {
             rvvm_error("RVVD ERROR: Base drive can not be same as this overlay drive");
-            return -4;
+            return NULL;
         }
-        switch (rvvd_open(base_disk, base_disk->filename)) {
-            case -1:
-                rvvm_error("RVVD ERROR: Can't open drive base.");
-                return -4;
-            case -2:
-                rvvm_error("RVVD ERROR: Can't open drive base: drive base already opened by another instance of rvvm");
-                return -4;
-            case -3:
-                rvvm_error("RVVD ERROR: Can't open drive base: version mismatch: can't load newer version of drive image");
-                return -4;
-            case -4:
-                rvvm_error("RVVD ERROR: Can't open drive base: base drive reported error");
-                return -4;
-            default:
-                disk->base_disk = base_disk;
+        if (!(base_disk = rvvd_open((const char*)header+26))) {
+            rvvm_error("RVVD ERROR: Can't open base disk \"%s\"", base_disk->filename);
+            return NULL;
         }
+        disk->base_disk = base_disk;
     }
 
     disk->sector_table_size = (disk->size /512 *8 /512);
     memset(disk->sector_cache, 0, sizeof(disk->sector_cache));
     disk->sector_cache[0].id = -1;
 
-    return 0;
+    return disk;
+}
+
+struct rvvd_dev* rvvd_fdopen(rvfile_t* fd) {
+        // Opens Risc-V Virtual Drive
+
+    rvvm_info("Opening RVVD drive %p", fd);
+
+    struct rvvd_dev* disk = safe_calloc(sizeof(struct rvvd_dev), 1);
+
+    disk->_fd = fd;
+
+    // Initializing disk structure
+    uint8_t header[512] = {0};
+    rvread(disk->_fd, header, 512, 0);
+
+    if (memcmp(header, "RVVD", 4)) {
+        rvvm_error("RVVD ERROR: Passed file is not RVVD drive image.");
+        return NULL;
+    }
+
+    // size_t namelen = strlen(filename);
+    // if (namelen > 255) namelen = 255;
+    // memcpy(disk->filename, filename, namelen);
+    // disk->filename[namelen] = 0;
+
+    disk->version = read_uint32_le(header+4);
+
+    if (disk->version != RVVD_VERSION && (disk->version > RVVD_VERSION || disk->version < RVVD_MIN_VERSION)) {
+        rvvm_error("RVVD ERROR: version mismatch: can't load newer version of drive image");
+        return NULL;
+    } else if (disk->version != RVVD_VERSION && disk->version < RVVD_VERSION) {
+        rvvm_warn("Drive version is outdated, consider update it to new version");
+    }
+
+    disk->size = read_uint64_le(header+8)*512;
+    disk->next_sector_offset = read_uint64_le(header+16);
+    disk->overlay = header[24] & DOPT_OVERLAY;
+    disk->compression_type = read_uint8(header+25);
+    if (disk->overlay) {
+
+        rvvm_info("Drive %p is overlay drive, opening base image...", disk->_fd);
+
+        struct rvvd_dev* base_disk;
+
+        if (!memcmp(header+26, disk->filename, 256)) {
+            rvvm_error("RVVD ERROR: Base drive can not be same as this overlay drive");
+            return NULL;
+        }
+        if (!(base_disk = rvvd_open((const char*)header+26))) {
+            rvvm_error("RVVD ERROR: Can't open base disk \"%s\"", base_disk->filename);
+            return NULL;
+        }
+        disk->base_disk = base_disk;
+    }
+
+    disk->sector_table_size = (disk->size /512 *8 /512);
+    memset(disk->sector_cache, 0, sizeof(disk->sector_cache));
+    disk->sector_cache[0].id = -1;
+
+    return disk;
 }
 
 void rvvd_close(struct rvvd_dev* disk) {
     // Closes rvvd disk
 
-    rvvm_info("Closing RVVD drive \"%s\"", disk->filename);
+    rvvm_info("Closing RVVD drive %p", disk->_fd);
 
     if (disk->overlay) {
-        rvvm_info("Closing RVVM drive base \"%s\"", disk->base_disk->filename);
+        rvvm_info("Closing RVVD drive base \"%s\"", disk->base_disk->filename);
         rvvd_close(disk->base_disk);
-        free(disk->base_disk);
     }
 
-    fclose(disk->_fd);
+    rvclose(disk->_fd);
+    free(disk);
 }
 
 void rvvd_migrate_to_current_version(struct rvvd_dev* disk) {
@@ -239,7 +303,7 @@ void rvvd_migrate_to_current_version(struct rvvd_dev* disk) {
 void rvvd_convert_to_solid(struct rvvd_dev* disk) {
     // Convert overlay image in solid mode
 
-    rvvm_info("RVVD \"%s\": Changing overlay into solid", disk->filename);
+    rvvm_info("RVVD %p: Changing overlay into solid", disk->_fd);
 
     uint8_t buffer[512] = {0};
     for (size_t i = 0; i < disk->sector_table_size*64; i++) {
@@ -259,32 +323,33 @@ void rvvd_convert_to_solid(struct rvvd_dev* disk) {
 void rvvd_dump_to_image(struct rvvd_dev* disk, const char* filename) {
     //Dump contents of RVVD drive into image file
 
-    rvvm_info("RVVD \"%s\": Dumping image", disk->filename);
+    rvvm_info("RVVD %p: Dumping image", disk->_fd);
 
-    FILE* img = fopen(filename, "wb");
+    rvfile_t* img = rvopen(filename, RVFILE_RW | RVFILE_CREAT | RVFILE_EXCL);
     if (img == NULL) {
-        rvvm_error("RVVD ERROR at \"%s\": Could not create image file", disk->filename);
+        rvvm_error("RVVD ERROR at %p: Could not create image file", disk->_fd);
+        return;
     }
     uint8_t buffer[512] = {0};
     for (size_t i = 0; i < disk->sector_table_size*64; i++) {
         rvvd_read(disk, buffer, i);
-        fwrite(buffer, 512, 1, img);
+        rvwrite(img, buffer, 512, RVFILE_CURPOS);
         memset(buffer, 0, 512);
     }
 
-    fclose(img);
+    rvclose(img);
 
 }
 
 void rvvd_read(struct rvvd_dev* disk, void* buffer, uint64_t sec_id) {
 
-    rvvm_info("RVVD \"%s\": Reading sector %ld", disk->filename, sec_id);
+    rvvm_info("RVVD %p: Reading sector %ld", disk->_fd, sec_id);
 
     uint8_t data[512] = {0};
 
     uint64_t offset = rvvd_sc_get(disk, sec_id);
 
-    if (!offset) offset = rvvd_sector_get_offset(disk, sec_id);
+    if (offset == ((uint64_t)-1)) offset = rvvd_sector_get_offset(disk, sec_id);
 
     if (!disk->overlay) {
         if (offset) rvvd_sector_read(disk, data, offset);
@@ -299,17 +364,17 @@ void rvvd_read(struct rvvd_dev* disk, void* buffer, uint64_t sec_id) {
 
 }
 
-void rvvd_write(struct rvvd_dev* disk, void* data, uint64_t sec_id) {
+void rvvd_write(struct rvvd_dev* disk, const void* data, uint64_t sec_id) {
     /*
     Writing in the disk file. If sector isn't allocated and write data not full of zeros,
     allocates it
     */
 
-    rvvm_info("RVVD \"%s\": Writing sector %ld", disk->filename, sec_id);
+    rvvm_info("RVVD %p: Writing sector %ld", disk->_fd, sec_id);
 
     uint64_t offset = rvvd_sc_get(disk, sec_id);
 
-    if (!offset) offset = rvvd_sector_get_offset(disk, sec_id);
+    if (offset == ((uint64_t)-1)) offset = rvvd_sector_get_offset(disk, sec_id);
 
     for (size_t i = 0; i < 512/sizeof(size_t); i++) {
         if (((const size_t*)data)[i] && !offset) {
@@ -325,42 +390,39 @@ void rvvd_write(struct rvvd_dev* disk, void* data, uint64_t sec_id) {
 
 }
 
-void rvvd_allocate(struct rvvd_dev* disk, void* data, uint64_t sec_id) {
+void rvvd_allocate(struct rvvd_dev* disk, const void* data, uint64_t sec_id) {
     // Allocates block in the disk file
 
-    rvvm_info("RVVD \"%s\": Allocating sector %ld", disk->filename, sec_id);
+    rvvm_info("RVVD %p: Allocating sector %ld", disk->_fd, sec_id);
 
     uint64_t offset = disk->next_sector_offset;
     disk->next_sector_offset += 512;
-    fseek(disk->_fd, offset, SEEK_SET);
-    fwrite(data, 512, 1, disk->_fd);
+    rvwrite(disk->_fd, data, 512, offset);
 
     uint8_t tmpbuf[8] = {0};
 
-    fseek(disk->_fd, 512+sec_id*8, SEEK_SET);
     write_uint64_le(tmpbuf, offset);
-    fwrite(tmpbuf, 8, 1, disk->_fd);
+    rvwrite(disk->_fd, tmpbuf, 8, 512+sec_id*8);
 
-    memset(tmpbuf, 0, 8);
-    fseek(disk->_fd, 16, SEEK_SET);
     write_uint64_le(tmpbuf, offset);
-    fwrite(tmpbuf, 8, 1, disk->_fd);
+    rvwrite(disk->_fd, tmpbuf, 8, 16);
 
     rvvd_sc_push(disk, sec_id, offset);
 
 }
 
-void rvvd_sync(struct rvvd_dev* disk) {
+bool rvvd_sync(struct rvvd_dev* disk) {
 
-    rvvm_info("RVVD \"%s\": Sync request", disk->filename);
-    fflush(disk->_fd);
+    rvvm_info("RVVD %p: Sync request", disk->_fd);
+    rvflush(disk->_fd);
+    return true;
 }
 
 
 void rvvd_sc_push(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset) {
     // Filling up table conversion result in the sector cache table
 
-    rvvm_info("RVVD \"%s\": Pusing sector cache {%ld : %ld}", disk->filename, sec_id, offset);
+    rvvm_info("RVVD %p: Pusing sector cache {%ld : %ld}", disk->_fd, sec_id, offset);
 
     if (offset && disk->sector_cache[sec_id & 0x1FF].id != sec_id) {
         disk->sector_cache[sec_id & 0x1FF].offset = offset;
@@ -370,9 +432,9 @@ void rvvd_sc_push(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset) {
 
 uint64_t rvvd_sc_get(struct rvvd_dev* disk, uint64_t sec_id) {
 
-    rvvm_info("RVVD \"%s\": Getting sector cache entry with sector_id = %ld", disk->filename, sec_id);
+    rvvm_info("RVVD %p: Getting sector cache entry with sector_id = %ld", disk->_fd, sec_id);
 
-    uint64_t offset = 0;
+    uint64_t offset = ((uint64_t)-1);
     if (disk->sector_cache[sec_id & 0x1FF].id == sec_id) {
         offset = disk->sector_cache[sec_id & 0x1FF].offset;
     }
@@ -381,13 +443,12 @@ uint64_t rvvd_sc_get(struct rvvd_dev* disk, uint64_t sec_id) {
 
 void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32_t sector_count) {
 
-    rvvm_info("RVVD \"%s\": Forward prediction of %d offsets", disk->filename, sector_count);
+    rvvm_info("RVVD %p: Forward prediction of %d offsets", disk->_fd, sector_count);
 
     if (sector_count > 64) sector_count = 64;
     if (from_sector + sector_count > disk->sector_table_size * 64) return;
     uint8_t buffer[512] = {0};
-    fseek(disk->_fd, 512+(8*from_sector), SEEK_SET);
-    fread(buffer, 8*sector_count, 1, disk->_fd);
+    rvread(disk->_fd, buffer, 8*sector_count, 512+(8*from_sector));
     for (size_t i = 0; i < sector_count; i++) {
         uint64_t offset = read_uint64_le(buffer+(8*i));
         rvvd_sc_push(disk, from_sector+i, offset);
@@ -395,22 +456,63 @@ void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32
 }
 
 uint64_t rvvd_sector_get_offset(struct rvvd_dev* disk, uint64_t sec_id) {
-    fseek(disk->_fd, 512+sec_id*8, SEEK_SET);
+
     uint8_t offsetbuf[8] = {0};
-    fread(offsetbuf, 8, 1, disk->_fd);
+    rvread(disk->_fd, offsetbuf, 8, 512+sec_id*8);
     return read_uint64_le(offsetbuf);
 }
 
-void rvvd_sector_write(struct rvvd_dev* disk, void* data, uint64_t offset) {
-    fseek(disk->_fd, offset, SEEK_SET);
-    fwrite(data, 512, 1, disk->_fd);
+size_t rvvd_blk_read(void* dev, void* dst, size_t count, uint64_t offset) {
+    struct rvvd_dev* drive = (struct rvvd_dev*)dev;
+    if (!drive->_fd) return 0;
+    if (count % 512 != 0 || offset % 512 != 0) return 0;
+
+    uint64_t start_sector_id = offset/512;
+    size_t sector_count = count/512;
+
+    rvvd_sc_forward_predict(drive, start_sector_id, sector_count);
+
+    for (size_t i = 0; i < sector_count; i++) rvvd_read(drive, dst+512*i, start_sector_id+i);
+    return count;
+
 }
 
-void rvvd_sector_read(struct rvvd_dev* disk, void* buffer, uint64_t offset) {
-    fseek(disk->_fd, offset, SEEK_SET);
-    fread(buffer, 512, 1, disk->_fd);
+size_t rvvd_blk_write(void* dev, const void* src, size_t count, uint64_t offset) {
+    struct rvvd_dev* drive = (struct rvvd_dev*)dev;
+    if (!drive->_fd) return 0;
+    if (count % 512 != 0 || offset % 512 != 0) return 0;
+
+    uint64_t start_sector_id = offset/512;
+    size_t sector_count = count/512;
+
+    for (size_t i = 0; i < sector_count; i++) rvvd_write(drive, src+512*i, start_sector_id+i);
+    return count;
+
 }
 
-void rvvd_sector_read_recursive(struct rvvd_dev* disk, void* buffer, uint64_t sec_id) {
-    rvvd_read(disk, buffer, sec_id);
+bool rvvd_blk_trim (void* dev, uint64_t offset, uint64_t count) {
+    UNUSED(dev);
+    UNUSED(offset);
+    UNUSED(count);
+    return false;
+}
+
+static blkdev_type_t blkdev_type_rvvd = {
+    .name = "rvvd",
+    .close = (const void*)rvvd_close,
+    .read = rvvd_blk_read,
+    .write = rvvd_blk_write,
+    .trim = rvvd_blk_trim,
+    .sync = (const void*)rvvd_sync,
+};
+
+bool blk_init_rvvd(blkdev_t* dev, rvfile_t* file)
+{
+    struct rvvd_dev* disk = rvvd_fdopen(file);
+    if (!disk) return false;
+    dev->type = &blkdev_type_rvvd;
+    dev->data = disk;
+    dev->size = disk->size;
+    
+    return true;
 }

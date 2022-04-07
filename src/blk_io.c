@@ -447,6 +447,7 @@ static bool blk_init_raw(blkdev_t* dev, rvfile_t* file)
     return true;
 }
 
+bool blk_init_rvvd(blkdev_t* dev, rvfile_t* file);
 blkdev_t* blk_open(const char* filename, uint8_t opts)
 {
     uint8_t filemode = 0;
@@ -455,14 +456,13 @@ blkdev_t* blk_open(const char* filename, uint8_t opts)
     if (!file) return NULL;
 
     blkdev_t* dev = safe_calloc(sizeof(blkdev_t), 1);
-#if 0
+
     char magic_buf[4] = {0};
     rvread(file, magic_buf, 4, 0);
-    if (memcmp(magic_buf, "RVVD", 4))
+    if (!memcmp(magic_buf, "RVVD", 4))
         blk_init_rvvd(dev, file);
     else
-#endif
-    blk_init_raw(dev, file);
+        blk_init_raw(dev, file);
 
     dev->pos = 0;
     return dev;
