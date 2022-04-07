@@ -24,6 +24,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //#define AIO_LINUX
 
+#define FILE_POS_INVALID 0
+#define FILE_POS_READ    1
+#define FILE_POS_WRITE   2
+
 #ifdef __unix__
 #include <unistd.h>
 #include <fcntl.h>
@@ -51,7 +55,6 @@ static bool try_lock_fd(int fd)
 
 #else
 #include <stdio.h>
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -88,9 +91,7 @@ static FILE* fopen_utf8(const char* name, const char* mode)
 #define fopen fopen_utf8
 #endif
 
-#define FILE_POS_INVALID 0
-#define FILE_POS_READ    1
-#define FILE_POS_WRITE   2
+#endif
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
@@ -116,6 +117,9 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    struct stat file_stat;
+    fstat(fd, &file_stat);
+    file->size = file_stat.st_size;
     file->pos = 0;
     file->fd = fd;
 
@@ -150,6 +154,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
 #endif
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    fseek(fp, 0, SEEK_END);
+    file->size = ftell(fp);
     file->pos = 0;
     file->pos_state = FILE_POS_INVALID;
     file->ptr = (void*)fp;
@@ -175,21 +181,19 @@ void rvclose(rvfile_t *file)
 uint64_t rvfilesize(rvfile_t* file)
 {
     if (!file) return 0;
-#if defined(__unix__)
-    struct stat file_stat;
-    fstat(file->fd, &file_stat);
-    return file_stat.st_size;
-#else
-    spin_lock_slow(&file->lock);
-    fseek((FILE*)file->ptr, 0, SEEK_END);
-    uint64_t size = ftell((FILE*)file->ptr);
-    file->pos_state = FILE_POS_INVALID;
-    spin_unlock(&file->lock);
-    return size;
-#endif
+    return file->size;
 }
 
 #if defined(__linux__) && defined(AIO_LINUX)
+
+typedef struct {
+    uint64_t  request_id;
+    rvfile_t* file;
+    uint64_t  offset;
+    size_t    length;
+    void*     userdata;
+    rvfile_async_callback_t callback_handler;
+} aio_request_data;
 
 static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64_t* buffer, uint64_t offset, uint64_t count, rvfile_async_callback_t callback_handler, void* user_data)
 {
@@ -298,81 +302,44 @@ static void create_async_task(rvfile_t* file, uint8_t opcode, void* buffer, size
 size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 {
     if (!file) return 0;
+    uint64_t pos_real = (offset == RVFILE_CURPOS) ? file->pos : offset;
 #if defined(__unix__)
-    ssize_t ret = 0;
-    if (offset == RVFILE_CURPOS) {
-#if 0
-        if (file->pos_state == FILE_POS_INVALID) {
-            lseek(file->fd, file->pos, SEEK_SET);
-            file->pos_state = FILE_POS_READ;
-        }
-        ret = read(file->fd, destination, count);
-#else
-        ret = pread(file->fd, destination, count, file->pos);
-#endif
-        if (ret > 0) file->pos += ret;
-    } else {
-        ret = pread(file->fd, destination, count, offset);
-    }
+    ssize_t ret = pread(file->fd, destination, count, pos_real);
     if (ret < 0) ret = 0;
-    return ret;
 #else
     spin_lock_slow(&file->lock);
-    if (offset != RVFILE_CURPOS) {
-        fseek((FILE*)file->ptr, offset, SEEK_SET);
-    } else if (!(file->pos_state & FILE_POS_READ)) {
-        fseek((FILE*)file->ptr, file->pos, SEEK_SET);
+    if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_READ)) {
+        fseek((FILE*)file->ptr, pos_real, SEEK_SET);
     }
     size_t ret = fread(destination, 1, count, (FILE*)file->ptr);
-    if (offset == RVFILE_CURPOS) {
-        file->pos_state = FILE_POS_READ;
-        file->pos += ret;
-    } else {
-        file->pos_state = FILE_POS_INVALID;
-    }
+    file->pos_real = pos_real + ret;
+    file->pos_state = FILE_POS_READ;
     spin_unlock(&file->lock);
-    return ret;
 #endif
+    if (offset == RVFILE_CURPOS) file->pos += ret;
+    return ret;
 }
 
 size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset)
 {
     if (!file) return 0;
+    uint64_t pos_real = (offset == RVFILE_CURPOS) ? file->pos : offset;
 #if defined(__unix__)
-    ssize_t ret = 0;
-    if (offset == RVFILE_CURPOS) {
-#if 0
-        if (file->pos_state == FILE_POS_INVALID) {
-            lseek(file->fd, file->pos, SEEK_SET);
-            file->pos_state = FILE_POS_WRITE;
-        }
-        ret = write(file->fd, source, count);
-#else
-        ret = pwrite(file->fd, source, count, file->pos);
-#endif
-        if (ret > 0) file->pos += ret;
-    } else {
-        ret = pwrite(file->fd, source, count, offset);
-    }
+    ssize_t ret = pwrite(file->fd, source, count, pos_real);
     if (ret < 0) ret = 0;
-    return ret;
 #else
     spin_lock_slow(&file->lock);
-    if (offset != RVFILE_CURPOS) {
-        fseek((FILE*)file->ptr, offset, SEEK_SET);
-    } else if (!(file->pos_state & FILE_POS_WRITE)) {
-        fseek((FILE*)file->ptr, file->pos, SEEK_SET);
+    if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_WRITE)) {
+        fseek((FILE*)file->ptr, pos_real, SEEK_SET);
     }
     size_t ret = fwrite(source, 1, count, (FILE*)file->ptr);
-    if (offset == RVFILE_CURPOS) {
-        file->pos_state = FILE_POS_WRITE;
-        file->pos += ret;
-    } else {
-        file->pos_state = FILE_POS_INVALID;
-    }
+    file->pos_real = pos_real + ret;
+    file->pos_state = FILE_POS_WRITE;
     spin_unlock(&file->lock);
-    return ret;
 #endif
+    if (offset == RVFILE_CURPOS) file->pos += ret;
+    if (pos_real + ret > file->size) file->size = pos_real + ret;
+    return ret;
 }
 
 bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
@@ -392,28 +359,13 @@ bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 bool rvseek(rvfile_t* file, int64_t offset, uint8_t startpos)
 {
     if (!file || startpos > RVFILE_END) return false;
-    int whence = SEEK_SET;
-    if (startpos == RVFILE_CUR) whence = SEEK_CUR;
-    if (startpos == RVFILE_END) whence = SEEK_END;
     if (startpos == RVFILE_CUR) {
         offset = file->pos + offset;
-        if (offset < 0) return false;
+    } else if (startpos == RVFILE_END) {
+        offset = file->size - offset;
     }
-    if (startpos == RVFILE_END) {
-#if defined(__unix__)
-        file->pos = lseek(file->fd, offset, whence);
-        file->pos_state = FILE_POS_READ | FILE_POS_WRITE;
-#else
-        spin_lock_slow(&file->lock);
-        fseek((FILE*)file->ptr, offset, whence);
-        file->pos = ftell((FILE*)file->ptr);
-        file->pos_state = FILE_POS_READ | FILE_POS_WRITE;
-        spin_unlock(&file->lock);
-#endif
-    } else if (file->pos != (uint64_t)offset) {
-        file->pos = (uint64_t)offset;
-        file->pos_state = FILE_POS_INVALID;
-    }
+    if (startpos != RVFILE_SET && offset < 0) return false;
+    file->pos = (uint64_t)offset;
     return true;
 }
 
@@ -434,6 +386,7 @@ bool rvflush(rvfile_t* file)
 
 bool rvtruncate(rvfile_t* file, uint64_t length)
 {
+    file->size = length;
 #if defined(__unix__)
     return ftruncate(file->fd, length) == 0;
 #else
@@ -506,4 +459,56 @@ bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_c
     create_async_task(file, RVFILE_ASYNC_VA, task_iolist, count, 0, callback, userdata);
     return true;
 #endif
+}
+
+/*
+ * Block device layer
+ */
+
+// Raw block device implementation
+// Be careful with function prototypes
+static blkdev_type_t blkdev_type_raw = {
+    .name = "raw",
+    .close = (const void*)rvclose,
+    .read = (const void*)rvread,
+    .write = (const void*)rvwrite,
+    .trim = (const void*)rvtrim,
+    .sync = (const void*)rvflush,
+};
+
+static bool blk_init_raw(blkdev_t* dev, rvfile_t* file)
+{
+    dev->type = &blkdev_type_raw;
+    dev->size = rvfilesize(file);
+    dev->data = file;
+    return true;
+}
+
+blkdev_t* blk_open(const char* filename, uint8_t opts)
+{
+    uint8_t filemode = 0;
+    if (opts & RVFILE_RW) filemode |= (RVFILE_RW | RVFILE_EXCL);
+    rvfile_t* file = rvopen(filename, filemode);
+    if (!file) return NULL;
+
+    blkdev_t* dev = safe_calloc(sizeof(blkdev_t), 1);
+#if 0
+    char magic_buf[4] = {0};
+    rvread(file, magic_buf, 4, 0);
+    if (memcmp(magic_buf, "RVVD", 4))
+        blk_init_rvvd(dev, file);
+    else
+#endif
+    blk_init_raw(dev, file);
+
+    dev->pos = 0;
+    return dev;
+}
+
+void blk_close(blkdev_t* dev)
+{
+    if (dev) {
+        dev->type->close(dev->data);
+        free(dev);
+    }
 }
