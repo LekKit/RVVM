@@ -22,8 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "threading.h"
 
-//#define AIO_LINUX
-
 #define FILE_POS_INVALID 0
 #define FILE_POS_READ    1
 #define FILE_POS_WRITE   2
@@ -48,9 +46,6 @@ static bool try_lock_fd(int fd)
 
 #ifdef __linux__
 #include <sys/syscall.h>
-#ifdef AIO_LINUX
-#include <linux/aio_abi.h>
-#endif
 #endif
 
 #else
@@ -122,13 +117,6 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->size = file_stat.st_size;
     file->pos = 0;
     file->fd = fd;
-
-#if defined(__linux__) && defined(AIO_LINUX)
-    aio_context_t* ctx = safe_calloc(sizeof(aio_context_t), 1);
-    syscall(SYS_io_setup, IO_MAX_OPS, ctx);
-    file->ptr = (void*)ctx;
-#endif
-
     return file;
 #else
     const char* open_mode;
@@ -183,121 +171,6 @@ uint64_t rvfilesize(rvfile_t* file)
     if (!file) return 0;
     return file->size;
 }
-
-#if defined(__linux__) && defined(AIO_LINUX)
-
-typedef struct {
-    uint64_t  request_id;
-    rvfile_t* file;
-    uint64_t  offset;
-    size_t    length;
-    void*     userdata;
-    rvfile_async_callback_t callback_handler;
-} aio_request_data;
-
-static struct iocb* create_linux_request(rvfile_t* file, uint16_t opcode, uint64_t* buffer, uint64_t offset, uint64_t count, rvfile_async_callback_t callback_handler, void* user_data)
-{
-    static uint64_t request_id = 0;
-    struct iocb* op = safe_calloc(sizeof(struct iocb), 1);
-    aio_request_data* userdata = safe_calloc(sizeof(aio_request_data), 1);
-    userdata->request_id = request_id++;
-    userdata->file = file;
-    userdata->userdata = user_data;
-    userdata->offset = offset;
-    userdata->length = count;
-    userdata->callback_handler = callback_handler;
-    op->aio_data = (uint64_t)userdata;
-    op->aio_lio_opcode = IOCB_CMD_PREAD;
-    if (opcode == RVFILE_ASYNC_WRITE) op->aio_lio_opcode = IOCB_CMD_PWRITE;
-    op->aio_fildes = file->fd;
-    op->aio_buf = (uint64_t)buffer;
-    op->aio_offset = offset;
-    op->aio_nbytes = count;
-    //op->aio_resfd = file->resfd;
-    op->aio_flags = IOCB_FLAG_RESFD;
-    return op;
-}
-
-#else
-
-typedef struct {
-    rvfile_t* file;
-    void*     buffer;
-    uint64_t  offset;
-    size_t    length;
-    rvfile_async_callback_t callback;
-    void*    userdata;
-    uint8_t  opcode;
-} async_task_t;
-
-static bool async_task_run(async_task_t* task)
-{
-    switch (task->opcode) {
-        case RVFILE_ASYNC_READ:
-            return rvread(task->file, task->buffer, task->length, task->offset) == task->length;
-        case RVFILE_ASYNC_WRITE:
-            return rvwrite(task->file, task->buffer, task->length, task->offset) == task->length;
-        case RVFILE_ASYNC_TRIM:
-            return rvtrim(task->file, task->offset, task->length);
-        default:
-            rvvm_warn("Unknown opcode %d in async_task_run()!", task->opcode);
-            return false;
-    }
-}
-
-static void* async_task(void* data)
-{
-    async_task_t* task = (async_task_t*)data;
-    rvaio_op_t* iolist;
-    uint8_t result = ASYNC_IO_DONE;
-
-    if (task->opcode == RVFILE_ASYNC_VA) {
-        iolist = (rvaio_op_t*)task->buffer;
-        for (size_t i=0; i<task->length; ++i) {
-            switch (iolist[i].opcode) {
-                case RVFILE_ASYNC_READ:
-                    if (rvread(task->file, iolist[i].buffer, iolist[i].length, iolist[i].offset) != iolist[i].length)
-                        result = ASYNC_IO_FAIL;
-                    break;
-                case RVFILE_ASYNC_WRITE:
-                    if (rvwrite(task->file, iolist[i].buffer, iolist[i].length, iolist[i].offset) != iolist[i].length)
-                        result = ASYNC_IO_FAIL;
-                    break;
-                case RVFILE_ASYNC_TRIM:
-                    if (!rvtrim(task->file, iolist[i].offset, iolist[i].length))
-                        result = ASYNC_IO_FAIL;
-                    break;
-                default:
-                    rvvm_warn("Unknown opcode %d in async_task_va()!", iolist[i].opcode);
-                    return false;
-            }
-        }
-
-        free(iolist);
-    } else {
-        result = async_task_run(task) ? ASYNC_IO_DONE : ASYNC_IO_FAIL;
-    }
-
-    task->callback(task->file, task->userdata, result);
-
-    free(task);
-    return NULL;
-}
-
-static void create_async_task(rvfile_t* file, uint8_t opcode, void* buffer, size_t length, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
-{
-    async_task_t* task = safe_calloc(sizeof(async_task_t), 1);
-    task->file = file;
-    task->buffer = buffer;
-    task->offset = offset;
-    task->length = length;
-    task->callback = callback;
-    task->userdata = userdata;
-    task->opcode = opcode;
-    thread_create_task(async_task, task);
-}
-
-#endif
 
 size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 {
@@ -404,61 +277,65 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
 #endif
 }
 
+static void* async_io_task(void** data)
+{
+    rvaio_op_t* iolist = (rvaio_op_t*)data[0];
+    size_t count = (size_t)data[1];
+    rvfile_async_callback_t va_callback = (rvfile_async_callback_t)data[2];
+    void* va_userdata = data[3];
+
+    uint8_t va_result = ASYNC_IO_DONE;
+    bool op_result;
+    for (size_t i=0; i<count; ++i) {
+        switch (iolist[i].opcode) {
+            case RVFILE_ASYNC_READ:
+                op_result = rvread(iolist[i].file, iolist[i].buffer, iolist[i].length, iolist[i].offset) == iolist[i].length;
+                break;
+            case RVFILE_ASYNC_WRITE:
+                op_result = rvwrite(iolist[i].file, iolist[i].buffer, iolist[i].length, iolist[i].offset) == iolist[i].length;
+                break;
+            case RVFILE_ASYNC_TRIM:
+                op_result = rvtrim(iolist[i].file, iolist[i].offset, iolist[i].length);
+                break;
+            default:
+                rvvm_warn("Unknown opcode %d in async_io_task()!", iolist[i].opcode);
+                return false;
+        }
+        if (iolist[i].callback) iolist[i].callback(iolist[i].file, iolist[i].userdata, op_result ? ASYNC_IO_DONE : ASYNC_IO_FAIL);
+        if (!op_result) va_result = ASYNC_IO_FAIL;
+    }
+    if (va_callback) va_callback(NULL, va_userdata, va_result);
+    free(iolist);
+    return NULL;
+}
+
 bool rvread_async(rvfile_t* file, void* destination, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
 {
     if (!file || offset == RVFILE_CURPOS) return false;
-#if defined(__linux__) && defined(AIO_LINUX)
-    aio_context_t* ctx = (aio_context_t*)file->ptr;
-    struct iocb* op = create_linux_request(file, IOCB_CMD_PREAD, (uint64_t*)destination, offset, count, callback, userdata);
-    return syscall(SYS_io_submit, ctx, 1, op);
-#else
-    create_async_task(file, RVFILE_ASYNC_READ, destination, count, offset, callback, userdata);
-    return true;
-#endif
+    rvaio_op_t op = {file, destination, offset, count, userdata, callback, RVFILE_ASYNC_READ};
+    return rvasync_va(&op, 1, NULL, NULL);
 }
 
 bool rvwrite_async(rvfile_t* file, const void* source, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
 {
     if (!file || offset == RVFILE_CURPOS) return false;
-#if defined(__linux__) && defined(AIO_LINUX)
-    aio_context_t* ctx = (aio_context_t*)file->ptr;
-    struct iocb* op = create_linux_request(file, IOCB_CMD_PWRITE, (uint64_t*)source, offset, count, callback, userdata);
-    return syscall(SYS_io_submit, ctx, 1, op);
-#else
-    create_async_task(file, RVFILE_ASYNC_WRITE, (void*)source, count, offset, callback, userdata);
-    return true;
-#endif
+    rvaio_op_t op = {file, (void*)source, offset, count, userdata, callback, RVFILE_ASYNC_WRITE};
+    return rvasync_va(&op, 1, NULL, NULL);
 }
 
 bool rvfsync_async(rvfile_t* file)
 {
-    if (!file) return false;
-#if defined(__linux__) && defined(AIO_LINUX)
-    aio_context_t* ctx = (aio_context_t*)file->ptr;
-    struct iocb* op = create_linux_request(file, IOCB_CMD_FSYNC, NULL, 0, 0, NULL, NULL);
-    return syscall(SYS_io_submit, ctx, 1, op);
-#else
     UNUSED(file);
     return false;
-#endif
 }
 
-bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata)
+bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata)
 {
-    if (!file) return false;
-#if defined(__linux__) && defined(AIO_LINUX)
-    aio_context_t* ctx = (aio_context_t*)file->ptr;
-    struct iocb** rlist = safe_calloc(sizeof(struct iocb), count);
-    for (size_t i = 0; i < count; i++) {
-        rlist[i] = create_linux_request(file, iolist[i].opcode, iolist[i].buffer, iolist[i].offset, iolist[i].length, callback, userdata);
-    }
-    return syscall(SYS_io_submit, ctx, count, rlist) >= 0;
-#else
     rvaio_op_t* task_iolist = safe_calloc(sizeof(rvaio_op_t), count);
     memcpy(task_iolist, iolist, sizeof(rvaio_op_t) * count);
-    create_async_task(file, RVFILE_ASYNC_VA, task_iolist, count, 0, callback, userdata);
+    void* args[4] = {task_iolist, (void*)count, (void*)callback, userdata};
+    thread_create_task_va(async_io_task, args, 4);
     return true;
-#endif
 }
 
 /*

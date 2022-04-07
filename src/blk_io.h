@@ -74,23 +74,25 @@ bool      rvtruncate(rvfile_t* file, uint64_t length);
 #define RVFILE_ASYNC_READ  0
 #define RVFILE_ASYNC_WRITE 1
 #define RVFILE_ASYNC_TRIM  2
-#define RVFILE_ASYNC_VA    3
-
-typedef struct {
-    uint8_t  opcode;
-    void*    buffer;
-    uint64_t offset;
-    size_t   length;
-} rvaio_op_t;
 
 typedef void (*rvfile_async_callback_t)(rvfile_t* file, void* user_data, uint8_t flags);
+
+typedef struct {
+    rvfile_t* file;
+    void*     buffer;
+    uint64_t  offset;
+    size_t    length;
+    void*     userdata;
+    rvfile_async_callback_t callback;
+    uint8_t   opcode;
+} rvaio_op_t;
 
 bool rvread_async(rvfile_t* file, void* destination, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata);
 bool rvwrite_async(rvfile_t* file, const void* source, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata);
 bool rvtrim_async(rvfile_t* file, uint64_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata);
 bool rvfsync_async(rvfile_t* file);
 
-bool rvasync_va(rvfile_t* file, rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata);
+bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata);
 
 /*
  * Block device API
