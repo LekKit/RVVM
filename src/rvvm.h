@@ -298,6 +298,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
 // Directly access physical memory (returns true on success)
 PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* src, size_t size);
 PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, paddr_t src, size_t size);
+PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, paddr_t addr, size_t size);
 
 // Spawns CPU threads and continues VM execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);

@@ -305,15 +305,15 @@ static bool rvvm_run_with_args(vm_args_t args)
 #endif
 
     if (args.image) {
-        FILE *fp = fopen(args.image, "rb+");
-        if (fp == NULL) {
+        blkdev_t* blk = blk_open(args.image, BLKDEV_RW);
+        if (blk == NULL) {
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
         } else {
 #if !defined(USE_FDT) || !defined(USE_PCI)
-            ata_init(machine, 0x40000000, 0x40001000, fp, NULL);
+            ata_init(machine, 0x40000000, 0x40001000, blk, NULL);
 #else
-            ata_init_pci(machine, &pci_buses->buses[0], fp, NULL);
+            ata_init_pci(machine, &pci_buses->buses[0], blk, NULL);
 #endif
         }
     }

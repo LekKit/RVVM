@@ -23,11 +23,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "pci-bus.h"
 
-#include <stdio.h>
+#include "blk_io.h"
 
-void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* fp0, FILE* fp1);
+void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave);
 #ifdef USE_PCI
-void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave);
+void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, blkdev_t* master, blkdev_t* slave);
 #endif
 
 #endif

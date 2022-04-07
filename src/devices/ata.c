@@ -24,16 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm_types.h"
 #include "spinlock.h"
 
-/* On Windows, ftell/fseek use 32-bit offsets,
- * this breaks when mounting >=4GB images.
- * Using _fseeki64, _ftelli64 therefore
- */
-
-#ifdef _WIN32
-#define fseek _fseeki64
-#define ftell _ftelli64
-#endif
-
 /* Data registers */
 #define ATA_REG_DATA 0x00
 #define ATA_REG_ERR 0x01 /* or FEATURE */
@@ -111,7 +101,7 @@ typedef uint16_t atareg_t;
 struct ata_dev
 {
     struct {
-        FILE *fp;
+        blkdev_t* blk;
         size_t size; /* in sectors */
         uint16_t bytes_to_rw;
         uint16_t sectcount;
@@ -124,7 +114,7 @@ struct ata_dev
         uint8_t hob_shift;
         bool nien : 1; /* interrupt disable */
         uint8_t buf[SECTOR_SIZE];
-    } drive[2]; 
+    } drive[2];
     struct {
         paddr_t prdt_addr;
         spinlock_t lock;
@@ -184,15 +174,9 @@ static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
 #ifdef USE_PCI
 static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
 {
-    /* No DMA transfer active */
-    if (!bit_check(ata->dma_info.cmd, 0)) {
-        spin_unlock(&ata->dma_info.lock);
-        return;
-    }
-
     bool is_read = bit_check(ata->dma_info.cmd, 3);
     size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
-    FILE *fp = ata->drive[ata->curdrive].fp;
+    blkdev_t* blk = ata->drive[ata->curdrive].blk;
     size_t processed = 0;
     while (1) {
         /* Read PRD */
@@ -211,28 +195,19 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
             buf_size = 64 * 1024;
         }
 
+        void *buf = rvvm_get_dma_ptr(machine, prd_physaddr, buf_size);
+        if (!buf) goto err;
+
         /* Read/write data to/from RAM */
-        void *buf = safe_malloc(buf_size);
         if (is_read) {
-            if (1 != fread(buf, buf_size, 1, fp)) {
-                free(buf);
-                goto err;
-            }
-            if (!rvvm_write_ram(machine, (paddr_t) prd_physaddr, buf, buf_size)) {
-                free(buf);
+            if (blk_read(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
                 goto err;
             }
         } else {
-            if (!rvvm_read_ram(machine, buf, (paddr_t) prd_physaddr, buf_size)) {
-                free(buf);
-                goto err;
-            }
-            if (1 != fwrite(buf, buf_size, 1, fp)) {
-                free(buf);
+            if (blk_write(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
                 goto err;
             }
         }
-        free(buf);
 
         processed += buf_size;
 
@@ -255,7 +230,6 @@ static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
     return;
 
 err:
-    ata->dma_info.cmd &= ~(1 << 0);
     ata->dma_info.status |= (1 << 2) | (1 << 1);
     ata_send_interrupt(ata);
 }
@@ -315,10 +289,9 @@ static void ata_cmd_initialize_device_params(struct ata_dev *ata)
 static bool ata_read_buf(struct ata_dev *ata)
 {
     //printf("ATA fill next sector\n");
-    if (1 != fread(ata->drive[ata->curdrive].buf,
-                SECTOR_SIZE,
-                1,
-                ata->drive[ata->curdrive].fp)) {
+    if (!blk_read(ata->drive[ata->curdrive].blk,
+                  ata->drive[ata->curdrive].buf,
+                  SECTOR_SIZE, BLKDEV_CURPOS)) {
         return false;
     }
 
@@ -331,10 +304,9 @@ static bool ata_read_buf(struct ata_dev *ata)
 static bool ata_write_buf(struct ata_dev *ata)
 {
     //printf("ATA write buf\n");
-    if (1 != fwrite(ata->drive[ata->curdrive].buf,
-                SECTOR_SIZE,
-                1,
-                ata->drive[ata->curdrive].fp)) {
+    if (!blk_write(ata->drive[ata->curdrive].blk,
+                   ata->drive[ata->curdrive].buf,
+                   SECTOR_SIZE, BLKDEV_CURPOS)) {
         return false;
     }
 
@@ -353,9 +325,9 @@ static void ata_cmd_read_sectors(struct ata_dev *ata)
     //printf("ATA read sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
 
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (fseek(ata->drive[ata->curdrive].fp,
-                ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk,
+                  ata_get_lba(ata, false) * SECTOR_SIZE,
+                  BLKDEV_SET)) {
         goto err;
     }
 
@@ -379,9 +351,9 @@ static void ata_cmd_write_sectors(struct ata_dev *ata)
 
     //printf("ATA write sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (fseek(ata->drive[ata->curdrive].fp,
-                ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk,
+                  ata_get_lba(ata, false) * SECTOR_SIZE,
+                  BLKDEV_SET)) {
         goto err;
     }
 
@@ -394,6 +366,7 @@ err:
 
 static void ata_cmd_read_dma(struct ata_dev *ata)
 {
+    spin_lock(&ata->dma_info.lock);
     ata->drive[ata->curdrive].sectcount &= 0xff;
     /* Sector count of 0 means 256 */
     if (ata->drive[ata->curdrive].sectcount == 0) {
@@ -407,10 +380,9 @@ static void ata_cmd_read_dma(struct ata_dev *ata)
             | ATA_STATUS_DRQ
             | ATA_STATUS_ERR);
 
-    spin_lock(&ata->dma_info.lock);
-    if (fseek(ata->drive[ata->curdrive].fp,
-                ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk,
+                  ata_get_lba(ata, false) * SECTOR_SIZE,
+                  BLKDEV_SET)) {
         spin_unlock(&ata->dma_info.lock);
         goto err;
     }
@@ -424,6 +396,7 @@ err:
 
 static void ata_cmd_write_dma(struct ata_dev *ata)
 {
+    spin_lock(&ata->dma_info.lock);
     ata->drive[ata->curdrive].sectcount &= 0xff;
     /* Sector count of 0 means 256 */
     if (ata->drive[ata->curdrive].sectcount == 0) {
@@ -437,10 +410,9 @@ static void ata_cmd_write_dma(struct ata_dev *ata)
             | ATA_STATUS_DRQ
             | ATA_STATUS_ERR);
 
-    spin_lock(&ata->dma_info.lock);
-    if (fseek(ata->drive[ata->curdrive].fp,
-                ata_get_lba(ata, false) * SECTOR_SIZE,
-                SEEK_SET) < 0) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk,
+                  ata_get_lba(ata, false) * SECTOR_SIZE,
+                  BLKDEV_SET)) {
         spin_unlock(&ata->dma_info.lock);
         goto err;
     }
@@ -695,7 +667,7 @@ static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_dat
                 ata->drive[ata->curdrive].lbam = 0;
                 ata->drive[ata->curdrive].sectcount = 1;
                 ata->drive[ata->curdrive].drive = 0;
-                if (ata->drive[ata->curdrive].fp != NULL) {
+                if (ata->drive[ata->curdrive].blk != NULL) {
                     ata->drive[ata->curdrive].error = ATA_ERR_AMNF; /* AMNF means OK here... */
                     ata->drive[ata->curdrive].status = ATA_STATUS_RDY | ATA_STATUS_SRV;
                 } else {
@@ -716,7 +688,6 @@ static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_dat
 static bool ata_bmdma_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
-    spin_lock(&ata->dma_info.lock);
 
 #if 0
     printf("ATA BMDMA MMIO offset: %d size: %d read\n", offset, size);
@@ -724,37 +695,43 @@ static bool ata_bmdma_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_da
     switch (offset)
     {
         case ATA_BMDMA_CMD:
-            if (size != 1) goto err;
-            *(uint8_t*) memory_data = ata->dma_info.cmd;
+            if (size != 1) return false;
+            *(uint8_t*)memory_data = ata->dma_info.cmd;
             break;
         case ATA_BMDMA_STATUS:
-            if (size != 1) goto err;
+            if (size != 1) return false;
             *(uint8_t*) memory_data = ata->dma_info.status
-                | (ata->drive[0].fp != NULL) << 5
-                | (ata->drive[1].fp != NULL) << 6;
+                | (ata->drive[0].blk != NULL) << 5
+                | (ata->drive[1].blk != NULL) << 6;
             break;
         case ATA_BMDMA_PRDT:
             {
-                if (size != 4) goto err;
-                *(uint32_t*) memory_data = (uint32_t) ata->dma_info.prdt_addr;
+                if (size != 4) return false;
+                *(uint32_t*)memory_data = (uint32_t) ata->dma_info.prdt_addr;
                 break;
             }
         default:
             /* secondary controller not supported now */
-            goto err;
+            return false;
     }
 
-    spin_unlock(&ata->dma_info.lock);
     return true;
-err:
+}
+
+
+static void* ata_worker(void** data)
+{
+    struct ata_dev* ata = (struct ata_dev *)data[0];
+    spin_lock(&ata->dma_info.lock);
+    ata_process_prdt(ata, (rvvm_machine_t*)data[1]);
     spin_unlock(&ata->dma_info.lock);
-    return false;
+    return NULL;
 }
 
 static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
-    spin_lock(&ata->dma_info.lock);
+    bool process_prdt;
 
 #if 0
     printf("ATA BMDMA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
@@ -762,84 +739,61 @@ static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_d
     switch (offset)
     {
         case ATA_BMDMA_CMD:
-            if (size != 1) goto err;
-            ata->dma_info.cmd = *(uint8_t*) memory_data;
-#ifndef ATA_ASYNC
-            ata_process_prdt(ata, device->machine);
-#endif
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
+            process_prdt = !(ata->dma_info.cmd & 1) && (*(uint8_t*)memory_data & 1);
+            ata->dma_info.cmd = *(uint8_t*)memory_data;
+            spin_unlock(&ata->dma_info.lock);
+            if (process_prdt) {
+                if (rvvm_has_arg("noasync")) {
+                    ata_process_prdt(ata, device->machine);
+                } else {
+                    void* req[2] = {ata, device->machine};
+                    thread_create_task_va(ata_worker, req, 2);
+                }
+            }
             break;
         case ATA_BMDMA_STATUS:
-            if (size != 1) goto err;
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
             ata->dma_info.status &= ~(*(uint8_t*)memory_data & 6);
             if (!bit_check(ata->dma_info.status, 2)) {
                 ata_clear_interrupt(ata);
             }
+            spin_unlock(&ata->dma_info.lock);
             break;
         case ATA_BMDMA_PRDT:
-            {
-                if (size != 4) goto err;
-                ata->dma_info.prdt_addr = (paddr_t)*(uint32_t*) memory_data;
-                break;
-            }
+            if (size != 4) return false;
+            spin_lock(&ata->dma_info.lock);
+            ata->dma_info.prdt_addr = (paddr_t)*(uint32_t*) memory_data;
+            spin_unlock(&ata->dma_info.lock);
+            break;
         default:
             /* secondary controller not supported now */
-            goto err;
+            return false;
     }
 
-    spin_unlock(&ata->dma_info.lock);
     return true;
-err:
-    spin_unlock(&ata->dma_info.lock);
-    return false;
 }
 #endif
-
-static size_t get_img_size(FILE *fp)
-{
-    fseek(fp, 0, SEEK_END);
-
-    long long size = ftell(fp);
-    if (size < 0) {
-        printf("Unable to get ATA disk size\n");
-        return 0;
-    } else if (size == 0) {
-        printf("ATA disk is empty\n");
-        return 0;
-    }
-
-    fseek(fp, 0, SEEK_SET);
-    return size;
-}
 
 static void ata_data_remove(rvvm_mmio_dev_t* device)
 {
     struct ata_dev *ata = (struct ata_dev *) device->data;
-
+    spin_lock(&ata->dma_info.lock);
     for (size_t i = 0; i < sizeof(ata->drive) / sizeof(ata->drive[0]); ++i) {
-        if (ata->drive[i].fp != NULL) {
-            fclose(ata->drive[i].fp);
+        if (ata->drive[i].blk != NULL) {
+            blk_close(ata->drive[i].blk);
         }
     }
+    spin_unlock(&ata->dma_info.lock);
 
     free(ata);
 }
 
-#ifdef ATA_ASYNC
-static void ata_data_update(rvvm_mmio_dev_t* device)
-{
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-    spin_lock(&ata->dma_info.lock);
-    ata_process_prdt(ata, device->machine);
-    spin_unlock(&ata->dma_info.lock);
-}
-#endif
-
 static rvvm_mmio_type_t ata_data_dev_type = {
     .name = "ata_data",
     .remove = ata_data_remove,
-#ifdef ATA_ASYNC
-    .update = ata_data_update,
-#endif
 };
 
 static void ata_remove_dummy(rvvm_mmio_dev_t* device)
@@ -853,19 +807,18 @@ static rvvm_mmio_type_t ata_ctl_dev_type = {
     .remove = ata_remove_dummy,
 };
 
-void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, FILE* master, FILE* slave)
+void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave)
 {
-    assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
-    ata->drive[0].fp = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[0].blk = master;
+    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[0].blk), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
-        ata->drive[0].fp = NULL;
+        ata->drive[0].blk = NULL;
     }
-    ata->drive[1].fp = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[1].fp), SECTOR_SIZE);
+    ata->drive[1].blk = slave;
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[1].blk), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
-        ata->drive[1].fp = NULL;
+        ata->drive[1].blk = NULL;
     }
     spin_init(&ata->dma_info.lock);
 
@@ -898,21 +851,21 @@ void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_
         rvvm_warn("Missing soc node in FDT!");
         return;
     }
-    
+
     reg_cells[0] = ((uint64_t)data_base_addr) >> 32;
     reg_cells[1] = data_base_addr;
     reg_cells[4] = ((uint64_t)ctl_base_addr) >> 32;
     reg_cells[5] = ctl_base_addr;
     reg_cells[2] = reg_cells[6] = 0;
     reg_cells[3] = reg_cells[7] = 0x1000;
-    
+
     struct fdt_node* ata_node = fdt_node_create_reg("ata", data_base_addr);
     fdt_node_add_prop_cells(ata_node, "reg", reg_cells, 8);
     fdt_node_add_prop_str(ata_node, "compatible", "ata-generic");
     fdt_node_add_prop_u32(ata_node, "reg-shift", ATA_REG_SHIFT);
     fdt_node_add_prop_u32(ata_node, "pio-mode", 4);
     fdt_node_add_child(soc, ata_node);
-    
+
     struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
     if (chosen == NULL) {
         rvvm_warn("Missing chosen node in FDT!");
@@ -972,19 +925,19 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 #endif
 
 #ifdef USE_PCI
-void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, FILE* master, FILE* slave)
+void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, blkdev_t* master, blkdev_t* slave)
 {
     assert(master != NULL || slave != NULL);
     struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
-    ata->drive[0].fp = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[0].fp), SECTOR_SIZE);
+    ata->drive[0].blk = master;
+    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[0].blk), SECTOR_SIZE);
     if (ata->drive[0].size == 0) {
-        ata->drive[0].fp = NULL;
+        ata->drive[0].blk = NULL;
     }
-    ata->drive[1].fp = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(get_img_size(ata->drive[1].fp), SECTOR_SIZE);
+    ata->drive[1].blk = slave;
+    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[1].blk), SECTOR_SIZE);
     if (ata->drive[1].size == 0) {
-        ata->drive[1].fp = NULL;
+        ata->drive[1].blk = NULL;
     }
     spin_init(&ata->dma_info.lock);
 
