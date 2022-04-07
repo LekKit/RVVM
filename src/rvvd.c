@@ -144,7 +144,6 @@ struct rvvd_dev* rvvd_mkimg_from_image(const char* image_filename, const char* f
     uint8_t bufferspace[512] = {0};
     for (size_t i = 0; i < size/512; i++)
     {
-        printf("%ld\n", rvtell(img_fd));
         rvread(img_fd, bufferspace, 512, RVFILE_CURPOS);
         rvvd_write(disk, bufferspace, i);
         memset(bufferspace, 0, 512);
@@ -422,7 +421,7 @@ bool rvvd_sync(struct rvvd_dev* disk) {
 void rvvd_sc_push(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset) {
     // Filling up table conversion result in the sector cache table
 
-    rvvm_info("RVVD %p: Pusing sector cache {%ld : %ld}", disk->_fd, sec_id, offset);
+    rvvm_info("RVVD %p: Pushing sector cache {%ld : %ld}", disk->_fd, sec_id, offset);
 
     if (offset && disk->sector_cache[sec_id & 0x1FF].id != sec_id) {
         disk->sector_cache[sec_id & 0x1FF].offset = offset;
