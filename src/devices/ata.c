@@ -807,7 +807,7 @@ static rvvm_mmio_type_t ata_ctl_dev_type = {
     .remove = ata_remove_dummy,
 };
 
-void ata_init(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave)
+void ata_init_pio(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave)
 {
     struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
     ata->drive[0].blk = master;

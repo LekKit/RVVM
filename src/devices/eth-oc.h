@@ -20,7 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ETH_OC_H
 
 #include "rvvm.h"
+#include "plic.h"
 
-void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq);
+#define ETHOC_DEFAULT_MMIO 0x21000000
+
+void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq);
+void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
 
 #endif

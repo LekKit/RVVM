@@ -21,7 +21,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm.h"
 
+#define SYSCON_DEFAULT_MMIO 0x100000
+
 void syscon_init(rvvm_machine_t* machine, paddr_t base_addr);
+void syscon_init_auto(rvvm_machine_t* machine);
 
 #endif
  

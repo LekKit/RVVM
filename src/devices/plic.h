@@ -16,7 +16,18 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef DEV_PLIC_H
+#define DEV_PLIC_H
+
 #include "rvvm.h"
 
-void* plic_init(rvvm_machine_t *mach, paddr_t base_addr);
-bool plic_send_irq(rvvm_machine_t *vm, void *data, uint32_t id);
+typedef void* plic_ctx_t;
+
+#define PLIC_DEFAULT_MMIO 0xC000000
+
+plic_ctx_t plic_init(rvvm_machine_t* machine, paddr_t base_addr);
+plic_ctx_t plic_init_auto(rvvm_machine_t* machine);
+uint32_t plic_alloc_irq(plic_ctx_t plic);
+bool plic_send_irq(plic_ctx_t plic, uint32_t irq);
+
+#endif

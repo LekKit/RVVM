@@ -37,8 +37,7 @@ struct altps2
 	spinlock_t lock;
 
 	// IRQ data
-	rvvm_machine_t *mach; // machine to send IRQ to
-	void *intc_data; // private interrupt controller data
+	plic_ctx_t plic;
 	uint32_t irq;
 
 	bool irq_enabled;
@@ -143,15 +142,14 @@ static rvvm_mmio_type_t altps2_dev_type = {
     .name = "altera_ps2",
 };
 
-void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, uint32_t irq, struct ps2_device *child)
+void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq, struct ps2_device *child)
 {
 	struct altps2 *ptr = safe_calloc(1, sizeof (struct altps2));
 
 	spin_init(&ptr->lock);
 	child->lock = &ptr->lock;
 	ptr->child = child;
-	ptr->mach = machine;
-	ptr->intc_data = intc_data;
+	ptr->plic = plic;
 	ptr->irq = irq;
 
 	child->port_data = ptr;
@@ -169,8 +167,8 @@ void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, ui
 	rvvm_attach_mmio(machine, &altps2);
 #ifdef USE_FDT
 	struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-	struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-	if (plic == NULL) {
+	struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+	if (plic_fdt == NULL) {
 		rvvm_warn("Missing nodes in FDT!");
 		return;
 	}
@@ -178,7 +176,7 @@ void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, void *intc_data, ui
 	struct fdt_node* ps2 = fdt_node_create_reg("ps2", base_addr);
 	fdt_node_add_prop_reg(ps2, "reg", base_addr, ALTERA_REG_SIZE);
 	fdt_node_add_prop_str(ps2, "compatible", "altr,ps2-1.0");
-	fdt_node_add_prop_u32(ps2, "interrupt-parent", fdt_node_get_phandle(plic));
+	fdt_node_add_prop_u32(ps2, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
 	fdt_node_add_prop_u32(ps2, "interrupts", irq);
 	fdt_node_add_child(soc, ps2);
 #endif
@@ -195,7 +193,7 @@ void altps2_interrupt_unlocked(struct ps2_device *dev)
 	}
 
 	ptr->irq_pending = true;
-	plic_send_irq(ptr->mach, ptr->intc_data, ptr->irq);
+	plic_send_irq(ptr->plic, ptr->irq);
 }
 
 // Send interrupt via PS/2 controller.

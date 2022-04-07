@@ -20,8 +20,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RTC_GOLDFISH_H
 
 #include "rvvm.h"
+#include "plic.h"
 
-void rtc_goldfish_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq);
+#define RTC_GOLDFISH_DEFAULT_MMIO 0x101000
+
+void rtc_goldfish_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq);
+void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
 
 #endif
  

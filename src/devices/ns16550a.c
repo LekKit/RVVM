@@ -25,8 +25,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define NS16550A_REG_SIZE 0x8
 
 struct ns16550a_data {
-    void* plic;
-    uint32_t irq_num;
+    plic_ctx_t plic;
+    uint32_t irq;
     spinlock_t lock;
     
     uint8_t ier;
@@ -221,7 +221,7 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, padd
             if ((regs->ier & 1) && regs->len) {
                 regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_RECV;
                 if (regs->plic) {
-                    plic_send_irq(device->machine, regs->plic, regs->irq_num);
+                    plic_send_irq(regs->plic, regs->irq);
                 }
                 spin_unlock(&regs->lock);
                 break;
@@ -229,7 +229,7 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, padd
             if (regs->ier & 2) {
                 regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_THR;
                 if (regs->plic) {
-                    plic_send_irq(device->machine, regs->plic, regs->irq_num);
+                    plic_send_irq(regs->plic, regs->irq);
                 }
             }
             spin_unlock(&regs->lock);
@@ -261,7 +261,7 @@ static void ns16550a_update(rvvm_mmio_dev_t* device)
     if (regs->plic) {
         spin_lock(&regs->lock);
         regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
-        if (regs->len) plic_send_irq(device->machine, regs->plic, regs->irq_num);
+        if (regs->len) plic_send_irq(regs->plic, regs->irq);
         spin_unlock(&regs->lock);
     }
 }
@@ -271,11 +271,11 @@ static rvvm_mmio_type_t ns16550a_dev_type = {
     .update = ns16550a_update,
 };
 
-void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
+void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq)
 {
     struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
-    ptr->plic = intc_data;
-    ptr->irq_num = irq;
+    ptr->plic = plic;
+    ptr->irq = irq;
     spin_init(&ptr->lock);
     terminal_rawmode();
 
@@ -292,8 +292,8 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, 
     
 #ifdef USE_FDT
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic = (soc && intc_data) ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (soc == NULL || (intc_data && plic == NULL)) {
+    struct fdt_node* plic_fdt = (soc && plic) ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (soc == NULL || (plic && plic_fdt == NULL)) {
         rvvm_warn("Missing nodes in FDT!");
         return;
     }
@@ -304,10 +304,15 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, 
     fdt_node_add_prop_u32(uart, "clock-frequency", 0x2625a00);
     fdt_node_add_prop_u32(uart, "fifo-size", 16);
     fdt_node_add_prop_str(uart, "status", "okay");
-    if (intc_data) {
-        fdt_node_add_prop_u32(uart, "interrupt-parent", fdt_node_get_phandle(plic));
+    if (plic) {
+        fdt_node_add_prop_u32(uart, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
         fdt_node_add_prop_u32(uart, "interrupts", irq);
     }
     fdt_node_add_child(soc, uart);
 #endif
+}
+
+void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+{
+    ns16550a_init(machine, NS16550A_DEFAULT_MMIO, plic, plic_alloc_irq(plic));
 }

@@ -101,3 +101,8 @@ void syscon_init(rvvm_machine_t* machine, paddr_t base_addr)
     fdt_node_add_child(soc, reboot);
 #endif
 }
+
+void syscon_init_auto(rvvm_machine_t* machine)
+{
+    syscon_init(machine, SYSCON_DEFAULT_MMIO);
+}

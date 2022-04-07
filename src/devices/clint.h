@@ -21,6 +21,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm.h"
 
+#define CLINT_DEFAULT_MMIO 0x2000000
+
 void clint_init(rvvm_machine_t* machine, paddr_t addr);
+void clint_init_auto(rvvm_machine_t* machine);
 
 #endif

@@ -148,3 +148,7 @@ void clint_init(rvvm_machine_t* machine, paddr_t addr)
     }
 }
 
+void clint_init_auto(rvvm_machine_t* machine)
+{
+    clint_init(machine, CLINT_DEFAULT_MMIO);
+}

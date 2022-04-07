@@ -103,7 +103,7 @@ void pci_send_irq(struct pci_func *func) {
     struct pci_device *dev = func->dev;
     struct pci_bus *bus = dev->bus;
     spin_unlock(&func->irq_lock);
-    plic_send_irq(bus->machine, bus->intc_data, bus->irq[func->desc->irq_pin - 1]);
+    plic_send_irq(bus->plic, bus->irq[func->desc->irq_pin - 1]);
 }
 
 void pci_clear_irq(struct pci_func *func) {
@@ -371,7 +371,7 @@ struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
         paddr_t io_len,
         paddr_t mem_addr,
         paddr_t mem_len,
-        void *intc_data,
+        plic_ctx_t plic,
         uint32_t irq)
 {
     size_t shift = is_ecam ? 20 : 16;
@@ -395,7 +395,7 @@ struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
         vector_init(list->buses[i].devices);
 
         list->buses[i].machine = machine;
-        list->buses[i].intc_data = intc_data;
+        list->buses[i].plic = plic;
         for (size_t j = 0; j < 4; ++j) {
             list->buses[i].irq[j] = irq;
         }
@@ -408,36 +408,11 @@ struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
     cam_dev.data = list;
 
     rvvm_attach_mmio(machine, &cam_dev);
-
-    return list;
-}
-
 #ifdef USE_FDT
-struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
-        size_t bus_count,
-        bool is_ecam,
-        paddr_t base_addr,
-        paddr_t io_addr,
-        paddr_t io_len,
-        paddr_t mem_addr,
-        paddr_t mem_len,
-        void *intc_data,
-        uint32_t irq)
-{
-    struct pci_bus_list *list = pci_bus_init(machine,
-            bus_count,
-            is_ecam,
-            base_addr,
-            io_addr,
-            io_len,
-            mem_addr,
-            mem_len,
-            intc_data,
-            irq);
-
+    /* Only one bus is supported atm, however, bus_count can be any */
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic == NULL) {
+    struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (plic_fdt == NULL) {
         rvvm_warn("Missing nodes in FDT!");
         return list;
     }
@@ -449,18 +424,18 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
     fdt_node_add_prop_u32(pci_node, "#address-cells", 3);
     fdt_node_add_prop_u32(pci_node, "#size-cells", 2);
 
-#ifdef USE_RV64
-#define HIADDR(addr) ((addr) >> 32)
-#define LOADDR(addr) ((addr) & ~(uint32_t)0)
-#define ADDR(addr) HIADDR(addr), LOADDR(addr)
-#else
-#define HIADDR(addr) 0
-#define LOADDR(addr) ((addr) & ~(uint32_t)0)
-#define ADDR(addr) HIADDR(addr), LOADDR(addr)
-#endif
+    #ifdef USE_RV64
+    #define HIADDR(addr) ((addr) >> 32)
+    #define LOADDR(addr) ((addr) & ~(uint32_t)0)
+    #define ADDR(addr) HIADDR(addr), LOADDR(addr)
+    #else
+    #define HIADDR(addr) 0
+    #define LOADDR(addr) ((addr) & ~(uint32_t)0)
+    #define ADDR(addr) HIADDR(addr), LOADDR(addr)
+    #endif
 
-    size_t shift = is_ecam ? 20 : 16;
-    paddr_t len = bus_count << shift;
+    size_t ecam_shift = is_ecam ? 20 : 16;
+    paddr_t len = bus_count << ecam_shift;
     uint32_t reg[4] = {
         ADDR(base_addr), ADDR(len)
     };
@@ -470,7 +445,7 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
     };
     fdt_node_add_prop_cells(pci_node, "bus-range", bus_range, 2);
 
-#define CFG_HI(cacheable, space, bus, dev, fun, reg) \
+    #define CFG_HI(cacheable, space, bus, dev, fun, reg) \
     ((cacheable) << 30 | (space) << 24 | (bus) << 16 | (dev) << 11 | (fun) << 8 | (reg))
 
     uint32_t ranges[7 * 2] = {
@@ -488,7 +463,7 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
 
     fdt_node_add_prop_u32(pci_node, "#interrupt-cells", 1);
     uint32_t interrupt_map[6] = {
-        CFG_HI(0, 0, 0, 0, 0, 0), 0, 0, 1, fdt_node_get_phandle(plic), irq,
+        CFG_HI(0, 0, 0, 0, 0, 0), 0, 0, 1, fdt_node_get_phandle(plic_fdt), irq,
     };
     fdt_node_add_prop_cells(pci_node, "interrupt-map", interrupt_map, 6);
     uint32_t interrupt_mask[4] = {
@@ -497,7 +472,17 @@ struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
     fdt_node_add_prop_cells(pci_node, "interrupt-map-mask", interrupt_mask, 4);
     fdt_node_add_child(soc, pci_node);
 
+#endif
     return list;
 }
-#endif
+
+struct pci_bus_list* pci_bus_init_auto(rvvm_machine_t *machine, plic_ctx_t plic)
+{
+    return pci_bus_init(machine, 1, true,
+                        PCI_BASE_DEFAULT_MMIO,
+                        PCI_IO_DEFAULT_MMIO, PCI_IO_DEFAULT_SIZE,
+                        PCI_MEM_DEFAULT_MMIO, PCI_MEM_DEFAULT_SIZE,
+                        plic, plic_alloc_irq(plic));
+}
+
 #endif

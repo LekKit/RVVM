@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "plic.h"
 #include "vector.h"
 #include <assert.h>
-//#include <unistd.h>
 
 #define CTXFLAG_THRESHOLD 0
 #define CTXFLAG_CLAIMCOMPLETE 1
@@ -40,431 +39,435 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 struct plic
 {
-	uint32_t prio[SOURCE_MAX];
-	uint32_t pending[(SOURCE_MAX+8+4-1)/8/4];
-	uint32_t enable[(SOURCE_MAX+8+4-1)/8/4][CTX_MAX];
-	uint32_t ctxflags[CTXFLAG_MAX][CTX_MAX];
-	spinlock_t lock;
-	uint32_t busy[(CTX2HARTID(CTX_MAX)+8*4+1)/8/4];
+    rvvm_machine_t* machine;
+    spinlock_t lock;
+    uint32_t alloc_irq;
+    uint32_t prio[SOURCE_MAX];
+    uint32_t pending[(SOURCE_MAX+8+4-1)/8/4];
+    uint32_t enable[(SOURCE_MAX+8+4-1)/8/4][CTX_MAX];
+    uint32_t ctxflags[CTXFLAG_MAX][CTX_MAX];
+    uint32_t busy[(CTX2HARTID(CTX_MAX)+8*4+1)/8/4];
 };
 
 static inline void set_hart_busy(struct plic *plic, uint32_t ctx, bool busy)
 {
-	if (busy)
-		plic->busy[ctx / 32] |= (1 << (ctx & 31));
-	else
-		plic->busy[ctx / 32] &= ~(1 << (ctx & 31));
+    if (busy)
+        plic->busy[ctx / 32] |= (1 << (ctx & 31));
+    else
+        plic->busy[ctx / 32] &= ~(1 << (ctx & 31));
 }
 
 static inline bool is_hart_busy(struct plic *plic, uint32_t ctx)
 {
-	return bit_check(plic->busy[ctx / 32], ctx & 31);
+    return bit_check(plic->busy[ctx / 32], ctx & 31);
 }
 
 static inline void set_int_pending(struct plic *plic, uint32_t x, bool val)
 {
-	if (val)
-		plic->pending[x / 32] |= (1 << (x & 31));
-	else
-		plic->pending[x / 32] &= ~(1 << (x & 31));
+    if (val)
+        plic->pending[x / 32] |= (1 << (x & 31));
+    else
+        plic->pending[x / 32] &= ~(1 << (x & 31));
 }
 
 static inline bool is_int_enabled(struct plic *plic, uint32_t ctx, uint32_t x)
 {
-	return bit_check(plic->enable[x / 32][ctx], x & 31);
+    return bit_check(plic->enable[x / 32][ctx], x & 31);
 }
 
 static inline bool is_int_pending(struct plic *plic, uint32_t x)
 {
-	return bit_check(plic->pending[x / 32], x & 31);
+    return bit_check(plic->pending[x / 32], x & 31);
 }
 
 static bool is_int_valid(struct plic *dev, uint32_t ctx, uint32_t id)
 {
-	assert(id < SOURCE_MAX);
-	if (id == 0)
-	{
-		/* no interrupt 0 */
-		return false;
-	}
+    assert(id < SOURCE_MAX);
+    if (id == 0)
+    {
+        /* no interrupt 0 */
+        return false;
+    }
 
-	/* is interrupt enabled for this hart? */
-	if (!is_int_enabled(dev, ctx, id))
-	{
-		return false;
-	}
+    /* is interrupt enabled for this hart? */
+    if (!is_int_enabled(dev, ctx, id))
+    {
+        return false;
+    }
 
-	uint32_t intprio = dev->prio[id];
+    uint32_t intprio = dev->prio[id];
 
-	/* is interrupt of this priority above threshold? */
-	if (intprio <= dev->ctxflags[CTXFLAG_THRESHOLD][ctx])
-	{
-		return false;
-	}
+    /* is interrupt of this priority above threshold? */
+    if (intprio <= dev->ctxflags[CTXFLAG_THRESHOLD][ctx])
+    {
+        return false;
+    }
 
-	/* yep, we can deliver this interrupt to this ctx */
-	return true;
+    /* yep, we can deliver this interrupt to this ctx */
+    return true;
 }
 
 static bool select_int(struct plic *dev, uint32_t ctx, uint32_t preferred_id)
 {
-	assert(ctx < CTX_MAX && preferred_id < SOURCE_MAX);
-	if (!is_int_valid(dev, ctx, preferred_id))
-	{
-		/* cannot deliver this interrupt to this hart, go out */
-		return false;
-	}
+    assert(ctx < CTX_MAX && preferred_id < SOURCE_MAX);
+    if (!is_int_valid(dev, ctx, preferred_id))
+    {
+        /* cannot deliver this interrupt to this hart, go out */
+        return false;
+    }
 
-	uint32_t cur_int = dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx];
-	assert(cur_int < SOURCE_MAX);
+    uint32_t cur_int = dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx];
+    assert(cur_int < SOURCE_MAX);
 
-	if (dev->prio[preferred_id] > dev->prio[cur_int])
-	{
-		/* new interrupt priority is higher than current, select it */
-		dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = preferred_id;
-		goto out;
-	}
+    if (dev->prio[preferred_id] > dev->prio[cur_int])
+    {
+        /* new interrupt priority is higher than current, select it */
+        dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = preferred_id;
+        goto out;
+    }
 
-	if (preferred_id < cur_int)
-	{
-		/* new interrupt ID is less that current, select it */
-		dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = preferred_id;
-		goto out;
-	}
+    if (preferred_id < cur_int)
+    {
+        /* new interrupt ID is less that current, select it */
+        dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = preferred_id;
+        goto out;
+    }
 
 out:
-	return true;
+    return true;
 }
 
 static void select_int_from_pending(struct plic *dev, uint32_t ctx)
 {
-	dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = 0;
+    dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] = 0;
 
-	/* start from 1 as there's no zero interrupt */
-	for (uint32_t i = 1; i < SOURCE_MAX; ++i)
-	{
-		if (is_int_pending(dev, i))
-		{
-			select_int(dev, ctx, i);
-		}
-	}
+    /* start from 1 as there's no zero interrupt */
+    for (uint32_t i = 1; i < SOURCE_MAX; ++i)
+    {
+        if (is_int_pending(dev, i))
+        {
+            select_int(dev, ctx, i);
+        }
+    }
 }
 
 static bool plic_prio_read_handler(struct plic *dev, uint32_t idx, uint32_t *data)
 {
-	if (idx >= SOURCE_MAX)
-	{
-		return true;
-	}
+    if (idx >= SOURCE_MAX)
+    {
+        return true;
+    }
 
-	*data = dev->prio[idx];
-	return true;
+    *data = dev->prio[idx];
+    return true;
 }
 
 static bool plic_prio_write_handler(struct plic *dev, uint32_t idx, uint32_t *data)
 {
-	if (idx >= SOURCE_MAX)
-	{
-		return true;
-	}
+    if (idx >= SOURCE_MAX)
+    {
+        return true;
+    }
 
-	if (idx == 0)
-	{
-		/* 0 is reserved, don't touch it */
-		return true;
-	}
+    if (idx == 0)
+    {
+        /* 0 is reserved, don't touch it */
+        return true;
+    }
 
-	dev->prio[idx] = *data;
-	return true;
+    dev->prio[idx] = *data;
+    return true;
 }
 
 static bool plic_pending_read_handler(struct plic *dev, uint32_t idx, uint32_t *data)
 {
-	if (idx >= SOURCE_MAX/8/4)
-	{
-		return true;
-	}
+    if (idx >= SOURCE_MAX/8/4)
+    {
+        return true;
+    }
 
-	*data = dev->pending[idx];
-	return true;
+    *data = dev->pending[idx];
+    return true;
 }
 
 static bool plic_ie_read_handler(struct plic *dev, uint32_t offset, uint32_t *data)
 {
-	uint32_t idx = offset & 31;
-	uint32_t ctx = offset / 32;
+    uint32_t idx = offset & 31;
+    uint32_t ctx = offset / 32;
 
-	if (idx >= SOURCE_MAX/8/4 || ctx >= CTX_MAX)
-	{
-		return true;
-	}
+    if (idx >= SOURCE_MAX/8/4 || ctx >= CTX_MAX)
+    {
+        return true;
+    }
 
-	*data = dev->enable[idx][ctx];
-	return true;
+    *data = dev->enable[idx][ctx];
+    return true;
 }
 
 static bool plic_ie_write_handler(struct plic *dev, uint32_t offset, uint32_t *data)
 {
-	uint32_t idx = offset & 31;
-	uint32_t ctx = offset / 32;
+    uint32_t idx = offset & 31;
+    uint32_t ctx = offset / 32;
 
-	if (idx >= SOURCE_MAX/8/4 || ctx >= CTX_MAX)
-	{
-		return true;
-	}
+    if (idx >= SOURCE_MAX/8/4 || ctx >= CTX_MAX)
+    {
+        return true;
+    }
 
-	dev->enable[idx][ctx] = *data;
-	return true;
+    dev->enable[idx][ctx] = *data;
+    return true;
 }
 
 static bool plic_ctxflag_read_handler(struct plic *dev, uint32_t offset, uint32_t *data)
 {
-	uint32_t idx = offset & 1023;
-	uint32_t ctx = offset / 1024;
+    uint32_t idx = offset & 1023;
+    uint32_t ctx = offset / 1024;
 
-	if (idx >= CTXFLAG_MAX || ctx >= CTX_MAX)
-	{
-		/* others are reserved, ignore */
-		return true;
-	}
+    if (idx >= CTXFLAG_MAX || ctx >= CTX_MAX)
+    {
+        /* others are reserved, ignore */
+        return true;
+    }
 
-	if (idx == CTXFLAG_CLAIMCOMPLETE)
-	{
-		/* interrupt claim */
+    if (idx == CTXFLAG_CLAIMCOMPLETE)
+    {
+        /* interrupt claim */
 
-		/* someone can change enable & priority/threshold values, so we need to recheck
-		 * our previous decision. If we can't use chosen interrupt, then we need
-		 * to get the new one. */
-		if (!is_int_valid(dev, ctx, dev->ctxflags[idx][ctx]))
-		{
-			select_int_from_pending(dev, ctx);
-		}
+        /* someone can change enable & priority/threshold values, so we need to recheck
+        * our previous decision. If we can't use chosen interrupt, then we need
+        * to get the new one. */
+        if (!is_int_valid(dev, ctx, dev->ctxflags[idx][ctx]))
+        {
+            select_int_from_pending(dev, ctx);
+        }
 
-		/* interrupt is claimed by this hart, clear the pending bit */
-		set_int_pending(dev, dev->ctxflags[idx][ctx], 0);
-	}
+        /* interrupt is claimed by this hart, clear the pending bit */
+        set_int_pending(dev, dev->ctxflags[idx][ctx], 0);
+    }
 
-	*data = dev->ctxflags[idx][ctx];
-	return true;
+    *data = dev->ctxflags[idx][ctx];
+    return true;
 }
 
 static bool plic_ctxflag_write_handler(rvvm_machine_t *mach, struct plic *dev, uint32_t offset, uint32_t *data)
 {
-	uint32_t idx = offset & 1023;
-	uint32_t ctx = offset / 1024;
+    uint32_t idx = offset & 1023;
+    uint32_t ctx = offset / 1024;
 
-	if (idx >= CTXFLAG_MAX || ctx >= CTX_MAX)
-	{
-		/* others are reserved, ignore */
-		return true;
-	}
+    if (idx >= CTXFLAG_MAX || ctx >= CTX_MAX)
+    {
+        /* others are reserved, ignore */
+        return true;
+    }
 
-	if (idx == CTXFLAG_CLAIMCOMPLETE)
-	{
-		/* interrupt completed signal */
+    if (idx == CTXFLAG_CLAIMCOMPLETE)
+    {
+        /* interrupt completed signal */
 
-		/* not sure if we need to check the value being written...
-		 * The spec says we need not to. So what is the point of writing
-		 * previously claimed interrupt ID here, since pending bit is cleared on claim? */
+        /* not sure if we need to check the value being written...
+        * The spec says we need not to. So what is the point of writing
+        * previously claimed interrupt ID here, since pending bit is cleared on claim? */
 
-		select_int_from_pending(dev, ctx);
+        select_int_from_pending(dev, ctx);
 
-		//printf("clear plic int\n");
+        //printf("clear plic int\n");
 
-		/* choose the right hart and interrupt priority */
-		size_t hartid = CTX2HARTID(ctx);
-		uint8_t prio = CTX2PRIO(ctx);
-		if (hartid >= vector_size(mach->harts))
-		{
-			/* bad context number passed */
-			return true;
-		}
+        /* choose the right hart and interrupt priority */
+        size_t hartid = CTX2HARTID(ctx);
+        uint8_t prio = CTX2PRIO(ctx);
+        if (hartid >= vector_size(mach->harts))
+        {
+            /* bad context number passed */
+            return true;
+        }
 
-		if (dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] == 0)
-		{
-			/* if there's no interrupts waiting, clear the pending bit */
-			set_hart_busy(dev, hartid, false);
+        if (dev->ctxflags[CTXFLAG_CLAIMCOMPLETE][ctx] == 0)
+        {
+            /* if there's no interrupts waiting, clear the pending bit */
+            set_hart_busy(dev, hartid, false);
             riscv_interrupt_clear(&vector_at(mach->harts, hartid), prio);
-		}
-		else
-		{
-			/* trigger CPU to execute our next interrupt */
-			riscv_interrupt(&vector_at(mach->harts, hartid), prio);
-		}
-	}
-	else
-	{
-		/* set threshold */
-		dev->ctxflags[idx][ctx] = *data;
-	}
+        }
+        else
+        {
+            /* trigger CPU to execute our next interrupt */
+            riscv_interrupt(&vector_at(mach->harts, hartid), prio);
+        }
+    }
+    else
+    {
+        /* set threshold */
+        dev->ctxflags[idx][ctx] = *data;
+    }
 
-	return true;
+    return true;
 }
 
 static bool plic_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-	struct plic *dev = (struct plic*)device->data;
+    struct plic *dev = (struct plic*)device->data;
 
-	spin_lock(&dev->lock);
-	bool ret = false;
-	if (offset < 0x1000)
-	{
-		/* interrupt priority */
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_prio_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else if (offset < 0x1080)
-	{
-		/* interrupt pending */
-		offset -= 0x1000;
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_pending_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else if (offset < 0x2000)
-	{
-		/* reserved, ignore */
-		ret = true;
-		goto out;
-	}
-	else if (offset < 0x1f2000)
-	{
-		/* enable bits */
-		offset -= 0x2000;
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_ie_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else if (offset < 0x200000)
-	{
-		/* reserved, ignore */
-		ret = true;
-		goto out;
-	}
-	else if (offset < 0x4000000)
-	{
-		/* context flags - threshold and claim/complete */
-		offset -= 0x200000;
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_ctxflag_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else
-	{
-		/* wtf is this? */
-		goto out;
-	}
+    spin_lock(&dev->lock);
+    bool ret = false;
+    if (offset < 0x1000)
+    {
+        /* interrupt priority */
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_prio_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else if (offset < 0x1080)
+    {
+        /* interrupt pending */
+        offset -= 0x1000;
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_pending_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else if (offset < 0x2000)
+    {
+        /* reserved, ignore */
+        ret = true;
+        goto out;
+    }
+    else if (offset < 0x1f2000)
+    {
+        /* enable bits */
+        offset -= 0x2000;
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_ie_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else if (offset < 0x200000)
+    {
+        /* reserved, ignore */
+        ret = true;
+        goto out;
+    }
+    else if (offset < 0x4000000)
+    {
+        /* context flags - threshold and claim/complete */
+        offset -= 0x200000;
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_ctxflag_read_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else
+    {
+        /* wtf is this? */
+        goto out;
+    }
 
-	ret = true;
+    ret = true;
 out:
-	spin_unlock(&dev->lock);
-	return ret;
+    spin_unlock(&dev->lock);
+    return ret;
 }
 
 static bool plic_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
 {
-	struct plic *dev = (struct plic*)device->data;
+    struct plic *dev = (struct plic*)device->data;
 
-	spin_lock(&dev->lock);
-	bool ret = false;
-	if (offset < 0x1000)
-	{
-		/* interrupt priority */
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_prio_write_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else if (offset < 0x1080)
-	{
-		/* R/O, do nothing. Pending bits are cleared by reading CLAIMCOMPLETE register */
-		ret = true;
-		goto out;
-	}
-	else if (offset < 0x2000)
-	{
-		/* reserved, ignore */
-		ret = true;
-		goto out;
-	}
-	else if (offset < 0x1f2000)
-	{
-		/* enable bits */
-		offset -= 0x2000;
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_ie_write_handler(dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else if (offset < 0x200000)
-	{
-		/* reserved, ignore */
-		ret = true;
-		goto out;
-	}
-	else if (offset < 0x4000000)
-	{
-		/* context flags - threshold and claim/complete */
-		offset -= 0x200000;
-		offset /= 4;
-		for (uint32_t i = 0; i < size / 4; ++i)
-		{
-			if (!plic_ctxflag_write_handler(device->machine, dev, offset + i, (uint32_t*)memory_data + i))
-			{
-				goto out;
-			}
-		}
-	}
-	else
-	{
-		/* wtf is this? */
-		goto out;
-	}
+    spin_lock(&dev->lock);
+    bool ret = false;
+    if (offset < 0x1000)
+    {
+        /* interrupt priority */
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_prio_write_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else if (offset < 0x1080)
+    {
+        /* R/O, do nothing. Pending bits are cleared by reading CLAIMCOMPLETE register */
+        ret = true;
+        goto out;
+    }
+    else if (offset < 0x2000)
+    {
+        /* reserved, ignore */
+        ret = true;
+        goto out;
+    }
+    else if (offset < 0x1f2000)
+    {
+        /* enable bits */
+        offset -= 0x2000;
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_ie_write_handler(dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else if (offset < 0x200000)
+    {
+        /* reserved, ignore */
+        ret = true;
+        goto out;
+    }
+    else if (offset < 0x4000000)
+    {
+        /* context flags - threshold and claim/complete */
+        offset -= 0x200000;
+        offset /= 4;
+        for (uint32_t i = 0; i < size / 4; ++i)
+        {
+            if (!plic_ctxflag_write_handler(device->machine, dev, offset + i, (uint32_t*)memory_data + i))
+            {
+                goto out;
+            }
+        }
+    }
+    else
+    {
+        /* wtf is this? */
+        goto out;
+    }
 
-	ret = true;
+    ret = true;
 out:
-	spin_unlock(&dev->lock);
-	return ret;
+    spin_unlock(&dev->lock);
+    return ret;
 }
 
 static rvvm_mmio_type_t plic_dev_type = {
     .name = "plic",
 };
 
-void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
+// Create PLIC device
+plic_ctx_t plic_init(rvvm_machine_t* machine, paddr_t base_addr)
 {
-	struct plic *ptr = safe_calloc(1, sizeof (struct plic));
-	spin_init(&ptr->lock);
-	
+    struct plic* dev = safe_calloc(sizeof(struct plic), 1);
+    dev->machine = machine;
+    spin_init(&dev->lock);
+
     rvvm_mmio_dev_t plic;
     plic.min_op_size = 4;
     plic.max_op_size = 4;
@@ -473,16 +476,16 @@ void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
     plic.type = &plic_dev_type;
     plic.begin = base_addr;
     plic.end = base_addr + 0x4000000;
-    plic.data = ptr;
+    plic.data = dev;
     rvvm_attach_mmio(machine, &plic);
 #ifdef USE_FDT
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
     struct fdt_node* cpus = fdt_node_find(machine->fdt, "cpus");
     if (soc == NULL || cpus == NULL) {
         rvvm_warn("Missing nodes in FDT!");
-        return ptr;
+        return dev;
     }
-    
+
     uint32_t* irq_ext = safe_calloc(sizeof(uint32_t), vector_size(machine->harts) * 4);
     vector_foreach(machine->harts, i) {
         struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
@@ -490,7 +493,7 @@ void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
         if (cpu_irq == NULL) {
             free(irq_ext);
             rvvm_warn("Missing nodes in FDT!");
-            return ptr;
+            return dev;
         }
 
         uint32_t irq_phandle = fdt_node_get_phandle(cpu_irq);
@@ -498,7 +501,7 @@ void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
         irq_ext[(i * 4) + 1] = INTERRUPT_SEXTERNAL;
         irq_ext[(i * 4) + 3] = INTERRUPT_MEXTERNAL;
     }
-    
+
     struct fdt_node* plic_node = fdt_node_create_reg("plic", base_addr);
     fdt_node_add_prop_u32(plic_node, "#interrupt-cells", 1);
     fdt_node_add_prop_reg(plic_node, "reg", base_addr, 0x4000000);
@@ -507,56 +510,52 @@ void* plic_init(rvvm_machine_t* machine, paddr_t base_addr)
     fdt_node_add_prop(plic_node, "interrupt-controller", NULL, 0);
     fdt_node_add_prop_cells(plic_node, "interrupts-extended", irq_ext, vector_size(machine->harts) * 4);
     free(irq_ext);
-    
+
     fdt_node_add_child(soc, plic_node);
 #endif
-	return ptr;
+    return dev;
 }
 
-// Send IRQ through PLIC to the machine
-// Parameters:
-// machine - machine context
-// data - PLIC private data from mmio_device_t->data
-// id - irq number
-bool plic_send_irq(rvvm_machine_t* machine, void *data, uint32_t id)
+plic_ctx_t plic_init_auto(rvvm_machine_t* machine)
 {
-    //rvvm_info("Sending PLIC IRQ");
-	struct plic *dev = (struct plic*)data;
-	spin_lock(&dev->lock);
+    return plic_init(machine, PLIC_DEFAULT_MMIO);
+}
 
-	assert(id != 0);
-	//printf("plic IRQ raise: %d\n", id);
+// Allocate new IRQ
+uint32_t plic_alloc_irq(plic_ctx_t plic)
+{
+    struct plic* dev = (struct plic*)plic;
+    dev->alloc_irq++;
+    return dev->alloc_irq;
+}
 
-	/* mark the interrupt as pending */
-	set_int_pending(dev, id, 1);
+// Send IRQ through PLIC
+bool plic_send_irq(plic_ctx_t plic, uint32_t irq)
+{
+    struct plic* dev = (struct plic*)plic;
+    spin_lock(&dev->lock);
 
-	/* choose hart and interrupt priority to send IRQ to */
-	//rvvm_machine_t* machine = vm->machine;
-	vector_foreach(machine->harts, i)
-	{
-        //rvvm_info("Checking hart %d", i);
-		if (is_hart_busy(dev, i))
-		{
-			continue;
-		}
+    /* mark the interrupt as pending */
+    set_int_pending(dev, irq, 1);
 
-		for (size_t ctx = HARTID2CTX(i); ctx < HARTID2CTX(i) + 2; ++ctx)
-		{
-			/* is_int_valid check is done in select_int */
-			if (select_int(dev, ctx, id))
-			{
-				/* found free hart, update the current selected interrupt ID */
-				set_hart_busy(dev, i, true);
-				riscv_interrupt(&vector_at(machine->harts, i), CTX2PRIO(ctx));
-				goto break_loop;
-			}
-		}
-	}
-	/* do not forcefully pick any hart if there were
-	 * no free harts - interrupt will be selected automatically
-	 * when hart will handle it's interrupt (and notify us about
-	 * that by writing CLAIMCOMPLETE register) */
-break_loop:
-	spin_unlock(&dev->lock);
-	return true;
+    /* choose hart and interrupt priority to send IRQ to */
+    vector_foreach(dev->machine->harts, i) {
+        if (!is_hart_busy(dev, i)) {
+            for (size_t ctx = HARTID2CTX(i); ctx < HARTID2CTX(i) + 2; ++ctx) {
+                /* is_int_valid check is done in select_int */
+                if (select_int(dev, ctx, irq)) {
+                    /* found free hart, update the current selected interrupt ID */
+                    set_hart_busy(dev, i, true);
+                    riscv_interrupt(&vector_at(dev->machine->harts, i), CTX2PRIO(ctx));
+                    break;
+                }
+            }
+        }
+    }
+    /* do not forcefully pick any hart if there were
+    * no free harts - interrupt will be selected automatically
+    * when hart will handle it's interrupt (and notify us about
+    * that by writing CLAIMCOMPLETE register) */
+    spin_unlock(&dev->lock);
+    return true;
 }

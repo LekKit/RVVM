@@ -21,7 +21,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define NS16550A_H
 
 #include "rvvm.h"
+#include "plic.h"
 
-void ns16550a_init(rvvm_machine_t *mach, paddr_t base_addr, void* intc_data, uint32_t irq);
+#define NS16550A_DEFAULT_MMIO 0x10000000
+
+void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq);
+void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
 
 #endif // NS16550A_H

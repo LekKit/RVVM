@@ -189,7 +189,7 @@ struct ethoc_dev
     thread_handle_t dma_thread;
     uint32_t kill_thread; /* Thanks to the awesome thread API we have to use this */
     rvvm_machine_t* machine; /* Machine to send IRQ to, also used as memory to send/recv packets */
-    void *intc_data;
+    plic_ctx_t plic;
     uint32_t irq;
     uint32_t cur_txbd;
     uint32_t cur_rxbd;
@@ -220,7 +220,7 @@ static bool ethoc_interrupt(struct ethoc_dev *eth, uint8_t int_num)
         return false;
     }
 
-    plic_send_irq(eth->machine, eth->intc_data, eth->irq);
+    plic_send_irq(eth->plic, eth->irq);
     return true;
 }
 
@@ -384,14 +384,14 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, pa
             eth->int_src &= ~*data;
 
             if ((eth->int_src & eth->int_mask) != 0) {
-                plic_send_irq(eth->machine, eth->intc_data, eth->irq);
+                plic_send_irq(eth->plic, eth->irq);
             }
             break;
         case ETHOC_INT_MASK:
             eth->int_mask = *data;
 
             if ((eth->int_src & eth->int_mask) != 0) {
-                plic_send_irq(eth->machine, eth->intc_data, eth->irq);
+                plic_send_irq(eth->plic, eth->irq);
             }
             break;
         case ETHOC_IPGT:
@@ -629,7 +629,7 @@ static rvvm_mmio_type_t ethoc_dev_type = {
     .remove = ethoc_remove,
 };
 
-void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uint32_t irq)
+void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
 #ifdef USE_TAP_LINUX
@@ -645,7 +645,7 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uin
     memset(&eth->bdbuf, '\0', sizeof(eth->bdbuf));
     ethoc_reset(eth);
 
-    eth->intc_data = intc_data;
+    eth->plic = plic;
     eth->irq = irq;
     eth->machine = machine;
 
@@ -673,8 +673,8 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uin
 
 #ifdef USE_FDT
     struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic == NULL) {
+    struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
+    if (plic_fdt == NULL) {
         rvvm_warn("Missing nodes in FDT!");
         return;
     }
@@ -682,10 +682,15 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, void* intc_data, uin
     struct fdt_node* ethoc = fdt_node_create_reg("ethernet", base_addr);
     fdt_node_add_prop_reg(ethoc, "reg", base_addr, 0x800);
     fdt_node_add_prop_str(ethoc, "compatible", "opencores,ethoc");
-    fdt_node_add_prop_u32(ethoc, "interrupt-parent", fdt_node_get_phandle(plic));
+    fdt_node_add_prop_u32(ethoc, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
     fdt_node_add_prop_u32(ethoc, "interrupts", irq);
     fdt_node_add_child(soc, ethoc);
 #endif
+}
+
+void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+{
+    ethoc_init(machine, ETHOC_DEFAULT_MMIO, plic, plic_alloc_irq(plic));
 }
 
 #endif

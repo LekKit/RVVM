@@ -21,7 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifdef USE_PCI
 #include "rvvm.h"
+#include "plic.h"
 #include "spinlock.h"
+
+#define PCI_BASE_DEFAULT_MMIO 0x50000000
+#define PCI_IO_DEFAULT_MMIO   0x58000000
+#define PCI_IO_DEFAULT_SIZE   0x1000000
+#define PCI_MEM_DEFAULT_MMIO  0x59000000
+#define PCI_MEM_DEFAULT_SIZE  0x6000000
 
 struct pci_bar_desc {
     rvvm_mmio_handler_t read;
@@ -64,8 +71,8 @@ struct pci_device {
 
 struct pci_bus {
     vector_t(struct pci_device) devices;
-    struct rvvm_machine_t *machine;
-    void *intc_data;
+    rvvm_machine_t* machine;
+    plic_ctx_t plic;
     uint32_t irq[4];
     paddr_t io_addr;
     paddr_t io_len;
@@ -89,22 +96,10 @@ struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
         paddr_t io_len,
         paddr_t mem_addr,
         paddr_t mem_len,
-        void *intc_data,
+        plic_ctx_t plic,
         uint32_t irq);
 
-#ifdef USE_FDT
-/* Only one bus is supported atm, however, bus_count can be any */
-struct pci_bus_list* pci_bus_init_dt(rvvm_machine_t *machine,
-        size_t bus_count,
-        bool is_ecam,
-        paddr_t base_addr,
-        paddr_t io_addr,
-        paddr_t io_len,
-        paddr_t mem_addr,
-        paddr_t mem_len,
-        void *intc_data,
-        uint32_t irq);
-#endif
+struct pci_bus_list* pci_bus_init_auto(rvvm_machine_t *machine, plic_ctx_t plic);
 
 void pci_send_irq(struct pci_func *func);
 void pci_clear_irq(struct pci_func *func);
