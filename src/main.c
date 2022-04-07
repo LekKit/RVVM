@@ -292,16 +292,12 @@ static bool rvvm_run_with_args(vm_args_t args)
         rvvm_info("Kernel image loaded at 0x%08"PRIxXLEN, machine->mem.begin + hugepage_offset);
     }
 
-    clint_init(machine, 0x2000000);
+    clint_init_auto(machine);
+    plic_ctx_t plic = plic_init_auto(machine);
 
-    void *plic_data = plic_init(machine, 0xC000000);
-
-    ns16550a_init(machine, 0x10000000, plic_data, 1);
+    ns16550a_init_auto(machine, plic);
 #if defined(USE_FDT) && defined(USE_PCI)
-    struct pci_bus_list *pci_buses = pci_bus_init_dt(machine,
-		    1, 1, 0x50000000,
-		    0x58000000, 0x1000000, 0x59000000, 0x6000000,
-		    plic_data, 4);
+    struct pci_bus_list* pci_buses = pci_bus_init_auto(machine, plic);
 #endif
 
     if (args.image) {
@@ -311,7 +307,7 @@ static bool rvvm_run_with_args(vm_args_t args)
             return false;
         } else {
 #if !defined(USE_FDT) || !defined(USE_PCI)
-            ata_init(machine, 0x40000000, 0x40001000, blk, NULL);
+            ata_init_pio(machine, ATA_DATA_DEFAULT_MMIO, ATA_CTL_DEFAULT_MMIO, blk, NULL);
 #else
             ata_init_pci(machine, &pci_buses->buses[0], blk, NULL);
 #endif
@@ -322,11 +318,11 @@ static bool rvvm_run_with_args(vm_args_t args)
     if (!args.nogui) {
         static struct ps2_device ps2_mouse;
         ps2_mouse = ps2_mouse_create();
-        altps2_init(machine, 0x20000000, plic_data, 2, &ps2_mouse);
+        altps2_init(machine, 0x20000000, plic, plic_alloc_irq(plic), &ps2_mouse);
 
         static struct ps2_device ps2_keyboard;
         ps2_keyboard = ps2_keyboard_create();
-        altps2_init(machine, 0x20001000, plic_data, 3, &ps2_keyboard);
+        altps2_init(machine, 0x20001000, plic, plic_alloc_irq(plic), &ps2_keyboard);
 
         init_fb(machine, 0x30000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
     } else {
@@ -341,11 +337,11 @@ static bool rvvm_run_with_args(vm_args_t args)
 #endif
     }
 #ifdef USE_NET
-    ethoc_init(machine, 0x21000000, plic_data, 5);
+    ethoc_init_auto(machine, plic);
 #endif
-    syscon_init(machine, 0x100000);
+    syscon_init_auto(machine);
 #ifdef USE_RTC
-    rtc_goldfish_init(machine, 0x101000, plic_data, 6);
+    rtc_goldfish_init_auto(machine, plic);
 #endif
 
     if (args.dumpdtb) {
