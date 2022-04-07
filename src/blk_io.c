@@ -40,8 +40,7 @@ static bool try_lock_fd(int fd)
     flk.l_whence = SEEK_SET;
     flk.l_start = 0;
     flk.l_len = 0;
-    fcntl(fd, F_SETLK, &flk);
-    return errno != EACCES && errno != EAGAIN;
+    return fcntl(fd, F_SETLK, &flk) == 0 || (errno != EACCES && errno != EAGAIN);
 }
 
 #ifdef __linux__
