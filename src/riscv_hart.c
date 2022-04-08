@@ -347,7 +347,11 @@ void riscv_hart_pause(rvvm_hart_t* vm)
 {
     atomic_or_uint32(&vm->pending_events, EXT_EVENT_PAUSE);
     riscv_hart_notify(vm);
-    thread_join(vm->thread);
+
+    // Clear vm->thread before freeing it
+    thread_handle_t thread = vm->thread;
+    vm->thread = NULL;
+    thread_join(thread);
 }
 
 void riscv_hart_queue_pause(rvvm_hart_t* vm)
