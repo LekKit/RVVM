@@ -95,8 +95,7 @@ static char* str_duplicate(const char* str)
 
 void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data, uint32_t len)
 {
-    assert(name != NULL);
-
+    if (node == NULL) return;
     struct fdt_prop_list *entry = safe_calloc(sizeof(struct fdt_prop_list), 1);
     entry->prop.name = str_duplicate(name);
     char *new_data = NULL;
@@ -156,7 +155,7 @@ static uint32_t fdt_get_new_phandle(struct fdt_node *node)
 
 uint32_t fdt_node_get_phandle(struct fdt_node *node)
 {
-    if (node->parent == NULL) {
+    if (node == NULL || node->parent == NULL) {
         // This is a root node, no handle needed
         return 0;
     }
@@ -191,6 +190,7 @@ static void fdt_name_with_addr(char* buffer, size_t size, const char *name, uint
 
 struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name)
 {
+    if (node == NULL) return NULL;
     struct fdt_node_list* list = node->nodes;
     while (list) {
         if (strcmp(list->node->name, name) == 0) return list->node;
@@ -208,6 +208,7 @@ struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint
 
 struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name)
 {
+    if (node == NULL) return NULL;
     char buffer[256] = {0};
     strncpy(buffer, name, 254);
     size_t len = strlen(buffer);
@@ -240,7 +241,7 @@ struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr)
 
 void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
 {
-    assert(node != NULL && child != NULL);
+    if (node == NULL || child == NULL) return;
 
     struct fdt_node_list *entry = safe_calloc(sizeof(struct fdt_node_list), 1);
     child->parent = node;
@@ -254,6 +255,7 @@ void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
 
 void fdt_node_free(struct fdt_node *node)
 {
+    if (node == NULL) return;
     free(node->name);
 
     for (struct fdt_prop_list *entry = node->props, *entry_next = NULL;
@@ -400,6 +402,7 @@ static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *
 
 size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid)
 {
+    if (node == NULL) return 0;
     struct fdt_size_desc size_desc = { 0 };
     fdt_get_tree_size(node, &size_desc);
     size_desc.struct_size += sizeof(uint32_t); // FDT_END
