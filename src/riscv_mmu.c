@@ -315,9 +315,13 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rw
             return false;
         }
         while (new_size < misaligned_size) new_size <<= 1;
-        bool ret = riscv_mmio_unaligned_op(dev, rwfunc, tmp, aligned_offset, new_size);
-        if (ret) memcpy(dest, tmp + offset_diff, size);
-        return ret;
+        if (!riscv_mmio_unaligned_op(dev, dev->read, tmp, aligned_offset, new_size)) return false;
+        if (rwfunc == dev->write) {
+            if (!riscv_mmio_unaligned_op(dev, rwfunc, tmp, aligned_offset, new_size)) return false;
+        } else {
+            memcpy(dest, tmp + offset_diff, size);
+        }
+        return true;
     }
     if (size > dev->max_op_size) {
         // Max operation size exceeded, cut into smaller parts
