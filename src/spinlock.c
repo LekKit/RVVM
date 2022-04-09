@@ -39,7 +39,7 @@ static void spin_atexit()
 
 NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
 {
-    for (size_t i=0; SPINLOCK_RETRIES; ++i) {
+    for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
         if (atomic_swap_uint32(&lock->flag, 2) == 0) {
             atomic_store_uint32(&lock->flag, 1);
             return;
