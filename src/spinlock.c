@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "spinlock.h"
 #include "threading.h"
 #include "utils.h"
+#include "rvtimer.h"
 
 // Maximum allowed lock time, warns and recovers the lock upon expiration
 #define SPINLOCK_MAX_MS 1000
@@ -51,13 +52,15 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
         atexit(spin_atexit);
     }
 
-    for (size_t i=0; infinite || i < SPINLOCK_MAX_MS / SPINLOCK_MAX_SLEEP; ++i) {
+    rvtimer_t timer;
+    rvtimer_init(&timer, 1000);
+    do {
         condvar_wait(global_cond, SPINLOCK_MAX_SLEEP);
         if (atomic_swap_uint32(&lock->flag, 2) == 0) {
             atomic_store_uint32(&lock->flag, 1);
             return;
         }
-    }
+    } while (infinite || rvtimer_get(&timer) < SPINLOCK_MAX_MS);
 
     rvvm_warn("Possible deadlock at %s", info);
 #ifdef USE_SPINLOCK_DEBUG
