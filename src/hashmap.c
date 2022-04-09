@@ -17,6 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "hashmap.h"
+#include "utils.h"
+
+#include <string.h>
 
 void hashmap_init(hashmap_t* map, size_t size)
 {
@@ -25,12 +28,13 @@ void hashmap_init(hashmap_t* map, size_t size)
     map->entries = 0;
     while (map->size < size)
         map->size = (map->size << 1) | 0x1;
-    map->buckets = (hashmap_bucket_t*)calloc(map->size+1, sizeof(hashmap_bucket_t));
+    map->buckets = (hashmap_bucket_t*)safe_calloc(sizeof(hashmap_bucket_t), map->size+1);
 }
 
 void hashmap_destroy(hashmap_t* map)
 {
     free(map->buckets);
+    memset(map, 0, sizeof(hashmap_t));
 }
 
 void hashmap_resize(hashmap_t* map, size_t size)
@@ -57,6 +61,10 @@ void hashmap_shrink(hashmap_t* map)
 
 void hashmap_clear(hashmap_t* map)
 {
-    hashmap_destroy(map);
-    hashmap_init(map, 16);
+    if (map->entries < (map->size >> 2)) {
+        map->size >>= 1;
+        map->buckets = safe_realloc(map->buckets, (map->size + 1) * sizeof(hashmap_bucket_t));
+    }
+    memset(map->buckets, 0, (map->size + 1) * sizeof(hashmap_bucket_t));
+    map->entries = 0;
 }
