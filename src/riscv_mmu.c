@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 
 #define SV32_VPN_BITS     10
 #define SV32_VPN_MASK     0x3FF
@@ -343,10 +342,10 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
-        if (paddr >= dev->begin && paddr < dev->end) {
+        if (paddr >= dev->addr && paddr < (dev->addr + dev->size)) {
             //rvvm_info("Hart %p accessing MMIO at 0x%08x", vm, paddr);
             // Found the device
-            offset = paddr - dev->begin;
+            offset = paddr - dev->addr;
             if (access == MMU_WRITE) {
                 rwfunc = dev->write;
             } else {
@@ -361,15 +360,15 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
                 } else {
                     memcpy(dest, ((vmptr_t)dev->data) + offset, size);
                 }
-                if ((offset >= PAGE_SIZE || riscv_block_aligned(dev->begin, PAGE_SIZE)) && 
-                    (dev->end - paddr >= PAGE_SIZE || riscv_block_aligned(dev->end + 1, PAGE_SIZE))) {
+                if ((offset >= PAGE_SIZE || riscv_block_aligned(dev->addr, PAGE_SIZE)) &&
+                    (dev->size - offset  >= PAGE_SIZE || riscv_block_aligned(dev->addr + dev->size, PAGE_SIZE))) {
                     riscv_tlb_put(vm, vaddr, ((vmptr_t)dev->data) + offset, access);
                 }
                 return true;
             }
             
             if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (dev->min_op_size-1)))) {
-                rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
+                //rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
                 return riscv_mmio_unaligned_op(dev, rwfunc, dest, offset, size);
             }
             return rwfunc(dev, dest, offset, size);
