@@ -33,17 +33,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define unlikely(x)   (x)
 #endif
 
-#if defined(RVVMLIB_SHARED) && defined(GNU_EXTS)
-#define PUBLIC        __attribute__((visibility("default")))
-#define HIDDEN        __attribute__((visibility("hidden")))
+#if defined(USE_NOINLINE) && defined(GNU_EXTS)
 #define NOINLINE      __attribute__((noinline))
-#elif defined(RVVMLIB_SHARED) && defined(_WIN32)
-#define PUBLIC        __declspec(dllexport)
-#define HIDDEN
+#elif defined(USE_NOINLINE) && defined(_WIN32)
 #define NOINLINE      __declspec(noinline)
 #else
-#define PUBLIC
-#define HIDDEN
 #define NOINLINE
 #endif
 
