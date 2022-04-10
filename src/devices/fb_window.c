@@ -1,6 +1,6 @@
 /*
 fb_window.c - Framebuffer window device
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,6 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "fb_window.h"
+#include "utils.h"
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 void r5g6b5_to_a8r8g8b8(const void* _in, void* _out, size_t length)
 {
@@ -75,7 +80,7 @@ static rvvm_mmio_type_t win_dev_type = {
     .update = window_update,
 };
 
-void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard)
+void init_fb(rvvm_machine_t* machine, rvvm_addr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard)
 {
     struct fb_data* data = safe_calloc(sizeof(struct fb_data), 1);
     uint32_t fb_size = width * height * 4;
@@ -92,8 +97,8 @@ void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t hei
     
     // Map the framebuffer into memory
     fb_region.data = data->framebuffer;
-    fb_region.begin = addr;
-    fb_region.end = addr + fb_size;
+    fb_region.addr = addr;
+    fb_region.size = fb_size;
     fb_region.type = &fb_dev_type;
     rvvm_attach_mmio(machine, &fb_region);
     
@@ -103,12 +108,6 @@ void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t hei
     rvvm_attach_mmio(machine, &win_placeholder);
 
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    if (soc == NULL) {
-        rvvm_warn("Missing soc node in FDT!");
-        return;
-    }
-    
     struct fdt_node* fb = fdt_node_create_reg("framebuffer", addr);
     fdt_node_add_prop_reg(fb, "reg", addr, fb_size);
     fdt_node_add_prop_str(fb, "compatible", "simple-framebuffer");
@@ -117,6 +116,6 @@ void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t hei
     fdt_node_add_prop_u32(fb, "height", height);
     fdt_node_add_prop_u32(fb, "stride", width * 4);
     
-    fdt_node_add_child(soc, fb);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), fb);
 #endif
 }

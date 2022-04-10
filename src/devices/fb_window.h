@@ -1,6 +1,6 @@
 /*
 fb_window.h - Framebuffer window device
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef FB_WINDOW_H
 #define FB_WINDOW_H
 
-#include "rvvm.h"
+#include "rvvmlib.h"
 #include "ps2-altera.h"
 
 /* TODO: pixel format */
@@ -35,7 +35,7 @@ struct fb_data
     void *winsys_data; // private window system data
 };
 
-void init_fb(rvvm_machine_t* machine, paddr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard);
+void init_fb(rvvm_machine_t* machine, rvvm_addr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard);
 
 #if defined(USE_FB)
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name);
