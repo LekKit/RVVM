@@ -19,15 +19,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef USE_NET
 
 #include "eth-oc.h"
-#include "plic.h"
 #include "bit_ops.h"
 #include "mem_ops.h"
 #include "threading.h"
 #include "spinlock.h"
+#include "utils.h"
 #include "tap.h"
 
-#include <string.h>
-#include <inttypes.h>
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 /* Device registers */
 #define ETHOC_MODER 0x00
@@ -629,7 +630,7 @@ static rvvm_mmio_type_t ethoc_dev_type = {
     .remove = ethoc_remove,
 };
 
-void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
 #ifdef USE_TAP_LINUX
@@ -658,39 +659,28 @@ void ethoc_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uin
         .read = ethoc_data_mmio_read,
         .write = ethoc_data_mmio_write,
         .type = &ethoc_dev_type,
-        .begin = base_addr,
-        .end = base_addr + 0x800,
+        .addr = base_addr,
+        .size = 0x800,
         .data = eth,
     };
     rvvm_attach_mmio(machine, &ethoc_dev);
     
     eth->dma_thread = thread_create(ethoc_workthread, eth);
-    if (!eth->dma_thread) {
-        rvvm_detach_mmio(machine, ethoc_dev.begin);
-        /* remove() will be called on machine shutdown */
-        return;
-    }
 
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic_fdt == NULL) {
-        rvvm_warn("Missing nodes in FDT!");
-        return;
-    }
-    
     struct fdt_node* ethoc = fdt_node_create_reg("ethernet", base_addr);
     fdt_node_add_prop_reg(ethoc, "reg", base_addr, 0x800);
     fdt_node_add_prop_str(ethoc, "compatible", "opencores,ethoc");
-    fdt_node_add_prop_u32(ethoc, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
+    fdt_node_add_prop_u32(ethoc, "interrupt-parent", plic_get_phandle(plic));
     fdt_node_add_prop_u32(ethoc, "interrupts", irq);
-    fdt_node_add_child(soc, ethoc);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), ethoc);
 #endif
 }
 
-void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
 {
-    ethoc_init(machine, ETHOC_DEFAULT_MMIO, plic, plic_alloc_irq(plic));
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ETHOC_DEFAULT_MMIO, 0x800);
+    ethoc_init(machine, addr, plic, plic_alloc_irq(plic));
 }
 
 #endif
