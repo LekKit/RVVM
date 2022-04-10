@@ -31,6 +31,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PRIx64 "I64x"
 #endif
 
+#ifndef PRIx64
+#define PRIx64 "llx"
+#endif
+
+#ifndef PRIx32
+#define PRIx32 "x"
+#endif
+
 #ifdef __SIZEOF_INT128__
 #define INT128_SUPPORT 1
 typedef unsigned __int128 uint128_t;
@@ -54,11 +62,9 @@ typedef int32_t smaxlen_t;
 
 typedef double fmaxlen_t;
 
-typedef maxlen_t addr_t;  // XLEN addr
-
 // Distinguish between virtual and physical addresses
-typedef addr_t vaddr_t;
-typedef addr_t paddr_t;
+typedef maxlen_t vaddr_t;
+typedef maxlen_t paddr_t;
 
 typedef uint8_t regid_t;  // Register index
 typedef uint8_t bitcnt_t; // Bits count

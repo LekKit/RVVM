@@ -90,19 +90,19 @@ NOINLINE void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 
 // Alignment checks / fixup
 
-static inline bool riscv_block_in_page(addr_t addr, size_t size)
+static inline bool riscv_block_in_page(vaddr_t addr, size_t size)
 {
     return (addr & PAGE_MASK) + size <= PAGE_SIZE;
 }
 
-static inline bool riscv_block_aligned(addr_t addr, size_t size)
+static inline bool riscv_block_aligned(vaddr_t addr, size_t size)
 {
     return (addr & (size - 1)) == 0;
 }
 
-static inline addr_t riscv_align_addr(addr_t addr, size_t size)
+static inline vaddr_t riscv_align_addr(vaddr_t addr, size_t size)
 {
-    return addr & (~(addr_t)(size - 1));
+    return addr & (~(vaddr_t)(size - 1));
 }
 
 /*
