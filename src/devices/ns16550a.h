@@ -1,5 +1,5 @@
 /*
-ns16550a.h - NS16550A UART emulator code definitions
+ns16550a.h - NS16550A UART
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     Mr0maks <mr.maks0443@gmail.com>
 
@@ -20,12 +20,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef NS16550A_H
 #define NS16550A_H
 
-#include "rvvm.h"
+#include "rvvmlib.h"
 #include "plic.h"
 
 #define NS16550A_DEFAULT_MMIO 0x10000000
 
-void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq);
-void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq);
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
 
 #endif // NS16550A_H

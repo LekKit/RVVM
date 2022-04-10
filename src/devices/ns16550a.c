@@ -18,9 +18,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ns16550a.h"
-#include "plic.h"
 #include "spinlock.h"
+#include "utils.h"
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
+
 #include <stdio.h>
+#include <stdlib.h>
 
 #define NS16550A_REG_SIZE 0x8
 
@@ -131,7 +137,7 @@ static uint8_t terminal_readchar(void* addr)
 }
 #endif
 
-static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     uint8_t *value = (uint8_t*) memory_data;
@@ -192,7 +198,7 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, paddr
     return true;
 }
 
-static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
     uint8_t value = *(uint8_t*) memory_data;
@@ -271,13 +277,14 @@ static rvvm_mmio_type_t ns16550a_dev_type = {
     .update = ns16550a_update,
 };
 
-void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
 {
+    terminal_rawmode();
+
     struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
     ptr->plic = plic;
     ptr->irq = irq;
     spin_init(&ptr->lock);
-    terminal_rawmode();
 
     rvvm_mmio_dev_t ns16550a = {0};
     ns16550a.min_op_size = 1;
@@ -285,19 +292,11 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, 
     ns16550a.read = ns16550a_mmio_read;
     ns16550a.write = ns16550a_mmio_write;
     ns16550a.type = &ns16550a_dev_type;
-    ns16550a.begin = base_addr;
-    ns16550a.end = base_addr + NS16550A_REG_SIZE;
+    ns16550a.addr = base_addr;
+    ns16550a.size = NS16550A_REG_SIZE;
     ns16550a.data = ptr;
     rvvm_attach_mmio(machine, &ns16550a);
-    
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic_fdt = (soc && plic) ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (soc == NULL || (plic && plic_fdt == NULL)) {
-        rvvm_warn("Missing nodes in FDT!");
-        return;
-    }
-    
     struct fdt_node* uart = fdt_node_create_reg("uart", base_addr);
     fdt_node_add_prop_reg(uart, "reg", base_addr, NS16550A_REG_SIZE);
     fdt_node_add_prop_str(uart, "compatible", "ns16550a");
@@ -305,14 +304,22 @@ void ns16550a_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, 
     fdt_node_add_prop_u32(uart, "fifo-size", 16);
     fdt_node_add_prop_str(uart, "status", "okay");
     if (plic) {
-        fdt_node_add_prop_u32(uart, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
+        fdt_node_add_prop_u32(uart, "interrupt-parent", plic_get_phandle(plic));
         fdt_node_add_prop_u32(uart, "interrupts", irq);
     }
-    fdt_node_add_child(soc, uart);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), uart);
 #endif
 }
 
-void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
 {
-    ns16550a_init(machine, NS16550A_DEFAULT_MMIO, plic, plic_alloc_irq(plic));
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
+    if (addr == NS16550A_DEFAULT_MMIO) {
+        rvvm_cmdline_append(machine, "console=ttyS");
+#ifdef USE_FDT
+        struct fdt_node* chosen = fdt_node_find(rvvm_get_fdt_root(machine), "chosen");
+        fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
+#endif
+    }
+    ns16550a_init(machine, addr, plic, plic_alloc_irq(plic));
 }
