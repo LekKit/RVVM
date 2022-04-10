@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef PS2_ALTERA_H
 #define PS2_ALTERA_H
 
-#include "rvvm.h"
+#include "rvvmlib.h"
 #include "plic.h"
 #include "spinlock.h"
 
@@ -37,7 +37,8 @@ struct ps2_device
     spinlock_t *lock; // PS/2 bus lock - used for external locks
 };
 
-void altps2_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq, struct ps2_device *child);
+void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq, struct ps2_device *child);
 void altps2_interrupt(struct ps2_device *dev);
 void altps2_interrupt_unlocked(struct ps2_device *dev);
+
 #endif
