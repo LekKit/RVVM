@@ -29,7 +29,7 @@ static spinlock_t global_lock;
 static vector_t(rvvm_machine_t*) global_machines = {0};
 
 static thread_handle_t builtin_eventloop_thread;
-static bool builtin_eventloop_enabled;
+static bool builtin_eventloop_enabled = true;
 
 static void* builtin_eventloop(void* arg)
 {
@@ -38,9 +38,15 @@ static void* builtin_eventloop(void* arg)
     
     // The eventloop runs while its enabled/ran manually,
     // and there are any running machines
-    while ((builtin_eventloop_enabled || arg) && vector_size(global_machines)) {
-        sleep_ms(10);
+    while (builtin_eventloop_enabled || arg) {
         spin_lock(&global_lock);
+        if (vector_size(global_machines) == 0) {
+            builtin_eventloop_thread = NULL;
+
+            // Thread handle leaking here
+            spin_unlock(&global_lock);
+            break;
+        }
         vector_foreach(global_machines, m) {
             machine = vector_at(global_machines, m);
             if (!atomic_load_uint32(&machine->running)) {
@@ -49,12 +55,7 @@ static void* builtin_eventloop(void* arg)
                     riscv_hart_pause(&vector_at(machine->harts, i));
                 }
                 vector_erase(global_machines, m);
-                
-                if (vector_size(global_machines) == 0) {
-                    vector_free(global_machines);
-                    spin_unlock(&global_lock);
-                    return NULL;
-                } else continue;
+                continue;
             }
             
             vector_foreach(machine->harts, i) {
@@ -73,7 +74,9 @@ static void* builtin_eventloop(void* arg)
             }
         }
         spin_unlock(&global_lock);
+        sleep_ms(10);
     }
+
     return arg;
 }
 
@@ -84,7 +87,7 @@ static void register_machine(rvvm_machine_t* machine)
         vector_init(global_machines);
     }
     vector_push_back(global_machines, machine);
-    if (builtin_eventloop_enabled && vector_size(global_machines) == 1) {
+    if (builtin_eventloop_enabled && builtin_eventloop_thread == NULL) {
         builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
     }
     spin_unlock(&global_lock);
@@ -92,7 +95,7 @@ static void register_machine(rvvm_machine_t* machine)
 
 static void deregister_machine(rvvm_machine_t* machine)
 {
-    bool stop_thread = false;
+    thread_handle_t stop_thread = NULL;
     spin_lock(&global_lock);
     vector_foreach(global_machines, i) {
         if (vector_at(global_machines, i) == machine) {
@@ -102,13 +105,14 @@ static void deregister_machine(rvvm_machine_t* machine)
     if (vector_size(global_machines) == 0) {
         vector_free(global_machines);
         // prevent deadlock
-        stop_thread = builtin_eventloop_enabled;
+        stop_thread = builtin_eventloop_thread;
+        builtin_eventloop_thread = NULL;
     }
     spin_unlock(&global_lock);
-    
+
     if (stop_thread) {
-        thread_signal_membarrier(builtin_eventloop_thread);
-        thread_join(builtin_eventloop_thread);
+        thread_signal_membarrier(stop_thread);
+        thread_join(stop_thread);
     }
 }
 
@@ -194,31 +198,39 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     fdt_node_add_prop(soc, "ranges", NULL, 0);
     
     fdt_node_add_child(machine->fdt, soc);
+    machine->fdt_soc = soc;
 }
 
 static void rvvm_gen_dtb(rvvm_machine_t* machine)
 {
-    vector_foreach(machine->harts, i) {
-        paddr_t a1 = vector_at(machine->harts, i).registers[REGISTER_X11];
-        if (a1 >= machine->mem.begin && a1 < (machine->mem.begin + machine->mem.size)) {
-            rvvm_info("DTB already present in a1 register, skipping");
-            return;
-        }
+    if (machine->fdt == NULL) return;
+
+    if (machine->cmdline) {
+        struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
+        fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
     }
-    paddr_t dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
-    size_t dtb_size = fdt_serialize(machine->fdt, machine->mem.data + (machine->mem.size >> 1), machine->mem.size >> 1, 0);
-    if (dtb_size) {
-        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", dtb_addr, (uint32_t)dtb_size);
-        vector_foreach(machine->harts, i) {
-            vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
-        }
+
+    if (machine->dtb_addr) {
+        rvvm_info("DTB already specified, skipping FDT generation");
     } else {
-        rvvm_error("Generated DTB does not fit in RAM!");
+        machine->dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
+        size_t dtb_size = fdt_serialize(machine->fdt, machine->mem.data + (machine->mem.size >> 1), machine->mem.size >> 1, 0);
+        if (dtb_size) {
+            rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->dtb_addr, (uint32_t)dtb_size);
+        } else {
+            rvvm_error("Generated DTB does not fit in RAM!");
+        }
     }
+
+    fdt_node_free(machine->fdt);
+    free(machine->cmdline);
+    machine->cmdline = NULL;
+    machine->fdt = NULL;
+    machine->fdt_soc = NULL;
 }
 #endif
 
-PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
+PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
     rvvm_hart_t* vm;
     rvvm_machine_t* machine = safe_calloc(sizeof(rvvm_machine_t), 1);
@@ -256,7 +268,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(paddr_t mem_base, size_t mem_size, si
     return machine;
 }
 
-PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* src, size_t size)
+PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, rvvm_addr_t dest, const void* src, size_t size)
 {
     if (dest < machine->mem.begin
     || (dest - machine->mem.begin + size) > machine->mem.size) return false;
@@ -264,7 +276,7 @@ PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, paddr_t dest, const void* sr
     return true;
 }
 
-PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, paddr_t src, size_t size)
+PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, size_t size)
 {
     if (src < machine->mem.begin
     || (src - machine->mem.begin + size) > machine->mem.size) return false;
@@ -272,20 +284,99 @@ PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, paddr_t src, size
     return true;
 }
 
-PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, paddr_t addr, size_t size)
+PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
     if (addr < machine->mem.begin
     || (addr - machine->mem.begin + size) > machine->mem.size) return NULL;
     return machine->mem.data + (addr - machine->mem.begin);
 }
 
+PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
+{
+    UNUSED(dev);
+    UNUSED(dest);
+    UNUSED(offset);
+    UNUSED(size);
+    return true;
+}
+
+PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine)
+{
+#ifdef USE_FDT
+    if (machine->fdt == NULL) rvvm_warn("rvvm_get_fdt_root() called after rvvm_gen_dtb()!");
+    return machine->fdt;
+#else
+    UNUSED(machine);
+    return NULL;
+#endif
+}
+
+PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine)
+{
+#ifdef USE_FDT
+    if (machine->fdt_soc == NULL) rvvm_warn("rvvm_get_fdt_soc() called after rvvm_gen_dtb()!");
+    return machine->fdt_soc;
+#else
+    UNUSED(machine);
+    return NULL;
+#endif
+}
+
+
+PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr)
+{
+    machine->dtb_addr = dtb_addr;
+}
+
+PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str)
+{
+#ifdef USE_FDT
+    free(machine->cmdline);
+    machine->cmdline = NULL;
+    rvvm_cmdline_append(machine, str);
+#else
+    UNUSED(machine);
+    UNUSED(str);
+#endif
+}
+
+PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str)
+{
+#ifdef USE_FDT
+    if (machine->fdt == NULL) {
+        rvvm_warn("rvvm_cmdline() called after rvvm_gen_dtb()!");
+        return;
+    }
+    size_t cmd_len = machine->cmdline ? strlen(machine->cmdline) : 0;
+    size_t append_len = strlen(str);
+    char* tmp = safe_calloc(sizeof(char), cmd_len + append_len + 2);
+    memcpy(tmp, machine->cmdline, cmd_len);
+    memcpy(tmp + cmd_len, str, append_len);
+    tmp[cmd_len + append_len] = ' ';
+    tmp[cmd_len + append_len + 1] = 0;
+    free(machine->cmdline);
+    machine->cmdline = tmp;
+#else
+    UNUSED(machine);
+    UNUSED(str);
+#endif
+}
+
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
 {
     if (machine->running) return;
     machine->running = true;
+
 #ifdef USE_FDT
     rvvm_gen_dtb(machine);
 #endif
+    if (machine->dtb_addr) {
+        vector_foreach(machine->harts, i) {
+            vector_at(machine->harts, i).registers[REGISTER_X11] = machine->dtb_addr;
+        }
+        machine->dtb_addr = 0;
+    }
+
     vector_foreach(machine->harts, i) {
         riscv_hart_spawn(&vector_at(machine->harts, i));
     }
@@ -295,17 +386,17 @@ PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
 PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine)
 {
     if (!machine->running) return;
-    machine->running = false;
+    deregister_machine(machine);
     vector_foreach(machine->harts, i) {
         riscv_hart_pause(&vector_at(machine->harts, i));
     }
-    deregister_machine(machine);
+    machine->running = false;
 }
 
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 {
     rvvm_mmio_dev_t* dev;
-    if (machine->running) return;
+    rvvm_pause_machine(machine);
     
     vector_foreach(machine->harts, i) {
         riscv_hart_free(&vector_at(machine->harts, i));
@@ -325,9 +416,6 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     vector_free(machine->harts);
     vector_free(machine->mmio);
     riscv_free_ram(&machine->mem);
-#ifdef USE_FDT
-    fdt_node_free(machine->fdt);
-#endif
     free(machine);
 }
 
@@ -340,54 +428,84 @@ PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_
     return &vector_at(machine->mmio, (size_t)handle);
 }
 
+// Regions of size 0 are ignored (those are non-IO placeholders)
+PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
+{
+    for (size_t i=0; i<64; ++i) {
+        if (size && addr >= machine->mem.begin && (addr + size) <= (machine->mem.begin + machine->mem.size)) {
+            addr = machine->mem.begin + machine->mem.size;
+            continue;
+        }
+
+        vector_foreach(machine->mmio, i) {
+            struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
+            if (size && addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
+                addr = dev->addr + dev->size;
+                continue;
+            }
+        }
+
+        return addr;
+    }
+
+    rvvm_warn("Cannot find free MMIO range!");
+    return addr + 0x1000;
+}
+
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
     rvvm_mmio_dev_t* dev;
     if (machine->running) return RVVM_INVALID_MMIO;
-
+    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
+        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
+        return RVVM_INVALID_MMIO;
+    }
     vector_push_back(machine->mmio, *mmio);
     rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
     dev = &vector_at(machine->mmio, ret);
     dev->machine = machine;
-    rvvm_info("Attached MMIO device at 0x%08"PRIxXLEN", type \"%s\"", dev->begin, dev->type ? dev->type->name : "null");
+    rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"", dev->addr, dev->type ? dev->type->name : "null");
     return ret;
 }
 
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, paddr_t mmio_addr)
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr)
 {
     if (machine->running) return;
     vector_foreach(machine->mmio, i) {
         struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
-        if (mmio_addr >= dev->begin
-         && mmio_addr <= dev->end) {
+        if (mmio_addr >= dev->addr
+         && mmio_addr < (dev->addr + dev->size)) {
             /* do not remove the machine from vector so that the handles
              * remain valid */
-            dev->begin = dev->end = 0;
+            dev->size = 0;
         }
     }
 }
 
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
 {
-    bool stop_thread = false;
+    thread_handle_t stop_thread = NULL;
     spin_lock(&global_lock);
-    if (builtin_eventloop_enabled && !enabled && vector_size(global_machines)) {
-        builtin_eventloop_enabled = false;
-        stop_thread = true;
-    } else if (!builtin_eventloop_enabled && enabled && vector_size(global_machines)) {
-        builtin_eventloop_enabled = true;
-        builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
+    if (builtin_eventloop_enabled != enabled) {
+        builtin_eventloop_enabled = enabled;
+        if (!enabled) {
+            stop_thread = builtin_eventloop_thread;
+            builtin_eventloop_thread = NULL;
+        } else if (builtin_eventloop_thread == NULL) {
+            builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
+        }
     }
     spin_unlock(&global_lock);
     
     if (stop_thread) {
-        thread_signal_membarrier(builtin_eventloop_thread);
-        thread_join(builtin_eventloop_thread);
+        thread_signal_membarrier(stop_thread);
+        thread_join(stop_thread);
     }
 }
 
 PUBLIC void rvvm_run_eventloop()
 {
+    rvvm_enable_builtin_eventloop(false);
     builtin_eventloop((void*)(size_t)1);
 }
 
