@@ -17,8 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef BLK_IO_H
 #define BLK_IO_H
 
-#include "rvvm_types.h"
-#include "spinlock.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 /*
  * File API
@@ -36,15 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Not suitable for async IO
 #define RVFILE_CURPOS ((uint64_t)-1)
 
-typedef struct {
-    uint64_t size;
-    uint64_t pos;
-    uint64_t pos_real;
-    uint8_t  pos_state;
-    spinlock_t lock;
-    void* ptr;
-    int fd;
-} rvfile_t;
+typedef struct blk_io_rvfile rvfile_t;
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode); // Returns NULL on failure
 void      rvclose(rvfile_t* file);

@@ -20,11 +20,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string.h>
 #include "blk_io.h"
 #include "utils.h"
+#include "spinlock.h"
 #include "threading.h"
 
 #define FILE_POS_INVALID 0
 #define FILE_POS_READ    1
 #define FILE_POS_WRITE   2
+
+struct blk_io_rvfile {
+    uint64_t size;
+    uint64_t pos;
+    uint64_t pos_real;
+    uint8_t  pos_state;
+    spinlock_t lock;
+    void* ptr;
+    int fd;
+};
 
 #ifdef __unix__
 #include <unistd.h>
