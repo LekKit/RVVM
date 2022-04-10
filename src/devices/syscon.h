@@ -19,12 +19,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef SYSCON_H
 #define SYSCON_H
 
-#include "rvvm.h"
+#include "rvvmlib.h"
 
 #define SYSCON_DEFAULT_MMIO 0x100000
 
-void syscon_init(rvvm_machine_t* machine, paddr_t base_addr);
-void syscon_init_auto(rvvm_machine_t* machine);
+PUBLIC void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
+PUBLIC void syscon_init_auto(rvvm_machine_t* machine);
 
 #endif
- 

@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SYSCON_POWEROFF 0x5555
 #define SYSCON_RESET    0x7777
 
-static bool syscon_mmio_read(rvvm_mmio_dev_t* dev, void* data, paddr_t offset, uint8_t size)
+static bool syscon_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
     UNUSED(dev);
     UNUSED(offset);
@@ -32,7 +32,7 @@ static bool syscon_mmio_read(rvvm_mmio_dev_t* dev, void* data, paddr_t offset, u
     return true;
 }
 
-static bool syscon_mmio_write(rvvm_mmio_dev_t* dev, void* data, paddr_t offset, uint8_t size)
+static bool syscon_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
     UNUSED(size);
     if (offset == 0) {
@@ -63,7 +63,7 @@ static rvvm_mmio_type_t syscon_dev_type = {
     .name = "syscon",
 };
 
-void syscon_init(rvvm_machine_t* machine, paddr_t base_addr)
+void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     rvvm_mmio_dev_t syscon = {0};
     syscon.min_op_size = 2;
@@ -71,38 +71,33 @@ void syscon_init(rvvm_machine_t* machine, paddr_t base_addr)
     syscon.read = syscon_mmio_read;
     syscon.write = syscon_mmio_write;
     syscon.type = &syscon_dev_type;
-    syscon.begin = base_addr;
-    syscon.end = base_addr + 0x1000;
+    syscon.addr = base_addr;
+    syscon.size = 0x1000;
     rvvm_attach_mmio(machine, &syscon);
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    if (soc == NULL) {
-        rvvm_warn("Missing soc node in FDT!");
-        return;
-    }
-    
     struct fdt_node* test = fdt_node_create_reg("test", base_addr);
     fdt_node_add_prop_reg(test, "reg", base_addr, 0x1000);
     fdt_node_add_prop(test, "compatible", "sifive,test1\0sifive,test0\0syscon\0", 33);
-    fdt_node_add_child(soc, test);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), test);
     
     struct fdt_node* poweroff = fdt_node_create("poweroff");
     fdt_node_add_prop_str(poweroff, "compatible", "syscon-poweroff");
     fdt_node_add_prop_u32(poweroff, "value", SYSCON_POWEROFF);
     fdt_node_add_prop_u32(poweroff, "offset", 0);
     fdt_node_add_prop_u32(poweroff, "regmap", fdt_node_get_phandle(test));
-    fdt_node_add_child(soc, poweroff);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), poweroff);
     
     struct fdt_node* reboot = fdt_node_create("reboot");
     fdt_node_add_prop_str(reboot, "compatible", "syscon-reboot");
     fdt_node_add_prop_u32(reboot, "value", SYSCON_RESET);
     fdt_node_add_prop_u32(reboot, "offset", 0);
     fdt_node_add_prop_u32(reboot, "regmap", fdt_node_get_phandle(test));
-    fdt_node_add_child(soc, reboot);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), reboot);
 #endif
 }
 
 void syscon_init_auto(rvvm_machine_t* machine)
 {
-    syscon_init(machine, SYSCON_DEFAULT_MMIO);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, SYSCON_DEFAULT_MMIO, 0x1000);
+    syscon_init(machine, addr);
 }
