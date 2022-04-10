@@ -18,11 +18,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "compiler.h"
-#include "mem_ops.h"
-#include "rvvm.h"
+#include "rvvmlib.h"
+#include "utils.h"
 
-#include <stdio.h>
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 #include "devices/clint.h"
 #include "devices/plic.h"
@@ -35,6 +36,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
 
 #ifdef _WIN32
 // For unicode fix
@@ -216,89 +221,68 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
     return true;
 }
 
-static bool load_file_to_ram(rvvm_machine_t* machine, paddr_t addr, const char* filename)
+static bool load_file_to_ram(rvvm_machine_t* machine, rvvm_addr_t addr, const char* filename)
 {
-    FILE* file = fopen(filename, "rb");
-    size_t fsize;
-    uint8_t* buffer;
-
+    rvfile_t* file = rvopen(filename, 0);
+    size_t filesize = rvfilesize(file);
+    void* ptr = rvvm_get_dma_ptr(machine, addr, filesize);
     if (file == NULL) {
         rvvm_error("Cannot open file %s", filename);
         return false;
     }
-
-    fseek(file, 0, SEEK_END);
-    fsize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    buffer = safe_malloc(fsize);
-
-    if (fread(buffer, 1, fsize, file) != fsize) {
-        rvvm_error("File %s read error", filename);
-        fclose(file);
-        free(buffer);
-        return false;
-    }
-
-    if (!rvvm_write_ram(machine, addr, buffer, fsize)) {
+    if (ptr == NULL) {
         rvvm_error("File %s does not fit in RAM", filename);
-        fclose(file);
-        free(buffer);
         return false;
     }
-
-    fclose(file);
-    free(buffer);
+    if (rvread(file, ptr, filesize, 0) != filesize) {
+        rvvm_error("File %s read error", filename);
+        return false;
+    }
+    rvclose(file);
     return true;
 }
 
 static bool rvvm_run_with_args(vm_args_t args)
 {
-    rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
+    rvvm_addr_t mem_base = RVVM_DEFAULT_MEMBASE;
+    rvvm_machine_t* machine = rvvm_create_machine(mem_base, args.mem, args.smp, args.rv64);
     if (machine == NULL) {
         rvvm_error("VM creation failed");
         return false;
-    } else if (!load_file_to_ram(machine, machine->mem.begin, args.bootrom)) {
+    } else if (!load_file_to_ram(machine, mem_base, args.bootrom)) {
         rvvm_error("Failed to load bootrom");
         return false;
     }
 
     if (args.dtb) {
-        paddr_t dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
-
+        rvvm_addr_t dtb_addr = mem_base + (args.mem >> 1);
         if (!load_file_to_ram(machine, dtb_addr, args.dtb)) {
             rvvm_error("Failed to load DTB");
             return false;
         }
-
-        rvvm_info("Custom DTB loaded at 0x%08"PRIxXLEN, dtb_addr);
-
-        // pass DTB address in a1 register of each hart
-        vector_foreach(machine->harts, i) {
-            vector_at(machine->harts, i).registers[REGISTER_X11] = dtb_addr;
-        }
+        rvvm_info("Custom DTB loaded at 0x%08"PRIx64, dtb_addr);
+        rvvm_set_dtb_addr(machine, dtb_addr);
     }
 
     if (args.kernel) {
         // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
 
-        // TODO: It's possible to move memory region 128k behind and put
+        // It's possible to move memory region 128k behind and put
         // patched OpenSBI there, to save those precious 4MB
-        paddr_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
-        if (!load_file_to_ram(machine, machine->mem.begin + hugepage_offset, args.kernel)) {
+        size_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
+        if (!load_file_to_ram(machine, mem_base + hugepage_offset, args.kernel)) {
             rvvm_error("Failed to load kernel");
             return false;
         }
-        rvvm_info("Kernel image loaded at 0x%08"PRIxXLEN, machine->mem.begin + hugepage_offset);
+        rvvm_info("Kernel image loaded at 0x%08"PRIx64, mem_base + hugepage_offset);
     }
 
     clint_init_auto(machine);
     plic_ctx_t plic = plic_init_auto(machine);
+    pci_bus_t* pci_bus = pci_bus_init_auto(machine, plic);
 
     ns16550a_init_auto(machine, plic);
-#if defined(USE_FDT) && defined(USE_PCI)
-    struct pci_bus_list* pci_buses = pci_bus_init_auto(machine, plic);
-#endif
+    syscon_init_auto(machine);
 
     if (args.image) {
         blkdev_t* blk = blk_open(args.image, BLKDEV_RW);
@@ -306,11 +290,8 @@ static bool rvvm_run_with_args(vm_args_t args)
             rvvm_error("Unable to open hard drive image file %s", args.image);
             return false;
         } else {
-#if !defined(USE_FDT) || !defined(USE_PCI)
-            ata_init_pio(machine, ATA_DATA_DEFAULT_MMIO, ATA_CTL_DEFAULT_MMIO, blk, NULL);
-#else
-            ata_init_pci(machine, &pci_buses->buses[0], blk, NULL);
-#endif
+            rvvm_cmdline_append(machine, "root=/dev/sda rw");
+            ata_init_auto(machine, pci_bus, blk);
         }
     }
 
@@ -325,21 +306,13 @@ static bool rvvm_run_with_args(vm_args_t args)
         altps2_init(machine, 0x20001000, plic, plic_alloc_irq(plic), &ps2_keyboard);
 
         init_fb(machine, 0x30000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
-    } else {
-#else
-    {
+        rvvm_cmdline_append(machine, "console=tty0");
+    }
 #endif
 
-#ifdef USE_FDT
-        // Broken in FreeBSD for whatever reason
-        struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-        if (chosen) fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
-#endif
-    }
 #ifdef USE_NET
     ethoc_init_auto(machine, plic);
 #endif
-    syscon_init_auto(machine);
 #ifdef USE_RTC
     rtc_goldfish_init_auto(machine, plic);
 #endif
@@ -347,11 +320,11 @@ static bool rvvm_run_with_args(vm_args_t args)
     if (args.dumpdtb) {
 #ifdef USE_FDT
         char buffer[65536];
-        size_t size = fdt_serialize(machine->fdt, buffer, sizeof(buffer), 0);
-        FILE* file;
-        if (size && (file = fopen(args.dumpdtb, "wb"))) {
-            fwrite(buffer, size, 1, file);
-            fclose(file);
+        size_t size = fdt_serialize(rvvm_get_fdt_root(machine), buffer, sizeof(buffer), 0);
+        rvfile_t* file;
+        if (size && (file = rvopen(args.dumpdtb, RVFILE_RW | RVFILE_CREAT | RVFILE_EXCL))) {
+            rvwrite(file, buffer, size, 0);
+            rvclose(file);
             rvvm_info("DTB dumped to %s, size %u", args.dumpdtb, (uint32_t)size);
         } else {
             rvvm_error("Failed to dump DTB!");
@@ -362,11 +335,10 @@ static bool rvvm_run_with_args(vm_args_t args)
     }
 
     rvvm_enable_builtin_eventloop(false);
-
     rvvm_start_machine(machine);
     rvvm_run_eventloop(); // Returns on machine shutdown
 
-    bool reset = machine->needs_reset;
+    bool reset = false;// TODO machine->needs_reset;
     rvvm_free_machine(machine);
 
 /*
