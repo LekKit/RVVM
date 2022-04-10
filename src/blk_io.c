@@ -103,6 +103,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
 #if defined(__unix__)
     int fd, open_flags = 0;
     if (mode & RVFILE_RW) {
+        if (mode & RVFILE_TRUNC) open_flags |= O_TRUNC;
         if (mode & RVFILE_CREAT) {
             open_flags |= O_CREAT;
             if (mode & RVFILE_EXCL) open_flags |= O_EXCL;
@@ -130,8 +131,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     return file;
 #else
     const char* open_mode;
-    if ((mode & RVFILE_CREAT) && (mode & RVFILE_RW)) {
-        open_mode = "wb";
+    if ((mode & RVFILE_TRUNC) && (mode & RVFILE_RW)) {
+        open_mode = "wb+";
     } else if (mode & RVFILE_RW) {
         open_mode = "rb+";
     } else {
@@ -139,6 +140,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     FILE* fp = fopen(filepath, open_mode);
+    if (!fp && (mode & RVFILE_RW) && (mode & RVFILE_CREAT)) fp = fopen(filepath, "wb+");
     if (!fp) {
         return NULL;
     }

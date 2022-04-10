@@ -28,6 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVFILE_RW    1    // Open file in read/write mode
 #define RVFILE_CREAT 2    // Create file if it doesn't exist (for RW only)
 #define RVFILE_EXCL  4    // Prevent other processes from opening this file
+#define RVFILE_TRUNC 8    // Truncate file conents upon opening (for RW only)
 
 #define RVFILE_SET   0    // Set file cursor
 #define RVFILE_CUR   1    // Move file cursor
