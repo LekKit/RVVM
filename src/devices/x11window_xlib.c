@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"
 #include "x11keymap.h"
+#include "utils.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>

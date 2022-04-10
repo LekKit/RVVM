@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "fb_window.h"
 #include "ps2-mouse.h"
 #include "ps2-keyboard.h"
+#include "utils.h"
 
 #include <windows.h>
 
