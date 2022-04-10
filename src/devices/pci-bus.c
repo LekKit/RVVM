@@ -1,6 +1,7 @@
 /*
 pci-bus.c - Peripheral Component Interconnect Bus
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,370 +17,235 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifdef USE_PCI
-#include <assert.h>
-
 #include "pci-bus.h"
+#ifdef USE_PCI
 #include "bit_ops.h"
 #include "mem_ops.h"
-#include "plic.h"
+#include "spinlock.h"
+#include "utils.h"
 
-static void pci_bus_remove(rvvm_mmio_dev_t *dev)
-{
-    struct pci_bus_list *list = (struct pci_bus_list *) dev->data;
-    for (size_t i = 0; i < list->count; ++i) {
-        vector_free(list->buses[i].devices);
-    }
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
-    free(list->buses);
-    free(list);
-}
-
-rvvm_mmio_type_t pci_bus_type = {
-    .name = "pci_cam",
-    .remove = pci_bus_remove,
-};
-
-#define PCI_REG_DEV_VEN_ID 0x0
-#define PCI_REG_STATUS_CMD 0x4
-#define PCI_REG_CLASS_REV  0x8
+#define PCI_REG_DEV_VEN_ID    0x0
+#define PCI_REG_STATUS_CMD    0x4
+#define PCI_REG_CLASS_REV     0x8
 #define PCI_REG_BIST_HDR_LATENCY_CACHE 0xC
 
-#define PCI_REG_BAR0       0x10
-#define PCI_REG_BAR1       0x14
-#define PCI_REG_BAR2       0x18
-#define PCI_REG_BAR3       0x1C
-#define PCI_REG_BAR4       0x20
-#define PCI_REG_BAR5       0x24
+#define PCI_REG_BAR0          0x10
+#define PCI_REG_BAR1          0x14
+#define PCI_REG_BAR2          0x18
+#define PCI_REG_BAR3          0x1C
+#define PCI_REG_BAR4          0x20
+#define PCI_REG_BAR5          0x24
 
 #define PCI_REG_SSID_SVID  0x2C
 
 #define PCI_REG_EXPANSION_ROM 0x30
-#define PCI_REG_CAP_PTR    0x34
-#define PCI_REG_IRQ_PIN_LINE 0x3c
+#define PCI_REG_CAP_PTR       0x34
+#define PCI_REG_IRQ_PIN_LINE  0x3c
 
-static inline bool pci_bus_read_invalid(uint8_t reg, void *dest, uint8_t size)
+#define PCI_CMD_IO_SPACE      0x1 // Accessible through IO ports
+#define PCI_CMD_MEM_SPACE     0x2 // Accessible through MMIO
+#define PCI_CMD_BUS_MASTER    0x4 // May use DMA
+#define PCI_CMD_DEFAULT       0x7
+#define PCI_CMD_IRQ_DISABLE   0x400
+
+#define PCI_STATUS_IRQ        0x8
+
+struct pci_func {
+    struct pci_device* dev;
+    rvvm_mmio_handle_t bar_handle[PCI_FUNC_BARS];
+    spinlock_t lock;
+    uint16_t status;
+    uint16_t command;
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint16_t class_code;
+    uint8_t prog_if;
+    uint8_t rev;
+    uint8_t irq_pin;
+    uint8_t irq_line;
+};
+
+struct pci_device {
+    struct pci_bus* bus;
+    struct pci_func func[PCI_DEV_FUNCS];
+    uint8_t dev_id;
+};
+
+struct pci_bus {
+    rvvm_machine_t* machine;
+    struct pci_device* dev[PCI_BUS_DEVS];
+
+    plic_ctx_t plic;
+    uint32_t irq[PCI_BUS_IRQS];
+
+    rvvm_addr_t io_addr;
+    size_t      io_len;
+    rvvm_addr_t mem_addr;
+    size_t      mem_len;
+
+    uint8_t bus_shift; /* 20 for ECAM, 16 for regular CAM */
+    uint8_t bus_id;
+};
+
+static void pci_bus_remove(rvvm_mmio_dev_t* dev)
 {
-    switch (reg) {
-        case PCI_REG_DEV_VEN_ID:
-            /* nonexistent devices have vendor ID of 0xFFFF */
-            memset(dest, 0xFF, size);
-            return true;
-        default:
-            /* ignore others */
-            memset(dest, 0x0, size);
-            return true;
+    pci_bus_t* bus = (pci_bus_t*)dev->data;
+    for (size_t i=0; i <PCI_BUS_DEVS; ++i) {
+        if (bus->dev[i]) free(bus->dev[i]);
     }
+    free(bus);
 }
 
-static inline bool pci_bus_write_invalid(uint8_t reg, void *dest, uint8_t size)
+static rvvm_mmio_type_t pci_bus_type = {
+    .name = "pci_bus",
+    .remove = pci_bus_remove,
+};
+
+static inline bool pci_bar_is_io(const rvvm_mmio_dev_t* bar)
 {
-    UNUSED(reg);
-    UNUSED(dest);
-    UNUSED(size);
-    return true;
-}
-
-static bool pci_bar_is_io(const struct pci_bar_desc *desc) {
-    // return desc->read || desc->write;
-    UNUSED(desc);
+    // This is for systems with IO ports (x86)
+    UNUSED(bar);
     return false;
 }
 
-void pci_send_irq(struct pci_func *func) {
-    spin_lock(&func->irq_lock);
-    /* no interrupt specified */
-    if (func->desc->irq_pin == 0) {
-        return;
-    }
-
-    /* check interrupt disable bit */
-    if (bit_check(func->command, 10)) {
-        return;
-    }
-
-    /* set interrupt status bit */
-    func->status |= (1 << 3);
-    struct pci_device *dev = func->dev;
-    struct pci_bus *bus = dev->bus;
-    spin_unlock(&func->irq_lock);
-    plic_send_irq(bus->plic, bus->irq[func->desc->irq_pin - 1]);
-}
-
-void pci_clear_irq(struct pci_func *func) {
-    spin_lock(&func->irq_lock);
-    /* clear interrupt status bit */
-    func->status &= ~(1 << 3);
-    spin_unlock(&func->irq_lock);
-}
-
-static bool pci_bus_read(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, uint8_t size)
+static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, uint8_t size)
 {
-    struct pci_bus_list *list = (struct pci_bus_list *) mmio_dev->data;
-    uint8_t reg = bit_cut(offset, 0, list->bus_shift - 8);
-    uint8_t fun = bit_cut(offset, list->bus_shift - 8, 3);
-    uint8_t dev = bit_cut(offset, list->bus_shift - 5, 5);
-    uint8_t bus = offset >> list->bus_shift;
+    pci_bus_t* bus = (pci_bus_t*)mmio_dev->data;
+    uint8_t dev_id = bit_cut(offset, bus->bus_shift - 5, 5);
+    uint8_t fun_id = bit_cut(offset, bus->bus_shift - 8, 3);
+    uint8_t reg = bit_cut(offset, 0, bus->bus_shift - 8);
+    //rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus->bus_id, dev_id, fun_id, reg, size);
 
-    rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus, dev, fun, reg, size);
-    assert(size == 4);
-
-    if (bus >= list->count) {
-        return pci_bus_read_invalid(reg, dest, size);
+    struct pci_device* dev = bus->dev[dev_id];
+    if (dev == NULL) {
+        // Nonexistent devices have vendor ID 0xFFFF
+        memset(dest, 0xFF, size);
+        return true;
     }
-    struct pci_bus *pci_bus = &list->buses[bus];
+    struct pci_func* func = &dev->func[fun_id];
 
-    if (dev >= vector_size(pci_bus->devices)) {
-        return pci_bus_read_invalid(reg, dest, size);
-    }
-    struct pci_device *device = &vector_at(pci_bus->devices, dev);
-
-    if (fun >= 8) {
-        return pci_bus_read_invalid(reg, dest, size);
-    }
-    struct pci_func *func = &device->func[fun];
-    spin_lock(&func->irq_lock);
+    spin_lock(&func->lock);
 
     switch (reg) {
         case PCI_REG_DEV_VEN_ID:
-            {
-                write_uint32_le(dest, func->desc->vendor_id | (uint32_t)func->desc->device_id << 16);
-                goto out;
-            }
+            write_uint32_le(dest, func->vendor_id | (uint32_t)func->device_id << 16);
+            break;
         case PCI_REG_STATUS_CMD:
-            {
-                /* idk why '| 3' is needed, kernel should set these bits... */
-                write_uint32_le(dest, func->status << 16 | func->command | 3);
-                goto out;
-            }
+            write_uint32_le(dest, func->status << 16 | func->command);
+            break;
         case PCI_REG_CLASS_REV:
-            {
-                write_uint32_le(dest, func->desc->class_code << 16
-                        | (uint32_t)func->desc->prog_if << 8);
-                goto out;
-            }
+            write_uint32_le(dest, func->class_code << 16| (uint32_t)func->prog_if << 8 | func->rev);
+            break;
         case PCI_REG_BIST_HDR_LATENCY_CACHE:
-            {
-                bool mf = false;
-                for (size_t i = 1; i < 8; ++i) {
-                    for (size_t j = 0; j < 6; ++j) {
-                        if (device->func[i].desc->bar[j].len != 0) {
-                            mf = true;
-                            break;
-                        }
+            for (size_t i = 1; i < PCI_DEV_FUNCS; ++i) {
+                for (size_t j = 0; j < PCI_FUNC_BARS; ++j) {
+                    if (dev->func[i].bar_handle[j] != RVVM_INVALID_MMIO) {
+                        write_uint32_le(dest, (1 << 23) | 16);
+                        break;
                     }
                 }
-
-                write_uint32_le(dest, (uint32_t)mf << 23);
-                goto out;
             }
-        case PCI_REG_CAP_PTR: /* currently no capabilities supported */
-        case PCI_REG_SSID_SVID: /* not necessary */
-        case PCI_REG_EXPANSION_ROM: /* not needed for now */
-        case 0xf8: /* needed for Intel ATA probe */
-        case 0x40: /* needed for Intel ATA probe */
-            memset(dest, 0x0, size);
-            goto out;
+            write_uint32_le(dest, 16);
+            break;
         case PCI_REG_IRQ_PIN_LINE:
-            {
-                write_uint32_le(dest, func->irq_line | (uint32_t)func->desc->irq_pin << 8);
-                goto out;
-            }
+            write_uint32_le(dest, func->irq_line | (uint32_t)func->irq_pin << 8);
+            break;
         case PCI_REG_BAR0:
         case PCI_REG_BAR1:
         case PCI_REG_BAR2:
         case PCI_REG_BAR3:
         case PCI_REG_BAR4:
-        case PCI_REG_BAR5:
-            {
-                uint8_t bar_num = (reg - 0x10) >> 2;
-                if (func->desc->bar[bar_num].len == 0) {
-                    memset(dest, 0x0, size);
-                    goto out;
-                }
-
-                rvvm_mmio_dev_t *bar_dev = rvvm_get_mmio(mmio_dev->machine,
-                        func->bar_mapping[bar_num]);
-                if (bar_dev == NULL) {
-                    memset(dest, 0x0, size);
-                    goto out;
-                }
-
-                write_uint32_le(dest, (uint32_t)bar_dev->begin | pci_bar_is_io(&func->desc->bar[bar_num]));
-                goto out;
+        case PCI_REG_BAR5: {
+            uint8_t bar_num = (reg - 0x10) >> 2;
+            rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
+            if (bar && bar->size) {
+                write_uint32_le(dest, (uint32_t)bar->addr | pci_bar_is_io(bar));
+                break;
             }
+            memset(dest, 0, size);
+            break;
+        }
+        case PCI_REG_SSID_SVID:
+            write_uint32_le(dest, 0xeba110dc);
+            break;
+        case PCI_REG_CAP_PTR: /* currently no capabilities supported */
+        case PCI_REG_EXPANSION_ROM: /* not needed for now */
+        default:
+            memset(dest, 0x0, size);
+            break;
     }
 
-    spin_unlock(&func->irq_lock);
-    return pci_bus_read_invalid(reg, dest, size);
-out:
-    spin_unlock(&func->irq_lock);
+    spin_unlock(&func->lock);
     return true;
 }
 
-static bool pci_bus_write(rvvm_mmio_dev_t *mmio_dev, void *dest, paddr_t offset, uint8_t size)
+static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, uint8_t size)
 {
-    struct pci_bus_list *list = (struct pci_bus_list *) mmio_dev->data;
-    uint8_t reg = bit_cut(offset, 0, list->bus_shift - 8);
-    uint8_t fun = bit_cut(offset, list->bus_shift - 8, 3);
-    uint8_t dev = bit_cut(offset, list->bus_shift - 5, 5);
-    uint8_t bus = offset >> list->bus_shift;
+    pci_bus_t* bus = (pci_bus_t*)mmio_dev->data;
+    uint8_t dev_id = bit_cut(offset, bus->bus_shift - 5, 5);
+    uint8_t fun_id = bit_cut(offset, bus->bus_shift - 8, 3);
+    uint8_t reg = bit_cut(offset, 0, bus->bus_shift - 8);
+    UNUSED(size);
+    //rvvm_info("PCI write %x:%x.%x reg 0x%x size %d", bus->bus_id, dev_id, fun_id, reg, size);
 
-    rvvm_info("PCI write %x:%x.%x reg 0x%x size %d", bus, dev, fun, reg, size);
-    assert(size == 4);
-
-    if (bus >= list->count) {
-        return pci_bus_write_invalid(reg, dest, size);
+    struct pci_device* dev = bus->dev[dev_id];
+    if (dev == NULL) {
+        return true;
     }
-    struct pci_bus *pci_bus = &list->buses[bus];
+    struct pci_func* func = &dev->func[fun_id];
 
-    if (dev >= vector_size(pci_bus->devices)) {
-        return pci_bus_write_invalid(reg, dest, size);
-    }
-    struct pci_device *device = &vector_at(pci_bus->devices, dev);
-
-    if (fun >= 8) {
-        return pci_bus_write_invalid(reg, dest, size);
-    }
-    struct pci_func *func = &device->func[fun];
-    spin_lock(&func->irq_lock);
+    spin_lock(&func->lock);
 
     switch (reg) {
-        case PCI_REG_EXPANSION_ROM: /* not needed for now, works as BAR */
-        case PCI_REG_BIST_HDR_LATENCY_CACHE:
-        case 0x40: /* needed for Intel ATA probe */
-            goto out;
         case PCI_REG_STATUS_CMD:
-            {
-                uint32_t val = read_uint32_le(dest);
-                func->command = val & 0xff;
-                goto out;
-            }
+            func->command = read_uint16_le(dest);
+            break;
         case PCI_REG_BAR0:
         case PCI_REG_BAR1:
         case PCI_REG_BAR2:
         case PCI_REG_BAR3:
         case PCI_REG_BAR4:
-        case PCI_REG_BAR5:
-            {
-                uint8_t bar_num = (reg - 0x10) >> 2;
-                uint32_t len = (uint32_t)func->desc->bar[bar_num].len;
-                if (len == 0) {
-                    goto out;
+        case PCI_REG_BAR5: {
+            uint8_t bar_num = (reg - 0x10) >> 2;
+            rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
+            if (bar && bar->size) {
+                uint32_t addr = read_uint32_le(dest) & ~(uint32_t)15;
+                if (~(uint32_t)0 - addr < bar->size) {
+                    addr = -bar->size;
                 }
-
-                uint32_t addr = read_uint32_le(dest);
-                uint32_t mask = (addr & 1) ? ~(uint32_t)3 : ~(uint32_t)15;
-                addr &= mask;
-                if (~(uint32_t)0 - addr < len) {
-                    addr = -len;
-                }
-
-                rvvm_mmio_dev_t *bar_dev = rvvm_get_mmio(mmio_dev->machine,
-                        func->bar_mapping[bar_num]);
-                if (bar_dev == NULL) {
-                    goto out;
-                }
-
-                /* must be atomic... */
-                paddr_t mmio_len = bar_dev->end - bar_dev->begin;
-                bar_dev->begin = (paddr_t)addr;
-                bar_dev->end = (paddr_t)addr + mmio_len;
-                /* ...up to this point. But no way to make it... */
-                goto out;
+                // Should be atomic
+                bar->addr = addr;
             }
+            break;
+        }
         case PCI_REG_IRQ_PIN_LINE:
-            {
-                uint32_t val = read_uint32_le(dest);
-                func->irq_line = val & 0xff;
-                goto out;
-            }
+            func->irq_line = read_uint8(dest);
+            break;
+        case PCI_REG_EXPANSION_ROM: /* not needed for now, works as BAR */
+        case PCI_REG_BIST_HDR_LATENCY_CACHE:
+        default:
+            break;
     }
 
-    spin_unlock(&func->irq_lock);
-    return pci_bus_write_invalid(reg, dest, size);
-out:
-    spin_unlock(&func->irq_lock);
+    spin_unlock(&func->lock);
     return true;
 }
 
-rvvm_mmio_type_t bar_type = {
-    .name = "pci_bar_map",
-};
-
-struct pci_device* pci_bus_add_device(rvvm_machine_t *machine,
-                struct pci_bus *bus,
-                struct pci_device_desc *desc,
-                void *data)
+PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t plic, uint32_t irq, bool ecam,
+                               rvvm_addr_t base_addr,
+                               rvvm_addr_t io_addr, size_t io_len,
+                               rvvm_addr_t mem_addr, size_t mem_len)
 {
-    vector_emplace_back(bus->devices);
-    struct pci_device *dev = &vector_at(bus->devices, vector_size(bus->devices) - 1);
-    dev->bus = bus;
-    dev->desc = desc;
+    size_t bus_count = 1;
+    size_t bus_shift = ecam ? 20 : 16;
 
-    for (size_t fun = 0; fun < 8; ++fun) {
-        struct pci_func *func = &dev->func[fun];
-        struct pci_func_desc *func_desc = &dev->desc->func[fun];
-        func->dev = dev;
-        func->desc = func_desc;
-        func->command = 0x7; /* io+mem access and bus mastering */
-        func->data = data;
-        spin_init(&func->irq_lock);
-
-        for (size_t i = 0; i < 6; ++i) {
-            struct pci_bar_desc *bar = &dev->desc->func[fun].bar[i];
-            if (bar->len == 0) {
-                func->bar_mapping[i] = RVVM_INVALID_MMIO;
-                continue;
-            }
-
-            paddr_t addr;
-            if (pci_bar_is_io(bar)) {
-                addr = bus->io_addr;
-                bus->io_addr += bar->len;
-                bus->io_len -= bar->len;
-            } else {
-                addr = bus->mem_addr;
-                bus->mem_addr += bar->len;
-                bus->mem_len -= bar->len;
-            }
-
-            rvvm_mmio_dev_t bar_map = {
-                .machine = machine,
-                .begin = addr,
-                .end = addr + bar->len,
-                .min_op_size = bar->min_op_size,
-                .max_op_size = bar->max_op_size,
-                .read = bar->read,
-                .write = bar->write,
-                .type = &bar_type,
-                .data = (void*) func,
-            };
-
-            func->bar_mapping[i] = rvvm_attach_mmio(machine, &bar_map);
-        }
-    }
-
-    return dev;
-}
-
-struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
-        size_t bus_count,
-        bool is_ecam,
-        paddr_t base_addr,
-        paddr_t io_addr,
-        paddr_t io_len,
-        paddr_t mem_addr,
-        paddr_t mem_len,
-        plic_ctx_t plic,
-        uint32_t irq)
-{
-    size_t shift = is_ecam ? 20 : 16;
-
-    rvvm_mmio_dev_t cam_dev = {
-        .machine = machine,
-        .begin = base_addr,
-        .end = base_addr + (bus_count << shift),
+    rvvm_mmio_dev_t pci_bus_mmio = {
+        .addr = base_addr,
+        .size = (1 << bus_shift),
         .min_op_size = 4,
         .max_op_size = 4,
         .read = pci_bus_read,
@@ -387,102 +253,190 @@ struct pci_bus_list* pci_bus_init(rvvm_machine_t *machine,
         .type = &pci_bus_type,
     };
 
-    struct pci_bus_list *list = safe_malloc(sizeof(struct pci_bus_list));
-    list->count = bus_count;
-    list->buses = (struct pci_bus *) safe_calloc(sizeof(struct pci_bus), bus_count);
-    list->bus_shift = shift;
-    for (size_t i = 0; i < bus_count; ++i) {
-        vector_init(list->buses[i].devices);
-
-        list->buses[i].machine = machine;
-        list->buses[i].plic = plic;
-        for (size_t j = 0; j < 4; ++j) {
-            list->buses[i].irq[j] = irq;
-        }
-
-        list->buses[i].io_addr = io_addr;
-        list->buses[i].io_len = io_len;
-        list->buses[i].mem_addr = mem_addr;
-        list->buses[i].mem_len = mem_len;
+    pci_bus_t* bus = safe_calloc(sizeof(pci_bus_t), 1);
+    bus->machine = machine;
+    bus->plic = plic;
+    for (size_t j=0; j<PCI_BUS_IRQS; ++j) {
+        bus->irq[j] = irq ? irq : plic_alloc_irq(plic);
     }
-    cam_dev.data = list;
+    bus->io_addr = io_addr;
+    bus->io_len = io_len;
+    bus->mem_addr = mem_addr;
+    bus->mem_len = mem_len;
+    bus->bus_id = 0;
+    bus->bus_shift = bus_shift;
 
-    rvvm_attach_mmio(machine, &cam_dev);
+    pci_bus_mmio.data = bus;
+    rvvm_attach_mmio(machine, &pci_bus_mmio);
+
+    // Host Bridge: SiFive, Inc. FU740-C000 RISC-V SoC PCI Express x8
+    pci_dev_desc_t bridge_desc = { .func[0] = { .vendor_id = 0xF15E, .class_code = 0x0600 } };
+    pci_bus_add_device(bus, &bridge_desc);
 #ifdef USE_FDT
-    /* Only one bus is supported atm, however, bus_count can be any */
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic_fdt == NULL) {
-        rvvm_warn("Missing nodes in FDT!");
-        return list;
-    }
-
     struct fdt_node* pci_node = fdt_node_create_reg("pci", base_addr);
-    const char *compatible = is_ecam ? "pci-host-ecam-generic" : "pci-host-cam-generic";
+    const char *compatible = ecam ? "pci-host-ecam-generic" : "pci-host-cam-generic";
     fdt_node_add_prop_str(pci_node, "compatible", compatible);
     fdt_node_add_prop_str(pci_node, "device_type", "pci");
+    fdt_node_add_prop(pci_node, "dma-coherent", NULL, 0);
     fdt_node_add_prop_u32(pci_node, "#address-cells", 3);
     fdt_node_add_prop_u32(pci_node, "#size-cells", 2);
+    fdt_node_add_prop_u32(pci_node, "#interrupt-cells", 1);
 
-    #ifdef USE_RV64
-    #define HIADDR(addr) ((addr) >> 32)
-    #define LOADDR(addr) ((addr) & ~(uint32_t)0)
-    #define ADDR(addr) HIADDR(addr), LOADDR(addr)
-    #else
-    #define HIADDR(addr) 0
-    #define LOADDR(addr) ((addr) & ~(uint32_t)0)
-    #define ADDR(addr) HIADDR(addr), LOADDR(addr)
-    #endif
+    #define FDT_ADDR(addr) (((uint64_t)(addr)) >> 32), ((addr) & ~(uint32_t)0)
 
-    size_t ecam_shift = is_ecam ? 20 : 16;
-    paddr_t len = bus_count << ecam_shift;
-    uint32_t reg[4] = {
-        ADDR(base_addr), ADDR(len)
-    };
+    paddr_t len = bus_count << bus_shift;
+    uint32_t reg[4] = { FDT_ADDR(base_addr), FDT_ADDR(len) };
     fdt_node_add_prop_cells(pci_node, "reg", reg, 4);
-    uint32_t bus_range[2] = {
-        0, bus_count - 1,
-    };
+
+    uint32_t bus_range[2] = { 0, bus_count - 1 };
     fdt_node_add_prop_cells(pci_node, "bus-range", bus_range, 2);
 
-    #define CFG_HI(cacheable, space, bus, dev, fun, reg) \
-    ((cacheable) << 30 | (space) << 24 | (bus) << 16 | (dev) << 11 | (fun) << 8 | (reg))
-
-    uint32_t ranges[7 * 2] = {
-        CFG_HI(0, 1, 0, 0, 0, 0),
-        ADDR(io_addr),
-        ADDR(io_addr),
-        ADDR(io_len),
-
-        CFG_HI(0, 2, 0, 0, 0, 0),
-        ADDR(mem_addr),
-        ADDR(mem_addr),
-        ADDR(mem_len),
+    // Range header: ((cacheable) << 30 | (space) << 24 | (bus) << 16 | (dev) << 11 | (fun) << 8 | (reg))
+    uint32_t ranges[14] = {
+        0x1000000, FDT_ADDR(io_addr), FDT_ADDR(io_addr), FDT_ADDR(io_len),
+        0x2000000, FDT_ADDR(mem_addr), FDT_ADDR(mem_addr), FDT_ADDR(mem_len),
     };
-    fdt_node_add_prop_cells(pci_node, "ranges", ranges, 7 * 2);
+    fdt_node_add_prop_cells(pci_node, "ranges", ranges, 14);
 
-    fdt_node_add_prop_u32(pci_node, "#interrupt-cells", 1);
-    uint32_t interrupt_map[6] = {
-        CFG_HI(0, 0, 0, 0, 0, 0), 0, 0, 1, fdt_node_get_phandle(plic_fdt), irq,
+    // Crossing-style IRQ routing for IRQ balancing
+    // INTA of dev 2 routes the same way as INTB of dev 1, etc
+    uint32_t plic_handle = plic_get_phandle(plic);
+    uint32_t interrupt_map[96] = {
+        0x0000, 0, 0, 1, plic_handle, bus->irq[0],
+        0x0000, 0, 0, 2, plic_handle, bus->irq[1],
+        0x0000, 0, 0, 3, plic_handle, bus->irq[2],
+        0x0000, 0, 0, 4, plic_handle, bus->irq[3],
+        0x0800, 0, 0, 1, plic_handle, bus->irq[1],
+        0x0800, 0, 0, 2, plic_handle, bus->irq[2],
+        0x0800, 0, 0, 3, plic_handle, bus->irq[3],
+        0x0800, 0, 0, 4, plic_handle, bus->irq[0],
+        0x1000, 0, 0, 1, plic_handle, bus->irq[2],
+        0x1000, 0, 0, 2, plic_handle, bus->irq[3],
+        0x1000, 0, 0, 3, plic_handle, bus->irq[0],
+        0x1000, 0, 0, 4, plic_handle, bus->irq[1],
+        0x1800, 0, 0, 1, plic_handle, bus->irq[3],
+        0x1800, 0, 0, 2, plic_handle, bus->irq[0],
+        0x1800, 0, 0, 3, plic_handle, bus->irq[2],
+        0x1800, 0, 0, 4, plic_handle, bus->irq[1],
     };
-    fdt_node_add_prop_cells(pci_node, "interrupt-map", interrupt_map, 6);
-    uint32_t interrupt_mask[4] = {
-        CFG_HI(0, 0, 0, 0, 0, 0), 0, 0, 7,
-    };
+    fdt_node_add_prop_cells(pci_node, "interrupt-map", interrupt_map, 96);
+
+    uint32_t interrupt_mask[4] = { 0x1800, 0, 0, 7 };
     fdt_node_add_prop_cells(pci_node, "interrupt-map-mask", interrupt_mask, 4);
-    fdt_node_add_child(soc, pci_node);
-
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), pci_node);
 #endif
-    return list;
+    return bus;
 }
 
-struct pci_bus_list* pci_bus_init_auto(rvvm_machine_t *machine, plic_ctx_t plic)
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
 {
-    return pci_bus_init(machine, 1, true,
-                        PCI_BASE_DEFAULT_MMIO,
-                        PCI_IO_DEFAULT_MMIO, PCI_IO_DEFAULT_SIZE,
-                        PCI_MEM_DEFAULT_MMIO, PCI_MEM_DEFAULT_SIZE,
-                        plic, plic_alloc_irq(plic));
+    bool ecam = true;
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, 1 << (ecam ? 20 : 16));
+    // If there's another colliding bus, move everything by 0x8000000
+    rvvm_addr_t offset = (addr - PCI_BASE_DEFAULT_MMIO) << (27 - (ecam ? 20 : 16));
+    return pci_bus_init(machine, plic, 0, ecam,
+                        addr,
+                        PCI_IO_DEFAULT_ADDR + offset, PCI_IO_DEFAULT_SIZE,
+                        PCI_MEM_DEFAULT_MMIO + offset, PCI_MEM_DEFAULT_SIZE);
 }
 
+static inline size_t pci_func_irq_pin_id(struct pci_func* func)
+{
+    return (func->dev->dev_id + func->irq_pin - 1) & 3;
+}
+
+PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
+{
+    if (bus == NULL) return NULL;
+    pci_dev_t* dev = NULL;
+    for (size_t i=0; i<PCI_BUS_DEVS; ++i) {
+        if (bus->dev[i] == NULL) {
+            bus->dev[i] = safe_calloc(sizeof(pci_dev_t), 1);
+            dev = bus->dev[i];
+            dev->dev_id = i;
+            break;
+        }
+    }
+    if (dev == NULL) {
+        rvvm_warn("Too much devices on a single PCI bus");
+        return NULL;
+    }
+
+    dev->bus = bus;
+
+    for (size_t fun_id = 0; fun_id < 8; ++fun_id) {
+        struct pci_func *func = &dev->func[fun_id];
+        func->dev = dev;
+        func->vendor_id = desc->func[fun_id].vendor_id;
+        func->device_id = desc->func[fun_id].device_id;
+        func->class_code = desc->func[fun_id].class_code;
+        func->prog_if = desc->func[fun_id].prog_if;
+        func->rev = desc->func[fun_id].rev;
+        func->irq_pin = desc->func[fun_id].irq_pin;
+        func->command = PCI_CMD_DEFAULT;
+        func->irq_line = bus->irq[pci_func_irq_pin_id(func)];
+        spin_init(&func->lock);
+
+        for (size_t bar_id = 0; bar_id < PCI_FUNC_BARS; ++bar_id) {
+            rvvm_mmio_dev_t bar = desc->func[fun_id].bar[bar_id];
+            bar.size = (bar.size + 15ULL) & ~15ULL;
+            if (bar.size) {
+                // IO ports aren't a thing on RISC-V anyways tho, and deprecated
+                if (pci_bar_is_io(&bar)) {
+                    bar.addr = bus->io_addr + ((bar.size - bus->io_addr) % bar.size);
+                    bus->io_len -= (bar.addr + bar.size) - bus->io_addr;
+                    bus->io_addr = bar.addr + bar.size;
+                } else {
+                    // Align device BAR to it's size
+                    bar.addr = bus->mem_addr + ((bar.size - bus->mem_addr) % bar.size);
+                    bus->mem_len -= (bar.addr + bar.size) - bus->mem_addr;
+                    bus->mem_addr = bar.addr + bar.size;
+                }
+                func->bar_handle[bar_id] = rvvm_attach_mmio(bus->machine, &bar);
+            } else {
+                func->bar_handle[bar_id] = RVVM_INVALID_MMIO;
+            }
+        }
+    }
+
+    return dev;
+}
+
+PUBLIC void pci_send_irq(pci_dev_t* dev, uint32_t func_id)
+{
+    if (dev == NULL || func_id >= PCI_DEV_FUNCS) return;
+    struct pci_func* func = &dev->func[func_id];
+    struct pci_bus* bus = dev->bus;
+    uint32_t irq;
+    spin_lock(&func->lock);
+    // Check IRQ on device & PCI CAM side
+    if (func->irq_pin == 0 || func->command & PCI_CMD_IRQ_DISABLE) {
+        spin_unlock(&func->lock);
+        return;
+    }
+    // Set interrupt status bit
+    func->status |= PCI_STATUS_IRQ;
+    irq = bus->irq[pci_func_irq_pin_id(func)];
+    spin_unlock(&func->lock);
+    plic_send_irq(bus->plic, irq);
+}
+
+PUBLIC void pci_clear_irq(pci_dev_t* dev, uint32_t func_id)
+{
+    if (dev == NULL || func_id >= PCI_DEV_FUNCS) return;
+    struct pci_func* func = &dev->func[func_id];
+    spin_lock(&func->lock);
+    // Clear interrupt status bit
+    func->status &= ~PCI_STATUS_IRQ;
+    spin_unlock(&func->lock);
+}
+
+#else
+// Shims for builds without USE_PCI
+PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t*, plic_ctx_t, uint32_t, bool, rvvm_addr_t,
+                               rvvm_addr_t, size_t, rvvm_addr_t, size_t) { return NULL; }
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t*, plic_ctx_t) { return NULL; }
+PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t*, const pci_dev_desc_t*) { return NULL; }
+PUBLIC void       pci_send_irq(pci_dev_t*, uint32_t) {}
+PUBLIC void       pci_clear_irq(pci_dev_t*, uint32_t) {}
 #endif
