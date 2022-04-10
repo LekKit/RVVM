@@ -1,6 +1,7 @@
 /*
-ata.h - ATA disk controller
+ata.h - IDE/ATA disk controller
 Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,13 +17,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "ata.h"
 #include "bit_ops.h"
 #include "mem_ops.h"
-#include "riscv.h"
-#include "rvvm.h"
-#include "ata.h"
-#include "rvvm_types.h"
 #include "spinlock.h"
+#include "utils.h"
+#include "threading.h"
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 /* Data registers */
 #define ATA_REG_DATA 0x00
@@ -122,44 +126,32 @@ struct ata_dev
         uint8_t status;
     } dma_info;
     uint8_t curdrive;
-    struct pci_func *func;
+    pci_dev_t* pci_dev;
 };
 
 static uint64_t ata_get_lba(struct ata_dev *ata, bool is48bit)
 {
     if (is48bit) {
         return bit_cut(ata->drive[ata->curdrive].lbal, 0, 8)
-            | bit_cut(ata->drive[ata->curdrive].lbam, 0, 8) << 8
-            | bit_cut(ata->drive[ata->curdrive].lbah, 0, 8) << 16
-            | bit_cut(ata->drive[ata->curdrive].lbal, 8, 8) << 24
-            | (uint64_t)bit_cut(ata->drive[ata->curdrive].lbam, 8, 8) << 32
-            | (uint64_t)bit_cut(ata->drive[ata->curdrive].lbah, 8, 8) << 40;
+             | bit_cut(ata->drive[ata->curdrive].lbam, 0, 8) << 8
+             | bit_cut(ata->drive[ata->curdrive].lbah, 0, 8) << 16
+             | bit_cut(ata->drive[ata->curdrive].lbal, 8, 8) << 24
+             | (uint64_t)bit_cut(ata->drive[ata->curdrive].lbam, 8, 8) << 32
+             | (uint64_t)bit_cut(ata->drive[ata->curdrive].lbah, 8, 8) << 40;
     } else {
         return bit_cut(ata->drive[ata->curdrive].lbal, 0, 8)
-            | bit_cut(ata->drive[ata->curdrive].lbam, 0, 8) << 8
-            | bit_cut(ata->drive[ata->curdrive].lbah, 0, 8) << 16
-            | bit_cut(ata->drive[ata->curdrive].drive, 0, 4) << 24;
+             | bit_cut(ata->drive[ata->curdrive].lbam, 0, 8) << 8
+             | bit_cut(ata->drive[ata->curdrive].lbah, 0, 8) << 16
+             | bit_cut(ata->drive[ata->curdrive].drive, 0, 4) << 24;
     }
 }
 
 static void ata_send_interrupt(struct ata_dev *ata) {
-    if (!ata->func || ata->drive[ata->curdrive].nien) {
-        return;
-    }
-
-#ifdef USE_PCI
-    pci_send_irq(ata->func);
-#endif
+    pci_send_irq(ata->pci_dev, 0);
 }
 
 static void ata_clear_interrupt(struct ata_dev *ata) {
-    if (!ata->func) {
-        return;
-    }
-
-#ifdef USE_PCI
-    pci_clear_irq(ata->func);
-#endif
+    pci_clear_irq(ata->pci_dev, 0);
 }
 
 static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
@@ -170,70 +162,6 @@ static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
         len -= 2;
     }
 }
-
-#ifdef USE_PCI
-static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
-{
-    bool is_read = bit_check(ata->dma_info.cmd, 3);
-    size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
-    blkdev_t* blk = ata->drive[ata->curdrive].blk;
-    size_t processed = 0;
-    while (1) {
-        /* Read PRD */
-        uint32_t prd_physaddr;
-        if (!rvvm_read_ram(machine, &prd_physaddr,
-                    ata->dma_info.prdt_addr, sizeof(prd_physaddr)))
-            goto err;
-        uint32_t prd_sectcount;
-        if (!rvvm_read_ram(machine, &prd_sectcount,
-                    ata->dma_info.prdt_addr + 4, sizeof(prd_sectcount)))
-            goto err;
-
-        uint32_t buf_size = prd_sectcount & 0xffff;
-        /* Value if 0 means size of 64K */
-        if (buf_size == 0) {
-            buf_size = 64 * 1024;
-        }
-
-        void *buf = rvvm_get_dma_ptr(machine, prd_physaddr, buf_size);
-        if (!buf) goto err;
-
-        /* Read/write data to/from RAM */
-        if (is_read) {
-            if (blk_read(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
-                goto err;
-            }
-        } else {
-            if (blk_write(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
-                goto err;
-            }
-        }
-
-        processed += buf_size;
-
-        /* If bit 31 is set, this is the last PRD */
-        if (bit_check(prd_sectcount, 31)) {
-            if (processed != to_process) {
-                goto err;
-            }
-
-            break;
-        }
-
-        /* All good, advance the pointer */
-        ata->dma_info.prdt_addr += 8;
-    }
-
-    ata->dma_info.cmd &= ~(1 << 0);
-    ata->dma_info.status |= (1 << 2);
-    ata_send_interrupt(ata);
-    return;
-
-err:
-    ata->dma_info.status |= (1 << 2) | (1 << 1);
-    ata_send_interrupt(ata);
-}
-#endif
 
 static void ata_cmd_identify(struct ata_dev *ata)
 {
@@ -288,7 +216,6 @@ static void ata_cmd_initialize_device_params(struct ata_dev *ata)
 /* Reads the data to buffer */
 static bool ata_read_buf(struct ata_dev *ata)
 {
-    //printf("ATA fill next sector\n");
     if (!blk_read(ata->drive[ata->curdrive].blk,
                   ata->drive[ata->curdrive].buf,
                   SECTOR_SIZE, BLKDEV_CURPOS)) {
@@ -303,7 +230,6 @@ static bool ata_read_buf(struct ata_dev *ata)
 /* Writes the data to buffer */
 static bool ata_write_buf(struct ata_dev *ata)
 {
-    //printf("ATA write buf\n");
     if (!blk_write(ata->drive[ata->curdrive].blk,
                    ata->drive[ata->curdrive].buf,
                    SECTOR_SIZE, BLKDEV_CURPOS)) {
@@ -321,8 +247,6 @@ static void ata_cmd_read_sectors(struct ata_dev *ata)
     if (ata->drive[ata->curdrive].sectcount == 0) {
         ata->drive[ata->curdrive].sectcount = 256;
     }
-
-    //printf("ATA read sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
 
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
     if (!blk_seek(ata->drive[ata->curdrive].blk,
@@ -349,7 +273,6 @@ static void ata_cmd_write_sectors(struct ata_dev *ata)
         ata->drive[ata->curdrive].sectcount = 256;
     }
 
-    //printf("ATA write sectors count: %d offset: 0x%08"PRIx64"\n", ata->drive[ata->curdrive].sectcount, ata_get_lba(ata, false));
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
     if (!blk_seek(ata->drive[ata->curdrive].blk,
                   ata_get_lba(ata, false) * SECTOR_SIZE,
@@ -437,7 +360,6 @@ static void ata_cmd_check_power_mode(struct ata_dev *ata)
 
 static void ata_handle_cmd(struct ata_dev *ata, uint8_t cmd)
 {
-    //printf("ATA command: 0x%02X\n", cmd);
     switch (cmd) {
         case ATA_CMD_IDENTIFY: ata_cmd_identify(ata); break;
         case ATA_CMD_INITIALIZE_DEVICE_PARAMS: ata_cmd_initialize_device_params(ata); break;
@@ -455,38 +377,21 @@ static void ata_handle_cmd(struct ata_dev *ata, uint8_t cmd)
     }
 }
 
-static bool ata_data_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_data_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-
-#if 0
-    printf("ATA DATA MMIO offset: %d size: %d read\n", offset, size);
-#endif
-    if ((offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
-        /* TODO: misalign */
+    struct ata_dev* ata = (struct ata_dev*)device->data;
+    if (offset & ((1 << ATA_REG_SHIFT) - 1)) {
+        // TODO: misalign
+        // It appears this is never executed if ATA_REG_SHIFT == 0
         return false;
     }
 
     offset >>= ATA_REG_SHIFT;
-
-    /* DATA register is of any size, others are 1 byte r/w */
-    if (size != 1 && offset != ATA_REG_DATA) {
-        /* TODO: misalign */
-        return false;
-    }
-
     switch (offset) {
         case ATA_REG_DATA:
             if (ata->drive[ata->curdrive].bytes_to_rw != 0) {
-                uint8_t *addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
-#if 0
-                if (size == 4) {
-                    write_uint32_le(memory_data, read_uint32_le(addr));
-                } else if (size == 2) {
-                    write_uint16_le(memory_data, read_uint16_le(addr));
-                }
-#endif
-                memcpy(memory_data, addr, size);
+                uint8_t* addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
+                memcpy(data, addr, size);
 
                 ata->drive[ata->curdrive].bytes_to_rw -= size;
                 if (ata->drive[ata->curdrive].bytes_to_rw == 0) {
@@ -500,66 +405,55 @@ static bool ata_data_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_dat
                     }
                 }
             } else {
-                memset(memory_data, '\0', size);
+                memset(data, 0, size);
             }
             break;
-        case ATA_REG_ERR:
-            /* ERROR */
-
+        case ATA_REG_ERR: // Error
             /* OSDev says that this register is 16-bit,
              * but there's no address stored so this seems wrong */
-            memcpy(memory_data, &ata->drive[ata->curdrive].error, size);
+            memcpy(data, &ata->drive[ata->curdrive].error, size);
             break;
         case ATA_REG_NSECT:
-            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].sectcount >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            write_uint8(data, ata->drive[ata->curdrive].sectcount >> ata->drive[ata->curdrive].hob_shift);
             break;
         case ATA_REG_LBAL:
-            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbal >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            write_uint8(data, ata->drive[ata->curdrive].lbal >> ata->drive[ata->curdrive].hob_shift);
             break;
         case ATA_REG_LBAM:
-            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbam >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            write_uint8(data, ata->drive[ata->curdrive].lbam >> ata->drive[ata->curdrive].hob_shift);
             break;
         case ATA_REG_LBAH:
-            *(uint8_t*) memory_data = (ata->drive[ata->curdrive].lbah >> ata->drive[ata->curdrive].hob_shift) & 0xff;
+            write_uint8(data, ata->drive[ata->curdrive].lbah >> ata->drive[ata->curdrive].hob_shift);
             break;
         case ATA_REG_DEVICE:
-            *(uint8_t*) memory_data = ata->drive[ata->curdrive].drive | (1 << 5) | (1 << 7);
+            write_uint8(data, ata->drive[ata->curdrive].drive | (1 << 5) | (1 << 7));
             break;
-        case ATA_REG_STATUS:
-            /* STATUS */
-            *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
+        case ATA_REG_STATUS: // Status
+            write_uint8(data, ata->drive[ata->curdrive].status);
             ata_clear_interrupt(ata);
+            break;
+        default:
+            memset(data, 0, size);
             break;
     }
 
     return true;
 }
 
-static bool ata_data_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_data_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-
-#if 0
-    printf("ATA DATA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
-#endif
-    if ((offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
-        /* TODO: misalign */
+    struct ata_dev* ata = (struct ata_dev*)device->data;
+    if (offset & ((1 << ATA_REG_SHIFT) - 1)) {
+        // TODO: misalign
+        // It appears this is never executed if ATA_REG_SHIFT == 0
         return false;
     }
 
     offset >>= ATA_REG_SHIFT;
-
-    /* DATA register is of any size, others are 1 byte r/w */
-    if (size != 1 && offset != ATA_REG_DATA) {
-        /* TODO: misalign */
-        return false;
-    }
-
     switch (offset) {
-        case ATA_REG_DATA:
-            {
+        case ATA_REG_DATA: {
                 uint8_t *addr = ata->drive[ata->curdrive].buf + SECTOR_SIZE - ata->drive[ata->curdrive].bytes_to_rw;
-                memcpy(addr, memory_data, size);
+                memcpy(addr, data, size);
 
                 ata->drive[ata->curdrive].bytes_to_rw -= size;
                 if (ata->drive[ata->curdrive].bytes_to_rw == 0) {
@@ -575,91 +469,67 @@ static bool ata_data_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_da
                 }
             }
             break;
-        case ATA_REG_ERR:
-            /* FEATURES - ignore */
+        case ATA_REG_ERR: // Features - ignore
             break;
         case ATA_REG_NSECT:
             ata->drive[ata->curdrive].sectcount <<= 8;
-            ata->drive[ata->curdrive].sectcount |= *(uint8_t*) memory_data;
+            ata->drive[ata->curdrive].sectcount |= read_uint8(data);
             break;
         case ATA_REG_LBAL:
             ata->drive[ata->curdrive].lbal <<= 8;
-            ata->drive[ata->curdrive].lbal |= *(uint8_t*) memory_data;
+            ata->drive[ata->curdrive].lbal |= read_uint8(data);
             break;
         case ATA_REG_LBAM:
             ata->drive[ata->curdrive].lbam <<= 8;
-            ata->drive[ata->curdrive].lbam |= *(uint8_t*) memory_data;
+            ata->drive[ata->curdrive].lbam |= read_uint8(data);
             break;
         case ATA_REG_LBAH:
             ata->drive[ata->curdrive].lbah <<= 8;
-            ata->drive[ata->curdrive].lbah |= *(uint8_t*) memory_data;
+            ata->drive[ata->curdrive].lbah |= read_uint8(data);
             break;
         case ATA_REG_DEVICE:
-            ata->curdrive = bit_check(*(uint8_t*) memory_data, 4) ? 1 : 0;
-            ata->drive[ata->curdrive].drive = *(uint8_t*) memory_data;
+            ata->curdrive = bit_check(read_uint8(data), 4) ? 1 : 0;
+            ata->drive[ata->curdrive].drive = read_uint8(data);
             break;
-        case ATA_REG_STATUS:
-            /* Command */
-
+        case ATA_REG_STATUS: // Command
             /* Not sure when error is cleared.
              * Spec says that it contains status of the last command executed */
             ata->drive[ata->curdrive].error = 0;
             ata->drive[ata->curdrive].status &= ~ATA_STATUS_ERR;
-            ata_handle_cmd(ata, *(uint8_t*) memory_data);
+            ata_handle_cmd(ata, read_uint8(data));
             break;
     }
 
     return true;
 }
 
-static bool ata_ctl_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_ctl_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-
-#if 0
-    printf("ATA CTL MMIO offset: %d size: %d read\n", offset, size);
-#endif
-    if (size != 1 || (offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
-        /* TODO: misalign */
-        return false;
-    }
-
+    struct ata_dev*ata = (struct ata_dev*)device->data;
+    UNUSED(size);
     offset >>= ATA_REG_SHIFT;
-
     switch (offset) {
-        case ATA_REG_CTL:
-            /* Alternate STATUS */
-            *(uint8_t*) memory_data = ata->drive[ata->curdrive].status;
+        case ATA_REG_CTL: // Alternate STATUS
+            write_uint8(data, ata->drive[ata->curdrive].status);
             ata_clear_interrupt(ata);
             break;
-        case ATA_REG_DRVADDR:
-            /* TODO: seems that Linux doesn't use this */
+        case ATA_REG_DRVADDR: // TODO: Seems that Linux doesn't use this
             break;
     }
 
     return true;
 }
 
-static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-
-#if 0
-    printf("ATA CTL MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
-#endif
-    if (size != 1 || (offset & ((1 << ATA_REG_SHIFT) - 1)) != 0) {
-        /* TODO: misalign */
-        return false;
-    }
-
+    struct ata_dev* ata = (struct ata_dev*)device->data;
+    UNUSED(size);
     offset >>= ATA_REG_SHIFT;
-
     switch (offset) {
-        case ATA_REG_CTL:
-            /* Device control */
-            ata->drive[ata->curdrive].nien = bit_check(*(uint8_t*) memory_data, 1);
-            ata->drive[ata->curdrive].hob_shift = bit_check(*(uint8_t*) memory_data, 7) ? 8 : 0;
-            if (bit_check(*(uint8_t*) memory_data, 2)) {
+        case ATA_REG_CTL: // Device control
+            ata->drive[ata->curdrive].nien = bit_check(read_uint8(data), 1);
+            ata->drive[ata->curdrive].hob_shift = bit_check(read_uint8(data), 7) ? 8 : 0;
+            if (bit_check(read_uint8(data), 2)) {
                 /* Soft reset */
                 ata->drive[ata->curdrive].bytes_to_rw = 0;
                 ata->drive[ata->curdrive].lbal = 1; /* Sectors start from 1 */
@@ -676,106 +546,12 @@ static bool ata_ctl_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_dat
                 }
             }
             break;
-        case ATA_REG_DRVADDR:
-            /* TODO: seems that Linux doesn't use this */
+        case ATA_REG_DRVADDR: // TODO: Seems that Linux doesn't use this
             break;
     }
 
     return true;
 }
-
-#ifdef USE_PCI
-static bool ata_bmdma_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
-{
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-
-#if 0
-    printf("ATA BMDMA MMIO offset: %d size: %d read\n", offset, size);
-#endif
-    switch (offset)
-    {
-        case ATA_BMDMA_CMD:
-            if (size != 1) return false;
-            *(uint8_t*)memory_data = ata->dma_info.cmd;
-            break;
-        case ATA_BMDMA_STATUS:
-            if (size != 1) return false;
-            *(uint8_t*) memory_data = ata->dma_info.status
-                | (ata->drive[0].blk != NULL) << 5
-                | (ata->drive[1].blk != NULL) << 6;
-            break;
-        case ATA_BMDMA_PRDT:
-            {
-                if (size != 4) return false;
-                *(uint32_t*)memory_data = (uint32_t) ata->dma_info.prdt_addr;
-                break;
-            }
-        default:
-            /* secondary controller not supported now */
-            return false;
-    }
-
-    return true;
-}
-
-
-static void* ata_worker(void** data)
-{
-    struct ata_dev* ata = (struct ata_dev *)data[0];
-    spin_lock(&ata->dma_info.lock);
-    ata_process_prdt(ata, (rvvm_machine_t*)data[1]);
-    spin_unlock(&ata->dma_info.lock);
-    return NULL;
-}
-
-static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
-{
-    struct ata_dev *ata = (struct ata_dev *) device->data;
-    bool process_prdt;
-
-#if 0
-    printf("ATA BMDMA MMIO offset: %d size: %d write val: 0x%02X\n", offset, size, *(uint8_t*) memory_data);
-#endif
-    switch (offset)
-    {
-        case ATA_BMDMA_CMD:
-            if (size != 1) return false;
-            spin_lock(&ata->dma_info.lock);
-            process_prdt = !(ata->dma_info.cmd & 1) && (*(uint8_t*)memory_data & 1);
-            ata->dma_info.cmd = *(uint8_t*)memory_data;
-            spin_unlock(&ata->dma_info.lock);
-            if (process_prdt) {
-                if (rvvm_has_arg("noasync")) {
-                    ata_process_prdt(ata, device->machine);
-                } else {
-                    void* req[2] = {ata, device->machine};
-                    thread_create_task_va(ata_worker, req, 2);
-                }
-            }
-            break;
-        case ATA_BMDMA_STATUS:
-            if (size != 1) return false;
-            spin_lock(&ata->dma_info.lock);
-            ata->dma_info.status &= ~(*(uint8_t*)memory_data & 6);
-            if (!bit_check(ata->dma_info.status, 2)) {
-                ata_clear_interrupt(ata);
-            }
-            spin_unlock(&ata->dma_info.lock);
-            break;
-        case ATA_BMDMA_PRDT:
-            if (size != 4) return false;
-            spin_lock(&ata->dma_info.lock);
-            ata->dma_info.prdt_addr = (paddr_t)*(uint32_t*) memory_data;
-            spin_unlock(&ata->dma_info.lock);
-            break;
-        default:
-            /* secondary controller not supported now */
-            return false;
-    }
-
-    return true;
-}
-#endif
 
 static void ata_data_remove(rvvm_mmio_dev_t* device)
 {
@@ -807,20 +583,20 @@ static rvvm_mmio_type_t ata_ctl_dev_type = {
     .remove = ata_remove_dummy,
 };
 
-void ata_init_pio(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave)
+static struct ata_dev* ata_create(blkdev_t* master, blkdev_t* slave)
 {
-    struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
+    struct ata_dev* ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
     ata->drive[0].blk = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[0].blk), SECTOR_SIZE);
-    if (ata->drive[0].size == 0) {
-        ata->drive[0].blk = NULL;
-    }
+    ata->drive[0].size = master ? DIV_ROUND_UP(blk_getsize(master), SECTOR_SIZE) : 0;
     ata->drive[1].blk = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[1].blk), SECTOR_SIZE);
-    if (ata->drive[1].size == 0) {
-        ata->drive[1].blk = NULL;
-    }
+    ata->drive[1].size = slave ? DIV_ROUND_UP(blk_getsize(slave), SECTOR_SIZE) : 0;
     spin_init(&ata->dma_info.lock);
+    return ata;
+}
+
+PUBLIC void ata_init_pio(rvvm_machine_t* machine, rvvm_addr_t data_base_addr, rvvm_addr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave)
+{
+    struct ata_dev* ata = ata_create(master, slave);
 
     rvvm_mmio_dev_t ata_data;
     ata_data.min_op_size = 1;
@@ -828,8 +604,8 @@ void ata_init_pio(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_b
     ata_data.read = ata_data_mmio_read_handler;
     ata_data.write = ata_data_mmio_write_handler;
     ata_data.type = &ata_data_dev_type;
-    ata_data.begin = data_base_addr;
-    ata_data.end = data_base_addr + ((ATA_REG_STATUS + 1) << ATA_REG_SHIFT);
+    ata_data.addr = data_base_addr;
+    ata_data.size = ((ATA_REG_STATUS + 1) << ATA_REG_SHIFT);
     ata_data.data = ata;
     rvvm_attach_mmio(machine, &ata_data);
 
@@ -839,19 +615,12 @@ void ata_init_pio(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_b
     ata_ctl.read = ata_ctl_mmio_read_handler,
     ata_ctl.write = ata_ctl_mmio_write_handler,
     ata_ctl.type = &ata_ctl_dev_type,
-    ata_ctl.begin = ctl_base_addr;
-    ata_ctl.end = ctl_base_addr + ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT);
+    ata_ctl.addr = ctl_base_addr;
+    ata_ctl.size = ((ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT);
     ata_ctl.data = ata;
     rvvm_attach_mmio(machine, &ata_ctl);
-
 #ifdef USE_FDT
     uint32_t reg_cells[8];
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    if (soc == NULL) {
-        rvvm_warn("Missing soc node in FDT!");
-        return;
-    }
-
     reg_cells[0] = ((uint64_t)data_base_addr) >> 32;
     reg_cells[1] = data_base_addr;
     reg_cells[4] = ((uint64_t)ctl_base_addr) >> 32;
@@ -864,35 +633,162 @@ void ata_init_pio(rvvm_machine_t* machine, paddr_t data_base_addr, paddr_t ctl_b
     fdt_node_add_prop_str(ata_node, "compatible", "ata-generic");
     fdt_node_add_prop_u32(ata_node, "reg-shift", ATA_REG_SHIFT);
     fdt_node_add_prop_u32(ata_node, "pio-mode", 4);
-    fdt_node_add_child(soc, ata_node);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), ata_node);
 
-    struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-    if (chosen == NULL) {
-        rvvm_warn("Missing chosen node in FDT!");
-        return;
-    }
-    fdt_node_add_prop_str(chosen, "bootargs", "root=/dev/sda rw");
+    rvvm_cmdline_append(machine, "root=/dev/sda rw");
 #endif
 }
 
 #ifdef USE_PCI
-static bool ata_data_read_primary(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+
+static rvvm_mmio_type_t ata_bmdma_dev_type = {
+    .name = "ata_bmdma",
+    .remove = ata_remove_dummy,
+};
+
+static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
 {
-    return ata_data_mmio_read_handler(device, memory_data, offset, size);
+    bool is_read = bit_check(ata->dma_info.cmd, 3);
+    size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
+    blkdev_t* blk = ata->drive[ata->curdrive].blk;
+    size_t processed = 0;
+    while (1) {
+        /* Read PRD */
+        uint32_t prd_physaddr;
+        if (!rvvm_read_ram(machine, &prd_physaddr,
+                    ata->dma_info.prdt_addr, sizeof(prd_physaddr)))
+            goto err;
+        uint32_t prd_sectcount;
+        if (!rvvm_read_ram(machine, &prd_sectcount,
+                    ata->dma_info.prdt_addr + 4, sizeof(prd_sectcount)))
+            goto err;
+
+        uint32_t buf_size = prd_sectcount & 0xffff;
+        /* Value if 0 means size of 64K */
+        if (buf_size == 0) {
+            buf_size = 64 * 1024;
+        }
+
+        void *buf = rvvm_get_dma_ptr(machine, prd_physaddr, buf_size);
+        if (!buf) goto err;
+
+        /* Read/write data to/from RAM */
+        if (is_read) {
+            if (blk_read(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
+                goto err;
+            }
+        } else {
+            if (blk_write(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
+                goto err;
+            }
+        }
+
+        processed += buf_size;
+
+        /* If bit 31 is set, this is the last PRD */
+        if (bit_check(prd_sectcount, 31)) {
+            if (processed != to_process) {
+                goto err;
+            }
+
+            break;
+        }
+
+        /* All good, advance the pointer */
+        ata->dma_info.prdt_addr += 8;
+    }
+
+    ata->dma_info.cmd &= ~(1 << 0);
+    ata->dma_info.status |= (1 << 2);
+    ata_send_interrupt(ata);
+    return;
+
+err:
+    ata->dma_info.status |= (1 << 2) | (1 << 1);
+    ata_send_interrupt(ata);
 }
 
-static bool ata_data_write_primary(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static void* ata_worker(void** data)
 {
-    return ata_data_mmio_write_handler(device, memory_data, offset, size);
+    struct ata_dev* ata = (struct ata_dev*)data[0];
+    spin_lock(&ata->dma_info.lock);
+    ata_process_prdt(ata, (rvvm_machine_t*)data[1]);
+    spin_unlock(&ata->dma_info.lock);
+    return NULL;
 }
 
-static bool ata_ctl_read_primary(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_bmdma_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
+{
+    struct ata_dev* ata = (struct ata_dev*)device->data;
+    switch (offset) {
+        case ATA_BMDMA_CMD:
+            if (size != 1) return false;
+            write_uint8(data, ata->dma_info.cmd);
+            break;
+        case ATA_BMDMA_STATUS:
+            if (size != 1) return false;
+            write_uint8(data, ata->dma_info.status
+                           | (ata->drive[0].blk != NULL) << 5
+                           | (ata->drive[1].blk != NULL) << 6);
+            break;
+        case ATA_BMDMA_PRDT:
+            if (size != 4) return false;
+            write_uint32_le(data, ata->dma_info.prdt_addr);
+            break;
+        default:
+            /* secondary controller not supported now */
+            return false;
+    }
+
+    return true;
+}
+
+static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
+{
+    struct ata_dev* ata = (struct ata_dev*)device->data;
+    bool process_prdt;
+    switch (offset) {
+        case ATA_BMDMA_CMD:
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
+            process_prdt = !(ata->dma_info.cmd & 1) && (read_uint8(data) & 1);
+            ata->dma_info.cmd = read_uint8(data);
+            spin_unlock(&ata->dma_info.lock);
+            if (process_prdt) {
+                void* req[2] = {ata, device->machine};
+                thread_create_task_va(ata_worker, req, 2);
+            }
+            break;
+        case ATA_BMDMA_STATUS:
+            if (size != 1) return false;
+            spin_lock(&ata->dma_info.lock);
+            ata->dma_info.status &= ~(read_uint8(data) & 6);
+            if (!bit_check(ata->dma_info.status, 2)) {
+                ata_clear_interrupt(ata);
+            }
+            spin_unlock(&ata->dma_info.lock);
+            break;
+        case ATA_BMDMA_PRDT:
+            if (size != 4) return false;
+            spin_lock(&ata->dma_info.lock);
+            ata->dma_info.prdt_addr = read_uint32_le(data);
+            spin_unlock(&ata->dma_info.lock);
+            break;
+        default:
+            // Secondary controller not supported now
+            return false;
+    }
+
+    return true;
+}
+
+static bool ata_ctl_read_primary(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     offset -= 2;
     return ata_ctl_mmio_read_handler(device, memory_data, offset, size);
 }
 
-static bool ata_ctl_write_primary(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool ata_ctl_write_primary(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     offset -= 2;
     return ata_ctl_mmio_write_handler(device, memory_data, offset, size);
@@ -922,61 +818,46 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 }
 #endif
 
-#endif
-
-#ifdef USE_PCI
-void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, blkdev_t* master, blkdev_t* slave)
+PUBLIC void ata_init_pci(pci_bus_t* pci_bus, blkdev_t* master, blkdev_t* slave)
 {
-    assert(master != NULL || slave != NULL);
-    struct ata_dev *ata = (struct ata_dev*)safe_calloc(sizeof(struct ata_dev), 1);
-    ata->drive[0].blk = master;
-    ata->drive[0].size = master == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[0].blk), SECTOR_SIZE);
-    if (ata->drive[0].size == 0) {
-        ata->drive[0].blk = NULL;
-    }
-    ata->drive[1].blk = slave;
-    ata->drive[1].size = slave == NULL ? 0 : DIV_ROUND_UP(blk_getsize(ata->drive[1].blk), SECTOR_SIZE);
-    if (ata->drive[1].size == 0) {
-        ata->drive[1].blk = NULL;
-    }
-    spin_init(&ata->dma_info.lock);
+    struct ata_dev* ata = ata_create(master, slave);
 
-    static struct pci_device_desc ata_desc = {
+    pci_dev_desc_t ata_desc = {
         .func[0] = {
-            .vendor_id = 0x8086,
-            .device_id = 0x1c3c, /* 6 Series/C200 Series Chipset Family IDE-r Controller */
-            .class_code = 0x0101, /* IDE */
-            .prog_if = 1 | 4, /* Do not use legacy mode */
-            .irq_pin = 1, /* INTA, unused by now */
+            .vendor_id = 0x8086,  // Intel (ata-generic kernel driver refuses to load with other vendors)
+            .device_id = 0x8c88,  // 9 Series Series Chipset Family SATA Controller [IDE Mode]
+            .class_code = 0x0101, // Mass Storage, IDE
+            .prog_if = 0x85,      // PCI native mode-only controller, supports bus mastering
+            .irq_pin = PCI_IRQ_PIN_INTA,
             .bar = {
                 {
-                    //.len = (ATA_REG_STATUS + 1) << ATA_REG_SHIFT,
-                    .len = 4096,
+                    .size = 4096,
                     .min_op_size = 1,
                     .max_op_size = 2,
-                    .read = ata_data_read_primary,
-                    .write = ata_data_write_primary,
+                    .read = ata_data_mmio_read_handler,
+                    .write = ata_data_mmio_write_handler,
+                    .data = ata,
+                    .type = &ata_data_dev_type,
                 },
                 {
-                    //.len = (ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT,
-                    .len = 4096,
+                    .size = 4096,
                     .min_op_size = 1,
                     .max_op_size = 1,
                     .read = ata_ctl_read_primary,
                     .write = ata_ctl_write_primary,
+                    .data = ata,
+                    .type = &ata_ctl_dev_type,
                 },
 #if 0
                 {
-                    //.len = (ATA_REG_STATUS + 1) << ATA_REG_SHIFT,
-                    .len = 4096,
+                    .size = 4096,
                     .min_op_size = 1,
                     .max_op_size = 2,
                     .read = ata_data_read_secondary,
                     .write = ata_data_write_secondary,
                 },
                 {
-                    //.len = (ATA_REG_DRVADDR + 1) << ATA_REG_SHIFT,
-                    .len = 4096,
+                    .size = 4096,
                     .min_op_size = 1,
                     .max_op_size = 1,
                     .read = ata_ctl_read_secondary,
@@ -986,50 +867,35 @@ void ata_init_pci(rvvm_machine_t* machine, struct pci_bus *pci_bus, blkdev_t* ma
                 { 0 }, { 0 },
 #endif
                 {
-                    .len = 16,
+                    .size = 16,
                     .min_op_size = 1,
                     .max_op_size = 4,
                     .read = ata_bmdma_mmio_read_handler,
                     .write = ata_bmdma_mmio_write_handler,
+                    .data = ata,
+                    .type = &ata_bmdma_dev_type,
                 }
             }
         }
     };
 
-    struct pci_device *pci_dev = pci_bus_add_device(machine, pci_bus, &ata_desc, (void*) ata);
-
-    ata->func = &pci_dev->func[0];
-    struct rvvm_mmio_dev_t *mmio_dev = rvvm_get_mmio(machine, ata->func->bar_mapping[0]);
-    if (!mmio_dev) {
-        rvvm_warn("ATA BAR mapping 0 not found!");
-        return;
-    }
-    mmio_dev->data = (void *) ata;
-    /* for remove & update function */
-    mmio_dev->type = &ata_data_dev_type;
-    mmio_dev = rvvm_get_mmio(machine, pci_dev->func[0].bar_mapping[1]);
-    if (!mmio_dev) {
-        rvvm_warn("ATA BAR mapping 1 not found!");
-        return;
-    }
-    mmio_dev->data = (void *) ata;
-    mmio_dev->type = &ata_ctl_dev_type;
-    mmio_dev = rvvm_get_mmio(machine, pci_dev->func[0].bar_mapping[4]);
-    if (!mmio_dev) {
-        rvvm_warn("ATA BAR mapping 4 not found!");
-        return;
-    }
-    mmio_dev->data = (void *) ata;
-    mmio_dev->type = &ata_ctl_dev_type;
-
-#ifdef USE_FDT
-    struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-    if (chosen == NULL) {
-        rvvm_warn("Missing chosen node in FDT!");
-        return;
-    }
-    fdt_node_add_prop_str(chosen, "bootargs", "root=/dev/sda rw");
-#endif
+    ata->pci_dev = pci_bus_add_device(pci_bus, &ata_desc);
 }
+
+#else
+PUBLIC void ata_init_pci(pci_bus_t*, blkdev_t*, blkdev_t*) {}
 #endif
 
+PUBLIC void ata_init_auto(rvvm_machine_t* machine, pci_bus_t* pci_bus, blkdev_t* image)
+{
+#ifdef USE_PCI
+    if (pci_bus) {
+        ata_init_pci(pci_bus, image, NULL);
+        return;
+    }
+#else
+    UNUSED(pci_bus);
+#endif
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ATA_DATA_DEFAULT_MMIO, 0x2000);
+    ata_init_pio(machine, addr, addr + 0x2000, image, NULL);
+}
