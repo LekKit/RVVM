@@ -247,7 +247,7 @@ void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
     child->parent = node;
     entry->node = child;
     entry->next = NULL;
-    
+
     struct fdt_node_list** last = &node->nodes;
     while ((*last)) last = &(*last)->next;
     *last = entry;
@@ -415,9 +415,10 @@ size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t 
     ctx.struct_off = buf_size = ALIGN_UP(buf_size + sizeof(struct fdt_reserve_entry), 4);
     ctx.strings_off = ctx.strings_begin = buf_size += size_desc.struct_size;
     buf_size += size_desc.strings_size;
-    
+
     if (buf_size > size) return 0;
 
+    memset(buffer, 0, buf_size);
     ctx.buf = buffer;
     struct fdt_header *hdr = (struct fdt_header *) ctx.buf;
     hdr->magic = fdt_host2u32(FDT_MAGIC);
