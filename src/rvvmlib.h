@@ -69,8 +69,8 @@ typedef bool (*rvvm_mmio_handler_t)(rvvm_mmio_dev_t* dev, void* dest, size_t off
 PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size);
 
 struct rvvm_mmio_dev_t {
-    rvvm_addr_t begin;        // MMIO region address in physical memory
-    size_t end;               // Last usable address in physical memory
+    rvvm_addr_t addr;         // MMIO region address in physical memory
+    size_t size;              // Size of the MMIO region, size zero means a device placeholder
     void* data;               // Device-specific data, or pointer to memory (for native memory regions)
     rvvm_machine_t* machine;  // Parent machine
     rvvm_mmio_type_t* type;   // Device-specific operations & info
