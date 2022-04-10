@@ -17,9 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "rtc-goldfish.h"
-#include "plic.h"
 #include "mem_ops.h"
+#include "utils.h"
 #include <time.h>
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 #define RTC_TIME_LOW     0x0
 #define RTC_TIME_HIGH    0x4
@@ -41,7 +45,7 @@ struct rtc_goldfish_data {
     bool alarm_enabled;
 };
 
-static bool rtc_goldfish_mmio_read(rvvm_mmio_dev_t* dev, void* data, paddr_t offset, uint8_t size)
+static bool rtc_goldfish_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
     struct rtc_goldfish_data* rtc = dev->data;
     uint64_t timer64 = time(NULL) * 1000000000ULL;
@@ -71,7 +75,7 @@ static bool rtc_goldfish_mmio_read(rvvm_mmio_dev_t* dev, void* data, paddr_t off
     return true;
 }
 
-static bool rtc_goldfish_mmio_write(rvvm_mmio_dev_t* dev, void* data, paddr_t offset, uint8_t size)
+static bool rtc_goldfish_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
     struct rtc_goldfish_data* rtc = dev->data;
     uint64_t timer64 = time(NULL) * 1000000000ULL;
@@ -106,7 +110,7 @@ static rvvm_mmio_type_t rtc_goldfish_dev_type = {
     .name = "rtc_goldfish",
 };
 
-void rtc_goldfish_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
 {
     struct rtc_goldfish_data* ptr = safe_calloc(sizeof(struct rtc_goldfish_data), 1);
     ptr->plic = plic;
@@ -118,28 +122,22 @@ void rtc_goldfish_init(rvvm_machine_t* machine, paddr_t base_addr, plic_ctx_t pl
     rtc_goldfish.read = rtc_goldfish_mmio_read;
     rtc_goldfish.write = rtc_goldfish_mmio_write;
     rtc_goldfish.type = &rtc_goldfish_dev_type;
-    rtc_goldfish.begin = base_addr;
-    rtc_goldfish.end = base_addr + RTC_REG_SIZE;
+    rtc_goldfish.addr = base_addr;
+    rtc_goldfish.size = RTC_REG_SIZE;
     rtc_goldfish.data = ptr;
     rvvm_attach_mmio(machine, &rtc_goldfish);
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* plic_fdt = soc ? fdt_node_find_reg_any(soc, "plic") : NULL;
-    if (plic_fdt == NULL) {
-        rvvm_warn("Missing nodes in FDT!");
-        return;
-    }
-    
     struct fdt_node* rtc = fdt_node_create_reg("rtc", base_addr);
     fdt_node_add_prop_reg(rtc, "reg", base_addr, RTC_REG_SIZE);
     fdt_node_add_prop_str(rtc, "compatible", "google,goldfish-rtc");
-    fdt_node_add_prop_u32(rtc, "interrupt-parent", fdt_node_get_phandle(plic_fdt));
+    fdt_node_add_prop_u32(rtc, "interrupt-parent", plic_get_phandle(plic));
     fdt_node_add_prop_u32(rtc, "interrupts", irq);
-    fdt_node_add_child(soc, rtc);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), rtc);
 #endif
 }
 
-void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
 {
-    rtc_goldfish_init(machine, RTC_GOLDFISH_DEFAULT_MMIO, plic, plic_alloc_irq(plic));
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_GOLDFISH_DEFAULT_MMIO, RTC_REG_SIZE);
+    rtc_goldfish_init(machine, addr, plic, plic_alloc_irq(plic));
 }
