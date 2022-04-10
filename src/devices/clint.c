@@ -17,15 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "clint.h"
-#include "compiler.h"
-#include "rvtimer.h"
+#include "riscv_hart.h"
 #include "mem_ops.h"
 #include "bit_ops.h"
-#include "riscv_hart.h"
 
-#define CLINT_MEM_SIZE 0x10000
+#define CLINT_MMIO_SIZE    0x10000
 
-static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, paddr_t offset, uint8_t size)
+static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
     rvvm_hart_t *vm = (rvvm_hart_t*) device->data;
     uint8_t tmp[8];
@@ -55,7 +53,7 @@ static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, paddr_t
     return false;
 }
 
-static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, paddr_t offset, uint8_t size)
+static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
     rvvm_hart_t *vm = (rvvm_hart_t*) device->data;
     uint8_t tmp[8];
@@ -105,7 +103,7 @@ static rvvm_mmio_type_t clint_dev_type = {
     .remove = clint_remove,
 };
 
-void clint_init(rvvm_machine_t* machine, paddr_t addr)
+PUBLIC void clint_init(rvvm_machine_t* machine, rvvm_addr_t addr)
 {
     rvvm_mmio_dev_t clint;
     clint.min_op_size = 1;
@@ -115,40 +113,40 @@ void clint_init(rvvm_machine_t* machine, paddr_t addr)
     clint.type = &clint_dev_type;
 
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* cpus = fdt_node_find(machine->fdt, "cpus");
+    struct fdt_node* cpus = fdt_node_find(rvvm_get_fdt_root(machine), "cpus");
 #endif
 
     vector_foreach(machine->harts, i) {
-        clint.begin = addr;
-        clint.end = addr + CLINT_MEM_SIZE;
+        clint.addr = addr;
+        clint.size = CLINT_MMIO_SIZE;
         clint.data = &vector_at(machine->harts, i);
         rvvm_attach_mmio(machine, &clint);
 
 #ifdef USE_FDT
-        struct fdt_node* cpu = cpus ? fdt_node_find_reg(cpus, "cpu", i) : NULL;
-        struct fdt_node* cpu_irq = cpu ? fdt_node_find(cpu, "interrupt-controller") : NULL;
-        if (cpu_irq && soc) {
+        struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
+        struct fdt_node* cpu_irq = fdt_node_find(cpu, "interrupt-controller");
+        if (cpu_irq) {
             uint32_t irq_phandle = fdt_node_get_phandle(cpu_irq);
             struct fdt_node* clint = fdt_node_create_reg("clint", addr);
-            fdt_node_add_prop_reg(clint, "reg", addr, CLINT_MEM_SIZE);
+            fdt_node_add_prop_reg(clint, "reg", addr, CLINT_MMIO_SIZE);
             fdt_node_add_prop_str(clint, "compatible", "riscv,clint0");
             uint32_t irq_ext[4];
             irq_ext[0] = irq_ext[2] = irq_phandle;
             irq_ext[1] = INTERRUPT_MSOFTWARE;
             irq_ext[3] = INTERRUPT_MTIMER;
             fdt_node_add_prop_cells(clint, "interrupts-extended", irq_ext, 4);
-            fdt_node_add_child(soc, clint);
+            fdt_node_add_child(rvvm_get_fdt_soc(machine), clint);
         } else {
             rvvm_warn("Missing nodes in FDT!");
         }
 #endif
 
-        addr += CLINT_MEM_SIZE;
+        addr += CLINT_MMIO_SIZE;
     }
 }
 
-void clint_init_auto(rvvm_machine_t* machine)
+PUBLIC void clint_init_auto(rvvm_machine_t* machine)
 {
-    clint_init(machine, CLINT_DEFAULT_MMIO);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, CLINT_DEFAULT_MMIO, CLINT_MMIO_SIZE);
+    clint_init(machine, addr);
 }
