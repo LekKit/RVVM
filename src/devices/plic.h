@@ -19,15 +19,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef DEV_PLIC_H
 #define DEV_PLIC_H
 
-#include "rvvm.h"
+#include "rvvmlib.h"
 
-typedef void* plic_ctx_t;
+typedef struct plic* plic_ctx_t;
 
 #define PLIC_DEFAULT_MMIO 0xC000000
 
-plic_ctx_t plic_init(rvvm_machine_t* machine, paddr_t base_addr);
-plic_ctx_t plic_init_auto(rvvm_machine_t* machine);
-uint32_t plic_alloc_irq(plic_ctx_t plic);
-bool plic_send_irq(plic_ctx_t plic, uint32_t irq);
+PUBLIC plic_ctx_t plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
+PUBLIC plic_ctx_t plic_init_auto(rvvm_machine_t* machine);
+
+// Allocate new IRQ
+PUBLIC uint32_t plic_alloc_irq(plic_ctx_t plic);
+
+// Get FDT phandle of the PLIC
+PUBLIC uint32_t plic_get_phandle(plic_ctx_t plic);
+
+// Send IRQ through PLIC
+PUBLIC bool plic_send_irq(plic_ctx_t plic, uint32_t irq);
 
 #endif

@@ -16,12 +16,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "rvvm.h"
+#include "plic.h"
 #include "riscv_hart.h"
 #include "bit_ops.h"
 #include "spinlock.h"
-
-#include "plic.h"
 #include "vector.h"
 #include <assert.h>
 
@@ -37,11 +35,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CTX2HARTID(ctx) ((ctx) >> 1)
 #define CTX2PRIO(ctx) ((ctx) & 1 ? INTERRUPT_MEXTERNAL : INTERRUPT_SEXTERNAL)
 
-struct plic
-{
+struct plic {
     rvvm_machine_t* machine;
     spinlock_t lock;
     uint32_t alloc_irq;
+    uint32_t phandle;
     uint32_t prio[SOURCE_MAX];
     uint32_t pending[(SOURCE_MAX+8+4-1)/8/4];
     uint32_t enable[(SOURCE_MAX+8+4-1)/8/4][CTX_MAX];
@@ -302,9 +300,9 @@ static bool plic_ctxflag_write_handler(rvvm_machine_t *mach, struct plic *dev, u
     return true;
 }
 
-static bool plic_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool plic_mmio_read_handler(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
-    struct plic *dev = (struct plic*)device->data;
+    struct plic* dev = (struct plic*)device->data;
 
     spin_lock(&dev->lock);
     bool ret = false;
@@ -383,7 +381,7 @@ out:
     return ret;
 }
 
-static bool plic_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, paddr_t offset, uint8_t size)
+static bool plic_mmio_write_handler(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     struct plic *dev = (struct plic*)device->data;
 
@@ -462,39 +460,33 @@ static rvvm_mmio_type_t plic_dev_type = {
 };
 
 // Create PLIC device
-plic_ctx_t plic_init(rvvm_machine_t* machine, paddr_t base_addr)
+PUBLIC plic_ctx_t plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
-    struct plic* dev = safe_calloc(sizeof(struct plic), 1);
-    dev->machine = machine;
-    spin_init(&dev->lock);
+    struct plic* plic = safe_calloc(sizeof(struct plic), 1);
+    plic->machine = machine;
+    spin_init(&plic->lock);
 
-    rvvm_mmio_dev_t plic;
-    plic.min_op_size = 4;
-    plic.max_op_size = 4;
-    plic.read = plic_mmio_read_handler;
-    plic.write = plic_mmio_write_handler;
-    plic.type = &plic_dev_type;
-    plic.begin = base_addr;
-    plic.end = base_addr + 0x4000000;
-    plic.data = dev;
-    rvvm_attach_mmio(machine, &plic);
+    rvvm_mmio_dev_t plic_mmio;
+    plic_mmio.min_op_size = 4;
+    plic_mmio.max_op_size = 4;
+    plic_mmio.read = plic_mmio_read_handler;
+    plic_mmio.write = plic_mmio_write_handler;
+    plic_mmio.type = &plic_dev_type;
+    plic_mmio.addr = base_addr;
+    plic_mmio.size = 0x4000000;
+    plic_mmio.data = plic;
+    rvvm_attach_mmio(machine, &plic_mmio);
 #ifdef USE_FDT
-    struct fdt_node* soc = fdt_node_find(machine->fdt, "soc");
-    struct fdt_node* cpus = fdt_node_find(machine->fdt, "cpus");
-    if (soc == NULL || cpus == NULL) {
-        rvvm_warn("Missing nodes in FDT!");
-        return dev;
+    struct fdt_node* cpus = fdt_node_find(rvvm_get_fdt_root(machine), "cpus");
+    if (cpus == NULL) {
+        rvvm_warn("Missing /cpus node in FDT!");
+        return plic;
     }
 
     uint32_t* irq_ext = safe_calloc(sizeof(uint32_t), vector_size(machine->harts) * 4);
     vector_foreach(machine->harts, i) {
         struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
-        struct fdt_node* cpu_irq = cpu ? fdt_node_find(cpu, "interrupt-controller") : NULL;
-        if (cpu_irq == NULL) {
-            free(irq_ext);
-            rvvm_warn("Missing nodes in FDT!");
-            return dev;
-        }
+        struct fdt_node* cpu_irq = fdt_node_find(cpu, "interrupt-controller");
 
         uint32_t irq_phandle = fdt_node_get_phandle(cpu_irq);
         irq_ext[(i * 4)] = irq_ext[(i * 4) + 2] = irq_phandle;
@@ -511,42 +503,52 @@ plic_ctx_t plic_init(rvvm_machine_t* machine, paddr_t base_addr)
     fdt_node_add_prop_cells(plic_node, "interrupts-extended", irq_ext, vector_size(machine->harts) * 4);
     free(irq_ext);
 
-    fdt_node_add_child(soc, plic_node);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), plic_node);
+
+    plic->phandle = fdt_node_get_phandle(plic_node);
 #endif
-    return dev;
+    return plic;
 }
 
-plic_ctx_t plic_init_auto(rvvm_machine_t* machine)
+PUBLIC plic_ctx_t plic_init_auto(rvvm_machine_t* machine)
 {
-    return plic_init(machine, PLIC_DEFAULT_MMIO);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PLIC_DEFAULT_MMIO, 0x4000000);
+    return plic_init(machine, addr);
 }
 
 // Allocate new IRQ
-uint32_t plic_alloc_irq(plic_ctx_t plic)
+PUBLIC uint32_t plic_alloc_irq(plic_ctx_t plic)
 {
-    struct plic* dev = (struct plic*)plic;
-    dev->alloc_irq++;
-    return dev->alloc_irq;
+    if (plic == NULL) return 0;
+    plic->alloc_irq++;
+    return plic->alloc_irq;
+}
+
+// Get FDT phandle of the PLIC
+PUBLIC uint32_t plic_get_phandle(plic_ctx_t plic)
+{
+    if (plic == NULL) return 0;
+    return plic->phandle;
 }
 
 // Send IRQ through PLIC
-bool plic_send_irq(plic_ctx_t plic, uint32_t irq)
+PUBLIC bool plic_send_irq(plic_ctx_t plic, uint32_t irq)
 {
-    struct plic* dev = (struct plic*)plic;
-    spin_lock(&dev->lock);
+    if (plic == NULL) return false;
+    spin_lock(&plic->lock);
 
     /* mark the interrupt as pending */
-    set_int_pending(dev, irq, 1);
+    set_int_pending(plic, irq, 1);
 
     /* choose hart and interrupt priority to send IRQ to */
-    vector_foreach(dev->machine->harts, i) {
-        if (!is_hart_busy(dev, i)) {
+    vector_foreach(plic->machine->harts, i) {
+        if (!is_hart_busy(plic, i)) {
             for (size_t ctx = HARTID2CTX(i); ctx < HARTID2CTX(i) + 2; ++ctx) {
                 /* is_int_valid check is done in select_int */
-                if (select_int(dev, ctx, irq)) {
+                if (select_int(plic, ctx, irq)) {
                     /* found free hart, update the current selected interrupt ID */
-                    set_hart_busy(dev, i, true);
-                    riscv_interrupt(&vector_at(dev->machine->harts, i), CTX2PRIO(ctx));
+                    set_hart_busy(plic, i, true);
+                    riscv_interrupt(&vector_at(plic->machine->harts, i), CTX2PRIO(ctx));
                     break;
                 }
             }
@@ -556,6 +558,6 @@ bool plic_send_irq(plic_ctx_t plic, uint32_t irq)
     * no free harts - interrupt will be selected automatically
     * when hart will handle it's interrupt (and notify us about
     * that by writing CLAIMCOMPLETE register) */
-    spin_unlock(&dev->lock);
+    spin_unlock(&plic->lock);
     return true;
 }
