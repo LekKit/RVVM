@@ -309,6 +309,7 @@ static void* riscv_hart_run_wrap(void* ptr)
 
 void riscv_hart_spawn(rvvm_hart_t *vm)
 {
+    vm->pending_events = 0;
     vm->thread = thread_create(riscv_hart_run_wrap, (void*)vm);
 }
 
