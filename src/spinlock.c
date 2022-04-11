@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Maximum allowed lock time, warns and recovers the lock upon expiration
 #define SPINLOCK_MAX_MS 1000
-#define SPINLOCK_MAX_SLEEP 10
+#define SPINLOCK_MAX_SLEEP 1
 
 // Attemts to claim the lock before sleep throttle
 #define SPINLOCK_RETRIES 100
@@ -35,7 +35,9 @@ static uint32_t global_cond_init = 0;
 
 static void spin_atexit()
 {
-    condvar_free(global_cond);
+    cond_var_t cond = global_cond;
+    global_cond = NULL;
+    condvar_free(cond);
 }
 
 NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
