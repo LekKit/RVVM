@@ -3,6 +3,7 @@ main.c - RVVM Entry point, API example
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
+                    KotB <github.com/0xCatPKG>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -242,40 +243,45 @@ static bool load_file_to_ram(rvvm_machine_t* machine, rvvm_addr_t addr, const ch
     return true;
 }
 
-static bool rvvm_run_with_args(vm_args_t args)
+// Load bootrom, kernel on each machine reset
+static bool handle_vm_reset(rvvm_machine_t* machine, void* data, bool reset)
 {
-    rvvm_addr_t mem_base = RVVM_DEFAULT_MEMBASE;
-    rvvm_machine_t* machine = rvvm_create_machine(mem_base, args.mem, args.smp, args.rv64);
-    if (machine == NULL) {
-        rvvm_error("VM creation failed");
-        return false;
-    } else if (!load_file_to_ram(machine, mem_base, args.bootrom)) {
-        rvvm_error("Failed to load bootrom");
-        return false;
-    }
-
-    if (args.dtb) {
-        rvvm_addr_t dtb_addr = mem_base + (args.mem >> 1);
-        if (!load_file_to_ram(machine, dtb_addr, args.dtb)) {
-            rvvm_error("Failed to load DTB");
+    if (reset) {
+        vm_args_t* args = data;
+        if (!load_file_to_ram(machine, RVVM_DEFAULT_MEMBASE, args->bootrom)) {
+            rvvm_error("Failed to load bootrom");
             return false;
         }
-        rvvm_info("Custom DTB loaded at 0x%08"PRIx64, dtb_addr);
-        rvvm_set_dtb_addr(machine, dtb_addr);
-    }
+        if (args->kernel) {
+            // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
 
-    if (args.kernel) {
-        // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
-
-        // It's possible to move memory region 128k behind and put
-        // patched OpenSBI there, to save those precious 4MB
-        size_t hugepage_offset = args.rv64 ? (2 << 20) : (4 << 20);
-        if (!load_file_to_ram(machine, mem_base + hugepage_offset, args.kernel)) {
-            rvvm_error("Failed to load kernel");
-            return false;
+            // It's possible to move memory region 128k behind and put
+            // patched OpenSBI there, to save those precious 4MB
+            rvvm_addr_t kern_addr = RVVM_DEFAULT_MEMBASE + (args->rv64 ? (2 << 20) : (4 << 20));
+            if (!load_file_to_ram(machine, kern_addr, args->kernel)) {
+                rvvm_error("Failed to load kernel");
+                return false;
+            }
+            rvvm_info("Kernel image loaded at 0x%08"PRIx64, kern_addr);
         }
-        rvvm_info("Kernel image loaded at 0x%08"PRIx64, mem_base + hugepage_offset);
+        if (args->dtb) {
+            rvvm_addr_t dtb_addr = RVVM_DEFAULT_MEMBASE + (args->mem >> 1);
+            if (!load_file_to_ram(machine, dtb_addr, args->dtb)) {
+                rvvm_error("Failed to load custom DTB");
+                return false;
+            }
+            rvvm_info("Custom DTB loaded at 0x%08"PRIx64, dtb_addr);
+            rvvm_set_dtb_addr(machine, dtb_addr);
+        }
     }
+    return true;
+}
+
+static void rvvm_run_with_args(vm_args_t args)
+{
+    rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
+
+    if (!handle_vm_reset(machine, &args, true)) return;
 
     clint_init_auto(machine);
     plic_ctx_t plic = plic_init_auto(machine);
@@ -288,7 +294,7 @@ static bool rvvm_run_with_args(vm_args_t args)
         blkdev_t* blk = blk_open(args.image, BLKDEV_RW);
         if (blk == NULL) {
             rvvm_error("Unable to open hard drive image file %s", args.image);
-            return false;
+            return;
         } else {
             rvvm_cmdline_append(machine, "root=/dev/sda rw");
             ata_init_auto(machine, pci_bus, blk);
@@ -322,7 +328,7 @@ static bool rvvm_run_with_args(vm_args_t args)
         char buffer[65536];
         size_t size = fdt_serialize(rvvm_get_fdt_root(machine), buffer, sizeof(buffer), 0);
         rvfile_t* file;
-        if (size && (file = rvopen(args.dumpdtb, RVFILE_RW | RVFILE_CREAT | RVFILE_EXCL))) {
+        if (size && (file = rvopen(args.dumpdtb, RVFILE_RW | RVFILE_CREAT | RVFILE_TRUNC))) {
             rvwrite(file, buffer, size, 0);
             rvclose(file);
             rvvm_info("DTB dumped to %s, size %u", args.dumpdtb, (uint32_t)size);
@@ -335,37 +341,11 @@ static bool rvvm_run_with_args(vm_args_t args)
     }
 
     rvvm_enable_builtin_eventloop(false);
+    rvvm_set_reset_handler(machine, handle_vm_reset, &args);
     rvvm_start_machine(machine);
     rvvm_run_eventloop(); // Returns on machine shutdown
 
-    bool reset = false;// TODO machine->needs_reset;
     rvvm_free_machine(machine);
-
-/*
- * Example machine resetting code, but a few issues here:
- * - Devices dont't know about resetting at all, may wreak havoc with DMA, etc
- *
- * - We need to reload bootrom & kernel images into ram,
- * but those may be not present after initial boot
- *
- * - Moreover, this should be not done from API user viewpoint but instead wrapped
- * in some helper routine (issue #2 again)
- *
- *
-    vector_foreach(machine->harts, i) {
-        riscv_tlb_flush(&vector_at(machine->harts, i));
-        vector_at(machine->harts, i).registers[REGISTER_PC] = machine->mem.begin;
-        vector_at(machine->harts, i).registers[REGISTER_X10] = i;
-        vector_at(machine->harts, i).registers[REGISTER_X11] = machine->mem.begin + (machine->mem.size >> 1);
-        vector_at(machine->harts, i).priv_mode = PRIVILEGE_MACHINE;
-        vector_at(machine->harts, i).pending_events = 0;
-    }
-    load_file_to_ram(machine, machine->mem.begin, args.bootrom);
-    load_file_to_ram(machine, machine->mem.begin + (machine->mem.size >> 1), args.dtb);
-    load_file_to_ram(machine, machine->mem.begin + (args.rv64 ? (2 << 20) : (4 << 20)), args.kernel);
-*/
-
-    return reset;
 }
 
 int main(int argc, const char** argv)
@@ -379,6 +359,6 @@ int main(int argc, const char** argv)
         return 0;
     }
 
-    while (rvvm_run_with_args(args));
+    rvvm_run_with_args(args);
     return 0;
 }
