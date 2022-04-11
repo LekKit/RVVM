@@ -124,6 +124,9 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine);
 // Reset/shutdown the VM
 PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
 
+// Returns true if the machine is powered on (even when it's paused)
+PUBLIC bool rvvm_machine_powered_on(rvvm_machine_t* machine);
+
 // Complete cleanup (frees memory, devices data, VM structures)
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
 

@@ -256,7 +256,7 @@ struct rvvm_machine_t {
     vector_t(rvvm_mmio_dev_t) mmio;
     rvtimer_t timer;
     uint32_t running;
-    bool needs_reset;
+    uint32_t power_state;
 
     rvvm_reset_handler_t on_reset;
     void* reset_data;
