@@ -17,9 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "syscon.h"
-#include "riscv_hart.h"
-#include "atomics.h"
 #include "mem_ops.h"
+
+#ifdef USE_FDT
+#include "fdtlib.h"
+#endif
 
 #define SYSCON_POWEROFF 0x5555
 #define SYSCON_RESET    0x7777
@@ -38,22 +40,11 @@ static bool syscon_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
     if (offset == 0) {
         switch(read_uint16_le_m(data)) {
             case SYSCON_POWEROFF:
-                rvvm_info("Machine %p shutting down", dev->machine);
-                dev->machine->needs_reset = false;
-                break;
             case SYSCON_RESET:
-                rvvm_info("Machine %p resetting", dev->machine);
-                dev->machine->needs_reset = true;
+                rvvm_reset_machine(dev->machine, read_uint16_le_m(data) == SYSCON_RESET);
                 break;
             default:
-                return true;
                 break;
-        }
-        // Handled by eventloop
-        atomic_store_uint32(&dev->machine->running, 0);
-        // For singlethreaded VMs, returns from riscv_hart_run()
-        if (vector_size(dev->machine->harts) == 1) {
-            riscv_hart_queue_pause(&vector_at(dev->machine->harts, 0));
         }
     }
     return true;
@@ -63,7 +54,7 @@ static rvvm_mmio_type_t syscon_dev_type = {
     .name = "syscon",
 };
 
-void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
+PUBLIC void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     rvvm_mmio_dev_t syscon = {0};
     syscon.min_op_size = 2;
@@ -96,7 +87,7 @@ void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 #endif
 }
 
-void syscon_init_auto(rvvm_machine_t* machine)
+PUBLIC void syscon_init_auto(rvvm_machine_t* machine)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, SYSCON_DEFAULT_MMIO, 0x1000);
     syscon_init(machine, addr);
