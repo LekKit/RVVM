@@ -258,6 +258,8 @@ struct rvvm_machine_t {
     uint32_t running;
     bool needs_reset;
 
+    rvvm_reset_handler_t on_reset;
+    void* reset_data;
     paddr_t dtb_addr;
 #ifdef USE_FDT
     // FDT nodes for device tree generation

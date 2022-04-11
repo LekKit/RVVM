@@ -86,6 +86,8 @@ struct rvvm_mmio_dev_t {
     uint8_t max_op_size;
 };
 
+typedef bool (*rvvm_reset_handler_t)(rvvm_machine_t* machine, void* data, bool reset);
+
 // Memory starts at 0x80000000 by default, machine boots from there as well
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
@@ -100,7 +102,7 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
 PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine);
 
-// Pass physical address of Device Tree Binary (skips FDT generation)
+// Pass physical address of Device Tree Binary (skips FDT generation until reset)
 // To revert this, pass dtb_addr = 0
 PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr);
 
@@ -108,11 +110,19 @@ PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr);
 PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
 
+// Set up handler & userdata to be called when the VM performs reset/shutdown
+// The handler should reload the bootrom, kernel, etc into RAM on reset,
+// since they are probably not usable after initial boot. Returning false cancels reset.
+PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data);
+
 // Spawns CPU threads and continues VM execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);
 
 // Stops the CPUs, everything is frozen upon return
 PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine);
+
+// Reset/shutdown the VM
+PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
 
 // Complete cleanup (frees memory, devices data, VM structures)
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
