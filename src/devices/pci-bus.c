@@ -431,6 +431,12 @@ PUBLIC void pci_clear_irq(pci_dev_t* dev, uint32_t func_id)
     spin_unlock(&func->lock);
 }
 
+PUBLIC void* pci_get_dma_ptr(pci_dev_t* dev, rvvm_addr_t addr, size_t size)
+{
+    if (dev == NULL) return NULL;
+    return rvvm_get_dma_ptr(dev->bus->machine, addr, size);
+}
+
 #else
 // Shims for builds without USE_PCI
 PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t*, plic_ctx_t, uint32_t, bool, rvvm_addr_t,
@@ -439,4 +445,5 @@ PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t*, plic_ctx_t) { return NULL; 
 PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t*, const pci_dev_desc_t*) { return NULL; }
 PUBLIC void       pci_send_irq(pci_dev_t*, uint32_t) {}
 PUBLIC void       pci_clear_irq(pci_dev_t*, uint32_t) {}
+PUBLIC void* pci_get_dma_ptr(pci_dev_t*, rvvm_addr_t, size_t){ return NULL; }
 #endif

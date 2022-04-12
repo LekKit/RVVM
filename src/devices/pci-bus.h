@@ -75,4 +75,7 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
 PUBLIC void       pci_send_irq(pci_dev_t* dev, uint32_t func_id);
 PUBLIC void       pci_clear_irq(pci_dev_t* dev, uint32_t func_id);
 
+// Directly access physical memory of the device bus host (returns non-NULL on success)
+PUBLIC void*      pci_get_dma_ptr(pci_dev_t* dev, rvvm_addr_t addr, size_t size);
+
 #endif
