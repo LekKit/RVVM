@@ -95,25 +95,39 @@ static inline void riscv_jit_flush_cache(rvvm_hart_t* vm)
 
 NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm);
 
-static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
+#ifndef RVJIT_NATIVE_LINKER
+static inline bool riscv_jtlb_lookup(rvvm_hart_t* vm)
 {
-    vaddr_t pc, tpc, entry;
-    size_t tries = 0;
-
-    if (unlikely(!vm->jit_enabled)) return false;
-
     // Try to find & execute a block
-    trace:
-    pc = vm->registers[REGISTER_PC];
-    entry = (pc >> 1) & (TLB_SIZE - 1);
-    tpc = vm->jtlb[entry].pc;
+    vaddr_t pc = vm->registers[REGISTER_PC];
+    vaddr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    vaddr_t tpc = vm->jtlb[entry].pc;
     if (likely(pc == tpc)) {
         vm->jtlb[entry].block(vm);
-        if (likely(tries++ < 10)) goto trace;
         return true;
-    } else if (tries == 0) {
+    } else {
+        return false;
+    }
+}
+#endif
+
+static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
+{
+    if (unlikely(!vm->jit_enabled)) return false;
+
+    vaddr_t pc = vm->registers[REGISTER_PC];
+    vaddr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    vaddr_t tpc = vm->jtlb[entry].pc;
+    if (likely(pc == tpc)) {
+        vm->jtlb[entry].block(vm);
+#ifndef RVJIT_NATIVE_LINKER
+        // Try to execute more blocks if they aren't linked
+        for (size_t i=0; i<10 && riscv_jtlb_lookup(vm); ++i);
+#endif
+        return true;
+    } else {
         return riscv_jit_lookup(vm);
-    } else return true;
+    }
 }
 
 // Block unrolling configuration
