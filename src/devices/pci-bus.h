@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Default PCI bus settings
 #define PCI_BASE_DEFAULT_MMIO 0x50000000
 #define PCI_IO_DEFAULT_ADDR   0x00000000
-#define PCI_IO_DEFAULT_SIZE   0x01000000
+#define PCI_IO_DEFAULT_SIZE   0x00000000
 #define PCI_MEM_DEFAULT_MMIO  0x59000000
 #define PCI_MEM_DEFAULT_SIZE  0x06000000
 
