@@ -296,7 +296,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t plic, uint32_
         0x1000000, FDT_ADDR(io_addr), FDT_ADDR(io_addr), FDT_ADDR(io_len),
         0x2000000, FDT_ADDR(mem_addr), FDT_ADDR(mem_addr), FDT_ADDR(mem_len),
     };
-    fdt_node_add_prop_cells(pci_node, "ranges", ranges, 14);
+    fdt_node_add_prop_cells(pci_node, "ranges", ranges + (io_len ? 0 : 7), io_len ? 14 : 7);
 
     // Crossing-style IRQ routing for IRQ balancing
     // INTA of dev 2 routes the same way as INTB of dev 1, etc
