@@ -336,7 +336,7 @@ PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str)
     size_t cmd_len = machine->cmdline ? strlen(machine->cmdline) : 0;
     size_t append_len = strlen(str);
     char* tmp = safe_calloc(sizeof(char), cmd_len + append_len + 2);
-    memcpy(tmp, machine->cmdline, cmd_len);
+    if (machine->cmdline) memcpy(tmp, machine->cmdline, cmd_len);
     memcpy(tmp + cmd_len, str, append_len);
     tmp[cmd_len + append_len] = ' ';
     tmp[cmd_len + append_len + 1] = 0;
