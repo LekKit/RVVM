@@ -286,22 +286,22 @@ static void rvjit_lookup_block(rvjit_block_t* block)
     code[2] |= VM_PTR_REG;
     code[19] |= (VM_PTR_REG << 3);
     code[30] |= VM_PTR_REG;
-    write_uint32_le(code + 3, offsetof(rvvm_hart_t, registers[REGISTER_PC]));
+    write_uint32_le_m(code + 3, offsetof(rvvm_hart_t, registers[REGISTER_PC]));
     code[11] = VM_TLB_SHIFT - 2;
-    write_uint32_le(code + 13, VM_TLB_MASK << (VM_TLB_SHIFT - 1));
-    write_uint32_le(code + 23, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, pc));
-    write_uint32_le(code + 36, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, block));
+    write_uint32_le_m(code + 13, VM_TLB_MASK << (VM_TLB_SHIFT - 1));
+    write_uint32_le_m(code + 23, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, pc));
+    write_uint32_le_m(code + 36, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, block));
     rvjit_put_code(block, code, sizeof(code));
 #elif defined(RVJIT_X86) && defined(RVJIT_ABI_FASTCALL)
     uint8_t code[38] = {0x8B, 0x91, 0x04, 0x01, 0x00, 0x00, 0x89, 0xD0,
         0xC1, 0xE0, 0x03, 0x25, 0xF0, 0x0F, 0x00, 0x00, 0x01, 0xC8, 0x39,
         0x90, 0x1C, 0x22, 0x00, 0x00, 0x75, 0x0B, 0x83, 0x39, 0x00, 0x74,
         0x06, 0xFF, 0xA0, 0x14, 0x22, 0x00, 0x00, 0xC3};
-    write_uint32_le(code + 2, offsetof(rvvm_hart_t, registers[REGISTER_PC]));
+    write_uint32_le_m(code + 2, offsetof(rvvm_hart_t, registers[REGISTER_PC]));
     code[10] = VM_TLB_SHIFT - 2;
-    write_uint32_le(code + 12, VM_TLB_MASK << (VM_TLB_SHIFT - 1));
-    write_uint32_le(code + 20, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, pc));
-    write_uint32_le(code + 33, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, block));
+    write_uint32_le_m(code + 12, VM_TLB_MASK << (VM_TLB_SHIFT - 1));
+    write_uint32_le_m(code + 20, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, pc));
+    write_uint32_le_m(code + 33, offsetof(rvvm_hart_t, jtlb) + offsetof(rvvm_jtlb_entry_t, block));
     rvjit_put_code(block, code, sizeof(code));
 #else
     regid_t pc = rvjit_try_claim_hreg(block);
