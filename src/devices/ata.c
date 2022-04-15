@@ -116,7 +116,7 @@ struct ata_dev
         atareg_t error;
         uint8_t status;
         uint8_t hob_shift;
-        bool nien : 1; /* interrupt disable */
+        bool nien; // Interrupt disable
         uint8_t buf[SECTOR_SIZE];
     } drive[2];
     struct {
@@ -154,50 +154,46 @@ static void ata_clear_interrupt(struct ata_dev *ata) {
     pci_clear_irq(ata->pci_dev, 0);
 }
 
-static void ata_copy_id_string(uint16_t *pos, const char *str, size_t len)
+static void ata_copy_id_string(uint8_t* buf, const char* str)
 {
-    while (len) {
-        *pos++ = (uint16_t)str[0] << 8 | str[1];
-        str += 2;
-        len -= 2;
+    // Reverse each byte pair since they are little-endian words
+    for (size_t i=0; str[i]; ++i) {
+        buf[(i & ~1) | ((~i) & 1)] = str[i];
     }
 }
 
 static void ata_cmd_identify(struct ata_dev *ata)
 {
-    uint16_t id_buf[SECTOR_SIZE / 2] = {
-        [0] = (1 << 6), // non-removable, ATA device
-        [1] = 65535, // logical cylinders
-        [3] = 16, // logical heads
-        [6] = 63, // sectors per track
-        [22] = 4, // number of bytes available in READ/WRITE LONG cmds
-        [47] = 0, // read-write multipe commands not implemented
-        [49] = (1 << 9) | (1 << 8), // Capabilities - LBA supported, DMA supported
-        [50] = (1 << 14), // Capabilities - bit 14 needs to be set as required by ATA/ATAPI-5 spec
-        [51] = (4 << 8), // PIO data transfer cycle timing mode
-        [53] = 1 | 2 | 4, // fields 54-58, 64-70 and 88 are valid
-        [54] = 65535, // logical cylinders
-        [55] = 16, // logical heads
-        [56] = 63, // sectors per track
-        // capacity in sectors
-        [57] = ata->drive[ata->curdrive].size > 0xffffffff ? 0xffff : ata->drive[ata->curdrive].size & 0xffff,
-        [58] = ata->drive[ata->curdrive].size > 0xffffffff ? 0xffff : ata->drive[ata->curdrive].size >> 16,
-        [60] = ata->drive[ata->curdrive].size > 0xffffffff ? 0xffff : ata->drive[ata->curdrive].size & 0xffff,
-        [61] = ata->drive[ata->curdrive].size > 0xffffffff ? 0xffff : ata->drive[ata->curdrive].size >> 16,
-        [64] = 1 | 2, // advanced PIO modes supported
-        [67] = 1, // PIO transfer cycle time without flow control
-        [68] = 1, // PIO transfer cycle time with IORDY flow control
-        [80] = 1 << 6, // ATA major version
-        [88] = 1 << 5 | 1 << 13, // UDMA mode 5 supported & active
-    };
+    uint8_t id_buf[SECTOR_SIZE] = {0};
+    write_uint16_le(id_buf,         0x40); // Non-removable, ATA device
+    write_uint16_le(id_buf + 2,   0xFFFF); // Logical cylinders
+    write_uint16_le(id_buf + 6,     0x10); // Sectors per track
+    write_uint16_le(id_buf + 12,    0x3F); // Logical heads
+    write_uint16_le(id_buf + 44,     0x4); // Number of bytes available in READ/WRITE LONG cmds
+    write_uint16_le(id_buf + 98,   0x300); // Capabilities - LBA supported, DMA supported
+    write_uint16_le(id_buf + 100, 0x4000); // Capabilities - bit 14 needs to be set as required by ATA/ATAPI-5 spec
+    write_uint16_le(id_buf + 102,  0x400); // PIO data transfer cycle timing mode
+    write_uint16_le(id_buf + 106,    0x7); // Fields 54-58, 64-70 and 88 are valid
+    write_uint16_le(id_buf + 108, 0xFFFF); // Logical cylinders
+    write_uint16_le(id_buf + 110,   0x10); // Logical heads
+    write_uint16_le(id_buf + 112,   0x3F); // Sectors per track
+    // Capacity in sectors
+    write_uint16_le(id_buf + 114,  ata->drive[ata->curdrive].size);
+    write_uint16_le(id_buf + 116,  ata->drive[ata->curdrive].size >> 16);
+    write_uint16_le(id_buf + 120,  ata->drive[ata->curdrive].size);
+    write_uint16_le(id_buf + 122,  ata->drive[ata->curdrive].size >> 16);
+    write_uint16_le(id_buf + 128,    0x3); // Advanced PIO modes supported
+    write_uint16_le(id_buf + 134,    0x1); // PIO transfer cycle time without flow control
+    write_uint16_le(id_buf + 136,    0x1); // PIO transfer cycle time with IORDY flow control
+    write_uint16_le(id_buf + 160,  0x100); // ATA major version
+    write_uint16_le(id_buf + 176, 0x80FF); // UDMA mode 7 active, All UDMA modes supported
 
-    const char serial[20] = "IDE emulated disk   ";
-    const char firmware[9] = "RVVM    ";
-    const char model[] = VERSION"                                        ";
-
-    ata_copy_id_string(id_buf + 10, serial, 20);
-    ata_copy_id_string(id_buf + 23, firmware, 8);
-    ata_copy_id_string(id_buf + 27, model, 40);
+    // Serial Number
+    ata_copy_id_string(id_buf + 20, "DEADBEEF            ");
+    // Firmware Revision
+    ata_copy_id_string(id_buf + 46, "RVVM    ");
+    // Model Number
+    ata_copy_id_string(id_buf + 54, "IDE Virtual HDD                         ");
 
     memcpy(ata->drive[ata->curdrive].buf, id_buf, sizeof(id_buf));
     ata->drive[ata->curdrive].bytes_to_rw = sizeof(id_buf);
@@ -411,7 +407,11 @@ static bool ata_data_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size
         case ATA_REG_ERR: // Error
             /* OSDev says that this register is 16-bit,
              * but there's no address stored so this seems wrong */
-            memcpy(data, &ata->drive[ata->curdrive].error, size);
+            if (size == 2) {
+                write_uint16_le(data, ata->drive[ata->curdrive].error);
+            } else {
+                write_uint8(data, ata->drive[ata->curdrive].error);
+            }
             break;
         case ATA_REG_NSECT:
             write_uint8(data, ata->drive[ata->curdrive].sectcount >> ata->drive[ata->curdrive].hob_shift);
@@ -646,31 +646,29 @@ static rvvm_mmio_type_t ata_bmdma_dev_type = {
     .remove = ata_remove_dummy,
 };
 
-static void ata_process_prdt(struct ata_dev *ata, rvvm_machine_t *machine)
+static void ata_process_prdt(struct ata_dev* ata)
 {
     bool is_read = bit_check(ata->dma_info.cmd, 3);
     size_t to_process = ata->drive[ata->curdrive].sectcount * SECTOR_SIZE;
     blkdev_t* blk = ata->drive[ata->curdrive].blk;
     size_t processed = 0;
+    uint8_t* buf;
+    uint32_t prd_physaddr, prd_sectcount, buf_size;
     while (1) {
         /* Read PRD */
-        uint32_t prd_physaddr;
-        if (!rvvm_read_ram(machine, &prd_physaddr,
-                    ata->dma_info.prdt_addr, sizeof(prd_physaddr)))
-            goto err;
-        uint32_t prd_sectcount;
-        if (!rvvm_read_ram(machine, &prd_sectcount,
-                    ata->dma_info.prdt_addr + 4, sizeof(prd_sectcount)))
-            goto err;
+        buf = pci_get_dma_ptr(ata->pci_dev, ata->dma_info.prdt_addr, 8);
+        if (buf == NULL)  goto err;
+        prd_physaddr = read_uint32_le(buf);
+        prd_sectcount = read_uint32_le(buf + 4);
 
-        uint32_t buf_size = prd_sectcount & 0xffff;
+        buf_size = prd_sectcount & 0xffff;
         /* Value if 0 means size of 64K */
         if (buf_size == 0) {
             buf_size = 64 * 1024;
         }
 
-        void *buf = rvvm_get_dma_ptr(machine, prd_physaddr, buf_size);
-        if (!buf) goto err;
+        buf = pci_get_dma_ptr(ata->pci_dev, prd_physaddr, buf_size);
+        if (buf == NULL)  goto err;
 
         /* Read/write data to/from RAM */
         if (is_read) {
@@ -708,11 +706,11 @@ err:
     ata_send_interrupt(ata);
 }
 
-static void* ata_worker(void** data)
+static void* ata_worker(void* data)
 {
-    struct ata_dev* ata = (struct ata_dev*)data[0];
+    struct ata_dev* ata = (struct ata_dev*)data;
     spin_lock(&ata->dma_info.lock);
-    ata_process_prdt(ata, (rvvm_machine_t*)data[1]);
+    ata_process_prdt(ata);
     spin_unlock(&ata->dma_info.lock);
     return NULL;
 }
@@ -755,8 +753,7 @@ static bool ata_bmdma_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, si
             ata->dma_info.cmd = read_uint8(data);
             spin_unlock(&ata->dma_info.lock);
             if (process_prdt) {
-                void* req[2] = {ata, device->machine};
-                thread_create_task_va(ata_worker, req, 2);
+                thread_create_task(ata_worker, ata);
             }
             break;
         case ATA_BMDMA_STATUS:
@@ -897,5 +894,5 @@ PUBLIC void ata_init_auto(rvvm_machine_t* machine, pci_bus_t* pci_bus, blkdev_t*
     UNUSED(pci_bus);
 #endif
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ATA_DATA_DEFAULT_MMIO, 0x2000);
-    ata_init_pio(machine, addr, addr + 0x2000, image, NULL);
+    ata_init_pio(machine, addr, addr + 0x1000, image, NULL);
 }
