@@ -427,9 +427,19 @@ PUBLIC bool rvvm_machine_powered_on(rvvm_machine_t* machine)
     return machine->power_state != RVVM_POWER_OFF;
 }
 
+static void rvvm_cleanup_mmio(rvvm_mmio_dev_t* dev)
+{
+    rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
+    // Either device implements it's own cleanup routine,
+    // or we free it's data buffer
+    if (dev->type && dev->type->remove)
+        dev->type->remove(dev);
+    else
+        free(dev->data);
+}
+
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 {
-    rvvm_mmio_dev_t* dev;
     rvvm_pause_machine(machine);
     
     vector_foreach(machine->harts, i) {
@@ -437,14 +447,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     }
 
     vector_foreach(machine->mmio, i) {
-        dev = &vector_at(machine->mmio, i);
-        rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
-        // Either device implements it's own cleanup routine,
-        // or we free it's data buffer
-        if (dev->type && dev->type->remove)
-            dev->type->remove(dev);
-        else
-            free(dev->data);
+        rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
     }
     
     vector_free(machine->harts);
@@ -505,7 +508,7 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
     return ret;
 }
 
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr)
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup)
 {
     if (machine->running) return;
     vector_foreach(machine->mmio, i) {
@@ -515,6 +518,7 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr)
             /* do not remove the machine from vector so that the handles
              * remain valid */
             dev->size = 0;
+            if (cleanup) rvvm_cleanup_mmio(dev);
         }
     }
 }
