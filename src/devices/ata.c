@@ -880,7 +880,7 @@ PUBLIC void ata_init_pci(pci_bus_t* pci_bus, blkdev_t* master, blkdev_t* slave)
 }
 
 #else
-PUBLIC void ata_init_pci(pci_bus_t*, blkdev_t*, blkdev_t*) {}
+PUBLIC void ata_init_pci(pci_bus_t* pci_bus, blkdev_t* master, blkdev_t* slave) { UNUSED(pci_bus); UNUSED(master); UNUSED(slave); }
 #endif
 
 PUBLIC void ata_init_auto(rvvm_machine_t* machine, pci_bus_t* pci_bus, blkdev_t* image)
