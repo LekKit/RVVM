@@ -291,13 +291,10 @@ static void rvvm_run_with_args(vm_args_t args)
     syscon_init_auto(machine);
 
     if (args.image) {
-        blkdev_t* blk = blk_open(args.image, BLKDEV_RW);
-        if (blk == NULL) {
-            rvvm_error("Unable to open hard drive image file %s", args.image);
+        rvvm_cmdline_append(machine, "root=/dev/nvme0n1 rw");
+        if (!nvme_init(pci_bus, args.image, true)) {
+            rvvm_error("Unable to open image file %s", args.image);
             return;
-        } else {
-            rvvm_cmdline_append(machine, "root=/dev/sda rw");
-            ata_init_auto(machine, pci_bus, blk);
         }
     }
 
