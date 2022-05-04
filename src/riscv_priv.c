@@ -78,7 +78,7 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             * where it gets ev_int flags and jumps into trap handler on it's own
             */
 
-            while (vm->wait_event) {
+            while (atomic_load_uint32(&vm->wait_event)) {
                 uint64_t timestamp = rvtimer_get(&vm->timer);
 
                 if (timestamp >= vm->timer.timecmp) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
