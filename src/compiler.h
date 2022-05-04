@@ -25,6 +25,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define GNU_EXTS 1
 #endif
 
+#if defined(GNU_EXTS) && defined(__has_attribute)
+#define GNU_ATTRIBUTE(attr) __has_attribute(attr)
+#else
+#define GNU_ATTRIBUTE(attr) 0
+#endif
+
 #ifdef GNU_EXTS
 #define likely(x)     __builtin_expect(!!(x),1)
 #define unlikely(x)   __builtin_expect(!!(x),0)
@@ -33,12 +39,45 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define unlikely(x)   (x)
 #endif
 
-#if defined(USE_NOINLINE) && defined(GNU_EXTS)
+#if defined(USE_NOINLINE) && GNU_ATTRIBUTE(noinline)
 #define NOINLINE      __attribute__((noinline))
 #elif defined(USE_NOINLINE) && defined(_WIN32)
 #define NOINLINE      __declspec(noinline)
 #else
 #define NOINLINE
+#endif
+
+#if GNU_ATTRIBUTE(__always_inline__)
+#define forceinline inline __attribute__((__always_inline__))
+#elif defined(_MSC_VER)
+#define forceinline __forceinline
+#else
+#define forceinline inline
+#endif
+
+// Match GCC macro __SANITIZE_THREAD__ on Clang, provide __SANITIZE_MEMORY__
+#if defined(__clang__) && defined(__has_feature)
+#if __has_feature(thread_sanitizer) && !defined(__SANITIZE_THREAD__)
+#define __SANITIZE_THREAD__
+#endif
+#if __has_feature(memory_sanitizer) && !defined(__SANITIZE_MEMORY__)
+#define __SANITIZE_MEMORY__
+#endif
+#endif
+
+// Suppress ThreadSanitizer in places with false alarms (emulated load/stores or RCU)
+// Guest dataraces hinder normal code instrumentation, so this is handy
+#if defined(__SANITIZE_THREAD__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(no_sanitize)
+#define TSAN_SUPPRESS __attribute__((no_sanitize("thread")))
+#else
+#define TSAN_SUPPRESS
+#endif
+
+// Suppress MemorySanitizer in places with false alarms (non-instrumented syscalls, X11 libs, etc)
+#if defined(__SANITIZE_MEMORY__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(no_sanitize)
+#define MSAN_SUPPRESS __attribute__((no_sanitize("memory")))
+#else
+#define MSAN_SUPPRESS
 #endif
 
 #ifdef GNU_EXTS
