@@ -212,7 +212,7 @@ void riscv_decoder_enable_fpu(rvvm_hart_t* vm, bool enable)
  * Attention: Any TLB flush must clear vm->wait_event to
  * restart dispatch loop, otherwise it will continue executing current page
  */
-void riscv_run_till_event(rvvm_hart_t* vm)
+TSAN_SUPPRESS void riscv_run_till_event(rvvm_hart_t* vm)
 {
     size_t inst_ptr = 0;  // Updated before any read
     uint32_t instruction;
