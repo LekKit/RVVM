@@ -391,8 +391,8 @@ static inline void riscv_jit_flush(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr
  * Since aligned loads/stores expect relaxed atomicity, MMU should use this
  * instead of a regular memcpy, to prevent other harts from observing
  * half-made memory operation on TLB miss
- */ 
-static inline void atomic_memcpy_relaxed(void* dest, const void* src, uint8_t size)
+ */
+TSAN_SUPPRESS static inline void atomic_memcpy_relaxed(void* dest, const void* src, uint8_t size)
 {
     if (likely(((((size_t)src) & (size-1)) == 0) && ((((size_t)dest) & (size-1)) == 0))) {
         switch(size) {
