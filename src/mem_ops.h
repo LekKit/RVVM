@@ -132,7 +132,7 @@ static inline void write_uint16_be_m(void* addr, uint16_t val) {
  * Falls back to byte-bang operations on big-endian systems
  */
 
-static inline uint64_t read_uint64_le(const void* addr) {
+TSAN_SUPPRESS static inline uint64_t read_uint64_le(const void* addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const uint64_t*)addr;
 #else
@@ -140,7 +140,7 @@ static inline uint64_t read_uint64_le(const void* addr) {
 #endif
 }
 
-static inline void write_uint64_le(void* addr, uint64_t val) {
+TSAN_SUPPRESS static inline void write_uint64_le(void* addr, uint64_t val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(uint64_t*)addr = val;
 #else
@@ -148,7 +148,7 @@ static inline void write_uint64_le(void* addr, uint64_t val) {
 #endif
 }
 
-static inline uint32_t read_uint32_le(const void* addr) {
+TSAN_SUPPRESS static inline uint32_t read_uint32_le(const void* addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const uint32_t*)addr;
 #else
@@ -156,7 +156,7 @@ static inline uint32_t read_uint32_le(const void* addr) {
 #endif
 }
 
-static inline void write_uint32_le(void* addr, uint32_t val) {
+TSAN_SUPPRESS static inline void write_uint32_le(void* addr, uint32_t val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(uint32_t*)addr = val;
 #else
@@ -164,7 +164,7 @@ static inline void write_uint32_le(void* addr, uint32_t val) {
 #endif
 }
 
-static inline uint16_t read_uint16_le(const void* addr) {
+TSAN_SUPPRESS static inline uint16_t read_uint16_le(const void* addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const uint16_t*)addr;
 #else
@@ -172,7 +172,7 @@ static inline uint16_t read_uint16_le(const void* addr) {
 #endif
 }
 
-static inline void write_uint16_le(void* addr, uint16_t val) {
+TSAN_SUPPRESS static inline void write_uint16_le(void* addr, uint16_t val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(uint16_t*)addr = val;
 #else
@@ -180,11 +180,11 @@ static inline void write_uint16_le(void* addr, uint16_t val) {
 #endif
 }
 
-static inline uint8_t read_uint8(const void* addr) {
+TSAN_SUPPRESS static inline uint8_t read_uint8(const void* addr) {
     return *(const uint8_t*)addr;
 }
 
-static inline void write_uint8(void* addr, uint8_t val) {
+TSAN_SUPPRESS static inline void write_uint8(void* addr, uint8_t val) {
     *(uint8_t*)addr = val;
 }
 
@@ -222,7 +222,7 @@ static inline void write_double_le_m(void* addr, double val) {
  * Floating-point memory operations (aligned)
  */
 
-static inline float read_float_le(const void *addr) {
+TSAN_SUPPRESS static inline float read_float_le(const void *addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const float*)addr;
 #else
@@ -230,7 +230,7 @@ static inline float read_float_le(const void *addr) {
 #endif
 }
 
-static inline double read_double_le(const void *addr) {
+TSAN_SUPPRESS static inline double read_double_le(const void *addr) {
 #ifdef HOST_LITTLE_ENDIAN
     return *(const double*)addr;
 #else
@@ -238,7 +238,7 @@ static inline double read_double_le(const void *addr) {
 #endif
 }
 
-static inline void write_float_le(void *addr, float val) {
+TSAN_SUPPRESS static inline void write_float_le(void *addr, float val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(float*)addr = val;
 #else
@@ -246,7 +246,7 @@ static inline void write_float_le(void *addr, float val) {
 #endif
 }
 
-static inline void write_double_le(void *addr, double val) {
+TSAN_SUPPRESS static inline void write_double_le(void *addr, double val) {
 #ifdef HOST_LITTLE_ENDIAN
     *(double*)addr = val;
 #else
