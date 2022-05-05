@@ -25,6 +25,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define GNU_EXTS 1
 #endif
 
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
+#define GCC_CHECK_VER(major, minor) (__GNUC__ > major || \
+        (__GNUC__ == major && __GNUC_MINOR__ >= minor))
+#else
+#define GCC_CHECK_VER(major, minor) 0
+#endif
+
+#ifdef __clang__
+#define CLANG_CHECK_VER(major, minor) (__clang_major__ > major || \
+          (__clang_major__ == major && __clang_minor__ >= minor))
+#else
+#define CLANG_CHECK_VER(major, minor) 0
+#endif
+
 #if defined(GNU_EXTS) && defined(__has_attribute)
 #define GNU_ATTRIBUTE(attr) __has_attribute(attr)
 #else
