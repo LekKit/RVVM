@@ -63,7 +63,7 @@ static uint64_t rvtimer_clocksource(uint64_t freq)
 
     LARGE_INTEGER clk;
     QueryPerformanceCounter(&clk);
-    return clk.QuadPart * perf_freq.QuadPart / freq;
+    return clk.QuadPart * freq / perf_freq.QuadPart;
 }
 
 #else
