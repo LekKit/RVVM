@@ -272,8 +272,6 @@ typedef struct {
 
 static threadpool_entry_t threadpool[THREAD_MAX_WORKERS];
 
-static uint32_t tasks_enqueued;
-
 static void* threadpool_worker(void* data)
 {
     threadpool_entry_t* thread_ctx = (threadpool_entry_t*)data;
@@ -291,8 +289,6 @@ static void* threadpool_worker(void* data)
             }
             thread_ctx->func = NULL;
             atomic_store_uint32(&thread_ctx->busy, 0);
-
-            atomic_sub_uint32(&tasks_enqueued, 1);
         }
     }
 
@@ -339,12 +335,6 @@ static bool thread_queue_task(thread_func_t func, void* arg, unsigned arg_count)
                 threadpool[i].thread = thread_create(threadpool_worker, &threadpool[i]);
             }
             condvar_wake(threadpool[i].cond);
-
-            atomic_add_uint32(&tasks_enqueued, 1);
-
-            if (tasks_enqueued > THREAD_MAX_WORKERS) {
-                rvvm_warn("Lost %d tasks from workqueue!", tasks_enqueued);
-            }
             return true;
         }
     }
