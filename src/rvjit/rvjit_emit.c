@@ -38,7 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // RVVM-specific configuration
 
-#define VM_REG_OFFSET(reg) offsetof(rvvm_hart_t, registers[reg])
+#define VM_REG_OFFSET(reg) (offsetof(rvvm_hart_t, registers) + (sizeof(maxlen_t) * reg))
 #define VM_TLB_OFFSET      offsetof(rvvm_hart_t, tlb)
 #define VM_TLB_MASK        (TLB_SIZE-1)
 #define VM_TLB_R           offsetof(rvvm_tlb_entry_t, r)
