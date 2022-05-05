@@ -49,11 +49,17 @@ static inline void spin_init(spinlock_t* lock)
 #endif
 }
 
+// Try to claim the lock, returns true on success
+static forceinline bool spin_try_lock(spinlock_t* lock)
+{
+    return atomic_cas_uint32_ex(&lock->flag, 0, 1, false, ATOMIC_ACQUIRE, ATOMIC_ACQUIRE);
+}
+
 // Perform locking on small critical section
 // Reports a deadlock upon waiting for too long
-static inline void _spin_lock(spinlock_t* lock, const char* info)
+static forceinline void _spin_lock(spinlock_t* lock, const char* info)
 {
-    if (atomic_add_uint32(&lock->flag, 1)) {
+    if (unlikely(!spin_try_lock(lock))) {
         spin_lock_wait(lock, info, false);
     }
 #ifdef USE_SPINLOCK_DEBUG
@@ -64,7 +70,7 @@ static inline void _spin_lock(spinlock_t* lock, const char* info)
 // Perform locking around heavy operation, wait indefinitely
 static inline void _spin_lock_slow(spinlock_t* lock, const char* info)
 {
-    if (atomic_add_uint32(&lock->flag, 1)) {
+    if (unlikely(!spin_try_lock(lock))) {
         spin_lock_wait(lock, info, true);
     }
 #ifdef USE_SPINLOCK_DEBUG
@@ -80,16 +86,10 @@ static inline void _spin_lock_slow(spinlock_t* lock, const char* info)
 #define spin_lock_slow(lock) _spin_lock_slow(lock, "[no debug]")
 #endif
 
-// Try to claim the lock, returns true on success
-static inline bool spin_try_lock(spinlock_t* lock)
-{
-    return !atomic_add_uint32(&lock->flag, 1);
-}
-
 // Release the lock
-static inline void spin_unlock(spinlock_t* lock)
+static forceinline void spin_unlock(spinlock_t* lock)
 {
-    if (atomic_swap_uint32(&lock->flag, 0) > 1) {
+    if (unlikely(atomic_swap_uint32_ex(&lock->flag, 0, ATOMIC_RELEASE) > 1)) {
         spin_lock_wake(lock);
     }
 }
