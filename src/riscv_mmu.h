@@ -61,31 +61,31 @@ void riscv_jit_tlb_flush(rvvm_hart_t* vm);
  */
 
 // Translate virtual address into VM pointer (only for physical memory)
-NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access);
+vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access);
 
 // Fetch instruction from virtual address
-NOINLINE bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst);
+bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst);
 
-// Load/store operations on virtual address (also used by JIT)
-NOINLINE void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+// Load/store operations on virtual address (uses MMU translation)
+void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 
-NOINLINE void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 
 #ifdef USE_FPU
-NOINLINE void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 
-NOINLINE void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
-NOINLINE void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
+void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg);
 #endif
 
 // Alignment checks / fixup

@@ -496,7 +496,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size
  * call MMIO handlers if needed.
  */
 
-NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
+vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
 {
     //rvvm_info("Hart %p vma tlb miss at 0x%08"PRIxXLEN, vm, addr);
     paddr_t paddr;
@@ -549,7 +549,7 @@ NOINLINE vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t 
     return NULL;
 }
 
-NOINLINE bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
+bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
 {
     uint8_t buff[4] = {0};
     if (!riscv_block_in_page(addr, 4)) {
@@ -571,9 +571,7 @@ NOINLINE bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst
     }
 }
 
-
-
-NOINLINE void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
@@ -581,7 +579,7 @@ NOINLINE void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -589,7 +587,7 @@ NOINLINE void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -597,7 +595,7 @@ NOINLINE void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
@@ -605,7 +603,7 @@ NOINLINE void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
@@ -613,7 +611,7 @@ NOINLINE void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
@@ -621,7 +619,7 @@ NOINLINE void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
@@ -631,28 +629,28 @@ NOINLINE void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 
 
 
-NOINLINE void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     write_uint64_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
 }
 
-NOINLINE void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     write_uint32_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 4, MMU_WRITE);
 }
 
-NOINLINE void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     write_uint16_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 2, MMU_WRITE);
 }
 
-NOINLINE void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     buff[0] = vm->registers[reg];
@@ -663,7 +661,7 @@ NOINLINE void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 
 #ifdef USE_FPU
 
-NOINLINE void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
@@ -672,7 +670,7 @@ NOINLINE void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-NOINLINE void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -683,14 +681,14 @@ NOINLINE void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 
 
 
-NOINLINE void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     write_double_le_m(buff, vm->fpu_registers[reg]);
     riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
 }
 
-NOINLINE void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     write_float_le_m(buff, read_float_nanbox(&vm->fpu_registers[reg]));
