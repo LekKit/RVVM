@@ -40,28 +40,30 @@ static void spin_atexit()
     condvar_free(cond);
 }
 
-NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
+static void spin_cond_init()
 {
-    for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
-        if (atomic_swap_uint32(&lock->flag, 2) == 0) {
-            atomic_store_uint32(&lock->flag, 1);
-            return;
-        }
-    }
-
     if (!atomic_swap_uint32(&global_cond_init, 1)) {
         global_cond = condvar_create();
         atexit(spin_atexit);
     }
+}
+
+NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
+{
+    for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
+        if (spin_try_lock(lock)) return;
+    }
+
+    spin_cond_init();
 
     rvtimer_t timer;
     rvtimer_init(&timer, 1000);
     do {
-        condvar_wait(global_cond, SPINLOCK_MAX_SLEEP);
         if (atomic_swap_uint32(&lock->flag, 2) == 0) {
             atomic_store_uint32(&lock->flag, 1);
             return;
         }
+        condvar_wait(global_cond, SPINLOCK_MAX_SLEEP);
     } while (infinite || rvtimer_get(&timer) < SPINLOCK_MAX_MS);
 
     rvvm_warn("Possible deadlock at %s", info);
@@ -74,5 +76,6 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
 NOINLINE void spin_lock_wake(spinlock_t* lock)
 {
     UNUSED(lock);
+    spin_cond_init();
     condvar_wake_all(global_cond);
 }
