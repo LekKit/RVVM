@@ -53,9 +53,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define unlikely(x)   (x)
 #endif
 
-#if defined(USE_NOINLINE) && GNU_ATTRIBUTE(noinline)
+#if GNU_ATTRIBUTE(noinline)
 #define NOINLINE      __attribute__((noinline))
-#elif defined(USE_NOINLINE) && defined(_WIN32)
+#elif defined(_WIN32)
 #define NOINLINE      __declspec(noinline)
 #else
 #define NOINLINE
