@@ -148,7 +148,7 @@ static forceinline void atomic_fence()
 static forceinline uint32_t atomic_load_uint32_ex(const void* addr, int memorder)
 {
 #ifdef C11_ATOMICS
-    return atomic_load_explicit((_Atomic const uint32_t*)addr, memorder);
+    return atomic_load_explicit((_Atomic uint32_t*)addr, memorder);
 #elif GNU_ATOMICS
 #if !defined(GNU_ATOMIC_INTRINS)
     // Optimize relaxed atomic loads when libatomic is used directly
@@ -360,7 +360,7 @@ static forceinline uint32_t atomic_or_uint32(void* addr, uint32_t val)
 static forceinline uint64_t atomic_load_uint64_ex(const void* addr, int memorder)
 {
 #ifdef C11_ATOMICS
-    return atomic_load_explicit((_Atomic const uint64_t*)addr, memorder);
+    return atomic_load_explicit((_Atomic uint64_t*)addr, memorder);
 #elif GNU_ATOMICS
 #if !defined(GNU_ATOMIC_INTRINS) && defined(HOST_64BIT)
     // Optimize relaxed atomic loads when libatomic is used directly
