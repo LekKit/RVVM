@@ -1,140 +1,180 @@
 # Makefile :)
-NAME     := rvvm
-SRCDIR   := src
-VERSION  := 0.4
+NAME    := rvvm
+SRCDIR  := src
+VERSION := 0.5
 
-# Passed by mingw make
+SPACE   :=
+ifneq (,$(findstring xterm,$(TERM)))
+RESET   := $(shell echo -e "\033[0;0m")
+RED     := $(shell echo -e "\033[1;31m")
+GREEN   := $(shell echo -e "\033[1;32m")
+YELLOW  := $(shell echo -e "\033[1;33m")
+BLUE    := $(shell echo -e "\033[1;34m")
+
+$(info $(SPACE))
+$(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
+$(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
+$(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
+$(info $(SPACE) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
+$(info $(SPACE) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
+$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ ▐░     ░ ▐░  ░ ▒░   ░  ░)
+$(info $(SPACE)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
+$(info $(SPACE)   ░░   ░      ░░       ░░  ░      ░   )
+$(info $(SPACE)    ░           ░        ░         ░   )
+$(info $(SPACE)               ░        ░              )
+$(info $(SPACE))
+endif
+
+# Automatically parallelize build
 ifeq ($(OS),Windows_NT)
-WIN_SET := 1
-NULL_STDERR := 2>nul
-OS := windows
-$(info Detected OS: Windows)
-
-# On windows there is a special way of detecting arch
-ifndef ARCH
-ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
-ARCH := x86_64
+JOBS ?= $(NUMBER_OF_PROCESSORS)
 else
-ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
-ARCH := x86_64
-endif
-endif
-
-ifeq ($(PROCESSOR_ARCHITECTURE),x86)
-ARCH := i386
-endif
-endif
-
-else
-
-# Automatically parallelize build on *nix
 ifeq ($(OS),Darwin)
 JOBS ?= $(shell sysctl hw.ncpu | awk '{print $$2}')
 else
 JOBS ?= $(shell nproc)
 endif
-
-MAKEFLAGS += -j $(JOBS) -l $(JOBS)
-
 endif
+override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
 
-
-# Detect unix-like OS by uname
-ifndef OS
-
+# Detect host & target OS
+ifeq ($(OS),Windows_NT)
+# Passed by MinGW/Cygwin Make on Windows hosts
+HOST_WINDOWS := 1
+NULL_STDERR := 2>NUL
+OS := windows
+$(info Detected OS: $(GREEN)Windows$(RESET))
+else
+# Assuming the host is POSIX
+HOST_POSIX := 1
 NULL_STDERR := 2>/dev/null
+
+ifneq (,$(findstring mingw, $(shell $(CC) -v 2>&1)))
+# Running MinGW
+OS := windows
+$(info Detected OS: $(GREEN)Windows$(RESET))
+else
+ifneq (,$(findstring Android, $(shell $(CC) -v 2>&1)))
+# Running Android NDK
+OS := android
+$(info Detected OS: $(GREEN)Android$(RESET))
+else
+# Detect *nix OS by uname
 OS_UNAME := $(shell uname -s)
 ifeq ($(OS_UNAME),Linux)
 OS := linux
-$(info Detected OS: Linux)
+$(info Detected OS: $(GREEN)Linux$(RESET))
 else
 ifneq (,$(findstring BSD,$(OS_UNAME)))
 OS := bsd
-$(info Detected OS: BSD)
+$(info Detected OS: $(GREEN)BSD$(RESET))
 else
 ifeq ($(OS_UNAME),Darwin)
 OS := darwin
-$(info Detected OS: Darwin/MacOS)
+$(info Detected OS: $(GREEN)Darwin/MacOS$(RESET))
 else
 OS := unknown
-$(warning [WARN] Unknown OS)
+$(info Detected OS: $(RED)Unknown$(RESET))
 endif
 endif
 endif
-
-else
-ifneq ($(WIN_SET),1)
-$(info Chosen OS: $(OS))
+endif
 endif
 
 endif
 
 # Set up OS options
 ifeq ($(OS),windows)
-override CFLAGS += -mwindows -static
-PROGRAMEXT := .exe
+# -mwindows for GUI-only
+override LDFLAGS += -static
+BIN_EXT := .exe
+LIB_EXT := .dll
 else
-ifneq ($(OS),android)
+# Check for lib presence before linking (there is no pthread on Android, etc)
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
 override LDFLAGS += -lpthread
 endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
+override LDFLAGS += -lrt
 endif
-
+LIB_EXT := .so
+endif
 
 # Detect compiler type
 CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
 ifneq (,$(findstring clang,$(CC_HELP)))
 CC_TYPE := clang
-$(info Detected compiler: LLVM Clang)
+$(info Detected CC: $(GREEN)LLVM Clang$(RESET))
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
 CC_TYPE := gcc
-$(info Detected compiler: GCC)
+$(info Detected CC: $(GREEN)GCC$(RESET))
 else
 CC_TYPE := unknown
-$(warning [WARN] Unknown compiler)
+$(info Detected CC: $(RED)Unknown$(RESET))
 endif
 endif
-
 
 # Detect target arch
 ifndef ARCH
-ifeq ($(CC_TYPE),gcc)
+# Ask a crosscompiler about it's actual target
 ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))))
-else
-ifeq ($(CC_TYPE),clang)
+ifndef ARCH
 ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))))
 endif
-endif
-
-
 # This may fail on older compilers, fallback to host arch then
 ifndef ARCH
+ifeq ($(HOST_POSIX),1)
 ARCH := $(shell uname -m)
-endif
-$(info Target arch: $(ARCH))
 else
+ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+ARCH := x86_64
+else
+ifeq ($(PROCESSOR_ARCHITECTURE),ARM64)
+ARCH := arm64
+else
+ARCH := i386
+endif
+endif
+endif
+$(info [$(YELLOW)INFO$(RESET)] Picked arch from uname, specify ARCH manually if cross-compiling)
+endif
+# x86 compilers sometimes fail to report -m32 multiarch
+ifneq (,$(findstring -m32, $(CFLAGS)))
+ifneq (,$(findstring x86_64, $(ARCH)))
+override ARCH = i386
+endif
+ifneq (,$(findstring amd64, $(ARCH)))
+override ARCH = i386
+endif
+endif
 endif
 
+$(info Target arch: $(GREEN)$(ARCH)$(RESET))
+
+# Detect presence of libatomic
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
+override LDFLAGS += -latomic
+else
+override CFLAGS += -DNO_LIBATOMIC
+endif
 
 # Set up compilation options
 ifeq ($(DEBUG),1)
-
 BUILD_TYPE := debug
 override CFLAGS += -DDEBUG -Og -ggdb
-
 else
 
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS += -O3 -flto=auto -pthread -frounding-math -fvisibility=hidden
+override CFLAGS := -O3 -flto=auto -pthread -fvisibility=hidden $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-# Many clang versions lack -frounding-math, and it doesn't need it in fact
-override CFLAGS += -O3 -flto=thin -pthread -fvisibility=hidden
+override CFLAGS := -O3 -flto=thin -pthread -fvisibility=hidden $(CFLAGS)
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
-override CFLAGS += -O2
+override CFLAGS := -O2 $(CFLAGS)
 endif
 endif
 
@@ -147,48 +187,86 @@ endif
 GIT_OUTPUT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
 VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
 
+$(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
+$(info $(SPACE))
 
-$(info RVVM $(VERSION))
-
-# Target-dependant sources
-SRC_deplist := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c $(SRCDIR)/devices/rtc-goldfish.c $(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
+# Conditionally compiled sources
+SRC_cond := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c \
+		$(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
 
 # Default build configuration
+USE_RV64 ?= 1
+USE_FPU ?= 1
+USE_JIT ?= 1
 USE_FB ?= 1
 USE_XCB ?= 0
 USE_XSHM ?= 1
-USE_RV64 ?= 1
-USE_JIT ?= 0
 USE_NET ?= 0
 USE_TAP_LINUX ?= 0
-USE_FPU ?= 1
 USE_FDT ?= 1
 USE_RTC ?= 1
-USE_SPINLOCK_DEBUG ?= 1
 USE_PCI ?= 1
+USE_SPINLOCK_DEBUG ?= 1
 
-# Need fixes
-USE_VMSWAP ?= 0
-USE_VMSWAP_SPLIT ?= 0
-
-ifeq ($(OS),linux)
-override LDFLAGS += -lrt
+ifneq (,$(findstring lib,$(MAKECMDGOALS)))
+override USE_LIB = 1
+else
+USE_LIB ?= 0
 endif
-# Needed for floating-point functions like fetestexcept/feraiseexcept
+
+ifeq ($(USE_RV64),1)
+override CFLAGS += -DUSE_RV64
+endif
+
 ifeq ($(USE_FPU),1)
+# Needed for floating-point functions like fetestexcept/feraiseexcept
 override LDFLAGS += -lm
 override CFLAGS += -DUSE_FPU
+# Disable unsafe FPU optimizations
+ifeq (,$(findstring rounding-math, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -frounding-math 2>&1)))
+override CFLAGS += -frounding-math
+endif
+endif
+
+ifeq ($(USE_JIT),1)
+# Check if RVJIT supports the target
+ifneq (,$(findstring 86, $(ARCH)))
+else
+ifneq (,$(findstring amd64, $(ARCH)))
+else
+ifneq (,$(findstring x64, $(ARCH)))
+else
+ifneq (,$(findstring arm, $(ARCH)))
+else
+ifneq (,$(findstring aarch64, $(ARCH)))
+else
+ifneq (,$(findstring riscv, $(ARCH)))
+else
+override USE_JIT = 0
+$(info [$(YELLOW)INFO$(RESET)] No RVJIT support for current target)
+endif
+endif
+endif
+endif
+endif
+endif
+ifeq ($(USE_JIT),1)
+SRC_depbuild += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
+override CFLAGS += -DUSE_JIT
+endif
 endif
 
 ifeq ($(USE_FB),1)
-override CFLAGS += -DUSE_FB
+# WinAPI Window
 ifeq ($(OS),windows)
 SRC_depbuild += $(SRCDIR)/devices/win32window.c
+override CFLAGS += -DUSE_FB
 override LDFLAGS += -lgdi32
 else
+# XCB Window
 ifeq ($(USE_XCB),1)
 SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
-override CFLAGS += -DUSE_X11 -DUSE_XCB
+override CFLAGS += -DUSE_FB -DUSE_X11 -DUSE_XCB
 ifeq ($(OS),darwin)
 PKGCFG_LIST += xcb
 else
@@ -203,47 +281,42 @@ override LDFLAGS += -lxcb-shm
 endif
 endif
 else
-SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
-override CFLAGS += -DUSE_X11
+# Xlib Window
 ifeq ($(OS),darwin)
+SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
+override CFLAGS += -DUSE_FB -DUSE_X11
 PKGCFG_LIST += x11
 else
+# Detect presence of libX11
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lX11 2>&1)))
+SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
+override CFLAGS += -DUSE_FB -DUSE_X11
 override LDFLAGS += -lX11
+else
+$(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
+endif
 endif
 ifeq ($(USE_XSHM),1)
-override CFLAGS += -DUSE_XSHM
 ifeq ($(OS),darwin)
+override CFLAGS += -DUSE_XSHM
 PKGCFG_LIST += xext
 else
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lXext 2>&1)))
+override CFLAGS += -DUSE_XSHM
 override LDFLAGS += -lXext
+else
+$(info [$(RED)WARN$(RESET)] libXext not found, ignoring USE_XSHM)
 endif
 endif
 endif
 endif
 endif
-
-ifeq ($(USE_RV64),1)
-override CFLAGS += -DUSE_RV64
-
-# GCC builtins need libatomic on 32-bit targets
-# Clang builtins are in compiler-rt, libatomic should be omitted
-ifeq ($(CC_TYPE),gcc)
-ifeq (,$(findstring 64,$(ARCH)))
-override LDFLAGS += -latomic
-endif
-endif
-
-endif
-
-ifeq ($(USE_JIT),1)
-SRC_depbuild += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
-override CFLAGS += -DUSE_JIT
 endif
 
 ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
 ifneq ($(OS_UNAME),Linux)
-USE_TAP_LINUX := 0
+override USE_TAP_LINUX = 0
 endif
 ifeq ($(USE_TAP_LINUX),1)
 SRC_depbuild += $(SRCDIR)/devices/tap_linux.c
@@ -256,30 +329,24 @@ endif
 endif
 endif
 
-ifeq ($(USE_VMSWAP_SPLIT),1)
-override CFLAGS += -DUSE_VMSWAP_SPLIT
-USE_VMSWAP := 1
-endif
-
-ifeq ($(USE_VMSWAP),1)
-override CFLAGS += -DUSE_VMSWAP
-endif
-
 ifeq ($(USE_FDT),1)
 override CFLAGS += -DUSE_FDT
 endif
 
 ifeq ($(USE_RTC),1)
-SRC_depbuild += $(SRCDIR)/devices/rtc-goldfish.c
 override CFLAGS += -DUSE_RTC
+endif
+
+ifeq ($(USE_PCI),1)
+override CFLAGS += -DUSE_PCI
 endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
-ifeq ($(USE_PCI),1)
-override CFLAGS += -DUSE_PCI
+ifeq ($(USE_LIB),1)
+override CFLAGS += -DUSE_LIB -fPIC
 endif
 
 ifeq ($(OS),darwin)
@@ -290,14 +357,13 @@ endif
 # Generic compiler flags
 override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
 
-DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
-
-OBJDIR := $(BUILD_TYPE).$(OS).$(ARCH)
+BUILDDIR := $(BUILD_TYPE).$(OS).$(ARCH)
+OBJDIR := $(BUILDDIR)/obj
 
 # Select sources to compile
 SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
 # Wipe all platform/config-dependant sources
-SRC := $(filter-out $(SRC_deplist),$(SRC))
+SRC := $(filter-out $(SRC_cond),$(SRC))
 # Put only needed sources to list
 SRC += $(SRC_depbuild)
 OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
@@ -309,65 +375,142 @@ ifeq ($(USE_RV64),1)
 OBJ_CPU64 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
 endif
 
-# Make directory if we need to.
-# This is really ugly, the proper solution would be a dependency on
-# an object file directory, but unfortunately we can't do that :(
-MKDIR_FOR_TARGET = @mkdir -p $(@D)
+OBJS := $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64)
+LIB_OBJS := $(filter-out main.c,$(OBJS))
+DEPS := $(OBJS:.o=.d)
+DIRS := $(sort $(BUILDDIR) $(OBJDIR) $(dir $(OBJS)))
+
+BINARY := $(BUILDDIR)/$(NAME)_$(ARCH)$(BIN_EXT)
+SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
+
+ifeq ($(USE_LIB),1)
+TARGET := $(BINARY) $(SHARED)
+else
+TARGET := $(BINARY)
+endif
+
+# Create directories for object files
+ifeq ($(HOST_POSIX),1)
+$(shell mkdir -p $(DIRS))
+else
+$(shell mkdir $(subst /,\\, $(DIRS)) $(NULL_STDERR))
+endif
+
+# Check previous buildflags
+CFLAGS_TXT := $(OBJDIR)/cflags.txt
+LDFLAGS_TXT := $(OBJDIR)/ldflags.txt
+CURR_CFLAGS := $(CC) $(CFLAGS)
+CURR_LDFLAGS := $(LD) $(LDFLAGS)
+sinclude $(CFLAGS_TXT) $(LDFLAGS_TXT)
+ifneq ($(CURR_CFLAGS), $(PREV_CFLAGS))
+ifneq ($(PREV_CFLAGS),)
+$(info [$(YELLOW)INFO$(RESET)] CFLAGS changed, doing a full rebuild)
+endif
+override MAKEFLAGS += -B
+else
+ifneq ($(CURR_LDFLAGS), $(PREV_LDFLAGS))
+$(info [$(YELLOW)INFO$(RESET)] LDFLAGS changed, relinking binaries)
+$(shell rm -f $(TARGET))
+endif
+endif
+ifeq (3.82,$(firstword $(sort $(MAKE_VERSION) 3.82)))
+$(file >$(CFLAGS_TXT),PREV_CFLAGS = $(CC) $(CFLAGS))
+$(file >$(LDFLAGS_TXT),PREV_LDFLAGS = $(LD) $(LDFLAGS))
+else
+$(shell echo PREV_CFLAGS = $(subst \,\\\, $(CC) $(CFLAGS)) > $(CFLAGS_TXT))
+$(shell echo PREV_LDFLAGS = $(subst \,\\\, $(LD) $(LDFLAGS)) > $(LDFLAGS_TXT))
+endif
+
+# Check compiler ability to generate header dependencies
+ifeq (,$(findstring MMD, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -MMD 2>&1)))
+DO_CC = @$(CC) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
+else
+$(info [$(RED)WARN$(RESET)] No compiler support for header dependencies, forcing rebuild)
+override MAKEFLAGS += -B
+DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
+endif
 
 # RV64 CPU
 $(OBJDIR)/%.64.o: $(SRCDIR)/%.c Makefile
-	$(MKDIR_FOR_TARGET)
-	$(info CC $<)
+	$(info [$(YELLOW)CC$(RESET)] $<)
 	$(DO_CC) -DRV64
 
 # RV32 CPU
 $(OBJDIR)/%.32.o: $(SRCDIR)/%.c Makefile
-	$(MKDIR_FOR_TARGET)
-	$(info CC $<)
+	$(info [$(YELLOW)CC$(RESET)] $<)
 	$(DO_CC)
 
 # Any normal code
 $(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
-	$(MKDIR_FOR_TARGET)
-	$(info CC $<)
+	$(info [$(YELLOW)CC$(RESET)] $<)
 	$(DO_CC)
 
-DEPEND   := $(OBJDIR)/Rules.depend
-TARGET   := $(OBJDIR)/$(NAME)_$(ARCH)$(PROGRAMEXT)
+# Main binary
+$(BINARY): $(OBJS)
+	$(info [$(GREEN)LD$(RESET)] $@)
+	@$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
+
+# Library
+$(SHARED): $(LIB_OBJS)
+	$(info [$(GREEN)LD$(RESET)] $@)
+	@$(CC) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
 
 .PHONY: all
 all: $(TARGET)
 
-$(TARGET): $(DEPEND) $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64)
-	$(info LD $@)
-	@$(CC) $(CFLAGS) $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64) $(LDFLAGS) -o $@
+.PHONY: lib
+lib: $(SHARED)
 
-.PHONY: neat
-neat: $(OBJDIR)
+.PHONY: test
+test: $(TARGET)
+#@curl url -o $(BUILDDIR)/riscv-tests.tar.gz
+	@tar xf $(BUILDDIR)/riscv-tests.tar.gz -C $(BUILDDIR)
+	@echo
+	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
+	@echo
+	@for file in $(BUILDDIR)/riscv-tests/rv32*.bin; do \
+		result=$$($(TARGET) $$file -nogui | tr -d '\0'); \
+		result="$${result##* }"; \
+		if [[ "$$result" == "0" ]]; then \
+		echo "[$(GREEN)PASS$(RESET)] $$file"; \
+		else \
+		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
+		fi; \
+	done
+ifeq ($(USE_RV64),1)
+	@echo
+	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV64)"
+	@echo
+	@for file in $(BUILDDIR)/riscv-tests/rv64*.bin; do \
+		result=$$($(TARGET) $$file -nogui -rv64 | tr -d '\0'); \
+		result="$${result##* }"; \
+		if [[ "$$result" == "0" ]]; then \
+		echo "[$(GREEN)PASS$(RESET)] $$file"; \
+		else \
+		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
+		fi; \
+	done
+endif
 
-$(OBJDIR):
-	@mkdir -p $(OBJDIR)
+.PHONY: cppcheck
+cppcheck:
+ifeq ($(CHECK_ALL),1)
+	@cppcheck -f -j$(JOBS) --enable=all --language=c --std=c11 $(SRCDIR)
+else
+	@cppcheck -f -j$(JOBS) --enable=warning,performance,portability --language=c --std=c11 $(SRCDIR)
+endif
 
 .PHONY: clean
-clean: depend
-	@-rm -f $(OBJDIR)/*.so
-	@-rm -f $(OBJ)
-	@-rm -f $(OBJ_CPU32)
-	@-rm -f $(OBJ_CPU64)
-	@-rm -f $(TARGET)
-	@-rm -f $(OBJDIR)/Rules.depend
-#	@-find $(OBJDIR)/ -depth -type d -exec rmdir {} +
+clean:
+	$(info [$(YELLOW)INFO$(RESET)] Cleaning up)
+ifeq ($(HOST_POSIX),1)
+	@-rm -f $(BINARY) $(SHARED)
+	@-rm -r $(OBJDIR)
+else
+	@-rm -f $(BINARY) $(SHARED) $(NULL_STDERR) ||:
+	@-rm -r $(OBJDIR) $(NULL_STDERR) ||:
+	@-del $(subst /,\\, $(BINARY) $(SHARED)) $(NULL_STDERR) ||:
+	@-rmdir /S /Q $(subst /,\\, $(OBJDIR)) $(NULL_STDERR) ||:
+endif
 
-.PHONY: depend
-depend: $(DEPEND)
-
-# If it fails, changing headers would not result in rebuilt sources.
-# Currently it's not properly working for CPU sources,
-# because rule "riscv_cpu.o" is not working on "riscv_cpu.64.o" target.
-# Ironically, was completely broken before makefile rework
-# Also may break on systems without GNU sed...
-$(OBJDIR)/Rules.depend: $(SRC) | $(OBJDIR)
-	@$(CC) -MM $(SRC) $(CFLAGS) $(NULL_STDERR) | sed "s;\(^[^         ]*\):\(.*\);$(OBJDIR)/\1:\2;" > $@
-
-
-sinclude $(OBJDIR)/Rules.depend
+sinclude $(DEPS)
