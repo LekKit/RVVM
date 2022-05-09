@@ -103,7 +103,7 @@ struct rvvd_dev* rvvd_mkoverlay(const char* base_filename, const char* filename)
     disk->base_disk = base_disk;
     disk->overlay = true;
 
-    //Seeking in file start pos then modifying default header
+    // Modifying image header 
     uint8_t header[512] = {0};
     rvvd_sector_read(disk, header, 0);
     write_uint64_le(header+16, 512+512*disk->sector_table_size);
@@ -129,7 +129,6 @@ struct rvvd_dev* rvvd_mkimg_from_image(const char* image_filename, const char* f
         return NULL;
     }
 
-    // Getting file size;
     uint64_t size = rvfilesize(img_fd);
 
     struct rvvd_dev* disk;
@@ -188,10 +187,13 @@ struct rvvd_dev* rvvd_open(const char* filename) {
         rvvm_warn("Drive \"%s\" version is outdated, consider update it to new version", filename);
     }
 
+    // Reading header
     disk->size = read_uint64_le(header+8)*512;
     disk->next_sector_offset = read_uint64_le(header+16);
     disk->overlay = header[24] & DOPT_OVERLAY;
     disk->compression_type = read_uint8(header+25);
+
+    // If drive is overlay, we opening base image too
     if (disk->overlay) {
 
         rvvm_info("Drive \"%s\" is overlay drive, opening base image...", filename);
@@ -248,10 +250,13 @@ struct rvvd_dev* rvvd_fdopen(rvfile_t* fd) {
         rvvm_warn("Drive version is outdated, consider update it to new version");
     }
 
+    // Reading header
     disk->size = read_uint64_le(header+8)*512;
     disk->next_sector_offset = read_uint64_le(header+16);
     disk->overlay = header[24] & DOPT_OVERLAY;
     disk->compression_type = read_uint8(header+25);
+
+    // If drive is overlay, we opening base image too
     if (disk->overlay) {
 
         rvvm_info("Drive %p is overlay drive, opening base image...", disk->_fd);
@@ -348,11 +353,14 @@ void rvvd_read(struct rvvd_dev* disk, void* buffer, uint64_t sec_id) {
 
     uint64_t offset = rvvd_sc_get(disk, sec_id);
 
-    if (offset == ((uint64_t)-1)) offset = rvvd_sector_get_offset(disk, sec_id);
+    // Get offset directly, if cache is invalid
+    if (offset == ((uint64_t)-1)) offset = rvvd_sector_get_offset(disk, sec_id); 
 
+    
     if (!disk->overlay) {
         if (offset) rvvd_sector_read(disk, data, offset);
     } else {
+        // If sector isn't allocated, try to read that sector in base image
         if (!offset) rvvd_read(disk->base_disk, data, sec_id);
         else rvvd_sector_read(disk, data, offset);
     }
@@ -373,16 +381,19 @@ void rvvd_write(struct rvvd_dev* disk, const void* data, uint64_t sec_id) {
 
     uint64_t offset = rvvd_sc_get(disk, sec_id);
 
+    // Get offset directly, if cache is invalid
     if (offset == ((uint64_t)-1)) offset = rvvd_sector_get_offset(disk, sec_id);
 
     for (size_t i = 0; i < 512/sizeof(size_t); i++) {
+        // If sector isn't allocated & data not empty, allocate new block
         if (((const size_t*)data)[i] && !offset) {
             rvvd_allocate(disk, data, sec_id);
             return;
         }
     }
 
-    if (!offset) return;
+    // If block isn't allocated & data is empty, here nothing to do
+    if (!offset) return; 
 
     rvvd_sector_write(disk, data, offset);
     rvvd_sc_push(disk, sec_id, offset);
@@ -394,15 +405,18 @@ void rvvd_allocate(struct rvvd_dev* disk, const void* data, uint64_t sec_id) {
 
     rvvm_info("RVVD %p: Allocating sector %ld", disk->_fd, sec_id);
 
+    // Gets last sector offset, then writes the sector
     uint64_t offset = disk->next_sector_offset;
     disk->next_sector_offset += 512;
     rvwrite(disk->_fd, data, 512, offset);
 
     uint8_t tmpbuf[8] = {0};
 
+    // Writing offset to the sector table
     write_uint64_le(tmpbuf, offset);
     rvwrite(disk->_fd, tmpbuf, 8, 512+sec_id*8);
 
+    // Writing last block offset to the file header
     write_uint64_le(tmpbuf, offset);
     rvwrite(disk->_fd, tmpbuf, 8, 16);
 
@@ -422,16 +436,16 @@ void rvvd_sc_push(struct rvvd_dev* disk, uint64_t sec_id, uint64_t offset) {
     // Filling up table conversion result in the sector cache table
 
     rvvm_info("RVVD %p: Pushing sector cache {%ld : %ld}", disk->_fd, sec_id, offset);
+    disk->sector_cache[sec_id & 0x1FF].offset = offset;
+    disk->sector_cache[sec_id & 0x1FF].id = sec_id;
 
-    if (offset && disk->sector_cache[sec_id & 0x1FF].id != sec_id) {
-        disk->sector_cache[sec_id & 0x1FF].offset = offset;
-        disk->sector_cache[sec_id & 0x1FF].id = sec_id;
-    }
 }
 
 uint64_t rvvd_sc_get(struct rvvd_dev* disk, uint64_t sec_id) {
 
     rvvm_info("RVVD %p: Getting sector cache entry with sector_id = %ld", disk->_fd, sec_id);
+
+    // Get sector cache entry
 
     uint64_t offset = ((uint64_t)-1);
     if (disk->sector_cache[sec_id & 0x1FF].id == sec_id) {
@@ -443,6 +457,8 @@ uint64_t rvvd_sc_get(struct rvvd_dev* disk, uint64_t sec_id) {
 void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32_t sector_count) {
 
     rvvm_info("RVVD %p: Forward prediction of %d offsets", disk->_fd, sector_count);
+
+    // Reads sector_count sectors from from_sector id
 
     if (sector_count > 64) sector_count = 64;
     if (from_sector + sector_count > disk->sector_table_size * 64) return;
@@ -456,12 +472,17 @@ void rvvd_sc_forward_predict(struct rvvd_dev* disk, uint64_t from_sector, uint32
 
 uint64_t rvvd_sector_get_offset(struct rvvd_dev* disk, uint64_t sec_id) {
 
+    // Gets sector offset by sector id
+
     uint8_t offsetbuf[8] = {0};
     rvread(disk->_fd, offsetbuf, 8, 512+sec_id*8);
     return read_uint64_le(offsetbuf);
 }
 
 size_t rvvd_blk_read(void* dev, void* dst, size_t count, uint64_t offset) {
+
+    // Read wrapper for blk API
+
     struct rvvd_dev* drive = (struct rvvd_dev*)dev;
     if (!drive->_fd) return 0;
     if (count % 512 != 0 || offset % 512 != 0) return 0;
@@ -477,6 +498,9 @@ size_t rvvd_blk_read(void* dev, void* dst, size_t count, uint64_t offset) {
 }
 
 size_t rvvd_blk_write(void* dev, const void* src, size_t count, uint64_t offset) {
+
+    // Write wrapper for blk API
+
     struct rvvd_dev* drive = (struct rvvd_dev*)dev;
     if (!drive->_fd) return 0;
     if (count % 512 != 0 || offset % 512 != 0) return 0;
@@ -490,6 +514,9 @@ size_t rvvd_blk_write(void* dev, const void* src, size_t count, uint64_t offset)
 }
 
 bool rvvd_blk_trim (void* dev, uint64_t offset, uint64_t count) {
+
+    // Trim wrapper for blk API
+
     UNUSED(dev);
     UNUSED(offset);
     UNUSED(count);
