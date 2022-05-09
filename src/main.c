@@ -37,6 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
+#include "devices/nvme.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -280,6 +281,7 @@ static bool handle_vm_reset(rvvm_machine_t* machine, void* data, bool reset)
 static void rvvm_run_with_args(vm_args_t args)
 {
     rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
+    if (machine == NULL) return;
 
     if (!handle_vm_reset(machine, &args, true)) return;
 
@@ -291,7 +293,7 @@ static void rvvm_run_with_args(vm_args_t args)
     syscon_init_auto(machine);
 
     if (args.image) {
-        rvvm_cmdline_append(machine, "root=/dev/nvme0n1 rw");
+        rvvm_cmdline_append(machine, "root=/dev/nvme0n1 rootflags=discard rw");
         if (!nvme_init(pci_bus, args.image, true)) {
             rvvm_error("Unable to open image file %s", args.image);
             return;
