@@ -27,16 +27,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define FILE_POS_READ    1
 #define FILE_POS_WRITE   2
 
-struct blk_io_rvfile {
-    uint64_t size;
-    uint64_t pos;
-    uint64_t pos_real;
-    uint8_t  pos_state;
-    spinlock_t lock;
-    void* ptr;
-    int fd;
-};
-
 #ifdef __unix__
 #include <unistd.h>
 #include <fcntl.h>
@@ -98,6 +88,19 @@ static FILE* fopen_utf8(const char* name, const char* mode)
 
 #endif
 
+struct blk_io_rvfile {
+    uint64_t size;
+    uint64_t pos;
+#ifdef __unix__
+    int fd;
+#else
+    uint64_t pos_real;
+    uint8_t  pos_state;
+    spinlock_t lock;
+    FILE* fp;
+#endif
+};
+
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
 #if defined(__unix__)
@@ -158,7 +161,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->size = ftell(fp);
     file->pos = 0;
     file->pos_state = FILE_POS_INVALID;
-    file->ptr = (void*)fp;
+    file->fp = fp;
     spin_init(&file->lock);
     return file;
 #endif
@@ -172,7 +175,7 @@ void rvclose(rvfile_t *file)
     free(file);
 #else
     spin_lock_slow(&file->lock);
-    fclose((FILE*)file->ptr);
+    fclose(file->fp);
     spin_unlock(&file->lock);
     free(file);
 #endif
@@ -194,9 +197,9 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 #else
     spin_lock_slow(&file->lock);
     if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_READ)) {
-        fseek((FILE*)file->ptr, pos_real, SEEK_SET);
+        fseek(file->fp, pos_real, SEEK_SET);
     }
-    size_t ret = fread(destination, 1, count, (FILE*)file->ptr);
+    size_t ret = fread(destination, 1, count, file->fp);
     file->pos_real = pos_real + ret;
     file->pos_state = FILE_POS_READ;
     spin_unlock(&file->lock);
@@ -215,9 +218,9 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 #else
     spin_lock_slow(&file->lock);
     if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_WRITE)) {
-        fseek((FILE*)file->ptr, pos_real, SEEK_SET);
+        fseek(file->fp, pos_real, SEEK_SET);
     }
-    size_t ret = fwrite(source, 1, count, (FILE*)file->ptr);
+    size_t ret = fwrite(source, 1, count, file->fp);
     file->pos_real = pos_real + ret;
     file->pos_state = FILE_POS_WRITE;
     spin_unlock(&file->lock);
@@ -265,7 +268,7 @@ bool rvflush(rvfile_t* file)
 #if defined(__unix__)
     return fsync(file->fd);
 #else
-    return fflush((FILE*)file->ptr) == 0;
+    return fflush(file->fp) == 0;
 #endif
 }
 
@@ -278,16 +281,20 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
     char tmp = 0;
     if (length) {
         spin_lock_slow(&file->lock);
-        fseek((FILE*)file->ptr, length - 1, SEEK_SET);
-        fread(&tmp, 1, 1, (FILE*)file->ptr);
-        fseek((FILE*)file->ptr, length - 1, SEEK_SET);
-        fwrite(&tmp, 1, 1, (FILE*)file->ptr);
+        fseek(file->fp, length - 1, SEEK_SET);
+        fread(&tmp, 1, 1, file->fp);
+        fseek(file->fp, length - 1, SEEK_SET);
+        fwrite(&tmp, 1, 1, file->fp);
         file->pos_state = FILE_POS_INVALID;
         spin_unlock(&file->lock);
     }
     return true;
 #endif
 }
+
+/*
+ * Async IO
+ */
 
 static void* async_io_task(void** data)
 {
@@ -311,7 +318,7 @@ static void* async_io_task(void** data)
                 break;
             default:
                 rvvm_warn("Unknown opcode %d in async_io_task()!", iolist[i].opcode);
-                return false;
+                return NULL;
         }
         if (iolist[i].callback) iolist[i].callback(iolist[i].file, iolist[i].userdata, op_result ? ASYNC_IO_DONE : ASYNC_IO_FAIL);
         if (!op_result) va_result = ASYNC_IO_FAIL;
