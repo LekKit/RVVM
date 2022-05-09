@@ -5,11 +5,11 @@ VERSION := 0.5
 
 SPACE   :=
 ifneq (,$(findstring xterm,$(TERM)))
-RESET   := $(shell echo -e "\033[0;0m")
-RED     := $(shell echo -e "\033[1;31m")
-GREEN   := $(shell echo -e "\033[1;32m")
-YELLOW  := $(shell echo -e "\033[1;33m")
-BLUE    := $(shell echo -e "\033[1;34m")
+RESET   := $(shell printf "\e[0;0m")
+RED     := $(shell printf "\e[1;31m")
+GREEN   := $(shell printf "\e[1;32m")
+YELLOW  := $(shell printf "\e[1;33m")
+BLUE    := $(shell printf "\e[1;34m")
 
 $(info $(SPACE))
 $(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
