@@ -123,7 +123,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
-    struct stat file_stat;
+    struct stat file_stat = {0};
     fstat(fd, &file_stat);
     file->size = file_stat.st_size;
     file->pos = 0;
@@ -358,11 +358,11 @@ bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callba
 // Be careful with function prototypes
 static blkdev_type_t blkdev_type_raw = {
     .name = "raw",
-    .close = (const void*)rvclose,
-    .read = (const void*)rvread,
-    .write = (const void*)rvwrite,
-    .trim = (const void*)rvtrim,
-    .sync = (const void*)rvflush,
+    .close = (void*)rvclose,
+    .read = (void*)rvread,
+    .write = (void*)rvwrite,
+    .trim = (void*)rvtrim,
+    .sync = (void*)rvflush,
 };
 
 static bool blk_init_raw(blkdev_t* dev, rvfile_t* file)
