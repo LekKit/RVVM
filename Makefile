@@ -4,14 +4,14 @@ SRCDIR  := src
 VERSION := 0.5
 
 SPACE   :=
-ifneq (,$(findstring xterm,$(TERM)))
-RESET   := $(shell printf "\e[0;0m")
-RED     := $(shell printf "\e[1;31m")
-GREEN   := $(shell printf "\e[1;32m")
-YELLOW  := $(shell printf "\e[1;33m")
-BLUE    := $(shell printf "\e[1;34m")
+ifneq (,$(TERM))
+RESET   := $(shell tput sgr0; tput bold)
+RED     := $(shell tput bold; tput setaf 1)
+GREEN   := $(shell tput bold; tput setaf 2)
+YELLOW  := $(shell tput bold; tput setaf 3)
+BLUE    := $(shell tput bold; tput setaf 6)
 
-$(info $(SPACE))
+$(info $(RESET))
 $(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
 $(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
 $(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
@@ -25,29 +25,20 @@ $(info $(SPACE)               ░        ░              )
 $(info $(SPACE))
 endif
 
-# Automatically parallelize build
-ifeq ($(OS),Windows_NT)
-JOBS ?= $(NUMBER_OF_PROCESSORS)
-else
-ifeq ($(OS),Darwin)
-JOBS ?= $(shell sysctl hw.ncpu | awk '{print $$2}')
-else
-JOBS ?= $(shell nproc)
-endif
-endif
-override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
-
 # Detect host & target OS
 ifeq ($(OS),Windows_NT)
 # Passed by MinGW/Cygwin Make on Windows hosts
 HOST_WINDOWS := 1
 NULL_STDERR := 2>NUL
+HOST_CPUS := $(NUMBER_OF_PROCESSORS)
 OS := windows
 $(info Detected OS: $(GREEN)Windows$(RESET))
 else
 # Assuming the host is POSIX
 HOST_POSIX := 1
 NULL_STDERR := 2>/dev/null
+HOST_UNAME := $(shell uname -s)
+HOST_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 
 ifneq (,$(findstring mingw, $(shell $(CC) -v 2>&1)))
 # Running MinGW
@@ -60,16 +51,15 @@ OS := android
 $(info Detected OS: $(GREEN)Android$(RESET))
 else
 # Detect *nix OS by uname
-OS_UNAME := $(shell uname -s)
-ifeq ($(OS_UNAME),Linux)
+ifeq ($(HOST_UNAME),Linux)
 OS := linux
 $(info Detected OS: $(GREEN)Linux$(RESET))
 else
-ifneq (,$(findstring BSD,$(OS_UNAME)))
+ifneq (,$(findstring BSD,$(HOST_UNAME)))
 OS := bsd
 $(info Detected OS: $(GREEN)BSD$(RESET))
 else
-ifeq ($(OS_UNAME),Darwin)
+ifeq ($(HOST_UNAME),Darwin)
 OS := darwin
 $(info Detected OS: $(GREEN)Darwin/MacOS$(RESET))
 else
@@ -82,6 +72,10 @@ endif
 endif
 
 endif
+
+# Automatically parallelize build
+JOBS ?= $(HOST_CPUS)
+override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
 
 # Set up OS options
 ifeq ($(OS),windows)
@@ -226,6 +220,10 @@ override CFLAGS += -DUSE_FPU
 ifeq (,$(findstring rounding-math, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -frounding-math 2>&1)))
 override CFLAGS += -frounding-math
 endif
+# Suppress Clang schizophrenia when frounding-math is misreported as supported
+ifeq ($(CC_TYPE),clang)
+override CFLAGS += -Wno-ignored-optimization-argument
+endif
 endif
 
 ifeq ($(USE_JIT),1)
@@ -265,48 +263,61 @@ override LDFLAGS += -lgdi32
 else
 # XCB Window
 ifeq ($(USE_XCB),1)
-SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
-override CFLAGS += -DUSE_FB -DUSE_X11 -DUSE_XCB
 ifeq ($(OS),darwin)
-PKGCFG_LIST += xcb
+XCB_CFLAGS := $(shell pkg-config xcb xcb-icccm --cflags $(NULL_STDERR))
+XCB_LDFLAGS := $(shell pkg-config xcb xcb-icccm --libs $(NULL_STDERR) || echo -lxcb-pkg-notfound)
 else
-override LDFLAGS += -lxcb
+XCB_LDFLAGS := -lxcb -lxcb-icccm
+endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XCB_CFLAGS) $(LDFLAGS) $(XCB_LDFLAGS) 2>&1)))
+SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
+override CFLAGS += -DUSE_FB -DUSE_X11 -DUSE_XCB $(XCB_CFLAGS)
+override LDFLAGS += $(XCB_LDFLAGS)
+else
+$(info [$(RED)WARN$(RESET)] libxcb not found, ignoring USE_FB)
 endif
 ifeq ($(USE_XSHM),1)
-override CFLAGS += -DUSE_XSHM
 ifeq ($(OS),darwin)
-PKGCFG_LIST += xcb-shm
+XCB_SHM_CFLAGS := $(shell pkg-config xcb-shm --cflags $(NULL_STDERR))
+XCB_SHM_LDFLAGS := $(shell pkg-config xcb-shm --libs $(NULL_STDERR) || echo -lxcb-shm-pkg-notfound)
 else
-override LDFLAGS += -lxcb-shm
+XCB_SHM_LDFLAGS := -lxcb-shm
+endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XCB_SHM_CFLAGS) $(LDFLAGS) $(XCB_SHM_LDFLAGS) 2>&1)))
+override CFLAGS += -DUSE_XSHM $(XCB_SHM_CFLAGS)
+override LDFLAGS += $(XCB_SHM_LDFLAGS)
+else
+$(info [$(RED)WARN$(RESET)] libxcb-shm not found, ignoring USE_XSHM)
 endif
 endif
 else
 # Xlib Window
 ifeq ($(OS),darwin)
-SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
-override CFLAGS += -DUSE_FB -DUSE_X11
-PKGCFG_LIST += x11
+XLIB_CFLAGS := $(shell pkg-config x11 --cflags $(NULL_STDERR))
+XLIB_LDFLAGS := $(shell pkg-config x11 --libs $(NULL_STDERR) || echo -lx11-pkg-notfound)
 else
+XLIB_LDFLAGS := -lX11
+endif
 # Detect presence of libX11
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lX11 2>&1)))
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XLIB_CFLAGS) $(LDFLAGS) $(XLIB_LDFLAGS) 2>&1)))
 SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
-override CFLAGS += -DUSE_FB -DUSE_X11
-override LDFLAGS += -lX11
+override CFLAGS += -DUSE_FB -DUSE_X11 $(XLIB_CFLAGS)
+override LDFLAGS += $(XLIB_LDFLAGS)
 else
 $(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
 endif
-endif
 ifeq ($(USE_XSHM),1)
 ifeq ($(OS),darwin)
-override CFLAGS += -DUSE_XSHM
-PKGCFG_LIST += xext
+XEXT_CFLAGS := $(shell pkg-config xext --cflags $(NULL_STDERR))
+XEXT_LDFLAGS := $(shell pkg-config xext --libs $(NULL_STDERR) || echo -lxext-pkg-notfound)
 else
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lXext 2>&1)))
-override CFLAGS += -DUSE_XSHM
-override LDFLAGS += -lXext
+XEXT_LDFLAGS := -lXext
+endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XEXT_CFLAGS) $(LDFLAGS) $(XEXT_LDFLAGS) 2>&1)))
+override CFLAGS += -DUSE_XSHM $(XEXT_CFLAGS)
+override LDFLAGS += $(XEXT_LDFLAGS)
 else
 $(info [$(RED)WARN$(RESET)] libXext not found, ignoring USE_XSHM)
-endif
 endif
 endif
 endif
@@ -349,13 +360,8 @@ ifeq ($(USE_LIB),1)
 override CFLAGS += -DUSE_LIB -fPIC
 endif
 
-ifeq ($(OS),darwin)
-override CFLAGS += $(shell pkg-config $(PKGCFG_LIST) --cflags)
-override LDFLAGS += $(shell pkg-config $(PKGCFG_LIST) --libs)
-endif
-
 # Generic compiler flags
-override CFLAGS += -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR)
+override CFLAGS := -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) $(CFLAGS)
 
 BUILDDIR := $(BUILD_TYPE).$(OS).$(ARCH)
 OBJDIR := $(BUILDDIR)/obj
@@ -429,6 +435,10 @@ $(info [$(RED)WARN$(RESET)] No compiler support for header dependencies, forcing
 override MAKEFLAGS += -B
 DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
 endif
+
+# Ignore deleted header files
+%.h:
+	@:
 
 # RV64 CPU
 $(OBJDIR)/%.64.o: $(SRCDIR)/%.c Makefile
