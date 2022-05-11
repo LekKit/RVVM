@@ -347,7 +347,7 @@ static void rvvm_run_with_args(vm_args_t args)
     rvvm_free_machine(machine);
 }
 
-int main(int argc, const char** argv)
+static int rvvm_main(int argc, const char** argv)
 {
     vm_args_t args = {0};
     rvvm_set_args(argc, argv);
@@ -360,4 +360,31 @@ int main(int argc, const char** argv)
 
     rvvm_run_with_args(args);
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+#ifdef _WIN32
+    HWND console = GetConsoleWindow();
+    DWORD pid;
+    GetWindowThreadProcessId(console, &pid);
+    if (GetCurrentProcessId() == pid) {
+        // If we don't have a parent terminal, destroy our console
+        FreeConsole();
+    }
+    // Use UTF-8 arguments
+    LPWSTR* argv_u16 = CommandLineToArgvW(GetCommandLineW(), &argc);
+    argv = safe_calloc(sizeof(char*), argc);
+    for (int i=0; i<argc; ++i) {
+        size_t arg_len = WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, NULL, 0, NULL, NULL);
+        argv[i] = safe_calloc(sizeof(char), arg_len);
+        WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, argv[i], arg_len, NULL, NULL);
+    }
+#endif
+    int ret = rvvm_main(argc, (const char**)argv);
+#ifdef _WIN32
+    for (int i=0; i<argc; ++i) free(argv[i]);
+    free(argv);
+#endif
+    return ret;
 }
