@@ -1,4 +1,4 @@
- /*
+/*
 rvvmlib.h - RISC-V Virtual Machine Public API
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stddef.h>
 #include <stdbool.h>
 
-#ifdef RVVMLIB_SHARED
+#ifdef USE_LIB
 #if defined(__GNUC__) || defined(__llvm__) || defined(__INTEL_COMPILER)
 #define PUBLIC        __attribute__((visibility("default")))
 #define HIDDEN        __attribute__((visibility("hidden")))
