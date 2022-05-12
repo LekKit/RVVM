@@ -157,7 +157,7 @@ static void ata_clear_interrupt(struct ata_dev *ata) {
 static void ata_copy_id_string(uint8_t* buf, const char* str)
 {
     // Reverse each byte pair since they are little-endian words
-    for (size_t i=0; str[i]; ++i) {
+    for (size_t i=0; i<strlen(str); ++i) {
         buf[(i & ~1) | ((~i) & 1)] = str[i];
     }
 }
