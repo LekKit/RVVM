@@ -2,30 +2,35 @@
 
 cmake_minimum_required(VERSION 3.9)
 
-set(RVVM_VERSION 0.4)
+set(RVVM_VERSION 0.5)
 project(RVVM VERSION ${RVVM_VERSION}
 	DESCRIPTION "RISC-V Virtual Machine"
 	HOMEPAGE_URL "https://github.com/LekKit/RVVM"
 	LANGUAGES C)
 
+option(RVVM_USE_RV64 "Use RV64 CPU" ON)
+option(RVVM_USE_FPU "Use floating-point instructions" ON)
+option(RVVM_USE_JIT "Use RVJIT Just-in-time compiler" ON)
 option(RVVM_USE_FB "Use framebuffer output" ON)
 option(RVVM_USE_XCB "Use XCB framebuffer backend - Xlib is used otherwise" OFF)
 option(RVVM_USE_XSHM "Use XSHM shared memory extension for X11" ON)
-option(RVVM_USE_RV64 "Use RV64 CPU" ON)
-option(RVVM_USE_JIT "Use RVJIT Just-in-time compiler" OFF)
 option(RVVM_USE_NET "Use networking" OFF)
-option(RVVM_USE_FPU "Use floating-point instructions" ON)
-option(RVVM_USE_VMSWAP "Use swap file for RAM" OFF)
-option(RVVM_USE_VMSWAP_SPLIT "Use swap splitting - one file per page" OFF)
-option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
+option(RVVM_USE_TAP_LINUX "Use Linux TAP implementation" OFF)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
-option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking - makes context switches cheaper" ON)
 option(RVVM_USE_PCI "Use PCI bus emulation" ON)
 option(RVVM_USE_RTC "Use Real Time Clock" ON)
-option(RVVM_USE_TAP_LINUX "Use Linux TAP implementation" OFF)
+option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
+option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking" OFF)
 
-if (RVVM_USE_JIT AND RVVM_USE_PRECISE_FS)
-	message(FATAL_ERROR "Precise FS tracking cannot be used with JIT.")
+if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+	message(FATAL_ERROR "CMake in-source build is not allowed")
+endif()
+
+if (NOT CMAKE_BUILD_TYPE OR NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
+	message(STATUS "Setting build type to Release as none was specified.")
+	set(CMAKE_BUILD_TYPE "Release" CACHE
+		STRING "Choose the type of build." FORCE)
+	set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(RVVM_SRC_DIR "${RVVM_SOURCE_DIR}/src")
@@ -35,9 +40,17 @@ add_library(rvvm_common INTERFACE)
 target_include_directories(rvvm_common INTERFACE "${RVVM_SRC_DIR}")
 target_compile_definitions(rvvm_common INTERFACE "VERSION=\"${RVVM_VERSION}\"")
 if (MSVC)
-	# Suppress warnings
+	# Suppress warnings: casts between int sizes, unsigned minus, cast after shift
 	target_compile_definitions(rvvm_common INTERFACE _CRT_SECURE_NO_WARNINGS)
-	target_compile_options(rvvm_common INTERFACE /wd4146 /wd4090 /wd4996 /wd4267 /wd4244)
+	target_compile_options(rvvm_common INTERFACE /wd4267 /wd4244 /wd4146 /wd4334)
+	# Use static runtime
+	set(buildflags CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_RELWITHDEBINFO
+			CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+	foreach(buildflag ${buildflags})
+		if(${buildflag} MATCHES "/MD")
+			string(REGEX REPLACE "/MD" "/MT" ${buildflag} "${${buildflag}}")
+		endif()
+	endforeach()
 endif()
 
 # Enable LTO
@@ -48,6 +61,12 @@ if (RVVM_LTO)
 	# flag on new targets, so we set it and restore it at the end.
 	set(RVVM_OLD_IPO ${CMAKE_INTERPROCEDURAL_OPTIMIZATION})
 	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+	# Enable parallel LTO
+	if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto=thin")
+	elseif (CMAKE_C_COMPILER_ID MATCHES "GNU")
+		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto=auto")
+	endif()
 endif()
 
 if (RVVM_IS_TOP_LEVEL)
@@ -59,20 +78,20 @@ if (RVVM_IS_TOP_LEVEL)
 	endif()
 endif()
 
-if (RVVM_USE_SPINLOCK_DEBUG)
-	target_compile_definitions(rvvm_common INTERFACE USE_SPINLOCK_DEBUG)
+if (UNIX OR WIN32)
+	find_package(Threads REQUIRED)
+	target_link_libraries(rvvm_common INTERFACE Threads::Threads)
 endif()
-
-if (RVVM_USE_FDT)
-	target_compile_definitions(rvvm_common INTERFACE USE_FDT)
-endif()
-
-if (RVVM_USE_PRECISE_FS)
-	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
-endif()
-
-if (RVVM_USE_PCI)
-	target_compile_definitions(rvvm_common INTERFACE USE_PCI)
+if (UNIX)
+	# Link librt, libatomic if we have them
+	find_library(RVVM_RT_LIB rt)
+	if (RVVM_RT_LIB)
+		target_link_libraries(rvvm_common INTERFACE ${RVVM_RT_LIB})
+	endif()
+	find_library(RVVM_ATOMIC_LIB atomic)
+	if (RVVM_ATOMIC_LIB)
+		target_link_libraries(rvvm_common INTERFACE ${RVVM_ATOMIC_LIB})
+	endif()
 endif()
 
 # CPU interpreter sources
@@ -82,61 +101,44 @@ file(GLOB RVVM_CPU_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
 )
 add_library(rvvm_cpu32 STATIC EXCLUDE_FROM_ALL ${RVVM_CPU_SRC})
 target_link_libraries(rvvm_cpu32 PRIVATE rvvm_common)
-add_library(rvvm_cpu64 STATIC EXCLUDE_FROM_ALL ${RVVM_CPU_SRC})
-target_link_libraries(rvvm_cpu64 PRIVATE rvvm_common)
-target_compile_definitions(rvvm_cpu64 PRIVATE RV64)
-target_compile_definitions(rvvm_cpu64 PUBLIC USE_RV64)
+target_link_libraries(rvvm_common INTERFACE rvvm_cpu32)
 if (RVVM_USE_RV64)
-	target_compile_definitions(rvvm_cpu32 PUBLIC USE_RV64)
+	target_compile_definitions(rvvm_common INTERFACE USE_RV64)
+	add_library(rvvm_cpu64 STATIC EXCLUDE_FROM_ALL ${RVVM_CPU_SRC})
+	target_link_libraries(rvvm_cpu64 PRIVATE rvvm_common)
+	target_link_libraries(rvvm_common INTERFACE rvvm_cpu64)
+	target_compile_definitions(rvvm_cpu64 PRIVATE RV64)
 endif()
+
 if (RVVM_USE_FPU)
-	target_compile_definitions(rvvm_cpu32 PUBLIC USE_FPU)
-	target_compile_definitions(rvvm_cpu64 PUBLIC USE_FPU)
+	target_compile_definitions(rvvm_common INTERFACE USE_FPU)
 
 	# Link libm library if we have it
 	find_library(RVVM_M_LIB m)
 	if (RVVM_M_LIB)
-		target_link_libraries(rvvm_cpu32 PRIVATE ${RVVM_M_LIB})
-		target_link_libraries(rvvm_cpu64 PRIVATE ${RVVM_M_LIB})
+		target_link_libraries(rvvm_common INTERFACE ${RVVM_M_LIB})
 	endif()
 
 	# Enforce correct floating-point behavior
-	if (CMAKE_C_COMPILER_ID MATCHES "GNU"
-	    AND NOT MSVC) # clang-cl
-		target_compile_options(rvvm_cpu32 PRIVATE -frounding-math)
-		target_compile_options(rvvm_cpu64 PRIVATE -frounding-math)
+	if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+		include(CheckCCompilerFlag)
+		check_c_compiler_flag(-frounding-math FROUNDING_MATH)
+		if (FROUNDING_MATH)
+			target_compile_options(rvvm_common INTERFACE -frounding-math)
+		endif()
 	endif()
 endif()
 
-# General sources
-file(GLOB RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_SRC_DIR}/*.h"
-	"${RVVM_SRC_DIR}/*.c"
-)
-set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
-list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
-add_library(rvvm ${RVVM_SRC})
-target_link_libraries(rvvm PRIVATE rvvm_common)
-target_link_libraries(rvvm PUBLIC rvvm_cpu32)
-if (UNIX OR WIN32)
-	find_package(Threads REQUIRED)
-	target_link_libraries(rvvm PRIVATE Threads::Threads)
-endif()
-if (UNIX)
-	# Link librt if we have it
-	find_library(RVVM_RT_LIB rt)
-	if (RVVM_RT_LIB)
-		target_link_libraries(rvvm PRIVATE ${RVVM_RT_LIB})
-	endif()
-endif()
-if (RVVM_USE_RV64)
-	target_link_libraries(rvvm PUBLIC rvvm_cpu64)
-endif()
-if (RVVM_USE_VMSWAP)
-	target_compile_definitions(rvvm PUBLIC USE_VMSWAP)
-	if (RVVM_USE_VMSWAP_SPLIT)
-		target_compile_definitions(rvvm PUBLIC USE_VMSWAP_SPLIT)
-	endif()
+# RVJIT library
+if (RVVM_USE_JIT)
+	file(GLOB RVVM_RVJIT_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
+		"${RVVM_SRC_DIR}/rvjit/*.h"
+		"${RVVM_SRC_DIR}/rvjit/*.c"
+	)
+	add_library(rvjit EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
+	target_link_libraries(rvjit PRIVATE rvvm_common)
+	target_link_libraries(rvvm_common INTERFACE rvjit)
+	target_compile_definitions(rvvm_common INTERFACE USE_JIT)
 endif()
 
 # Device sources
@@ -147,87 +149,105 @@ file(GLOB RVVM_DEVICES_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
 set(RVVM_XCB_SRC "${RVVM_SRC_DIR}/devices/x11window_xcb.c")
 set(RVVM_XLIB_SRC "${RVVM_SRC_DIR}/devices/x11window_xlib.c")
 set(RVVM_WIN32_SRC "${RVVM_SRC_DIR}/devices/win32window.c")
-set(RVVM_RTC_SRC "${RVVM_SRC_DIR}/devices/rtc-goldfish.c")
 set(RVVM_TAP_LINUX_SRC "${RVVM_SRC_DIR}/devices/tap_linux.c")
 set(RVVM_TAP_USER_SRC "${RVVM_SRC_DIR}/devices/tap_user.c")
 list(REMOVE_ITEM RVVM_DEVICES_SRC
 	${RVVM_XCB_SRC}
 	${RVVM_XLIB_SRC}
 	${RVVM_WIN32_SRC}
-	${RVVM_RTC_SRC}
 	${RVVM_TAP_LINUX_SRC}
 	${RVVM_TAP_USER_SRC})
-target_sources(rvvm PRIVATE ${RVVM_DEVICES_SRC})
+
 if (RVVM_USE_FB)
-	target_compile_definitions(rvvm PUBLIC USE_FB)
 	if (UNIX)
-		find_package(X11 REQUIRED)
-		target_compile_definitions(rvvm PRIVATE USE_X11)
+		find_package(X11)
 		if (RVVM_USE_XCB)
 			if (NOT TARGET X11::xcb)
-				message(FATAL_ERROR "XCB library not found")
-			endif()
-			target_sources(rvvm PRIVATE "${RVVM_XCB_SRC}")
-			target_link_libraries(rvvm PRIVATE X11::xcb)
-			if (RVVM_USE_XSHM)
-				# FindX11 doesn't search for xcb-shm, so do this manually
-				find_library(RVVM_XCB_SHM_LIB xcb-shm REQUIRED)
-				target_link_libraries(rvvm PRIVATE ${RVVM_XCB_SHM_LIB})
-				target_compile_definitions(rvvm PRIVATE USE_XSHM)
+				message(WARNING "XCB library not found, ignoring USE_FB")
+			else()
+				list(APPEND RVVM_DEVICES_SRC ${RVVM_XCB_SRC})
+				target_link_libraries(rvvm_common INTERFACE X11::xcb)
+				target_compile_definitions(rvvm_common INTERFACE USE_FB USE_X11 USE_XCB)
+				if (RVVM_USE_XSHM)
+					# FindX11 doesn't search for xcb-shm, so do this manually
+					find_library(RVVM_XCB_SHM_LIB xcb-shm)
+					if (NOT RVVM_XCB_SHM_LIB)
+						message(WARNING "XCB-SHM library not found, ignoring USE_XSHM")
+					else()
+						target_link_libraries(rvvm_common INTERFACE ${RVVM_XCB_SHM_LIB})
+						target_compile_definitions(rvvm_common INTERFACE USE_XSHM)
+					endif()
+				endif()
 			endif()
 		else()
 			if (NOT TARGET X11::X11)
-				message(FATAL_ERROR "X11 library not found")
-			endif()
-			target_sources(rvvm PRIVATE "${RVVM_XLIB_SRC}")
-			target_link_libraries(rvvm PRIVATE X11::X11)
-			if (RVVM_USE_XSHM)
-				if (NOT TARGET X11::Xext)
-					message(FATAL_ERROR "Xext library not found")
+				message(WARNING "X11 library not found, ignoring USE_FB")
+			else()
+				list(APPEND RVVM_DEVICES_SRC ${RVVM_XLIB_SRC})
+				target_link_libraries(rvvm_common INTERFACE X11::X11)
+				target_compile_definitions(rvvm_common INTERFACE USE_FB USE_X11)
+				if (RVVM_USE_XSHM)
+					if (NOT TARGET X11::Xext)
+						message(WARNING "Xext library not found, ignoring USE_XSHM")
+					else()
+						target_link_libraries(rvvm_common INTERFACE X11::Xext)
+						target_compile_definitions(rvvm_common INTERFACE USE_XSHM)
+					endif()
 				endif()
-				target_link_libraries(rvvm PRIVATE X11::Xext)
-				target_compile_definitions(rvvm PRIVATE USE_XSHM)
 			endif()
 		endif()
 	elseif (WIN32)
-		target_sources(rvvm PRIVATE "${RVVM_WIN32_SRC}")
-		find_library(RVVM_GDI32_LIB gdi32 REQUIRED)
-		target_link_libraries(rvvm PRIVATE ${RVVM_GDI32_LIB})
+		list(APPEND RVVM_DEVICES_SRC ${RVVM_WIN32_SRC})
+		target_link_libraries(rvvm_common INTERFACE gdi32)
+		target_compile_definitions(rvvm_common INTERFACE USE_FB)
 	endif()
 endif()
+
 if (RVVM_USE_NET)
-	target_compile_definitions(rvvm PUBLIC USE_NET)
-	if (RVVM_USE_TAP_LINUX)
-		if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-			target_sources(rvvm PRIVATE "${RVVM_TAP_LINUX_SRC}")
-			target_compile_definitions(rvvm PUBLIC USE_TAP_LINUX)
-		else()
-			message(FATAL_ERROR "Networking is supported only on Linux for now")
-		endif()
+	target_compile_definitions(rvvm_common INTERFACE USE_NET)
+	if (RVVM_USE_TAP_LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+		list(APPEND RVVM_DEVICES_SRC ${RVVM_TAP_LINUX_SRC})
+		target_compile_definitions(rvvm_common INTERFACE USE_TAP_LINUX)
 	else()
-		target_sources(rvvm PRIVATE "${RVVM_TAP_USER_SRC}")
+		if (RVVM_USE_TAP_LINUX)
+			message(STATUS "TAP is supported only on Linux")
+		endif()
+		list(APPEND RVVM_DEVICES_SRC ${RVVM_TAP_USER_SRC})
+		if (WIN32)
+			target_link_libraries(rvvm_common INTERFACE ws2_32)
+		endif()
 	endif()
+endif()
+
+if (RVVM_USE_FDT)
+	target_compile_definitions(rvvm_common INTERFACE USE_FDT)
+endif()
+
+if (RVVM_USE_PCI)
+	target_compile_definitions(rvvm_common INTERFACE USE_PCI)
 endif()
 
 if (RVVM_USE_RTC)
-  target_compile_definitions(rvvm PUBLIC USE_RTC)
-  target_sources(rvvm PRIVATE ${RVVM_RTC_SRC})
+  target_compile_definitions(rvvm_common INTERFACE USE_RTC)
 endif()
 
-# RVJIT library
-file(GLOB RVVM_RVJIT_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_SRC_DIR}/rvjit/*.h"
-	"${RVVM_SRC_DIR}/rvjit/*.c"
-)
-add_library(rvjit EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
-target_link_libraries(rvjit PRIVATE rvvm_common)
-target_compile_definitions(rvjit PUBLIC USE_JIT)
-if (RVVM_USE_JIT)
-	target_link_libraries(rvvm PUBLIC rvjit)
-	target_link_libraries(rvjit PUBLIC rvvm)
-	target_link_libraries(rvvm_cpu32 PUBLIC rvjit)
-	target_link_libraries(rvvm_cpu64 PUBLIC rvjit)
+if (RVVM_USE_SPINLOCK_DEBUG)
+	target_compile_definitions(rvvm_common INTERFACE USE_SPINLOCK_DEBUG)
 endif()
+
+if (RVVM_USE_PRECISE_FS)
+	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
+endif()
+
+# General sources
+file(GLOB RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
+	"${RVVM_SRC_DIR}/*.h"
+	"${RVVM_SRC_DIR}/*.c"
+)
+set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
+list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
+add_library(rvvm ${RVVM_SRC} ${RVVM_DEVICES_SRC})
+target_link_libraries(rvvm PRIVATE rvvm_common)
 
 # Main executable
 add_executable(rvvm_bin ${RVVM_MAIN_SRC})
