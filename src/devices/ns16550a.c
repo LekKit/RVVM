@@ -34,48 +34,51 @@ struct ns16550a_data {
     plic_ctx_t plic;
     uint32_t irq;
     spinlock_t lock;
-    
+
     uint8_t ier;
-    uint8_t iir;
     uint8_t lcr;
     uint8_t mcr;
     uint8_t scr;
     uint8_t dll;
     uint8_t dlm;
-    
+
     uint8_t buf;
     uint8_t len;
 };
 
-// RW DLAB = 1
-#define NS16550A_REG_DLL 0
-#define NS16550A_REG_DLM 1
-
 // Read
-#define NS16550A_REG_RBR 0
-#define NS16550A_REG_IIR 2
+#define NS16550A_REG_RBR_DLL 0x0
+#define NS16550A_REG_IIR     0x2
 // Write
-#define NS16550A_REG_THR 0
-#define NS16550A_REG_FCR 2
+#define NS16550A_REG_THR_DLL 0x0
+#define NS16550A_REG_FCR     0x2
 // RW
-#define NS16550A_REG_IER 1
-#define NS16550A_REG_LCR 3
-#define NS16550A_REG_MCR 4
-#define NS16550A_REG_LSR 5
-#define NS16550A_REG_MSR 6
-#define NS16550A_REG_SCR 7
+#define NS16550A_REG_IER_DLM 0x1
+#define NS16550A_REG_LCR     0x3
+#define NS16550A_REG_MCR     0x4
+#define NS16550A_REG_LSR     0x5
+#define NS16550A_REG_MSR     0x6
+#define NS16550A_REG_SCR     0x7
 
+#define NS16550A_IER_RECV    0x1
+#define NS16550A_IER_THR     0x2
+#define NS16550A_IER_LSR     0x4
+#define NS16550A_IER_MSR     0x8
 
-#define NS16550A_IER_MASK  0xF
-#define NS16550A_IIR_FIFO  0xC0
-#define NS16550A_IIR_THR   0x2
-#define NS16550A_IIR_RECV  0x4
-#define NS16550A_LSR_THR   0x60
-#define NS16550A_LCR_DLAB  0x80
+#define NS16550A_IIR_FIFO    0xC0
+#define NS16550A_IIR_NONE    0x1
+#define NS16550A_IIR_MSR     0x0
+#define NS16550A_IIR_THR     0x2
+#define NS16550A_IIR_RECV    0x4
+#define NS16550A_IIR_LSR     0x6
+
+#define NS16550A_LSR_RECV    0x1
+#define NS16550A_LSR_THR     0x60
+
+#define NS16550A_LCR_DLAB    0x80
 
 #if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
-#include <fcntl.h>
 #include <termios.h>
 
 static struct termios orig_term_opts;
@@ -95,14 +98,21 @@ static void terminal_rawmode()
         term_opts.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
         term_opts.c_iflag &= ~(IXON | ICRNL);
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_opts);
-        fcntl(STDIN_FILENO, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK);
         once = false;
     }
 }
 
 static uint8_t terminal_readchar(void* addr)
 {
-    return (read(0, addr, 1) == 1) ? 1 : 0;
+    fd_set rfds;
+    struct timeval timeout = {0};
+    FD_ZERO(&rfds);
+    FD_SET(0, &rfds);
+    select(1, &rfds, NULL, NULL, &timeout);
+    if (FD_ISSET(0, &rfds)) {
+        return read(0, addr, 1) == 1;
+    }
+    return 0;
 }
 
 #elif _WIN32
@@ -114,13 +124,27 @@ static uint8_t terminal_readchar(void* addr)
 // with linux shell, needs workarounds
 static void terminal_rawmode()
 {
-    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0);
+    //AttachConsole(ATTACH_PARENT_PROCESS);
+    SetConsoleOutputCP(CP_UTF8);
+    // ENABLE_VIRTUAL_TERMINAL_INPUT
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0x200);
+    // ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), 0x5);
 }
 
 static uint8_t terminal_readchar(void* addr)
 {
-    if (_kbhit()) {
-        *(uint8_t*)addr = _getch();
+    static char t_buff[32];
+    static size_t t_head = 0, t_tail = 0;
+    if (t_head == t_tail && _kbhit()) {
+        wchar_t w_buff[8];
+        DWORD w_chars;
+        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buff, sizeof(w_buff), &w_chars, NULL);
+        t_head = WideCharToMultiByte(CP_UTF8, 0, w_buff, w_chars, t_buff, sizeof(t_buff), NULL, NULL);
+        t_tail = 0;
+    }
+    if (t_head != t_tail) {
+        *(uint8_t*)addr = t_buff[t_tail++];
         return 1;
     } else return 0;
 }
@@ -140,36 +164,36 @@ static uint8_t terminal_readchar(void* addr)
 static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
-    uint8_t *value = (uint8_t*) memory_data;
+    uint8_t *value = (uint8_t*)memory_data;
     UNUSED(size);
-    if (regs->lcr & NS16550A_LCR_DLAB) {
-        switch (offset) {
-            case NS16550A_REG_DLL:
-                *value = regs->dll;
-                return true;
-            case NS16550A_REG_DLM:
-                *value = regs->dlm;
-                return true;
-            default:
-                break;
-        }
-    }
+    spin_lock(&regs->lock);
+    // Read char from stdin
+    if (!regs->len) regs->len = terminal_readchar(&regs->buf);
     switch (offset) {
-        case NS16550A_REG_RBR:
-            spin_lock(&regs->lock);
-            if (regs->len) {
+        case NS16550A_REG_RBR_DLL:
+            if (regs->lcr & NS16550A_LCR_DLAB) {
+                *value = regs->dll;
+            } else {
                 *value = regs->buf;
                 regs->len = 0;
-            } else {
-                *value = 0;
+                regs->buf = 0;
             }
-            spin_unlock(&regs->lock);
             break;
-        case NS16550A_REG_IER:
-            *value = regs->ier;
+        case NS16550A_REG_IER_DLM:
+            if (regs->lcr & NS16550A_LCR_DLAB) {
+                *value = regs->dlm;
+            } else {
+                *value = regs->ier;
+            }
             break;
         case NS16550A_REG_IIR:
-            *value = regs->iir;
+            if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
+                *value = NS16550A_IIR_RECV | NS16550A_IIR_FIFO;
+            } else if (regs->ier & NS16550A_IER_THR) {
+                *value = NS16550A_IIR_THR | NS16550A_IIR_FIFO;
+            } else {
+                *value = NS16550A_IIR_NONE | NS16550A_IIR_FIFO;
+            }
             break;
         case NS16550A_REG_LCR:
             *value = regs->lcr;
@@ -178,14 +202,10 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_
             *value = regs->mcr;
             break;
         case NS16550A_REG_LSR:
-            // Read char from stdin
-            spin_lock(&regs->lock);
-            regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
-            *value = NS16550A_LSR_THR | regs->len;
-            spin_unlock(&regs->lock);
+            *value = NS16550A_LSR_THR | (regs->len ? NS16550A_LSR_RECV : 0);
             break;
         case NS16550A_REG_MSR:
-            *value = 0;
+            *value = 0xF0;
             break;
         case NS16550A_REG_SCR:
             *value = regs->scr;
@@ -194,53 +214,36 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_
             *value = 0;
             break;
     }
-
+    spin_unlock(&regs->lock);
     return true;
 }
 
 static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
     struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
-    uint8_t value = *(uint8_t*) memory_data;
+    uint8_t value = *(uint8_t*)memory_data;
     UNUSED(size);
-    if (regs->lcr & NS16550A_LCR_DLAB) {
-        switch (offset) {
-            case NS16550A_REG_DLL:
-                regs->dll = value;
-                return true;
-            case NS16550A_REG_DLM:
-                regs->dlm = value;
-                return true;
-            default:
-                break;
-        }
-    }
+    spin_lock(&regs->lock);
     switch (offset) {
-        case NS16550A_REG_THR:
-            putc(value, stdout);
-            fflush(stdout);
-            break;
-        case NS16550A_REG_IER:
-            //rvvm_info("NS16550A IER: 0x%x", value);
-            regs->ier = value & NS16550A_IER_MASK;
-            spin_lock(&regs->lock);
-            if ((regs->ier & 1) && regs->len) {
-                regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_RECV;
-                if (regs->plic) {
-                    plic_send_irq(regs->plic, regs->irq);
-                }
-                spin_unlock(&regs->lock);
-                break;
+        case NS16550A_REG_THR_DLL:
+            if (regs->lcr & NS16550A_LCR_DLAB) {
+                regs->dll = value;
+            } else {
+                putc(value, stdout);
+                fflush(stdout);
             }
-            if (regs->ier & 2) {
-                regs->iir = NS16550A_IIR_FIFO | NS16550A_IIR_THR;
-                if (regs->plic) {
+            break;
+        case NS16550A_REG_IER_DLM:
+            if (regs->lcr & NS16550A_LCR_DLAB) {
+                regs->dlm = value;
+            } else {
+                regs->ier = value;
+                if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
+                    plic_send_irq(regs->plic, regs->irq);
+                } else if (regs->ier & (NS16550A_IER_THR | NS16550A_IER_LSR)) {
                     plic_send_irq(regs->plic, regs->irq);
                 }
             }
-            spin_unlock(&regs->lock);
-            break;
-        case NS16550A_REG_FCR:
             break;
         case NS16550A_REG_LCR:
             regs->lcr = value;
@@ -251,13 +254,10 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size
         case NS16550A_REG_SCR:
             regs->scr = value;
             break;
-        // Registers are RO
-        case NS16550A_REG_LSR:
-        case NS16550A_REG_MSR:
-            break;
         default:
             break;
     }
+    spin_unlock(&regs->lock);
     return true;
 }
 
@@ -267,7 +267,13 @@ static void ns16550a_update(rvvm_mmio_dev_t* device)
     if (regs->plic) {
         spin_lock(&regs->lock);
         regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
-        if (regs->len) plic_send_irq(regs->plic, regs->irq);
+        if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
+            plic_send_irq(regs->plic, regs->irq);
+        } else if (regs->ier & (NS16550A_IER_THR | NS16550A_IER_LSR)) {
+            // This fixes OpenBSD tty(?), doesn't work from mmio handlers
+            // Might as well be related to PLIC, lets disable it for now
+            //plic_send_irq(regs->plic, regs->irq);
+        }
         spin_unlock(&regs->lock);
     }
 }
