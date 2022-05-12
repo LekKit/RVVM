@@ -99,12 +99,19 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #include <sys/syscall.h>
 #endif
 
-#ifndef MAP_JIT
-#define MAP_JIT 0
-#elif defined(__APPLE__)
+#if defined(__APPLE__) && defined(MAP_JIT)
+#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
 #include <libkern/OSCacheControl.h>
 #include <pthread.h>
-#define RVJIT_APPLE
+#define RVJIT_APPLE_SILICON
+#endif
+#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 101400
+#define MAP_RVJIT MAP_JIT
+#endif
+#endif
+
+#ifndef MAP_RVJIT
+#define MAP_RVJIT 0
 #endif
 
 static size_t page_mask()
@@ -124,7 +131,7 @@ static inline int rvjit_virt_flags(uint8_t flags)
 
 void* rvjit_mmap(size_t size, uint8_t flags)
 {
-    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS | MAP_RVJIT, -1, 0);
     if (tmp == MAP_FAILED) tmp = NULL;
     return tmp;
 }
@@ -214,7 +221,7 @@ static void flush_icache(const void* addr, size_t size)
 {
     syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
 }
-#elif defined(RVJIT_APPLE)
+#elif defined(RVJIT_APPLE_SILICON)
 static void flush_icache(const void* addr, size_t size)
 {
     sys_icache_invalidate((void*)addr, size);
@@ -325,7 +332,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         return NULL;
     }
 
-#ifdef RVJIT_APPLE
+#ifdef RVJIT_APPLE_SILICON
     pthread_jit_write_protect_np(false);
 #endif
 
@@ -364,7 +371,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
     }
 #endif
 
-#ifdef RVJIT_APPLE
+#ifdef RVJIT_APPLE_SILICON
     pthread_jit_write_protect_np(true);
 #endif
 
