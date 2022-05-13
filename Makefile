@@ -162,10 +162,10 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS := -O3 -flto=auto -pthread -fvisibility=hidden $(CFLAGS)
+override CFLAGS := -O3 -flto=auto -pthread -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS := -O3 -flto=thin -pthread -fvisibility=hidden $(CFLAGS)
+override CFLAGS := -O3 -flto=thin -pthread -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS := -O2 $(CFLAGS)
