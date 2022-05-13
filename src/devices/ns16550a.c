@@ -108,8 +108,7 @@ static uint8_t terminal_readchar(void* addr)
     struct timeval timeout = {0};
     FD_ZERO(&rfds);
     FD_SET(0, &rfds);
-    select(1, &rfds, NULL, NULL, &timeout);
-    if (FD_ISSET(0, &rfds)) {
+    if (!select(1, &rfds, NULL, NULL, &timeout) && FD_ISSET(0, &rfds)) {
         return read(0, addr, 1) == 1;
     }
     return 0;
@@ -119,9 +118,6 @@ static uint8_t terminal_readchar(void* addr)
 #include <windows.h>
 #include <conio.h>
 
-// Needs to be tested on actual windows machine
-// Very likely to be broken in many ways when working
-// with linux shell, needs workarounds
 static void terminal_rawmode()
 {
     //AttachConsole(ATTACH_PARENT_PROCESS);
