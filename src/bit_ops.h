@@ -94,4 +94,46 @@ static inline uint64_t byteswap_uint64(uint64_t val)
             ((val & 0x00000000000000FF) << 56));
 }
 
+static inline uint64_t mulh_uint64(int64_t a, int64_t b)
+{
+#ifdef INT128_SUPPORT
+    return ((int128_t)a * (int128_t)b) >> 64;
+#else
+    int64_t lo_lo = (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF);
+    int64_t hi_lo = (a >> 32)        * (b & 0xFFFFFFFF);
+    int64_t lo_hi = (a & 0xFFFFFFFF) * (b >> 32);
+    int64_t hi_hi = (a >> 32)        * (b >> 32);
+    int64_t cross = (lo_lo >> 32) + (hi_lo & 0xFFFFFFFF) + lo_hi;
+    return (hi_lo >> 32) + (cross >> 32) + hi_hi;
+#endif
+}
+
+static inline uint64_t mulhu_uint64(uint64_t a, uint64_t b)
+{
+#ifdef INT128_SUPPORT
+    return ((uint128_t)a * (uint128_t)b) >> 64;
+#else
+    uint64_t lo_lo = (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF);
+    uint64_t hi_lo = (a >> 32)        * (b & 0xFFFFFFFF);
+    uint64_t lo_hi = (a & 0xFFFFFFFF) * (b >> 32);
+    uint64_t hi_hi = (a >> 32)        * (b >> 32);
+    uint64_t cross = (lo_lo >> 32) + (hi_lo & 0xFFFFFFFF) + lo_hi;
+    return (hi_lo >> 32) + (cross >> 32) + hi_hi;
+#endif
+}
+
+static inline uint64_t mulhsu_uint64(int64_t a, uint64_t b)
+{
+#ifdef INT128_SUPPORT
+    return ((int128_t)a * (uint128_t)b) >> 64;
+#else
+    int64_t lo_lo = (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF);
+    int64_t hi_lo = (a >> 32)        * (b & 0xFFFFFFFF);
+    int64_t lo_hi = (a & 0xFFFFFFFF) * (b >> 32);
+    int64_t hi_hi = (a >> 32)        * (b >> 32);
+    uint64_t cross = (lo_lo >> 32) + (hi_lo & 0xFFFFFFFF) + lo_hi;
+    return (hi_lo >> 32) + (cross >> 32) + hi_hi;
+#endif
+}
+
 #endif
