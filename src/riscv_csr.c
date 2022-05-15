@@ -75,8 +75,9 @@ static inline void csr_helper_masked(maxlen_t* csr, maxlen_t* dest, maxlen_t mas
     *dest = tmp & mask;
 }
 
-static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
+static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
 {
+    maxlen_t new_status = *dest;
 #ifdef USE_FPU
     bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
 #ifndef USE_PRECISE_FS
@@ -103,15 +104,15 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
 #endif
 
 #ifdef USE_RV64
-    if (vm->rv64 && unlikely(bit_cut(*dest, 32, 6) ^ (bit_cut(*dest, 32, 6) >> 1))) {
+    if (vm->rv64 && unlikely(bit_cut(new_status, 32, 6) ^ (bit_cut(new_status, 32, 6) >> 1))) {
         // Changed XLEN somewhere
-        if (bit_cut(*dest, 32, 2) ^ (bit_cut(*dest, 32, 2) >> 1)) {
+        if (bit_cut(new_status, 32, 2) ^ (bit_cut(new_status, 32, 2) >> 1)) {
             mask |= 0x300000000ULL;
         }
-        if (bit_cut(*dest, 34, 2) ^ (bit_cut(*dest, 34, 2) >> 1)) {
+        if (bit_cut(new_status, 34, 2) ^ (bit_cut(new_status, 34, 2) >> 1)) {
             mask |= 0xC00000000ULL;
         }
-        if (bit_cut(*dest, 36, 2) ^ (bit_cut(*dest, 36, 2) >> 1)) {
+        if (bit_cut(new_status, 36, 2) ^ (bit_cut(new_status, 36, 2) >> 1)) {
             mask |= 0x3000000000ULL;
         }
         riscv_update_xlen(vm);
@@ -128,6 +129,10 @@ static inline void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t m
         riscv_decoder_enable_fpu(vm, fpu_enabled);
     }
 #endif
+    if (bit_cut(vm->csr.status, 0, 4) != bit_cut(new_status, 0, 4)) {
+        // IRQ enable bits changed
+        riscv_restart_dispatch(vm);
+    }
 }
 
 static bool riscv_csr_illegal(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
@@ -240,7 +245,6 @@ static bool riscv_csr_mideleg(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_mie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ie, dest, CSR_MEIP_MASK, op);
-    // handle possible interrupts?
     riscv_restart_dispatch(vm);
     return true;
 }
@@ -278,7 +282,6 @@ static bool riscv_csr_mtval(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_mip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ip, dest, CSR_MEIP_MASK, op);
-    // handle possible interrupts?
     riscv_restart_dispatch(vm);
     return true;
 }
@@ -296,7 +299,6 @@ static bool riscv_csr_sstatus(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_sie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ie, dest, CSR_SEIP_MASK, op);
-    // handle possible interrupts?
     riscv_restart_dispatch(vm);
     return true;
 }
@@ -334,7 +336,6 @@ static bool riscv_csr_stval(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_sip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     csr_helper_masked(&vm->csr.ip, dest, CSR_SEIP_MASK, op);
-    // handle possible interrupts?
     riscv_restart_dispatch(vm);
     return true;
 }
