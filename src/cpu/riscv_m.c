@@ -46,11 +46,7 @@ static void riscv_m_mulh(rvvm_hart_t *vm, const uint32_t instruction)
     rvjit_mulh(rds, rs1, rs2, 4);
 
 #ifdef RV64
-#ifdef INT128_SUPPORT
-    riscv_write_register(vm, rds, ((int128_t)reg1 * (int128_t)reg2) >> 64);
-#else
-    riscv_write_register(vm, rds, ((int64_t)reg1 >> 32) * ((int64_t)reg2 >> 32));
-#endif
+    riscv_write_register(vm, rds, mulh_uint64(reg1, reg2));
 #else
     riscv_write_register(vm, rds, ((int64_t)reg1 * (int64_t)reg2) >> 32);
 #endif
@@ -67,11 +63,7 @@ static void riscv_m_mulhsu(rvvm_hart_t *vm, const uint32_t instruction)
     rvjit_mulhsu(rds, rs1, rs2, 4);
 
 #ifdef RV64
-#ifdef INT128_SUPPORT
-    riscv_write_register(vm, rds, ((int128_t)reg1 * (uint128_t)reg2) >> 64);
-#else
-    riscv_write_register(vm, rds, ((int64_t)reg1 >> 32) * ((uint64_t)reg2 >> 32));
-#endif
+    riscv_write_register(vm, rds, mulhsu_uint64(reg1, reg2));
 #else
     riscv_write_register(vm, rds, ((int64_t)reg1 * (uint64_t)reg2) >> 32);
 #endif
@@ -88,11 +80,7 @@ static void riscv_m_mulhu(rvvm_hart_t *vm, const uint32_t instruction)
     rvjit_mulhu(rds, rs1, rs2, 4);
 
 #ifdef RV64
-#ifdef INT128_SUPPORT
-    riscv_write_register(vm, rds, ((uint128_t)reg1 * (uint128_t)reg2) >> 64);
-#else
-    riscv_write_register(vm, rds, ((uint64_t)reg1 >> 32) * ((uint64_t)reg2 >> 32));
-#endif
+    riscv_write_register(vm, rds, mulhu_uint64(reg1, reg2));
 #else
     riscv_write_register(vm, rds, ((uint64_t)reg1 * (uint64_t)reg2) >> 32);
 #endif
