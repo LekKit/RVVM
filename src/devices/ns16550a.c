@@ -80,6 +80,8 @@ struct ns16550a_data {
 #if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #include <termios.h>
+#include <sys/time.h>
+#include <sys/types.h>
 
 static struct termios orig_term_opts;
 
