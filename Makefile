@@ -25,59 +25,91 @@ $(info $(SPACE)               ░        ░              )
 $(info $(SPACE))
 endif
 
-# Detect host & target OS
+# Detect host features
 ifeq ($(OS),Windows_NT)
 # Passed by MinGW/Cygwin Make on Windows hosts
 HOST_WINDOWS := 1
 NULL_STDERR := 2>NUL
+HOST_UNAME := Windows
 HOST_CPUS := $(NUMBER_OF_PROCESSORS)
-OS := windows
-$(info Detected OS: $(GREEN)Windows$(RESET))
+ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+HOST_ARCH := x86_64
+else
+ifeq ($(PROCESSOR_ARCHITECTURE),ARM64)
+HOST_ARCH := arm64
+else
+HOST_ARCH := i386
+endif
+endif
 else
 # Assuming the host is POSIX
 HOST_POSIX := 1
 NULL_STDERR := 2>/dev/null
-HOST_UNAME := $(shell uname -s)
+HOST_UNAME := $(shell uname -s 2>/dev/null || echo POSIX)
 HOST_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-
-ifneq (,$(findstring mingw, $(shell $(CC) -v 2>&1)))
-# Running MinGW
-OS := windows
-$(info Detected OS: $(GREEN)Windows$(RESET))
-else
-ifneq (,$(findstring Android, $(shell $(CC) -v 2>&1)))
-# Running Android NDK
-OS := android
-$(info Detected OS: $(GREEN)Android$(RESET))
-else
-# Detect *nix OS by uname
-ifeq ($(HOST_UNAME),Linux)
-OS := linux
-$(info Detected OS: $(GREEN)Linux$(RESET))
-else
-ifneq (,$(findstring BSD,$(HOST_UNAME)))
-OS := bsd
-$(info Detected OS: $(GREEN)BSD$(RESET))
-else
-ifeq ($(HOST_UNAME),Darwin)
-OS := darwin
-$(info Detected OS: $(GREEN)Darwin/MacOS$(RESET))
-else
-OS := unknown
-$(info Detected OS: $(RED)Unknown$(RESET))
-endif
-endif
-endif
-endif
-endif
-
+HOST_ARCH := $(shell uname -m 2>/dev/null || echo Unknown)
 endif
 
 # Automatically parallelize build
 JOBS ?= $(HOST_CPUS)
 override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
 
+# Get compiler target triplet (arch-vendor-kernel-abi)
+CC_TRIPLET := $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))
+ifeq (,$(findstring -, $(CC_TRIPLET)))
+CC_TRIPLET := $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))
+endif
+
+tolower = $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(subst G,g,$(subst H,h,$(subst I,i,$(subst J,j,$(subst K,k,$(subst L,l,$(subst M,m,$(subst N,n,$(subst O,o,$(subst P,p,$(subst Q,q,$(subst R,r,$(subst S,s,$(subst T,t,$(subst U,u,$(subst V,v,$(subst W,w,$(subst X,x,$(subst Y,y,$(subst Z,z,$1))))))))))))))))))))))))))
+
+# Detect target OS
+ifneq (,$(findstring android, $(CC_TRIPLET)))
+OS := Android
+else
+ifneq (,$(findstring linux, $(CC_TRIPLET)))
+OS := Linux
+else
+ifneq (,$(findstring mingw, $(CC_TRIPLET)))
+OS := Windows
+else
+ifneq (,$(findstring cygwin, $(CC_TRIPLET)))
+# Technically, Cygwin != Windows, since it defines both _WIN32 & __unix__,
+# which may lead to funny API mixing, but let's ignore that for now
+OS := Windows
+else
+ifneq (,$(findstring windows, $(CC_TRIPLET)))
+OS := Windows
+else
+ifneq (,$(findstring darwin, $(CC_TRIPLET)))
+OS := Darwin
+else
+ifneq (,$(findstring macos, $(CC_TRIPLET)))
+OS := Darwin
+else
+ifneq (,$(findstring emscripten, $(CC_TRIPLET)))
+# Running Emscripten
+OS := Emscripten
+else
+# Use host OS as a target
+OS := $(HOST_UNAME)
+endif
+endif
+endif
+endif
+endif
+endif
+endif
+endif
+
+$(info Detected OS: $(GREEN)$(OS)$(RESET))
+OS := $(call tolower,$(OS))
+
 # Set up OS options
+ifeq ($(OS),emscripten)
+override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
+BIN_EXT := .html
+LIB_EXT := .so
+else
 ifeq ($(OS),windows)
 # -mwindows for GUI-only
 override LDFLAGS += -static
@@ -91,7 +123,13 @@ endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
 override LDFLAGS += -lrt
 endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
+override LDFLAGS += -latomic
+else
+override CFLAGS += -DNO_LIBATOMIC
+endif
 LIB_EXT := .so
+endif
 endif
 
 # Detect compiler type
@@ -111,26 +149,11 @@ endif
 
 # Detect target arch
 ifndef ARCH
-# Ask a crosscompiler about it's actual target
-ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))))
-ifndef ARCH
-ARCH := $(firstword $(subst -, ,$(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))))
-endif
+# Get target arch from target triplet
+ARCH := $(firstword $(subst -, ,$(CC_TRIPLET)))
 # This may fail on older compilers, fallback to host arch then
 ifndef ARCH
-ifeq ($(HOST_POSIX),1)
-ARCH := $(shell uname -m)
-else
-ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
-ARCH := x86_64
-else
-ifeq ($(PROCESSOR_ARCHITECTURE),ARM64)
-ARCH := arm64
-else
-ARCH := i386
-endif
-endif
-endif
+ARCH := $(HOST_ARCH)
 $(info [$(YELLOW)INFO$(RESET)] Picked arch from uname, specify ARCH manually if cross-compiling)
 endif
 # x86 compilers sometimes fail to report -m32 multiarch
@@ -145,13 +168,6 @@ endif
 endif
 
 $(info Target arch: $(GREEN)$(ARCH)$(RESET))
-
-# Detect presence of libatomic
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
-override LDFLAGS += -latomic
-else
-override CFLAGS += -DNO_LIBATOMIC
-endif
 
 # Set up compilation options
 ifeq ($(DEBUG),1)
@@ -217,12 +233,8 @@ ifeq ($(USE_FPU),1)
 override LDFLAGS += -lm
 override CFLAGS += -DUSE_FPU
 # Disable unsafe FPU optimizations
-ifeq (,$(findstring rounding-math, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -frounding-math 2>&1)))
-override CFLAGS += -frounding-math
-endif
-# Suppress Clang schizophrenia when frounding-math is misreported as supported
-ifeq ($(CC_TYPE),clang)
-override CFLAGS += -Wno-ignored-optimization-argument
+ifeq (,$(findstring rounding-math, $(shell $(CC) -frounding-math 2>&1)))
+override CFLAGS += -frounding-math -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument
 endif
 endif
 
@@ -261,6 +273,9 @@ SRC_depbuild += $(SRCDIR)/devices/win32window.c
 override CFLAGS += -DUSE_FB
 override LDFLAGS += -lgdi32
 else
+ifeq ($(OS),emscripten)
+$(info [$(YELLOW)INFO$(RESET)] No USE_FB support for Emscripten)
+else
 # XCB Window
 ifeq ($(USE_XCB),1)
 ifeq ($(OS),darwin)
@@ -273,9 +288,6 @@ ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XCB_CFLAGS) $(LDFLAGS) $(XC
 SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
 override CFLAGS += -DUSE_FB -DUSE_X11 -DUSE_XCB $(XCB_CFLAGS)
 override LDFLAGS += $(XCB_LDFLAGS)
-else
-$(info [$(RED)WARN$(RESET)] libxcb not found, ignoring USE_FB)
-endif
 ifeq ($(USE_XSHM),1)
 ifeq ($(OS),darwin)
 XCB_SHM_CFLAGS := $(shell pkg-config xcb-shm --cflags $(NULL_STDERR))
@@ -291,6 +303,9 @@ $(info [$(RED)WARN$(RESET)] libxcb-shm not found, ignoring USE_XSHM)
 endif
 endif
 else
+$(info [$(RED)WARN$(RESET)] libxcb not found, ignoring USE_FB)
+endif
+else
 # Xlib Window
 ifeq ($(OS),darwin)
 XLIB_CFLAGS := $(shell pkg-config x11 --cflags $(NULL_STDERR))
@@ -303,9 +318,6 @@ ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XLIB_CFLAGS) $(LDFLAGS) $(X
 SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_FB -DUSE_X11 $(XLIB_CFLAGS)
 override LDFLAGS += $(XLIB_LDFLAGS)
-else
-$(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
-endif
 ifeq ($(USE_XSHM),1)
 ifeq ($(OS),darwin)
 XEXT_CFLAGS := $(shell pkg-config xext --cflags $(NULL_STDERR))
@@ -318,6 +330,10 @@ override CFLAGS += -DUSE_XSHM $(XEXT_CFLAGS)
 override LDFLAGS += $(XEXT_LDFLAGS)
 else
 $(info [$(RED)WARN$(RESET)] libXext not found, ignoring USE_XSHM)
+endif
+endif
+else
+$(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
 endif
 endif
 endif
@@ -363,7 +379,9 @@ endif
 # Generic compiler flags
 override CFLAGS := -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) $(CFLAGS)
 
+ifndef BUILDDIR
 BUILDDIR := $(BUILD_TYPE).$(OS).$(ARCH)
+endif
 OBJDIR := $(BUILDDIR)/obj
 
 # Select sources to compile
@@ -428,7 +446,7 @@ $(shell echo PREV_LDFLAGS = $(subst \,\\\, $(LD) $(LDFLAGS)) > $(LDFLAGS_TXT))
 endif
 
 # Check compiler ability to generate header dependencies
-ifeq (,$(findstring MMD, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -MMD 2>&1)))
+ifeq (,$(findstring MMD, $(shell $(CC) -MMD 2>&1)))
 DO_CC = @$(CC) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 else
 $(info [$(RED)WARN$(RESET)] No compiler support for header dependencies, forcing rebuild)
