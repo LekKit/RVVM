@@ -41,7 +41,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             #define RVJIT_ABI_WIN64 1
         #endif
     #else
-        #define RVJIT_CALL __attribute__((sysv_abi))
+        #if GNU_ATTRIBUTE(sysv_abi)
+            #define RVJIT_CALL __attribute__((sysv_abi))
+        #endif
         #define RVJIT_ABI_SYSV 1
     #endif
     #define RVJIT_NATIVE_64BIT 1
