@@ -58,11 +58,13 @@ typedef struct {
     uint32_t flag;
 } cond_var_internal_t;
 
+#ifndef __EMSCRIPTEN__
 static void signal_membarrier(int sig)
 {
     UNUSED(sig);
     atomic_fence();
 }
+#endif
 
 #endif
 
@@ -120,7 +122,7 @@ void thread_signal_membarrier(thread_handle_t handle)
     if (handle == NULL) return;
 #ifdef _WIN32
     QueueUserAPC(apc_membarrier, *(HANDLE*)handle, 0);
-#else
+#elif !defined(__EMSCRIPTEN__)
     struct sigaction sa;
     sigaction(SIGUSR2, NULL, &sa);
 
