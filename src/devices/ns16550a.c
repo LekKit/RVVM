@@ -110,7 +110,7 @@ static uint8_t terminal_readchar(void* addr)
     struct timeval timeout = {0};
     FD_ZERO(&rfds);
     FD_SET(0, &rfds);
-    if (!select(1, &rfds, NULL, NULL, &timeout) && FD_ISSET(0, &rfds)) {
+    if (select(1, &rfds, NULL, NULL, &timeout) > 0) {
         return read(0, addr, 1) == 1;
     }
     return 0;
