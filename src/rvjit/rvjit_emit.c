@@ -141,6 +141,7 @@ static regid_t rvjit_map_reg(rvjit_block_t* block, regid_t greg, regflags_t flag
 {
     if (unlikely(greg >= RVJIT_REGISTERS)) {
         rvvm_fatal("Mapped RVJIT register is out of range!");
+        return REG_ILL;
     }
     if (block->regs[greg].hreg == REG_ILL) {
         regid_t hreg = rvjit_claim_hreg(block);
