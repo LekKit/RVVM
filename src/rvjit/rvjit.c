@@ -97,11 +97,12 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 
 #ifdef __linux__
 #include <sys/syscall.h>
+#include <signal.h>
 #endif
 
 #if defined(__APPLE__) && defined(MAP_JIT)
 #if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
-#include <libkern/OSCacheControl.h>
+void sys_icache_invalidate(void* start, size_t len);
 #include <pthread.h>
 #define RVJIT_APPLE_SILICON
 #endif
@@ -140,6 +141,7 @@ static int rvjit_anon_memfd()
 {
 #if defined(__NR_memfd_create)
     // If we are running on older kernel, should return -ENOSYS
+    signal(SIGSYS, SIG_IGN);
     int memfd = syscall(__NR_memfd_create, "rvjit_heap", 1);
 #elif defined(__FreeBSD__)
     int memfd = shm_open(SHM_ANON, O_RDWR, 0);
@@ -152,21 +154,36 @@ static int rvjit_anon_memfd()
     }
 #else
     int memfd = -1;
-    rvvm_info("No RVJIT anon memfd support for this platform");
+    rvvm_info("No RVJIT memfd support for this platform");
 #endif
-#if defined(ANDROID) || defined(__ANDROID__)
-    rvvm_warn("No RVJIT shmem support on Android");
+
+#if defined(ANDROID) || defined(__ANDROID__) || defined(__serenity__)
+    if (memfd < 0) rvvm_warn("No RVJIT shmem support for this platform");
 #else
     if (memfd < 0) {
         rvvm_info("Falling back to RVJIT shmem");
         char shm_file[] = "/shm-rvjit";
         memfd = shm_open(shm_file, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (shm_unlink(shm_file) == -1) {
+        if (shm_unlink(shm_file) < 0) {
             close(memfd);
             memfd = -1;
         }
     }
 #endif
+
+    if (memfd < 0) {
+        rvvm_warn("Falling back to RVJIT file mapping");
+        const char* filename = "/var/tmp/rvjit_heap";
+        memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        if (memfd < 0) {
+            filename = "/tmp/rvjit_heap";
+            memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        }
+        if (unlink(filename) < 0) {
+            close(memfd);
+            memfd = -1;
+        }
+    }
     return memfd;
 }
 
@@ -263,7 +280,7 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
 
     if (block->heap.data == NULL) {
         if (!rvjit_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
-            rvvm_warn("RVJIT heap allocation failure!");
+            rvvm_warn("Failed to allocate W^X RVJIT heap!");
             return false;
         }
         flush_icache(block->heap.code, block->heap.size);
