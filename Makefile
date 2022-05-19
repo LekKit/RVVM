@@ -3,35 +3,13 @@ NAME    := rvvm
 SRCDIR  := src
 VERSION := 0.5
 
-SPACE   :=
-ifneq (,$(TERM))
-RESET   := $(shell tput sgr0; tput bold)
-RED     := $(shell tput bold; tput setaf 1)
-GREEN   := $(shell tput bold; tput setaf 2)
-YELLOW  := $(shell tput bold; tput setaf 3)
-BLUE    := $(shell tput bold; tput setaf 6)
-
-$(info $(RESET))
-$(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
-$(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
-$(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
-$(info $(SPACE) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
-$(info $(SPACE) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
-$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ ▐░     ░ ▐░  ░ ▒░   ░  ░)
-$(info $(SPACE)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
-$(info $(SPACE)   ░░   ░      ░░       ░░  ░      ░   )
-$(info $(SPACE)    ░           ░        ░         ░   )
-$(info $(SPACE)               ░        ░              )
-$(info $(SPACE))
-endif
-
 # Detect host features
 ifeq ($(OS),Windows_NT)
 # Passed by MinGW/Cygwin Make on Windows hosts
 HOST_WINDOWS := 1
 NULL_STDERR := 2>NUL
 HOST_UNAME := Windows
-HOST_CPUS := $(NUMBER_OF_PROCESSORS)
+HOST_CPUS := $(firstword $(NUMBER_OF_PROCESSORS) 1)
 ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
 HOST_ARCH := x86_64
 else
@@ -45,9 +23,34 @@ else
 # Assuming the host is POSIX
 HOST_POSIX := 1
 NULL_STDERR := 2>/dev/null
-HOST_UNAME := $(shell uname -s 2>/dev/null || echo POSIX)
-HOST_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-HOST_ARCH := $(shell uname -m 2>/dev/null || echo Unknown)
+HOST_UNAME := $(firstword $(shell uname -s 2>/dev/null) POSIX)
+HOST_CPUS := $(firstword $(shell nproc 2>/dev/null) $(shell sysctl -n hw.ncpu 2>/dev/null) 1)
+HOST_ARCH := $(firstword $(shell uname -m 2>/dev/null) Unknown)
+endif
+
+# Some eye-candy stuff
+SPACE   :=
+ifneq (,$(TERM))
+RESET   := $(shell tput sgr0 $(NULL_STDERR); tput bold    $(NULL_STDERR))
+RED     := $(shell tput bold $(NULL_STDERR); tput setaf 1 $(NULL_STDERR))
+GREEN   := $(shell tput bold $(NULL_STDERR); tput setaf 2 $(NULL_STDERR))
+YELLOW  := $(shell tput bold $(NULL_STDERR); tput setaf 3 $(NULL_STDERR))
+BLUE    := $(shell tput bold $(NULL_STDERR); tput setaf 6 $(NULL_STDERR))
+
+$(info $(RESET))
+ifneq (,$(findstring UTF, $(LANG)))
+$(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
+$(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
+$(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
+$(info $(SPACE) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
+$(info $(SPACE) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
+$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ ▐░     ░ ▐░  ░ ▒░   ░  ░)
+$(info $(SPACE)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
+$(info $(SPACE)   ░░   ░      ░░       ░░  ░      ░   )
+$(info $(SPACE)    ░           ░        ░         ░   )
+$(info $(SPACE)               ░        ░              )
+$(info $(SPACE))
+endif
 endif
 
 # Automatically parallelize build
@@ -55,10 +58,7 @@ JOBS ?= $(HOST_CPUS)
 override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
 
 # Get compiler target triplet (arch-vendor-kernel-abi)
-CC_TRIPLET := $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR))
-ifeq (,$(findstring -, $(CC_TRIPLET)))
-CC_TRIPLET := $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR))
-endif
+CC_TRIPLET := $(firstword $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR)) $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR)))
 
 tolower = $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(subst G,g,$(subst H,h,$(subst I,i,$(subst J,j,$(subst K,k,$(subst L,l,$(subst M,m,$(subst N,n,$(subst O,o,$(subst P,p,$(subst Q,q,$(subst R,r,$(subst S,s,$(subst T,t,$(subst U,u,$(subst V,v,$(subst W,w,$(subst X,x,$(subst Y,y,$(subst Z,z,$1))))))))))))))))))))))))))
 
@@ -234,7 +234,10 @@ override LDFLAGS += -lm
 override CFLAGS += -DUSE_FPU
 # Disable unsafe FPU optimizations
 ifeq (,$(findstring rounding-math, $(shell $(CC) -frounding-math 2>&1)))
-override CFLAGS += -frounding-math -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument
+override CFLAGS += -frounding-math
+ifeq ($(CC_TYPE),clang)
+override CFLAGS += -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument
+endif
 endif
 endif
 
