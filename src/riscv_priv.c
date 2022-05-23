@@ -47,6 +47,7 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                 // Set PC to csr.sepc
                 vm->registers[REGISTER_PC] = vm->csr.epc[PRIVILEGE_SUPERVISOR];
                 // Set privilege mode to SPP
+                if (vm->csr.ip & vm->csr.ie) riscv_restart_dispatch(vm);
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
@@ -64,6 +65,7 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                 // Set PC to csr.mepc
                 vm->registers[REGISTER_PC] = vm->csr.epc[PRIVILEGE_MACHINE];
                 // Set privilege mode to MPP
+                if (vm->csr.ip & vm->csr.ie) riscv_restart_dispatch(vm);
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
@@ -72,36 +74,28 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             }
             return;
         case RV_PRIV_S_WFI:
-            /*
-            * Sleep before timer interrupt or external interrupt.
-            * External interrupts are dropping CPU executor to scheduler,
-            * where it gets ev_int flags and jumps into trap handler on it's own
-            */
-
+            // Resume execution for locally enabled interrupts pending at any privilege level
+            if (vm->csr.ip & vm->csr.ie) {
+                riscv_restart_dispatch(vm);
+                return;
+            }
+            // Stall the hart until an interrupt might need servicing
             while (atomic_load_uint32(&vm->wait_event)) {
                 uint64_t timestamp = rvtimer_get(&vm->timer);
-
                 if (timestamp >= vm->timer.timecmp) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
-
-                if (riscv_handle_irqs(vm, true)) {
-                    // If we aren't unwinded to dispatch decrement PC by instruction size
-                    vm->registers[REGISTER_PC] -= 4;
-                    return;
+                // Calculate sleep period
+                if (vm->timer.timecmp > timestamp) {
+                    timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
+                    if (timestamp == 0) timestamp = 1;
+                    if (timestamp > 100) timestamp = 100;
+                    sleep_ms(timestamp);
                 } else {
-                    // Calculate sleep period
-                    if (vm->timer.timecmp > timestamp) {
-                        timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
-                        if (timestamp == 0) timestamp = 1;
-                        if (timestamp > 100) timestamp = 100;
-                        sleep_ms(timestamp);
-                    } else {
-                        /*
-                         * Timer interrupt is pending, but we are still here.
-                         * This most likely means that timer IRQs are disabled,
-                         * so we should sleep and wait for devices / IPI
-                         */
-                        sleep_ms(10);
-                    }
+                    /*
+                     * Timer interrupt is pending, but we are still here.
+                     * This most likely means that timer IRQs are disabled,
+                     * so we should sleep and wait for devices / IPI
+                     */
+                    sleep_ms(10);
                 }
             }
             return;
