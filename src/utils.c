@@ -17,8 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "utils.h"
-#include <stdbool.h>
+#include "rvtimer.h"
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
 static int loglevel = LOG_WARN;
@@ -152,11 +153,10 @@ int str_to_int_dec(const char* str)
     return val;
 }
 
-
-void rvvm_set_args(int _argc, const char** _argv)
+void rvvm_set_args(int new_argc, const char** new_argv)
 {
-    argc = _argc;
-    argv = _argv;
+    argc = new_argc;
+    argv = new_argv;
 
     if (rvvm_has_arg("v") || rvvm_has_arg("verbose")) {
         rvvm_set_loglevel(LOG_INFO);
@@ -232,4 +232,22 @@ uint64_t rvvm_getarg_size(const char* arg)
     const char* argvalue = rvvm_getarg(arg);
     if (argvalue == NULL) return 0;
     return ((uint64_t)str_to_int_dec(argvalue)) << mem_suffix_shift(argvalue[rvvm_strlen(argvalue)-1]);
+}
+
+void rvvm_randombytes(void* buffer, size_t size)
+{
+    // Xorshift RNG seeded by precise timer
+    uint64_t seed = rvtimer_clocksource(1000000000);
+    uint8_t* bytes = buffer;
+    size_t tmp_size;
+    do {
+        seed ^= (seed >> 17);
+        seed ^= (seed << 21);
+        seed ^= (seed << 28);
+        seed ^= (seed >> 49);
+        tmp_size = size > 8 ? 8 : size;
+        memcpy(bytes, &seed, tmp_size);
+        bytes += tmp_size;
+        size -= tmp_size;
+    } while (size);
 }

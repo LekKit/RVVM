@@ -63,7 +63,7 @@ size_t int_to_str_dec(char* str, size_t size, int val);
 int str_to_int_dec(const char* str);
 
 // Global argparser
-void rvvm_set_args(int _argc, const char** _argv);
+void rvvm_set_args(int new_argc, const char** new_argv);
 bool rvvm_has_arg(const char* arg);
 const char* rvvm_getarg(const char* arg);
 bool rvvm_getarg_bool(const char* arg);
@@ -84,5 +84,8 @@ static inline size_t mem_suffix_shift(char suffix)
         default: return 0;
     }
 }
+
+// Generate random bytes
+void rvvm_randombytes(void* buffer, size_t size);
 
 #endif
