@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "utils.h"
 
-#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#if defined(__unix__)
 #include <unistd.h>
 #include <time.h>
 
@@ -28,7 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
 #endif
 
-static uint64_t rvtimer_clocksource(uint64_t freq)
+uint64_t rvtimer_clocksource(uint64_t freq)
 {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC_RAW, &now);
@@ -50,7 +50,7 @@ static inline void clock_gettime(int t, struct timespec* tp)
     tp->tv_nsec = (tmp.QuadPart % 10000000ULL) * 100;
 }*/
 
-static uint64_t rvtimer_clocksource(uint64_t freq)
+uint64_t rvtimer_clocksource(uint64_t freq)
 {
     static LARGE_INTEGER perf_freq = {0};
     if (perf_freq.QuadPart == 0) {
@@ -71,7 +71,7 @@ static uint64_t rvtimer_clocksource(uint64_t freq)
 
 static uint64_t __rvtimer = 0;
 
-static uint64_t rvtimer_clocksource(uint64_t freq)
+uint64_t rvtimer_clocksource(uint64_t freq)
 {
     return __rvtimer++ * freq / 1000;
 }

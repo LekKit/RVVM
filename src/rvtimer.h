@@ -28,6 +28,9 @@ typedef struct {
     uint64_t timecmp;
 } rvtimer_t;
 
+// Get system clocksource
+uint64_t rvtimer_clocksource(uint64_t freq);
+
 // Initialize the timer and the clocksource
 void rvtimer_init(rvtimer_t* timer, uint64_t freq);
 
