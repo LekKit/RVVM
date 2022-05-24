@@ -117,6 +117,12 @@ void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val
     fdt_node_add_prop(node, name, &val, sizeof(val));
 }
 
+void fdt_node_add_prop_u64(struct fdt_node *node, const char *name, uint64_t val)
+{
+    val = fdt_host2u64(val);
+    fdt_node_add_prop(node, name, &val, sizeof(val));
+}
+
 void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count)
 {
     uint32_t* buf = safe_calloc(sizeof(uint32_t), count);
@@ -400,6 +406,11 @@ static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *
     fdt_serialize_u32(ctx, FDT_END_NODE);
 }
 
+size_t fdt_size(struct fdt_node *node)
+{
+    return fdt_serialize(node, NULL, 0, 0);
+}
+
 size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid)
 {
     if (node == NULL) return 0;
@@ -416,6 +427,7 @@ size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t 
     ctx.strings_off = ctx.strings_begin = buf_size += size_desc.struct_size;
     buf_size += size_desc.strings_size;
 
+    if (buffer == NULL) return ALIGN_UP(buf_size, 8);
     if (buf_size > size) return 0;
 
     memset(buffer, 0, buf_size);
@@ -439,4 +451,3 @@ size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t 
 
     return buf_size;
 }
-

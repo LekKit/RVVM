@@ -67,6 +67,9 @@ void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data
 // Add single-cell property
 void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val);
 
+// Add double-cell property
+void fdt_node_add_prop_u64(struct fdt_node *node, const char *name, uint64_t val);
+
 // Add multi-cell property
 void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count);
 
@@ -94,7 +97,11 @@ void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child);
 // Recursively free a node and it's child nodes
 void fdt_node_free(struct fdt_node *node);
 
+// Returns required buffer size for serializing
+size_t fdt_size(struct fdt_node *node);
+
 // Serialize DTB into buffer, returns 0 when there's insufficient space
+// Returns required buffer size when buffer == NULL
 size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid);
 
 #endif
