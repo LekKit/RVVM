@@ -75,29 +75,25 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             return;
         case RV_PRIV_S_WFI:
             // Resume execution for locally enabled interrupts pending at any privilege level
-            if (vm->csr.ip & vm->csr.ie) {
-                riscv_restart_dispatch(vm);
-                return;
-            }
-            // Stall the hart until an interrupt might need servicing
-            while (atomic_load_uint32(&vm->wait_event)) {
-                uint64_t timestamp = rvtimer_get(&vm->timer);
-                if (timestamp >= vm->timer.timecmp) vm->csr.ip |= (1 << INTERRUPT_MTIMER);
-                // Calculate sleep period
-                if (vm->timer.timecmp > timestamp) {
-                    timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
-                    if (timestamp == 0) timestamp = 1;
-                    if (timestamp > 100) timestamp = 100;
-                    sleep_ms(timestamp);
-                } else {
-                    /*
-                     * Timer interrupt is pending, but we are still here.
-                     * This most likely means that timer IRQs are disabled,
-                     * so we should sleep and wait for devices / IPI
-                     */
-                    sleep_ms(10);
+            if (!(vm->csr.ip & vm->csr.ie)) {
+                // Stall the hart until an interrupt might need servicing
+                while (atomic_load_uint32(&vm->wait_event)) {
+                    if (vm->csr.ie & (1 << INTERRUPT_MTIMER)) {
+                        // Calculate sleep period
+                        uint64_t timestamp = rvtimer_get(&vm->timer);
+                        if (vm->timer.timecmp > timestamp) {
+                            timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
+                            sleep_ms(timestamp);
+                        }
+                        vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+                        break;
+                    } else {
+                        // Timer IRQs disabled, wait for external IRQs
+                        sleep_ms(10);
+                    }
                 }
             }
+            riscv_restart_dispatch(vm);
             return;
     }
 
