@@ -42,6 +42,9 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     fdt_node_add_prop_str(machine->fdt, "model", "RVVM   ");
 
     struct fdt_node* chosen = fdt_node_create("chosen");
+    uint8_t rng_buffer[64] = {0};
+    rvvm_randombytes(rng_buffer, sizeof(rng_buffer));
+    fdt_node_add_prop(chosen, "rng-seed", rng_buffer, sizeof(rng_buffer));
     fdt_node_add_child(machine->fdt, chosen);
 
     struct fdt_node* memory = fdt_node_create_reg("memory", machine->mem.begin);
@@ -128,8 +131,10 @@ static void rvvm_gen_dtb(rvvm_machine_t* machine)
     if (machine->dtb_addr) {
         rvvm_info("DTB already specified, skipping FDT generation");
     } else {
-        machine->dtb_addr = machine->mem.begin + (machine->mem.size >> 1);
-        size_t dtb_size = fdt_serialize(machine->fdt, machine->mem.data + (machine->mem.size >> 1), machine->mem.size >> 1, 0);
+        size_t dtb_size = fdt_size(machine->fdt);
+        size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
+        dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
+        machine->dtb_addr = machine->mem.begin + dtb_off;
         if (dtb_size) {
             rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->dtb_addr, (uint32_t)dtb_size);
         } else {
@@ -286,9 +291,8 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
 PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
 {
     UNUSED(dev);
-    UNUSED(dest);
     UNUSED(offset);
-    UNUSED(size);
+    memset(dest, 0, size);
     return true;
 }
 
