@@ -40,12 +40,9 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
 #ifdef USE_JIT
     vm->jit_enabled = !rvvm_has_arg("nojit");
     if (vm->jit_enabled) {
-        if (rvvm_getarg_size("jitcache")) {
-            vm->jit_enabled = rvjit_ctx_init(&vm->jit, rvvm_getarg_size("jitcache"));
-        } else {
-            // 16M JIT cache per hart
-            vm->jit_enabled = rvjit_ctx_init(&vm->jit, 16 << 20);
-        }
+        size_t jit_cache = rvvm_getarg_size("jitcache");
+        if (!jit_cache) jit_cache = 16 << 20; // 16M JIT cache per hart
+        vm->jit_enabled = rvjit_ctx_init(&vm->jit, jit_cache);
 
         if (!vm->jit_enabled) rvvm_warn("RVJIT failed to initialize, falling back to interpreter");
     }
@@ -93,7 +90,7 @@ void riscv_hart_run(rvvm_hart_t* vm)
 
     while (true) {
         riscv_run_till_event(vm);
-        atomic_store_uint32(&vm->wait_event, HART_RUNNING);
+        atomic_store_uint32_ex(&vm->wait_event, HART_RUNNING, ATOMIC_RELAXED);
 #ifndef USE_SJLJ
         if (vm->trap) {
             vm->registers[REGISTER_PC] = vm->csr.tvec[vm->priv_mode] & (~3ULL);
@@ -107,7 +104,7 @@ void riscv_hart_run(rvvm_hart_t* vm)
         if (events & EXT_EVENT_TIMER) {
             vm->csr.ip |= (1U << INTERRUPT_MTIMER);
         }
-        
+
         if ((vm->csr.ip & (1U << INTERRUPT_MTIMER)) && !rvtimer_pending(&vm->timer)) {
             riscv_interrupt_clear(vm, INTERRUPT_MTIMER);
         }
@@ -139,23 +136,13 @@ void riscv_update_xlen(rvvm_hart_t* vm)
             rv64 = bit_check(vm->csr.status, 33);
             break;
     }
-    
+
     if (vm->rv64 != rv64) {
         if (rv64) {
-            rvvm_info("Hart %p switches to RV64", vm);
-            for (size_t i=0; i<REGISTERS_MAX; ++i) {
-                vm->registers[i] = (int32_t)vm->registers[i];
-            }
-            vm->csr.isa &= ~CSR_MISA_RV32;
-            vm->csr.isa |= CSR_MISA_RV64;
+            //rvvm_info("Hart %p switches to RV64", vm);
             riscv_decoder_init_rv64(vm);
         } else {
-            rvvm_info("Hart %p switches to RV32", vm);
-            for (size_t i=0; i<REGISTERS_MAX; ++i) {
-                vm->registers[i] = (uint32_t)vm->registers[i];
-            }
-            vm->csr.isa &= ~CSR_MISA_RV64;
-            vm->csr.isa |= CSR_MISA_RV32;
+            //rvvm_info("Hart %p switches to RV32", vm);
             riscv_decoder_init_rv32(vm);
         }
         vm->rv64 = rv64;
@@ -176,7 +163,7 @@ void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode)
 #ifdef USE_RV64
     riscv_update_xlen(vm);
 #endif
-    
+
     // May unwind to dispatch
     if (mmu_toggle) riscv_tlb_flush(vm);
 }
@@ -224,7 +211,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
     vm->trap = true;
     riscv_switch_priv(vm, priv);
-    riscv_jit_discard(vm);
+    if (cause < TRAP_ENVCALL_UMODE || cause > TRAP_ENVCALL_MMODE) riscv_jit_discard(vm);
 #ifdef USE_SJLJ
     longjmp(vm->unwind, 1);
 #else
@@ -236,9 +223,9 @@ static const uint16_t irq_mask_high[PRIVILEGES_MAX] = {
     0xEEE, 0xCCC, 0x888, 0x0
 };
 
-static inline uint32_t riscv_irq_mask(rvvm_hart_t* vm, bool wfi) {
+static inline uint32_t riscv_irq_mask(rvvm_hart_t* vm) {
     uint32_t ret = irq_mask_high[vm->priv_mode];
-    if (((1 << vm->priv_mode) & vm->csr.status) || wfi)
+    if ((1 << vm->priv_mode) & vm->csr.status)
         ret |= (0x111 << vm->priv_mode);
 
     return ret;
@@ -261,7 +248,7 @@ static inline maxlen_t riscv_cause_irq_mask(rvvm_hart_t* vm)
 bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
 {
     // IRQs that are pending, enabled by mie and allowed by privilege mode & mstatus
-    uint32_t irqs = vm->csr.ip & vm->csr.ie & riscv_irq_mask(vm, wfi);
+    uint32_t irqs = vm->csr.ip & vm->csr.ie & riscv_irq_mask(vm);
     if (unlikely(irqs)) {
         for (int i=11; i>=0; --i) {
             if (irqs & (1 << i)) {
@@ -297,8 +284,7 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
 
 void riscv_restart_dispatch(rvvm_hart_t* vm)
 {
-    //if (vm->wait_event != HART_STOPPED) longjmp(vm->unwind, 1);
-    atomic_store_uint32(&vm->wait_event, HART_STOPPED);
+    atomic_store_uint32_ex(&vm->wait_event, HART_STOPPED, ATOMIC_RELAXED);
 }
 
 static void* riscv_hart_run_wrap(void* ptr)
@@ -360,31 +346,3 @@ void riscv_hart_queue_pause(rvvm_hart_t* vm)
     atomic_or_uint32(&vm->pending_events, EXT_EVENT_PAUSE);
     riscv_hart_notify(vm);
 }
-
-#if 0
-// Serialized interrupt delivery
-
-#define HART_CLAIMED 2
-
-static void riscv_hart_notify_claim(rvvm_hart_t* vm)
-{
-    // Expects the hart to be currently running (vm->wait_event == 1)
-    // If not, wait until the previous event has been processed
-    while (!atomic_cas_uint32(&vm->wait_event, HART_RUNNING, HART_CLAIMED));
-}
-
-static void riscv_hart_notify(rvvm_hart_t* vm)
-{
-    atomic_store_uint32(&vm->wait_event, HART_STOPPED);
-    // Explicitly sync memory with the hart thread
-    thread_signal_membarrier(vm->thread);
-}
-
-void riscv_interrupt_ext(rvvm_hart_t* vm, bitcnt_t irq)
-{
-    riscv_hart_notify_claim(vm);
-    atomic_or_uint32(&vm->pending_irqs, 1U << irq);
-    riscv_hart_notify(vm);
-}
-
-#endif
