@@ -345,7 +345,7 @@ endif
 
 ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
-ifneq ($(OS_UNAME),Linux)
+ifneq ($(OS),linux)
 override USE_TAP_LINUX = 0
 endif
 ifeq ($(USE_TAP_LINUX),1)
