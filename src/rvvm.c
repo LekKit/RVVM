@@ -28,6 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static spinlock_t global_lock = SPINLOCK_INIT;
 static vector_t(rvvm_machine_t*) global_machines = {0};
 
+static cond_var_t builtin_eventloop_cond;
 static thread_handle_t builtin_eventloop_thread;
 static bool builtin_eventloop_enabled = true;
 
@@ -175,6 +176,8 @@ static void* builtin_eventloop(void* arg)
     rvvm_machine_t* machine;
     rvvm_mmio_dev_t* dev;
     
+    builtin_eventloop_cond = condvar_create();
+
     // The eventloop runs while its enabled/ran manually,
     // and there are any running machines
     while (builtin_eventloop_enabled || arg) {
@@ -182,6 +185,7 @@ static void* builtin_eventloop(void* arg)
         if (vector_size(global_machines) == 0) {
             thread_detach(builtin_eventloop_thread);
             builtin_eventloop_thread = NULL;
+            condvar_free(builtin_eventloop_cond);
             spin_unlock(&global_lock);
             break;
         }
@@ -227,7 +231,7 @@ static void* builtin_eventloop(void* arg)
             }
         }
         spin_unlock(&global_lock);
-        sleep_ms(10);
+        condvar_wait(builtin_eventloop_cond, 10);
     }
 
     return arg;
@@ -402,13 +406,13 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine)
     if (vector_size(global_machines) == 0) {
         vector_free(global_machines);
         // prevent deadlock
+        condvar_wake(builtin_eventloop_cond);
         stop_thread = builtin_eventloop_thread;
         builtin_eventloop_thread = NULL;
     }
     spin_unlock(&global_lock);
 
     if (stop_thread) {
-        thread_signal_membarrier(stop_thread);
         thread_join(stop_thread);
     }
 }
@@ -424,6 +428,7 @@ PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
         riscv_hart_queue_pause(&vector_at(machine->harts, 0));
     }
     spin_unlock(&global_lock);
+    condvar_wake(builtin_eventloop_cond);
 }
 
 PUBLIC bool rvvm_machine_powered_on(rvvm_machine_t* machine)
@@ -534,6 +539,7 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
     if (builtin_eventloop_enabled != enabled) {
         builtin_eventloop_enabled = enabled;
         if (!enabled) {
+            condvar_wake(builtin_eventloop_cond);
             stop_thread = builtin_eventloop_thread;
             builtin_eventloop_thread = NULL;
         } else if (builtin_eventloop_thread == NULL) {
@@ -543,7 +549,6 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
     spin_unlock(&global_lock);
     
     if (stop_thread) {
-        thread_signal_membarrier(stop_thread);
         thread_join(stop_thread);
     }
 }
