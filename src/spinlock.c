@@ -45,6 +45,7 @@ static void spin_cond_init()
     if (!atomic_swap_uint32(&global_cond_init, 1)) {
         global_cond = condvar_create();
         atexit(spin_atexit);
+        atomic_fence();
     }
 }
 
