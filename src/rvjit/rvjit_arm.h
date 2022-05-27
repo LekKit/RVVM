@@ -22,9 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #if defined(__linux__)
 #include <sys/auxv.h>
-#include <asm/hwcap.h>
 #else
-#warning No arm cpu flags detection for target os
+#warning No RVJIT ARM CPU flags detection for target OS
 #endif
 
 #ifndef RVJIT_ARM_H
@@ -36,50 +35,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define rvjit_a32_assert(expr) (void)0
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
-/* gcc/clang? builtin functions */
-extern int __aeabi_idiv (int, int);
-extern unsigned __aeabi_uidiv (unsigned, unsigned);
+#ifdef GNU_EXTS
+// Builtin math functions
+extern int __aeabi_idiv(int, int);
+extern unsigned __aeabi_uidiv(unsigned, unsigned);
+#define rvjit_a32_soft_idiv __aeabi_idiv
+#define rvjit_a32_soft_uidiv __aeabi_uidiv
+#else
+static int rvjit_a32_soft_idiv(int a, int b)
+{
+    return a / b;
+}
+extern unsigned rvjit_a32_soft_uidiv(unsigned a, unsigned b)
+{
+    return a / b;
+}
 #endif
+
+#define RVJIT_ARM_IDIVA (1 << 17)
 
 static uint32_t rvjit_a32_hwcaps = 0;
 
-// maybe copy-paste for internal use linux hwcaps is a bad idea
-#define HWCAP_A32_SWP       (1 << 0)
-#define HWCAP_A32_HALF      (1 << 1)
-#define HWCAP_A32_THUMB     (1 << 2)
-#define HWCAP_A32_26BIT     (1 << 3)	/* Play it safe */
-#define HWCAP_A32_FAST_MULT	(1 << 4)
-#define HWCAP_A32_FPA       (1 << 5)
-#define HWCAP_A32_VFP       (1 << 6)
-#define HWCAP_A32_EDSP      (1 << 7)
-#define HWCAP_A32_JAVA      (1 << 8)
-#define HWCAP_A32_IWMMXT	(1 << 9)
-#define HWCAP_A32_CRUNCH	(1 << 10)	/* Obsolete */
-#define HWCAP_A32_THUMBEE	(1 << 11)
-#define HWCAP_A32_NEON      (1 << 12)
-#define HWCAP_A32_VFPv3     (1 << 13)
-#define HWCAP_A32_VFPv3D16	(1 << 14)	/* also set for VFPv4-D16 */
-#define HWCAP_A32_TLS       (1 << 15)
-#define HWCAP_A32_VFPv4     (1 << 16)
-#define HWCAP_A32_IDIVA     (1 << 17)
-#define HWCAP_A32_IDIVT     (1 << 18)
-#define HWCAP_A32_VFPD32	(1 << 19)	/* set if VFP has 32 regs (not 16) */
-#define HWCAP_A32_IDIV      (HWCAP_ARM_IDIVA | HWCAP_ARM_IDIVT)
-#define HWCAP_A32_LPAE      (1 << 20)
-#define HWCAP_A32_EVTSTRM	(1 << 21)
-
 static inline void rvjit_a32_test_cpu()
 {
-    if( rvjit_a32_hwcaps == 0 )
-    {
-#if defined(__linux__)
+    static bool init = false;
+    if (!init) {
+        init = true;
+#ifdef __linux__
         rvjit_a32_hwcaps = getauxval(AT_HWCAP);
-
-        if( rvjit_a32_hwcaps & HWCAP_A32_IDIV )
-            rvvm_info("RVJIT detected arm IDIV/UDIV instructions extension");
-#else
-        rvjit_a32_hwcaps = 1;
+        if (rvjit_a32_hwcaps & RVJIT_ARM_IDIVA)
+            rvvm_info("RVJIT detected ARM IDIV/UDIV instructions extension");
 #endif
     }
 }
@@ -87,7 +72,7 @@ static inline void rvjit_a32_test_cpu()
 static bool rvjit_a32_check_div()
 {
     rvjit_a32_test_cpu();
-    return !!(rvjit_a32_hwcaps & HWCAP_ARM_IDIVA);
+    return !!(rvjit_a32_hwcaps & RVJIT_ARM_IDIVA);
 }
 
 static bool check_imm_bits(int32_t val, bitcnt_t bits)
@@ -858,9 +843,9 @@ static inline void rvjit_a32_soft_div_divu(rvjit_block_t* block, enum a32_md_opc
         rvjit_a32_dp(block, A32_MOV, A32_AL, 1, 0, rvjit_a32_shifter_reg_imm(hrs2, A32_LSL, 0));
 
     if (likely(op == A32_SDIV)) {
-        rvjit_native_setreg32(block, A32_IP, (unsigned)__aeabi_idiv);
+        rvjit_native_setreg32(block, A32_IP, (unsigned)rvjit_a32_soft_idiv);
     } else if (likely(op == A32_UDIV)) {
-        rvjit_native_setreg32(block, A32_IP, (unsigned)__aeabi_uidiv);
+        rvjit_native_setreg32(block, A32_IP, (unsigned)rvjit_a32_soft_uidiv);
     }
 
     rvjit_native_push(block, A32_LR);
