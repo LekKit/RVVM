@@ -45,7 +45,6 @@ static inline size_t ptrsize_to_page(void* ptr, size_t size)
 
 #ifdef _WIN32
 #include <windows.h>
-#include <memoryapi.h>
 
 static size_t page_mask()
 {
