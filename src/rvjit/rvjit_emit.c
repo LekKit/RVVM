@@ -143,19 +143,25 @@ static regid_t rvjit_map_reg(rvjit_block_t* block, regid_t greg, regflags_t flag
         rvvm_fatal("Mapped RVJIT register is out of range!");
         return REG_ILL;
     }
+#if defined(RVJIT_RISCV)
+    if (greg == RVJIT_REGISTER_ZERO) return 0;
+#elif defined(RVJIT_ARM64)
+    if (greg == RVJIT_REGISTER_ZERO) return 31;
+#endif
     if (block->regs[greg].hreg == REG_ILL) {
         regid_t hreg = rvjit_claim_hreg(block);
         block->regs[greg].hreg = hreg;
         block->regs[greg].flags = 0;
     }
     block->regs[greg].last_used = block->size;
-
+#if !defined(RVJIT_RISCV) && !defined(RVJIT_ARM64)
     if (greg == RVJIT_REGISTER_ZERO) {
         if (!(block->regs[greg].flags & REG_LOADED) || (block->regs[greg].flags & REG_DIRTY)) {
             rvjit_native_zero_reg(block, block->regs[greg].hreg);
         }
         block->regs[greg].flags = REG_LOADED;
     }
+#endif
 
     if (flags & REG_DST) {
         block->regs[greg].flags |= REG_DIRTY;
