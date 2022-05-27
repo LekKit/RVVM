@@ -44,7 +44,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <inttypes.h>
 
 #ifdef _WIN32
-// For unicode fix
+// For unicode, console setup
+#if     _WIN32_WINNT < 0x0500
+#undef  _WIN32_WINNT
+#define _WIN32_WINNT   0x0500
+#endif
 #include <windows.h>
 #endif
 
