@@ -149,10 +149,11 @@ endif
 
 # Detect target arch
 ifndef ARCH
+ifneq (,$(findstring -,$(CC_TRIPLET)))
 # Get target arch from target triplet
 ARCH := $(firstword $(subst -, ,$(CC_TRIPLET)))
+else
 # This may fail on older compilers, fallback to host arch then
-ifndef ARCH
 ARCH := $(HOST_ARCH)
 $(info [$(YELLOW)INFO$(RESET)] Picked arch from uname, specify ARCH manually if cross-compiling)
 endif
