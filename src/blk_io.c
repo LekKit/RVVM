@@ -23,16 +23,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "spinlock.h"
 #include "threading.h"
 
-#define FILE_POS_INVALID 0
-#define FILE_POS_READ    1
-#define FILE_POS_WRITE   2
-
-#ifdef __unix__
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(USE_STDIO)
+// POSIX implementation using open, pread, pwrite...
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#define POSIX_FILE_IMPL
+
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 
 static bool try_lock_fd(int fd)
 {
@@ -44,31 +46,30 @@ static bool try_lock_fd(int fd)
     return fcntl(fd, F_SETLK, &flk) == 0 || (errno != EACCES && errno != EAGAIN);
 }
 
-#ifdef __linux__
-#include <sys/syscall.h>
-#endif
+#elif defined(_WIN32) && !defined(UNDER_CE) && !defined(USE_STDIO)
+// Win32 implementation using CreateFile, OVERLAPPED, ReadFile...
+#include <windows.h>
+#define WIN32_FILE_IMPL
+// Prototypes for older winapi headers
+#define DEVIOCTL_SET_SPARSE    0x000900c4
+#define DEVIOCTL_SET_ZERO_DATA 0x000980c8
+typedef struct {
+  LARGE_INTEGER FileOffset;
+  LARGE_INTEGER BeyondFinalZero;
+} SET_ZERO_DATA_INFO;
 
 #else
+// C stdio implementation using fopen, fread...
+// Emulates pread by using locks around fseek+fread
 #include <stdio.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <io.h>
-
-/*
- * On Windows, ftell/fseek use 32-bit offsets.
- * Older releases of MinGW lack _fseeki64/_ftelli64,
- * but provide GNU fseeko64/ftello64, these work fine as well.
- */
-
-#ifdef __MINGW32__
-#define fseek fseeko64
-#define ftell ftello64
-#else
-#define fseek _fseeki64
-#define ftell _ftelli64
+// 64-bit offset & UTF-8 filenames on win32
+#if defined(_WIN32) && !defined(UNDER_CE)
+#if     _WIN32_WINNT < 0x0600
+#undef  _WIN32_WINNT
+#define _WIN32_WINNT   0x0600
 #endif
-
+#include <windows.h>
 static FILE* fopen_utf8(const char* name, const char* mode)
 {
     size_t name_len = strlen(name);
@@ -84,15 +85,22 @@ static FILE* fopen_utf8(const char* name, const char* mode)
     return file;
 }
 #define fopen fopen_utf8
+#define fseek _fseeki64
+#define ftell _ftelli64
 #endif
 
+#define FILE_POS_INVALID 0
+#define FILE_POS_READ    1
+#define FILE_POS_WRITE   2
 #endif
 
 struct blk_io_rvfile {
     uint64_t size;
     uint64_t pos;
-#ifdef __unix__
+#if defined(POSIX_FILE_IMPL)
     int fd;
+#elif defined(WIN32_FILE_IMPL)
+    HANDLE handle;
 #else
     uint64_t pos_real;
     uint8_t  pos_state;
@@ -103,7 +111,7 @@ struct blk_io_rvfile {
 
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
-#if defined(__unix__)
+#if defined(POSIX_FILE_IMPL)
     int fd, open_flags = 0;
     if (mode & RVFILE_RW) {
         if (mode & RVFILE_TRUNC) open_flags |= O_TRUNC;
@@ -132,6 +140,47 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->pos = 0;
     file->fd = fd;
     return file;
+#elif defined(WIN32_FILE_IMPL)
+    DWORD access = GENERIC_READ;
+    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    DWORD disp = OPEN_EXISTING;
+    if (mode & RVFILE_RW) {
+        if (mode & RVFILE_CREAT) {
+            disp = OPEN_ALWAYS;
+            if (mode & RVFILE_TRUNC) disp = CREATE_ALWAYS;
+        } else {
+            if (mode & RVFILE_TRUNC) disp = TRUNCATE_EXISTING;
+        }
+
+        access |= GENERIC_WRITE;
+    }
+    if (mode & RVFILE_EXCL) share = 0;
+    size_t path_len = strlen(filepath);
+    wchar_t* u16_path = safe_calloc(sizeof(wchar_t), path_len + 1);
+    MultiByteToWideChar(CP_UTF8, 0, filepath, path_len, u16_path, path_len + 1);
+    HANDLE handle = CreateFileW(u16_path, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
+    free(u16_path);
+
+    // Retry opening existing file using system locale (oh...)
+    if (handle == INVALID_HANDLE_VALUE && (mode & (RVFILE_CREAT | RVFILE_TRUNC)) == 0) {
+        handle = CreateFileA(filepath, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (handle != INVALID_HANDLE_VALUE) rvvm_warn("Non UTF-8 filepath passed to rvopen()");
+    }
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == ERROR_SHARING_VIOLATION) rvvm_error("File %s is busy", filepath);
+        return NULL;
+    }
+    DWORD sizeh;
+    DWORD sizel = GetFileSize(handle, &sizeh);
+    DWORD tmp;
+    DeviceIoControl(handle, DEVIOCTL_SET_SPARSE, NULL, 0, NULL, 0, &tmp, NULL);
+
+    rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    file->size = ((uint64_t)sizeh) << 32 | sizel;
+    file->pos = 0;
+    file->handle = handle;
+    return file;
 #else
     const char* open_mode;
     if ((mode & RVFILE_TRUNC) && (mode & RVFILE_RW)) {
@@ -148,14 +197,6 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         return NULL;
     }
 
-#ifdef _WIN32
-    if ((mode & RVFILE_EXCL) && !LockFile((HANDLE)_get_osfhandle(_fileno(fp)), 0, 0, 0, 0)) {
-        rvvm_error("File %s is busy", filepath);
-        fclose(fp);
-        return NULL;
-    }
-#endif
-
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
     fseek(fp, 0, SEEK_END);
     file->size = ftell(fp);
@@ -170,15 +211,16 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
 void rvclose(rvfile_t *file)
 {
     if (!file) return;
-#if defined(__unix__)
+#if defined(POSIX_FILE_IMPL)
     close(file->fd);
-    free(file);
+#elif defined(WIN32_FILE_IMPL)
+    CloseHandle(file->handle);
 #else
     spin_lock_slow(&file->lock);
     fclose(file->fp);
     spin_unlock(&file->lock);
-    free(file);
 #endif
+    free(file);
 }
 
 uint64_t rvfilesize(rvfile_t* file)
@@ -191,9 +233,13 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 {
     if (!file) return 0;
     uint64_t pos_real = (offset == RVFILE_CURPOS) ? file->pos : offset;
-#if defined(__unix__)
+#if defined(POSIX_FILE_IMPL)
     ssize_t ret = pread(file->fd, destination, count, pos_real);
     if (ret < 0) ret = 0;
+#elif defined(WIN32_FILE_IMPL)
+    OVERLAPPED overlapped = { .OffsetHigh = pos_real >> 32, .Offset = (uint32_t)pos_real };
+    DWORD ret = 0;
+    ReadFile(file->handle, destination, count, &ret, &overlapped);
 #else
     spin_lock_slow(&file->lock);
     if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_READ)) {
@@ -212,9 +258,13 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 {
     if (!file) return 0;
     uint64_t pos_real = (offset == RVFILE_CURPOS) ? file->pos : offset;
-#if defined(__unix__)
+#if defined(POSIX_FILE_IMPL)
     ssize_t ret = pwrite(file->fd, source, count, pos_real);
     if (ret < 0) ret = 0;
+#elif defined(WIN32_FILE_IMPL)
+    OVERLAPPED overlapped = { .OffsetHigh = pos_real >> 32, .Offset = (uint32_t)pos_real };
+    DWORD ret = 0;
+    WriteFile(file->handle, source, count, &ret, &overlapped);
 #else
     spin_lock_slow(&file->lock);
     if (pos_real != file->pos_real || !(file->pos_state & FILE_POS_WRITE)) {
@@ -232,10 +282,16 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 
 bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 {
-    if (!file) return 0;
-#if defined(__unix__) && defined(__linux__) && defined(__NR_fallocate)
+    if (!file) return false;
+#if defined(POSIX_FILE_IMPL) && defined(__linux__) && defined(__NR_fallocate)
     // FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE
     return syscall(__NR_fallocate, file->fd, 0x3, offset, count) == 0;
+#elif defined(WIN32_FILE_IMPL)
+    SET_ZERO_DATA_INFO fz;
+    DWORD tmp;
+    fz.FileOffset.QuadPart = offset;
+    fz.BeyondFinalZero.QuadPart = offset + count;
+    return DeviceIoControl(file->handle, DEVIOCTL_SET_ZERO_DATA, &fz, sizeof(fz), NULL, 0 , &tmp, NULL);
 #else
     UNUSED(file);
     UNUSED(offset);
@@ -265,8 +321,14 @@ uint64_t rvtell(rvfile_t* file)
 
 bool rvflush(rvfile_t* file)
 {
-#if defined(__unix__)
-    return fsync(file->fd);
+    if (!file) return false;
+    // Do not issue kernel-side buffer flushing
+#if defined(POSIX_FILE_IMPL)
+    //return fsync(file->fd) == 0;
+    return true;
+#elif defined(WIN32_FILE_IMPL)
+    //return FlushFileBuffers(file->handle);
+    return true;
 #else
     return fflush(file->fp) == 0;
 #endif
@@ -274,9 +336,14 @@ bool rvflush(rvfile_t* file)
 
 bool rvtruncate(rvfile_t* file, uint64_t length)
 {
+    if (!file) return false;
     file->size = length;
-#if defined(__unix__)
+#if defined(POSIX_FILE_IMPL)
     return ftruncate(file->fd, length) == 0;
+#elif defined(WIN32_FILE_IMPL)
+    LONG high_len = length >> 32;
+    SetFilePointer(file->handle, (uint32_t)length, &high_len, FILE_BEGIN);
+    return SetEndOfFile(file->handle);
 #else
     char tmp = 0;
     if (length) {
