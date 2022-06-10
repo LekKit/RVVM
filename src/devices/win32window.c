@@ -21,6 +21,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "ps2-keyboard.h"
 #include "utils.h"
 
+#ifndef UNICODE
+#define UNICODE
+#endif
 #include <windows.h>
 
 #define KEYMAP_PAUSE VK_PAUSE
@@ -33,7 +36,7 @@ typedef struct {
     POINTS lastcur;
     struct mouse_btns btns;
     int x;
-	int y;
+    int y;
     char name[256];
 } win32fb_data;
 
@@ -47,11 +50,13 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 }
 
 static ATOM winclass_atom = 0;
+static uint32_t winborder_x;
+static uint32_t winborder_y;
 
 static void init_keycodes()
 {
     init_keymap();
-    
+
     init_keycode(0x41, 0x1C, 1);
     init_keycode(0x42, 0x32, 1);
     init_keycode(0x43, 0x21, 1);
@@ -162,33 +167,44 @@ static void init_keycodes()
 void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name)
 {
     win32fb_data* wdata = safe_calloc(1, sizeof(win32fb_data));
-	data->winsys_data = (void*)wdata;
+    data->winsys_data = (void*)wdata;
     data->framebuffer = safe_calloc((size_t)width * height, 4);
-    
+
     wdata->hwnd = NULL;
     wdata->x = width;
     wdata->y = height;
     strncpy(wdata->name, name, sizeof(wdata->name) - 1);
     wdata->name[sizeof(wdata->name) - 1] = 0;
-    
+
     if (winclass_atom == 0) {
-        WNDCLASS wc = { 0 };
+        WNDCLASSW wc = { 0 };
         wc.lpfnWndProc   = WindowProc;
         wc.hInstance     = GetModuleHandle(NULL);
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = "RVVM_window";
-        winclass_atom = RegisterClass(&wc);
+        wc.lpszClassName = L"RVVM_window";
+        winclass_atom = RegisterClassW(&wc);
         if (winclass_atom == 0) {
-            MessageBox(NULL, "Failed to register window class!", "RVVM Error", MB_OK | MB_ICONERROR);
+            MessageBoxW(NULL, L"Failed to register window class!", L"RVVM Error", MB_OK | MB_ICONERROR);
             return;
         }
-        
+
+        HWND tmp_window = CreateWindowW(
+            L"RVVM_window", L"RVVM",
+            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            CW_USEDEFAULT, CW_USEDEFAULT, 128, 128,
+            NULL, NULL, GetModuleHandle(NULL), NULL);
+        RECT rect;
+        GetClientRect(tmp_window, &rect);
+        winborder_x = 128 - (rect.right - rect.left);
+        winborder_y = 128 - (rect.bottom - rect.top);
+        DestroyWindow(tmp_window);
+
         init_keycodes();
     }
-    /* 
-     * It's not possible to work with window from thread other than the window creator in win32,
-     * so the hacky workaround is to move window creation to fb_update...
-     */
+    /*
+    * It's not possible to work with window from thread other than the window creator in win32,
+    * so the hacky workaround is to move window creation to fb_update...
+    */
 }
 
 void fb_close_window(struct fb_data *data)
@@ -203,20 +219,14 @@ void fb_update(struct fb_data *data)
 {
     if (winclass_atom == 0) return;
     win32fb_data* wdata = (win32fb_data*)data->winsys_data;
-    
+
     if (wdata->hwnd == NULL) {
-        RECT rect;
-        rect.top = 0;
-        rect.left = 0;
-        rect.right = wdata->x;
-        rect.bottom = wdata->y;
-        AdjustWindowRect(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE, 0);
-        
-        wdata->hwnd = CreateWindow(
-            "RVVM_window",
-            wdata->name,
+        wchar_t window_name[32] = {0};
+        MultiByteToWideChar(CP_UTF8, 0, wdata->name, strlen(wdata->name), window_name, 32);
+        wdata->hwnd = CreateWindowW(
+            L"RVVM_window", window_name,
             WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+            CW_USEDEFAULT, CW_USEDEFAULT, wdata->x + winborder_x, wdata->y + winborder_y,
             NULL, NULL, GetModuleHandle(NULL), NULL);
     }
 
@@ -268,11 +278,13 @@ void fb_update(struct fb_data *data)
                 SelectObject(hdcc, hBitmap);
                 hdc = BeginPaint(wdata->hwnd, &ps);
                 GetClientRect(wdata->hwnd, &rect);
+#ifndef UNDER_CE
                 SetStretchBltMode(hdc, STRETCH_HALFTONE);
+#endif
                 StretchBlt(hdc, 0, 0, rect.right, rect.bottom, hdcc, 0, 0, wdata->x, wdata->y, SRCCOPY);
-                
+
                 EndPaint(wdata->hwnd, &ps);
-                
+
                 DeleteObject(hBitmap);
                 DeleteDC(hdcc);
                 break;
