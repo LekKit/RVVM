@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvmlib.h"
 #include "ps2-altera.h"
+#include "utils.h"
 
 /* TODO: pixel format */
 
