@@ -106,6 +106,7 @@ OS := $(call tolower,$(OS))
 
 # Set up OS options
 ifeq ($(OS),emscripten)
+override CFLAGS += -pthread
 override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
 BIN_EXT := .html
 LIB_EXT := .so
@@ -116,20 +117,25 @@ override LDFLAGS += -static
 BIN_EXT := .exe
 LIB_EXT := .dll
 else
+LIB_EXT := .so
 # Check for lib presence before linking (there is no pthread on Android, etc)
+ifneq (,$(findstring main, $(shell $(CC) -pthread $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
+override LDFLAGS += -pthread
+endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
 override LDFLAGS += -lpthread
 endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
 override LDFLAGS += -lrt
 endif
+endif
+
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
 override LDFLAGS += -latomic
 else
 override CFLAGS += -DNO_LIBATOMIC
 endif
-LIB_EXT := .so
-endif
+
 endif
 
 # Detect compiler type
@@ -179,10 +185,10 @@ else
 BUILD_TYPE := release
 override CFLAGS += -DNDEBUG
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS := -O3 -flto=auto -pthread -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS := -O3 -flto=thin -pthread -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
 # Whatever compiler that might be, lets not enable aggressive optimizations
 override CFLAGS := -O2 $(CFLAGS)
@@ -275,7 +281,9 @@ ifeq ($(USE_FB),1)
 ifeq ($(OS),windows)
 SRC_depbuild += $(SRCDIR)/devices/win32window.c
 override CFLAGS += -DUSE_FB
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lgdi32 2>&1)))
 override LDFLAGS += -lgdi32
+endif
 else
 ifeq ($(OS),emscripten)
 $(info [$(YELLOW)INFO$(RESET)] No USE_FB support for Emscripten)
@@ -354,8 +362,14 @@ SRC_depbuild += $(SRCDIR)/devices/tap_linux.c
 override CFLAGS += -DUSE_TAP_LINUX
 else
 SRC_depbuild += $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
+# Link WinSock
 ifeq ($(OS),windows)
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lws2_32 2>&1)))
 override LDFLAGS += -lws2_32
+else
+# On WinCE there is no _32 suffix
+override LDFLAGS += -lws2
+endif
 endif
 endif
 endif
