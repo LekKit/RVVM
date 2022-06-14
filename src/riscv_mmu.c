@@ -38,6 +38,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SV48_LEVELS       4
 #define SV57_LEVELS       5
 
+#ifdef __unix__
+#include <sys/mman.h>
+#endif
+
 bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
 {
     // Memory boundaries should be always aligned to page size
@@ -45,20 +49,39 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
         rvvm_error("Memory boundaries misaligned: 0x%08"PRIxXLEN" - 0x%08"PRIxXLEN, begin, begin+size);
         return false;
     }
+#ifdef __unix__
+    vmptr_t data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (data != MAP_FAILED) {
+#ifdef __linux__
+        if (!rvvm_has_arg("no_thp")) {
+            if (madvise(data, size, MADV_MERGEABLE) == -1) {
+                rvvm_info("KSM madvise() failed");
+            }
+        }
+        if (madvise(data, size, MADV_HUGEPAGE) == -1) {
+            rvvm_info("THP madvise() failed");
+        }
+#endif
+#else
     vmptr_t data = calloc(size, 1);
-    if (!data) {
-        rvvm_error("Memory allocation failure");
-        return false;
+    if (data != NULL) {
+#endif
+        mem->data = data;
+        mem->begin = begin;
+        mem->size = size;
+        return true;
     }
-    mem->data = data;
-    mem->begin = begin;
-    mem->size = size;
-    return true;
+    rvvm_error("Memory allocation failure");
+    return false;
 }
 
 void riscv_free_ram(rvvm_ram_t* mem)
 {
+#ifdef __unix__
+    munmap(mem->data, mem->size);
+#else
     free(mem->data);
+#endif
     // Prevent accidental access
     mem->data = NULL;
     mem->begin = 0;
