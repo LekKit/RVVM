@@ -53,14 +53,19 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
     vmptr_t data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (data != MAP_FAILED) {
 #ifdef __linux__
-        if (!rvvm_has_arg("no_thp")) {
+        if (!rvvm_has_arg("no_ksm")) {
             if (madvise(data, size, MADV_MERGEABLE) == -1) {
                 rvvm_info("KSM madvise() failed");
             }
         }
-        if (madvise(data, size, MADV_HUGEPAGE) == -1) {
-            rvvm_info("THP madvise() failed");
+        if (!rvvm_has_arg("no_thp") && (size > (256 << 20))) {
+            if (madvise(data, size, MADV_HUGEPAGE) == -1) {
+                rvvm_info("THP madvise() failed");
+            } else {
+                rvvm_info("THP enabled");
+            }
         }
+        
 #endif
 #else
     vmptr_t data = calloc(size, 1);
