@@ -67,7 +67,9 @@ void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
     vm->csr.isa = CSR_MISA_RV32;
     riscv_decoder_init_rv32(vm);
 #endif
+
     riscv_priv_init(vm);
+    vm->wfi_cond = condvar_create();
 }
 
 void riscv_hart_free(rvvm_hart_t* vm)
@@ -77,6 +79,7 @@ void riscv_hart_free(rvvm_hart_t* vm)
 #else
     UNUSED(vm);
 #endif
+    condvar_free(vm->wfi_cond);
 }
 
 void riscv_hart_run(rvvm_hart_t* vm)
@@ -302,8 +305,8 @@ void riscv_hart_spawn(rvvm_hart_t *vm)
 static void riscv_hart_notify(rvvm_hart_t* vm)
 {
     atomic_store_uint32(&vm->wait_event, HART_STOPPED);
-    // Explicitly sync memory with the hart thread, wake from WFI sleep
-    thread_signal_membarrier(vm->thread);
+    // Wake from WFI sleep
+    condvar_wake(vm->wfi_cond);
 }
 
 void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)

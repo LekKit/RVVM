@@ -83,13 +83,13 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                         uint64_t timestamp = rvtimer_get(&vm->timer);
                         if (vm->timer.timecmp > timestamp) {
                             timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
-                            sleep_ms(timestamp);
+                            condvar_wait(vm->wfi_cond, timestamp);
                         }
                         vm->csr.ip |= (1 << INTERRUPT_MTIMER);
                         break;
                     } else {
                         // Timer IRQs disabled, wait for external IRQs
-                        sleep_ms(10);
+                        condvar_wait(vm->wfi_cond, CONDVAR_INFINITE);
                     }
                 }
             }
