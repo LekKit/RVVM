@@ -118,6 +118,7 @@ static void nvme_remove(rvvm_mmio_dev_t* dev)
 {
     nvme_dev_t* nvme = (nvme_dev_t*)dev->data;
     nvme_shutdown(nvme);
+    blk_close(nvme->blk);
     free(nvme);
 }
 

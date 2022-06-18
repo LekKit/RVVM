@@ -95,6 +95,7 @@ static FILE* fopen_utf8(const char* name, const char* mode)
 #endif
 
 struct blk_io_rvfile {
+    char* filepath;
     uint64_t size;
     uint64_t pos;
 #if defined(POSIX_FILE_IMPL)
@@ -134,11 +135,20 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    file->filepath = safe_calloc(rvvm_strlen(filepath)+1, 1);
+    memcpy(file->filepath, filepath, rvvm_strlen(filepath));
     struct stat file_stat = {0};
     fstat(fd, &file_stat);
     file->size = file_stat.st_size;
     file->pos = 0;
     file->fd = fd;
+
+    rvvm_info("RVFILE \"%s\" opened {%s%s%s%s}", file->filepath,
+              mode & RVFILE_RW ? " RVFILE_RW " : " RVFILE_RDONLY ",
+              mode & RVFILE_TRUNC ? "| RVFILE_TRUNC " : "", 
+              mode & RVFILE_CREAT ? "| RVFILE_CREAT" : "", 
+              mode & RVFILE_EXCL ? "| RVFILE_EXCL" : "");
+
     return file;
 #elif defined(WIN32_FILE_IMPL)
     DWORD access = GENERIC_READ;
@@ -177,9 +187,18 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     DeviceIoControl(handle, DEVIOCTL_SET_SPARSE, NULL, 0, NULL, 0, &tmp, NULL);
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    file->filepath = safe_calloc(rvvm_strlen(filepath)+1, 1);
+    memcpy(file->filepath, filepath, rvvm_strlen(filepath));
     file->size = ((uint64_t)sizeh) << 32 | sizel;
     file->pos = 0;
     file->handle = handle;
+
+    rvvm_info("RVFILE \"%s\" opened {%s%s%s%s}", file->filepath,
+              mode & RVFILE_RW ? " RVFILE_RW " : " RVFILE_RDONLY ",
+              mode & RVFILE_TRUNC ? "| RVFILE_TRUNC " : "", 
+              mode & RVFILE_CREAT ? "| RVFILE_CREAT" : "", 
+              mode & RVFILE_EXCL ? "| RVFILE_EXCL" : "");
+
     return file;
 #else
     const char* open_mode;
@@ -198,12 +217,21 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    file->filepath = safe_calloc(rvvm_strlen(filepath)+1, 1);
+    memcpy(file->filepath, filepath, rvvm_strlen(filepath));
     fseek(fp, 0, SEEK_END);
     file->size = ftell(fp);
     file->pos = 0;
     file->pos_state = FILE_POS_INVALID;
     file->fp = fp;
     spin_init(&file->lock);
+
+    rvvm_info("RVFILE \"%s\" opened {%s%s%s%s}", file->filepath,
+              mode & RVFILE_RW ? " RVFILE_RW " : " RVFILE_RDONLY ",
+              mode & RVFILE_TRUNC ? "| RVFILE_TRUNC " : "", 
+              mode & RVFILE_CREAT ? "| RVFILE_CREAT" : "", 
+              mode & RVFILE_EXCL ? "| RVFILE_EXCL" : "");
+
     return file;
 #endif
 }
@@ -220,6 +248,8 @@ void rvclose(rvfile_t *file)
     fclose(file->fp);
     spin_unlock(&file->lock);
 #endif
+    rvvm_info("RVFILE \"%s\" closed", file->filepath);
+    free(file->filepath);
     free(file);
 }
 
