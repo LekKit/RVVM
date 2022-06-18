@@ -57,6 +57,7 @@ typedef int rvvm_mmio_handle_t;
 typedef struct {
     void (*remove)(rvvm_mmio_dev_t* dev);
     void (*update)(rvvm_mmio_dev_t* dev);
+    void (*reset)(rvvm_mmio_dev_t* dev);
     /* TODO
      * void (*suspend)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
      * void (*resume)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
@@ -102,7 +103,7 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
 PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine);
 
-// Pass physical address of Device Tree Binary (skips FDT generation until reset)
+// Pass physical address of Device Tree Binary (skips FDT generation)
 // To revert this, pass dtb_addr = 0
 PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr);
 
@@ -111,9 +112,13 @@ PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
 
 // Set up handler & userdata to be called when the VM performs reset/shutdown
-// The handler should reload the bootrom, kernel, etc into RAM on reset,
-// since they are probably not usable after initial boot. Returning false cancels reset.
+// Returning false cancels reset
 PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data);
+
+// Load bootrom, kernel binaries into RAM (handle reset as well)
+PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);
+PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
+PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 
 // Spawns CPU threads and continues VM execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);

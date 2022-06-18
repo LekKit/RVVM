@@ -120,7 +120,7 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     machine->fdt_soc = soc;
 }
 
-static void rvvm_gen_dtb(rvvm_machine_t* machine)
+static rvvm_addr_t rvvm_gen_dtb(rvvm_machine_t* machine)
 {
     if (machine->cmdline) {
         struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
@@ -129,19 +129,15 @@ static void rvvm_gen_dtb(rvvm_machine_t* machine)
         machine->cmdline = NULL;
     }
 
-    if (machine->dtb_addr) {
-        rvvm_info("DTB already specified, skipping FDT generation");
+    size_t dtb_size = fdt_size(machine->fdt);
+    size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
+    dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
+    if (dtb_size) {
+        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->mem.begin + dtb_off, (uint32_t)dtb_size);
     } else {
-        size_t dtb_size = fdt_size(machine->fdt);
-        size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
-        dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
-        machine->dtb_addr = machine->mem.begin + dtb_off;
-        if (dtb_size) {
-            rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->dtb_addr, (uint32_t)dtb_size);
-        } else {
-            rvvm_error("Generated DTB does not fit in RAM!");
-        }
+        rvvm_error("Generated DTB does not fit in RAM!");
     }
+    return machine->mem.begin + dtb_off;
 }
 #endif
 
@@ -149,12 +145,44 @@ static void rvvm_gen_dtb(rvvm_machine_t* machine)
 #define RVVM_POWER_RESET 1
 #define RVVM_POWER_OFF   2
 
-static void rvvm_reset_machine_state(rvvm_machine_t* machine)
+static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
 {
     machine->power_state = RVVM_POWER_ON;
+    // Call reset callback
+    if (machine->on_reset && !machine->on_reset(machine, machine->reset_data, true)) {
+        return false;
+    }
+    // Reset devices
+    vector_foreach(machine->mmio, i) {
+        rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
+        if (dev->type && dev->type->reset) dev->type->reset(dev);
+    }
+    if (machine->power_state != RVVM_POWER_ON) {
+        return false;
+    }
+    // Load bootrom, kernel, dtb into RAM if needed
+    if (machine->bootrom_file) {
+        rvread(machine->bootrom_file, machine->mem.data, machine->mem.size, 0);
+    }
+    if (machine->kernel_file) {
+        size_t kernel_offset = machine->rv64 ? 0x200000 : 0x400000;
+        size_t kernel_size = machine->mem.size > kernel_offset ? machine->mem.size - kernel_offset : 0;
+        rvread(machine->kernel_file, machine->mem.data + kernel_offset, kernel_size, 0);
+    }
+    rvvm_addr_t dtb_addr = machine->dtb_addr;
+    if (machine->dtb_file) {
+        size_t dtb_size = rvfilesize(machine->dtb_file);
+        size_t dtb_offset = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
+        dtb_addr = machine->mem.begin + dtb_offset;
+        rvread(machine->dtb_file, machine->mem.data + dtb_offset, machine->mem.size - dtb_offset, 0);
+    }
 #ifdef USE_FDT
-    rvvm_gen_dtb(machine);
+    if (dtb_addr == 0) {
+        // If no DTB was supplied, generate it
+        dtb_addr = rvvm_gen_dtb(machine);
+    }
 #endif
+    // Reset CPUs
     rvtimer_init(&machine->timer, 10000000); // 10 MHz timer
     vector_foreach(machine->harts, i) {
         rvvm_hart_t* vm = &vector_at(machine->harts, i);
@@ -163,12 +191,12 @@ static void rvvm_reset_machine_state(rvvm_machine_t* machine)
         vm->csr.hartid = i;
         vm->registers[REGISTER_X10] = i;
         // a1 register contains FDT address
-        if (machine->dtb_addr) vm->registers[REGISTER_X11] = machine->dtb_addr;
+        vm->registers[REGISTER_X11] = dtb_addr;
         // Boot from ram base addr by default
         vm->registers[REGISTER_PC] = vm->mem.begin;
         riscv_switch_priv(vm, PRIVILEGE_MACHINE);
     }
-    machine->dtb_addr = 0;
+    return true;
 }
 
 static void* builtin_eventloop(void* arg)
@@ -197,17 +225,15 @@ static void* builtin_eventloop(void* arg)
                     riscv_hart_pause(&vector_at(machine->harts, i));
                 }
                 // Call reset/poweroff handler
-                bool do_reset = machine->power_state == RVVM_POWER_RESET;
-                if (machine->on_reset) {
-                    do_reset &= machine->on_reset(machine, machine->reset_data, do_reset);
-                }
-                if (do_reset) {
+                if (machine->power_state == RVVM_POWER_RESET && rvvm_reset_machine_state(machine)) {
                     rvvm_info("Machine %p resetting", machine);
-                    rvvm_reset_machine_state(machine);
                     vector_foreach(machine->harts, i) {
                         riscv_hart_spawn(&vector_at(machine->harts, i));
                     }
                 } else {
+                    if (machine->on_reset) {
+                        machine->on_reset(machine, machine->reset_data, false);
+                    }
                     rvvm_info("Machine %p shutting down", machine);
                     machine->running = false;
                     vector_erase(global_machines, m);
@@ -239,16 +265,29 @@ static void* builtin_eventloop(void* arg)
 
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
+    rvvm_machine_t* machine;
     rvvm_hart_t* vm;
-    rvvm_machine_t* machine = safe_calloc(sizeof(rvvm_machine_t), 1);
+#ifndef USE_RV64
+    if (rv64) {
+        rvvm_error("RV64 is disabled in this RVVM build");
+        return NULL;
+    }
+#endif
     if (hart_count == 0) {
-        rvvm_warn("Creating machine with no harts at all... What are you even??");
+        rvvm_error("Creating machine with no harts at all... What are you even??");
+        return NULL;
+    }
+    if (hart_count > 1024) {
+        rvvm_error("Invalid machine core count");
+        return NULL;
     }
     if (!rv64 && mem_size > (1U << 30)) {
         // Workaround for SBI/Linux hangs on incorrect machine config
         rvvm_warn("Creating RV32 machine with >1G of RAM is likely to break, fixing");
         mem_size = 1U << 30;
     }
+
+    machine = safe_calloc(sizeof(rvvm_machine_t), 1);
     if (!riscv_init_ram(&machine->mem, mem_base, mem_size)) {
         free(machine);
         return NULL;
@@ -263,6 +302,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
         vm->mem = machine->mem;
     }
     machine->power_state = RVVM_POWER_OFF;
+    machine->rv64 = rv64;
 #ifdef USE_FDT
     rvvm_init_fdt(machine);
 #endif
@@ -320,7 +360,6 @@ PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine)
 #endif
 }
 
-
 PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr)
 {
     machine->dtb_addr = dtb_addr;
@@ -360,6 +399,44 @@ PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t
 {
     machine->on_reset = handler;
     machine->reset_data = data;
+}
+
+static bool file_reopen_check_size(rvfile_t** dest, const char* path, size_t size)
+{
+    rvclose(*dest);
+    if (path) {
+        *dest = rvopen(path, 0);
+        if (*dest == NULL) {
+            rvvm_error("Could not open file %s", path);
+            return false;
+        }
+        if (rvfilesize(*dest) > size) {
+            rvvm_error("File %s doesn't fit in RAM", path);
+            rvclose(*dest);
+            *dest = NULL;
+            return false;
+        }
+    } else {
+        *dest = NULL;
+    }
+    return true;
+}
+
+PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path)
+{
+    return file_reopen_check_size(&machine->bootrom_file, path, machine->mem.size);
+}
+
+PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path)
+{
+    size_t kernel_offset = machine->rv64 ? 0x200000 : 0x400000;
+    size_t kernel_size = machine->mem.size > kernel_offset ? machine->mem.size - kernel_offset : 0;
+    return file_reopen_check_size(&machine->kernel_file, path, kernel_size);
+}
+
+PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path)
+{
+    return file_reopen_check_size(&machine->dtb_file, path, machine->mem.size >> 1);
 }
 
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
@@ -462,6 +539,9 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     vector_free(machine->harts);
     vector_free(machine->mmio);
     riscv_free_ram(&machine->mem);
+    rvclose(machine->bootrom_file);
+    rvclose(machine->kernel_file);
+    rvclose(machine->dtb_file);
 #ifdef USE_FDT
     fdt_node_free(machine->fdt);
 #endif

@@ -24,11 +24,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //#define USE_SJLJ
 #include "rvvmlib.h"
 #include "rvvm_types.h"
-#include "rvtimer.h"
 #include "compiler.h"
-#include "threading.h"
-#include "vector.h"
 #include "utils.h"
+#include "vector.h"
+#include "rvtimer.h"
+#include "threading.h"
+#include "blk_io.h"
 
 #ifdef USE_JIT
 #include "rvjit/rvjit.h"
@@ -258,7 +259,11 @@ struct rvvm_machine_t {
     rvtimer_t timer;
     uint32_t running;
     uint32_t power_state;
+    bool rv64;
 
+    rvfile_t* bootrom_file;
+    rvfile_t* kernel_file;
+    rvfile_t* dtb_file;
     rvvm_reset_handler_t on_reset;
     void* reset_data;
     paddr_t dtb_addr;
