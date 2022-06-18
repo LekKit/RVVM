@@ -97,6 +97,7 @@ cond_var_t condvar_create()
 {
     cond_var_internal_t* cond = calloc(sizeof(cond_var_internal_t), 1);
     if (cond) {
+        atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
         cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (cond->event) return cond;
