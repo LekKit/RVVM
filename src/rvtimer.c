@@ -38,18 +38,6 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 #elif defined(_WIN32)
 #include <windows.h>
 
-/*#define CLOCK_MONOTONIC_RAW 0
-struct timespec { long tv_sec; long tv_nsec; };
-static inline void clock_gettime(int t, struct timespec* tp)
-{
-    UNUSED(t);
-    ULARGE_INTEGER tmp;
-    GetSystemTimeAsFileTime((LPFILETIME)&tmp);
-    tmp.QuadPart -= 0x19DB1DED53E8000ULL; // to UNIX time
-    tp->tv_sec = tmp.QuadPart / 10000000ULL;
-    tp->tv_nsec = (tmp.QuadPart % 10000000ULL) * 100;
-}*/
-
 uint64_t rvtimer_clocksource(uint64_t freq)
 {
     static LARGE_INTEGER perf_freq = {0};
@@ -67,13 +55,12 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 }
 
 #else
+#include <time.h>
 #warning No support for platform clocksource!
-
-static uint64_t __rvtimer = 0;
 
 uint64_t rvtimer_clocksource(uint64_t freq)
 {
-    return __rvtimer++ * freq / 1000;
+    return time(0) * freq;
 }
 
 #endif
@@ -104,9 +91,10 @@ bool rvtimer_pending(rvtimer_t* timer)
 void sleep_ms(uint32_t ms)
 {
 #if defined(_WIN32)
-    //Sleep(ms);
-    SleepEx(ms, TRUE);
-#elif defined(CLOCK_MONOTONIC_RAW)
-    usleep(ms*1000);
+    Sleep(ms);
+#elif defined(__unix__) || defined(__APPLE__)
+    usleep(ms * 1000);
+#else
+    UNUSED(ms);
 #endif
 }
