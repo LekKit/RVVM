@@ -114,7 +114,7 @@ static inline bool cmp_arg(const char* arg, const char* name)
 
 static void print_help()
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
     const wchar_t* help = L"\n"
 #else
     printf("\n"
@@ -160,7 +160,7 @@ static void print_help()
            "    -verbose         Enable verbose logging\n"
            "    -help            Show this help message\n"
            "    [bootrom]        Machine bootrom (SBI, BBL, etc)\n"
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
            "\n";
     WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), help, wcslen(help), NULL, NULL);
 #else
@@ -196,10 +196,6 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
                 args->mem = ((size_t)atoi(arg_val)) << mem_suffix_shift(arg_val[strlen(arg_val)-1]);
         } else if (cmp_arg(arg_name, "smp")) {
             args->smp = atoi(arg_val);
-            if (args->smp > 1024) {
-                rvvm_error("Invalid cores count specified: %s", arg_val);
-                return false;
-            }
         } else if (cmp_arg(arg_name, "res")) {
             size_t i;
             for (i=0; arg_val[i] && arg_val[i] != 'x'; ++i);
@@ -227,67 +223,20 @@ static bool parse_args(int argc, const char** argv, vm_args_t* args)
     return true;
 }
 
-static bool load_file_to_ram(rvvm_machine_t* machine, rvvm_addr_t addr, const char* filename)
-{
-    rvfile_t* file = rvopen(filename, 0);
-    size_t filesize = rvfilesize(file);
-    void* ptr = rvvm_get_dma_ptr(machine, addr, filesize);
-    if (file == NULL) {
-        rvvm_error("Cannot open file %s", filename);
-        return false;
-    }
-    if (ptr == NULL) {
-        rvvm_error("File %s does not fit in RAM", filename);
-        return false;
-    }
-    if (rvread(file, ptr, filesize, 0) != filesize) {
-        rvvm_error("File %s read error", filename);
-        return false;
-    }
-    rvclose(file);
-    return true;
-}
-
-// Load bootrom, kernel on each machine reset
-static bool handle_vm_reset(rvvm_machine_t* machine, void* data, bool reset)
-{
-    if (reset) {
-        vm_args_t* args = data;
-        if (!load_file_to_ram(machine, RVVM_DEFAULT_MEMBASE, args->bootrom)) {
-            rvvm_error("Failed to load bootrom");
-            return false;
-        }
-        if (args->kernel) {
-            // Kernel offset is 2MB for RV64, 4MB for RV32 (aka hugepage alignment)
-
-            // It's possible to move memory region 128k behind and put
-            // patched OpenSBI there, to save those precious 4MB
-            rvvm_addr_t kern_addr = RVVM_DEFAULT_MEMBASE + (args->rv64 ? (2 << 20) : (4 << 20));
-            if (!load_file_to_ram(machine, kern_addr, args->kernel)) {
-                rvvm_error("Failed to load kernel");
-                return false;
-            }
-            rvvm_info("Kernel image loaded at 0x%08"PRIx64, kern_addr);
-        }
-        if (args->dtb) {
-            rvvm_addr_t dtb_addr = RVVM_DEFAULT_MEMBASE + (args->mem >> 1);
-            if (!load_file_to_ram(machine, dtb_addr, args->dtb)) {
-                rvvm_error("Failed to load custom DTB");
-                return false;
-            }
-            rvvm_info("Custom DTB loaded at 0x%08"PRIx64, dtb_addr);
-            rvvm_set_dtb_addr(machine, dtb_addr);
-        }
-    }
-    return true;
-}
-
 static void rvvm_run_with_args(vm_args_t args)
 {
     rvvm_machine_t* machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, args.mem, args.smp, args.rv64);
-    if (machine == NULL) return;
+    if (machine == NULL) {
+        rvvm_error("Failed to create VM");
+        return;
+    }
 
-    if (!handle_vm_reset(machine, &args, true)) return;
+    if (!rvvm_load_bootrom(machine, args.bootrom)
+     || !rvvm_load_kernel(machine, args.kernel)
+     || !rvvm_load_dtb(machine, args.dtb)) {
+        rvvm_error("Failed to initialize VM");
+        return;
+    }
 
     clint_init_auto(machine);
     plic_ctx_t plic = plic_init_auto(machine);
@@ -344,7 +293,6 @@ static void rvvm_run_with_args(vm_args_t args)
     }
 
     rvvm_enable_builtin_eventloop(false);
-    rvvm_set_reset_handler(machine, handle_vm_reset, &args);
     rvvm_start_machine(machine);
     rvvm_run_eventloop(); // Returns on machine shutdown
 
@@ -368,7 +316,7 @@ static int rvvm_main(int argc, const char** argv)
 
 int main(int argc, char** argv)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
     HWND console = GetConsoleWindow();
     DWORD pid;
     GetWindowThreadProcessId(console, &pid);
@@ -386,7 +334,7 @@ int main(int argc, char** argv)
     }
 #endif
     int ret = rvvm_main(argc, (const char**)argv);
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
     for (int i=0; i<argc; ++i) free(argv[i]);
     free(argv);
 #endif
