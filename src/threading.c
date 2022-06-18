@@ -25,31 +25,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 
-// Unsupported pre-win Vista
-//#define WINDOWS_SRW_CONDVAR
-
 typedef HANDLE thread_internal_t;
-
-#ifdef WINDOWS_SRW_CONDVAR
 typedef struct {
-    CONDITION_VARIABLE cond;
-    SRWLOCK lock;
+    HANDLE event;
     uint32_t flag;
 } cond_var_internal_t;
-#else
-typedef HANDLE cond_var_internal_t;
-#endif
-
-static void __stdcall apc_membarrier(ULONG_PTR p)
-{
-    UNUSED(p);
-    atomic_fence();
-}
 
 #else
 
 #include <pthread.h>
-#include <signal.h>
 
 typedef pthread_t thread_internal_t;
 typedef struct {
@@ -57,14 +41,6 @@ typedef struct {
     pthread_mutex_t lock;
     uint32_t flag;
 } cond_var_internal_t;
-
-#ifndef __EMSCRIPTEN__
-static void signal_membarrier(int sig)
-{
-    UNUSED(sig);
-    atomic_fence();
-}
-#endif
 
 #endif
 
@@ -117,48 +93,16 @@ bool thread_detach(thread_handle_t handle)
     return ret;
 }
 
-void thread_signal_membarrier(thread_handle_t handle)
-{
-    if (handle == NULL) return;
-#ifdef _WIN32
-    QueueUserAPC(apc_membarrier, *(HANDLE*)handle, 0);
-#elif !defined(__EMSCRIPTEN__)
-    struct sigaction sa;
-    sigaction(SIGUSR2, NULL, &sa);
-
-    if (sa.sa_handler != signal_membarrier) {
-        if (sa.sa_handler != SIG_DFL && sa.sa_handler != SIG_IGN) {
-            rvvm_warn("thread_signal_membarrier() failed: SIGUSR2 is already in use!");
-            return;
-        } else {
-            sa.sa_handler = signal_membarrier;
-            sigemptyset(&sa.sa_mask);
-            sa.sa_flags = SA_RESTART;
-            // Still a possible race here?..
-            sigaction(SIGUSR2, &sa, NULL);
-        }
-    }
-
-    pthread_kill(*(pthread_t*)handle, SIGUSR2);
-#endif
-}
-
 cond_var_t condvar_create()
 {
     cond_var_internal_t* cond = calloc(sizeof(cond_var_internal_t), 1);
     if (cond) {
-#ifdef WINDOWS_SRW_CONDVAR
-        InitializeConditionVariable(&cond->cond);
-        InitializeSRWLock(&cond->lock);
-        cond->flag = 0;
-        return cond;
-#elif defined(_WIN32)
-        *cond = CreateEventA(NULL, FALSE, FALSE, NULL);
-        if (*cond) return cond;
+#ifdef _WIN32
+        cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        if (cond->event) return cond;
 #else
         if (pthread_cond_init(&cond->cond, NULL) == 0
          && pthread_mutex_init(&cond->lock, NULL) == 0) {
-             cond->flag = 0;
              return cond;
         }
 #endif
@@ -172,37 +116,23 @@ bool condvar_wait(cond_var_t cond, unsigned timeout_ms)
 {
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return false;
-#ifdef WINDOWS_SRW_CONDVAR
-    bool ret = true;
-    DWORD ms = timeout_ms;
-    if (timeout_ms == CONDVAR_INFINITE) ms = INFINITE;
-    AcquireSRWLockShared(&cond_p->lock);
-    if (atomic_load_uint32(&cond_p->flag) == 0) {
-        ret = SleepConditionVariableSRW(&cond_p->cond, &cond_p->lock, ms, CONDITION_VARIABLE_LOCKMODE_SHARED);
-    }
-    atomic_store_uint32(&cond_p->flag, 0);
-    ReleaseSRWLockShared(&cond_p->lock);
-    return ret;
-#elif defined(_WIN32)
-    DWORD ms = timeout_ms;
-    if (timeout_ms == CONDVAR_INFINITE) ms = INFINITE;
-    return WaitForSingleObject(*cond_p, ms) == WAIT_OBJECT_0;
+    if (atomic_swap_uint32(&cond_p->flag, 0)) return true;
+#ifdef _WIN32
+    DWORD ms = (timeout_ms == CONDVAR_INFINITE) ? INFINITE : timeout_ms;
+    return WaitForSingleObject(cond_p->event, ms) == WAIT_OBJECT_0;
 #else
     bool ret = true;
     pthread_mutex_lock(&cond_p->lock);
-    if (atomic_load_uint32(&cond_p->flag) == 0) {
-        if (timeout_ms == CONDVAR_INFINITE) {
-            ret = pthread_cond_wait(&cond_p->cond, &cond_p->lock) == 0;
-        } else {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_nsec += timeout_ms * 1000000;
-            ts.tv_sec += ts.tv_nsec / 1000000000;
-            ts.tv_nsec %= 1000000000;
-            ret = pthread_cond_timedwait(&cond_p->cond, &cond_p->lock, &ts) == 0;
-        }
+    if (timeout_ms == CONDVAR_INFINITE) {
+        ret = pthread_cond_wait(&cond_p->cond, &cond_p->lock) == 0;
+    } else {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += timeout_ms * 1000000;
+        ts.tv_sec += ts.tv_nsec / 1000000000;
+        ts.tv_nsec %= 1000000000;
+        ret = pthread_cond_timedwait(&cond_p->cond, &cond_p->lock, &ts) == 0;
     }
-    atomic_store_uint32(&cond_p->flag, 0);
     pthread_mutex_unlock(&cond_p->lock);
     return ret;
 #endif
@@ -212,16 +142,11 @@ void condvar_wake(cond_var_t cond)
 {
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return;
-#ifdef WINDOWS_SRW_CONDVAR
-    AcquireSRWLockExclusive(&cond_p->lock);
-    atomic_store_uint32(&cond_p->flag, 1);
-    ReleaseSRWLockExclusive(&cond_p->lock);
-    WakeConditionVariable(&cond_p->cond);
-#elif defined(_WIN32)
-    SetEvent(*cond_p);
+    if (atomic_swap_uint32(&cond_p->flag, 1)) return;
+#ifdef _WIN32
+    SetEvent(cond_p->event);
 #else
     pthread_mutex_lock(&cond_p->lock);
-    atomic_store_uint32(&cond_p->flag, 1);
     pthread_cond_signal(&cond_p->cond);
     pthread_mutex_unlock(&cond_p->lock);
 #endif
@@ -231,16 +156,11 @@ void condvar_wake_all(cond_var_t cond)
 {
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return;
-#ifdef WINDOWS_SRW_CONDVAR
-    AcquireSRWLockExclusive(&cond_p->lock);
-    atomic_store_uint32(&cond_p->flag, 1);
-    ReleaseSRWLockExclusive(&cond_p->lock);
-    WakeAllConditionVariable(&cond_p->cond);
-#elif defined(_WIN32)
-    SetEvent(*cond_p);
+    if (atomic_swap_uint32(&cond_p->flag, 1)) return;
+#ifdef _WIN32
+    SetEvent(cond_p->event);
 #else
     pthread_mutex_lock(&cond_p->lock);
-    atomic_store_uint32(&cond_p->flag, 1);
     pthread_cond_broadcast(&cond_p->cond);
     pthread_mutex_unlock(&cond_p->lock);
 #endif
@@ -251,16 +171,24 @@ void condvar_free(cond_var_t cond)
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return;
     condvar_wake_all(cond);
-#ifdef WINDOWS_SRW_CONDVAR
-    UNUSED(cond_p);
-#elif defined(_WIN32)
-    CloseHandle(*cond_p);
+#ifdef _WIN32
+    CloseHandle(cond_p->event);
 #else
     pthread_cond_destroy(&cond_p->cond);
     pthread_mutex_destroy(&cond_p->lock);
 #endif
     free(cond);
 }
+
+// Threadpool task offloading
+
+#define THREAD_MAX_WORKERS 4
+
+#if (defined(_WIN32) && defined(UNDER_CE)) || defined(__EMSCRIPTEN__)
+#define THREAD_MAX_WORKER_IDLE CONDVAR_INFINITE
+#else
+#define THREAD_MAX_WORKER_IDLE 5000
+#endif
 
 typedef struct {
     uint32_t busy;
@@ -280,7 +208,7 @@ static void* threadpool_worker(void* data)
     //rvvm_info("Spawned new threadpool worker %p", data);
 
     bool busy = true;
-    while (condvar_wait(thread_ctx->cond, THREAD_MAX_WORKER_IDLE_MS) || busy) {
+    while (condvar_wait(thread_ctx->cond, THREAD_MAX_WORKER_IDLE) || busy) {
         busy = atomic_load_uint32(&thread_ctx->busy);
         if (busy && thread_ctx->func) {
             //rvvm_info("Threadpool worker %p woke up", data);

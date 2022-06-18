@@ -21,10 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdbool.h>
 
-#define THREAD_MAX_WORKERS 4
-#define THREAD_MAX_VA_ARGS 8
-#define THREAD_MAX_WORKER_IDLE_MS 5000
-
 typedef void* thread_handle_t;
 typedef void* (*thread_func_t)(void*);
 typedef void* (*thread_func_va_t)(void**);
@@ -34,10 +30,6 @@ thread_handle_t thread_create(thread_func_t func, void* arg);
 void* thread_join(thread_handle_t handle);
 bool thread_detach(thread_handle_t handle);
 
-// Deliver a signal with total memory ordering to the thread
-// Also immediately interrupts any sleep in a target thread
-void thread_signal_membarrier(thread_handle_t handle);
-
 #define CONDVAR_INFINITE ((unsigned)-1)
 
 cond_var_t condvar_create();
@@ -45,6 +37,8 @@ bool condvar_wait(cond_var_t cond, unsigned timeout_ms);
 void condvar_wake(cond_var_t cond);
 void condvar_wake_all(cond_var_t cond);
 void condvar_free(cond_var_t cond);
+
+#define THREAD_MAX_VA_ARGS 8
 
 // Execute task in threadpool
 void thread_create_task(thread_func_t func, void* arg);
