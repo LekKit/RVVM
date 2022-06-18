@@ -348,7 +348,9 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
         maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 60) | (vm->root_page_table >> PAGE_SHIFT);
         csr_helper(&satp, dest, op);
         vm->mmu_mode = satp >> 60;
-        if (vm->mmu_mode < CSR_SATP_MODE_SV39 || vm->mmu_mode > CSR_SATP_MODE_SV57) {
+        if (vm->mmu_mode < CSR_SATP_MODE_SV39
+         || vm->mmu_mode > CSR_SATP_MODE_SV57
+         || (vm->mmu_mode > CSR_SATP_MODE_SV48 && !rvvm_has_arg("sv57"))) {
             vm->mmu_mode = CSR_SATP_MODE_PHYS;
         }
         vm->root_page_table = (satp & bit_mask(44)) << PAGE_SHIFT;
