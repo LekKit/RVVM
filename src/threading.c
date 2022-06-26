@@ -143,7 +143,7 @@ void condvar_wake(cond_var_t cond)
 {
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return;
-    if (atomic_swap_uint32(&cond_p->flag, 1)) return;
+    atomic_store_uint32(&cond_p->flag, 1);
 #ifdef _WIN32
     SetEvent(cond_p->event);
 #else
@@ -157,7 +157,7 @@ void condvar_wake_all(cond_var_t cond)
 {
     cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
     if (!cond) return;
-    if (atomic_swap_uint32(&cond_p->flag, 1)) return;
+    atomic_store_uint32(&cond_p->flag, 1);
 #ifdef _WIN32
     SetEvent(cond_p->event);
 #else
