@@ -146,18 +146,11 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, boo
 // Manipulate attached mmio zone by handle, may be done on a running VM
 PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
 
-/*
- * Allows to disable the internal eventloop thread and
- * offload it somewhere. For self-contained VMs this
- * should be used in main thread.
- */
+// Allows to disable the internal eventloop thread and offload it somewhere
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
-PUBLIC void rvvm_run_eventloop(); // Returns when all VMs are stopped
 
-/*
- * For hosts with no threading support, executes a single hart in the current thread.
- * Returns when the VM shuts down itself.
- */
-PUBLIC void rvvm_run_machine_singlethread(rvvm_machine_t* machine);
+// Returns when all VMs are stopped
+// For self-contained VMs this should be used in main thread
+PUBLIC void rvvm_run_eventloop();
 
 #endif

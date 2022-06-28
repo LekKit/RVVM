@@ -638,14 +638,3 @@ PUBLIC void rvvm_run_eventloop()
     rvvm_enable_builtin_eventloop(false);
     builtin_eventloop((void*)(size_t)1);
 }
-
-PUBLIC void rvvm_run_machine_singlethread(rvvm_machine_t* machine)
-{
-    if (machine->running) return;
-    machine->running = true;
-    if (machine->power_state != RVVM_POWER_ON) rvvm_reset_machine_state(machine);
-    // I don't have the slightest idea how the preemptive timer,
-    // nor the async peripherals should work now,
-    // but for dumb environments might suffice
-    riscv_hart_run(&vector_at(machine->harts, 0));
-}
