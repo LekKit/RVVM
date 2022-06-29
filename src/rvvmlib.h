@@ -41,6 +41,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HIDDEN
 #endif
 
+#ifndef RVVM_VERSION
+#define RVVM_VERSION "0.5"
+#endif
 #define RVVM_ABI_VERSION     3
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
