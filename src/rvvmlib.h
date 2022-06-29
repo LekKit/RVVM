@@ -120,6 +120,9 @@ PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 
+// Dump generated device tree
+PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
+
 // Spawns CPU threads and continues VM execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);
 
