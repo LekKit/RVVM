@@ -214,6 +214,7 @@ static void* builtin_eventloop(void* arg)
             thread_detach(builtin_eventloop_thread);
             builtin_eventloop_thread = NULL;
             condvar_free(builtin_eventloop_cond);
+            builtin_eventloop_cond = NULL;
             spin_unlock(&global_lock);
             break;
         }
