@@ -22,10 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvmlib.h"
 #include "utils.h"
 
-#ifdef USE_FDT
-#include "fdtlib.h"
-#endif
-
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/ns16550a.h"
@@ -276,20 +272,7 @@ static void rvvm_run_with_args(vm_args_t args)
 #endif
 
     if (args.dumpdtb) {
-#ifdef USE_FDT
-        char buffer[65536];
-        size_t size = fdt_serialize(rvvm_get_fdt_root(machine), buffer, sizeof(buffer), 0);
-        rvfile_t* file;
-        if (size && (file = rvopen(args.dumpdtb, RVFILE_RW | RVFILE_CREAT | RVFILE_TRUNC))) {
-            rvwrite(file, buffer, size, 0);
-            rvclose(file);
-            rvvm_info("DTB dumped to %s, size %u", args.dumpdtb, (uint32_t)size);
-        } else {
-            rvvm_error("Failed to dump DTB!");
-        }
-#else
-        rvvm_error("This build doesn't support FDT generation");
-#endif
+        rvvm_dump_dtb(machine, args.dumpdtb);
     }
 
     rvvm_enable_builtin_eventloop(false);
