@@ -1,6 +1,7 @@
 /*
 ringbuf.с - FIFO ringbuf
 Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -43,7 +44,7 @@ bool ringbuf_is_empty(struct ringbuf *rb)
     return rb->consumed == 0;
 }
 
-bool ringbuf_put(struct ringbuf *rb, void *data, size_t len)
+bool ringbuf_put(struct ringbuf *rb, const void *data, size_t len)
 {
 	if (ringbuf_get_free_spc(rb) < len) {
 		rvvm_warn("Overflow in ringbuf %p! size=%u, consumed=%u, len=%u", rb, (uint32_t)rb->size, (uint32_t)rb->consumed, (uint32_t)len);
@@ -61,7 +62,7 @@ bool ringbuf_put(struct ringbuf *rb, void *data, size_t len)
 	memcpy((uint8_t*)rb->data + rb->start, data, first_chunk_len);
 
 	size_t second_chunk_len = len - first_chunk_len;
-	memcpy(rb->data, data, second_chunk_len);
+	memcpy(rb->data, ((const uint8_t*)data) + first_chunk_len, second_chunk_len);
 
 	rb->start = second_chunk_len;
 	rb->consumed += len;
@@ -91,7 +92,7 @@ bool ringbuf_get(struct ringbuf *rb, void *data, size_t len)
 	memcpy(data, (uint8_t*)rb->data + rb->size - first_chunk_len, first_chunk_len);
 
 	size_t second_chunk_len = len - first_chunk_len;
-	memcpy(data, rb->data, second_chunk_len);
+	memcpy(((uint8_t*)data) + first_chunk_len, rb->data, second_chunk_len);
 
 	rb->consumed -= len;
 	return true;

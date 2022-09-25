@@ -1,6 +1,7 @@
 /*
 ringbuf.h - FIFO ringbuf
 Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -23,18 +24,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 #include <stdbool.h>
 
-struct ringbuf
-{
+typedef struct ringbuf {
     void *data;
     size_t size;
     size_t start;
     size_t consumed;
-};
+} ringbuf_t;
 
 void ringbuf_create(struct ringbuf *rb, size_t size);
 void ringbuf_destroy(struct ringbuf *rb);
 size_t ringbuf_get_free_spc(struct ringbuf *rb);
-bool ringbuf_put(struct ringbuf *rb, void *data, size_t len);
+bool ringbuf_put(struct ringbuf *rb, const void *data, size_t len);
 bool ringbuf_get(struct ringbuf *rb, void *data, size_t len);
 bool ringbuf_is_empty(struct ringbuf *rb);
 bool ringbuf_skip(struct ringbuf *rb, size_t len);
