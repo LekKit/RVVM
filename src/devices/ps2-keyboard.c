@@ -325,7 +325,7 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
 	spin_lock(ps2keyboard->lock);
 
-	if (key == NULL)
+	if (key == NULL || key->len == 0)
 	{
 		ps2_handle_typematic(ps2keyboard);
 		goto out;
@@ -342,7 +342,10 @@ void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool p
 	if (pressed)
 	{
 		/* no other key types are known... */
-		assert(key->len == 1 || key->len == 2 || key->len == 8);
+		if (key->len != 1 && key->len != 2 && key->len != 8) {
+			rvvm_warn("Invalid key size in ps2_handle_keyboard()");
+			return;
+		}
 
 		keylen = dev->lastkey.len = key->len * sizeof(key->keycode[0]) > KEY_SIZE
 			? KEY_SIZE
