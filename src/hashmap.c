@@ -68,3 +68,18 @@ void hashmap_clear(hashmap_t* map)
     memset(map->buckets, 0, (map->size + 1) * sizeof(hashmap_bucket_t));
     map->entries = 0;
 }
+
+void hashmap_rebalance(hashmap_t* map, size_t index)
+{
+    size_t j = index, k;
+    while (true) {
+        map->buckets[index].val = 0;
+        do {
+            j = (j + 1) & map->size;
+            if (!map->buckets[j].val) return;
+            k = hashmap_hash(map->buckets[j].key) & map->size;
+        } while ((index <= j) ? (index < k && k <= j) : (index < k || k <= j));
+        map->buckets[index] = map->buckets[j];
+        index = j;
+    }
+}

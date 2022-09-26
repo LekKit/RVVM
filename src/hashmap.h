@@ -76,14 +76,29 @@ static inline size_t hashmap_hash(size_t k)
     return k;
 }
 
+void hashmap_rebalance(hashmap_t* map, size_t index);
+
 static inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
 {
     size_t hash = hashmap_hash(key);
     size_t index;
     for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
         index = (hash + i) & map->size;
-        if (!map->buckets[index].val || map->buckets[index].key == key) {
-            if (!map->buckets[index].val) map->entries++;
+
+        if (map->buckets[index].key == key) {
+            // The key is already used, change value
+            map->buckets[index].val = val;
+
+            if (!val) {
+                // Value = 0 means we can clear a bucket
+                // Rebalance colliding trailing entries
+                hashmap_rebalance(map, index);
+                map->entries--;
+            }
+            return;
+        } else if (!map->buckets[index].val && val) {
+            // Empty bucket found, the key is unused
+            map->entries++;
             map->buckets[index].key = key;
             map->buckets[index].val = val;
             return;
@@ -91,7 +106,7 @@ static inline void hashmap_put(hashmap_t* map, size_t key, size_t val)
     }
     // Near-key space is polluted with colliding entries, reallocate and rehash
     // Puts the new entry as well to simplify the inlined function
-    hashmap_grow(map, key, val);
+    if (val) hashmap_grow(map, key, val);
 }
 
 static inline size_t hashmap_get(const hashmap_t* map, size_t key)
@@ -100,12 +115,8 @@ static inline size_t hashmap_get(const hashmap_t* map, size_t key)
     size_t index;
     for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
         index = (hash + i) & map->size;
-        if (map->buckets[index].key == key) {
+        if (map->buckets[index].key == key || !map->buckets[index].val) {
             return map->buckets[index].val;
-        }
-        if (map->buckets[index].val == 0) {
-            // Upon hitting unallocated entry, there is no need to search further
-            return 0;
         }
     }
     return 0;
@@ -113,25 +124,8 @@ static inline size_t hashmap_get(const hashmap_t* map, size_t key)
 
 static inline void hashmap_remove(hashmap_t* map, size_t key)
 {
-    size_t hash = hashmap_hash(key);
-    size_t index;
-    for (size_t i=0; i<HASHMAP_MAX_PROBES; ++i) {
-        index = (hash + i) & map->size;
-        if (map->buckets[index].key == key) {
-            map->buckets[index].val = 0;
-            map->entries--;
-
-            // Rebalance colliding trailing entries
-            for (size_t j=index; j<HASHMAP_MAX_PROBES; ++j) {
-                if (map->buckets[j & map->size].key == key && map->buckets[j & map->size].val) {
-                    map->buckets[index] = map->buckets[j & map->size];
-                    map->buckets[j & map->size].val = 0;
-                    break;;
-                }
-            }
-            break;
-        }
-    }
+    // Treat value zero as removed key
+    hashmap_put(map, key, 0);
     if (map->entries < (map->size >> 2)) {
         hashmap_shrink(map);
     }
