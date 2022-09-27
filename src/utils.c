@@ -237,17 +237,21 @@ uint64_t rvvm_getarg_size(const char* arg)
 void rvvm_randombytes(void* buffer, size_t size)
 {
     // Xorshift RNG seeded by precise timer
-    uint64_t seed = rvtimer_clocksource(1000000000);
+    static uint64_t seed = 0;
     uint8_t* bytes = buffer;
-    size_t tmp_size;
-    do {
+    size_t size_rem = size & 0x7;
+    size -= size_rem;
+    seed += rvtimer_clocksource(1000000000ULL);
+    for (size_t i=0; i<size; i += 8) {
         seed ^= (seed >> 17);
         seed ^= (seed << 21);
         seed ^= (seed << 28);
         seed ^= (seed >> 49);
-        tmp_size = size > 8 ? 8 : size;
-        memcpy(bytes, &seed, tmp_size);
-        bytes += tmp_size;
-        size -= tmp_size;
-    } while (size);
+        memcpy(bytes + i, &seed, 8);
+    }
+    seed ^= (seed >> 17);
+    seed ^= (seed << 21);
+    seed ^= (seed << 28);
+    seed ^= (seed >> 49);
+    memcpy(bytes + size, &seed, size_rem);
 }
