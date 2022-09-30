@@ -37,15 +37,22 @@ static void spin_atexit()
 {
     cond_var_t cond = global_cond;
     global_cond = NULL;
+    // Make sure no use-after-free happens on running threads
+    atomic_fence();
     condvar_free(cond);
 }
 
 static void spin_cond_init()
 {
-    if (!atomic_swap_uint32(&global_cond_init, 1)) {
+    uint32_t tmp = atomic_or_uint32(&global_cond_init, 1);
+    if (tmp == 0) {
+        // We are initializing the condvar
         global_cond = condvar_create();
         atexit(spin_atexit);
-        atomic_fence();
+        atomic_or_uint32(&global_cond_init, 2);
+    } else if (tmp == 1) {
+        // Someone is not done initializing it
+        while (atomic_load_uint32(&global_cond_init) < 2) sleep_ms(1);
     }
 }
 
