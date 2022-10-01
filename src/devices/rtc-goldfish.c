@@ -37,7 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RTC_REG_SIZE     0x20
 
 struct rtc_goldfish_data {
-    plic_ctx_t plic;
+    plic_ctx_t* plic;
     uint32_t irq;
     uint32_t alarm_low;
     uint32_t alarm_high;
@@ -110,7 +110,7 @@ static rvvm_mmio_type_t rtc_goldfish_dev_type = {
     .name = "rtc_goldfish",
 };
 
-PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct rtc_goldfish_data* ptr = safe_calloc(sizeof(struct rtc_goldfish_data), 1);
     ptr->plic = plic;
@@ -136,7 +136,7 @@ PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
 #endif
 }
 
-PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_GOLDFISH_DEFAULT_MMIO, RTC_REG_SIZE);
     rtc_goldfish_init(machine, addr, plic, plic_alloc_irq(plic));
