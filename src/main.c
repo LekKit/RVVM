@@ -235,7 +235,7 @@ static void rvvm_run_with_args(vm_args_t args)
     }
 
     clint_init_auto(machine);
-    plic_ctx_t plic = plic_init_auto(machine);
+    plic_ctx_t* plic = plic_init_auto(machine);
     pci_bus_t* pci_bus = pci_bus_init_auto(machine, plic);
 
     ns16550a_init_auto(machine, plic);
