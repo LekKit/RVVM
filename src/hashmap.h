@@ -126,7 +126,7 @@ static inline void hashmap_remove(hashmap_t* map, size_t key)
 {
     // Treat value zero as removed key
     hashmap_put(map, key, 0);
-    if (map->entries < (map->size >> 2)) {
+    if (map->entries < (map->size >> 3) && map->entries > 1024) {
         hashmap_shrink(map);
     }
 }
