@@ -38,7 +38,7 @@ struct altps2
     spinlock_t lock;
 
     // IRQ data
-    plic_ctx_t plic;
+    plic_ctx_t* plic;
     uint32_t irq;
 
     bool irq_enabled;
@@ -143,7 +143,7 @@ static rvvm_mmio_type_t altps2_dev_type = {
     .name = "altera_ps2",
 };
 
-void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq, struct ps2_device *child)
+void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq, struct ps2_device *child)
 {
     struct altps2 *ptr = safe_calloc(1, sizeof (struct altps2));
 
