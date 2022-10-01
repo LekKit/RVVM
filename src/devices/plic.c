@@ -460,7 +460,7 @@ static rvvm_mmio_type_t plic_dev_type = {
 };
 
 // Create PLIC device
-PUBLIC plic_ctx_t plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
+PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     struct plic* plic = safe_calloc(sizeof(struct plic), 1);
     plic->machine = machine;
@@ -510,14 +510,14 @@ PUBLIC plic_ctx_t plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
     return plic;
 }
 
-PUBLIC plic_ctx_t plic_init_auto(rvvm_machine_t* machine)
+PUBLIC plic_ctx_t* plic_init_auto(rvvm_machine_t* machine)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PLIC_DEFAULT_MMIO, 0x4000000);
     return plic_init(machine, addr);
 }
 
 // Allocate new IRQ
-PUBLIC uint32_t plic_alloc_irq(plic_ctx_t plic)
+PUBLIC uint32_t plic_alloc_irq(plic_ctx_t* plic)
 {
     if (plic == NULL) return 0;
     plic->alloc_irq++;
@@ -525,14 +525,14 @@ PUBLIC uint32_t plic_alloc_irq(plic_ctx_t plic)
 }
 
 // Get FDT phandle of the PLIC
-PUBLIC uint32_t plic_get_phandle(plic_ctx_t plic)
+PUBLIC uint32_t plic_get_phandle(plic_ctx_t* plic)
 {
     if (plic == NULL) return 0;
     return plic->phandle;
 }
 
 // Send IRQ through PLIC
-PUBLIC bool plic_send_irq(plic_ctx_t plic, uint32_t irq)
+PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq)
 {
     if (plic == NULL) return false;
     spin_lock(&plic->lock);
