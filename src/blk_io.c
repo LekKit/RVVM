@@ -229,6 +229,28 @@ uint64_t rvfilesize(rvfile_t* file)
     return file->size;
 }
 
+#if defined(POSIX_FILE_IMPL) && defined(RVREAD_MMAP_FILE)
+#include <sys/mman.h>
+
+/*
+ * This is an experimental memory usage optimization, which remaps
+ * the destination buffer to be a file mapping which you just read.
+ * Under memory pressure, this allows swapping elimination.
+ * TODO: This is currently sub-optimal in regard to vm.max_map_count,
+ * and may cause OOM. Use with care!
+ */
+static void rvread_mmap_file(rvfile_t* file, void* destination, size_t count, uint64_t offset)
+{
+    if (count < 0x1000) return;
+    size_t low = ((size_t)destination) & 0xFFFULL;
+    uint8_t* buffer = ((uint8_t*)destination) + low;
+    size_t size = (count - low) & (~0xFFFULL);
+    offset += low;
+    if (!size || (offset & 0xFFF)) return;
+    mmap(buffer, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, file->fd, offset);
+}
+#endif
+
 size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 {
     if (!file) return 0;
@@ -236,6 +258,9 @@ size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
 #if defined(POSIX_FILE_IMPL)
     ssize_t ret = pread(file->fd, destination, count, pos_real);
     if (ret < 0) ret = 0;
+#ifdef RVREAD_MMAP_FILE
+    rvread_mmap_file(file, destination, ret, pos_real);
+#endif
 #elif defined(WIN32_FILE_IMPL)
     OVERLAPPED overlapped = { .OffsetHigh = pos_real >> 32, .Offset = (uint32_t)pos_real };
     DWORD ret = 0;
