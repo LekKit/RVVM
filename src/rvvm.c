@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvm.h"
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
+#include "riscv_cpu.h"
 #include "vector.h"
 #include "utils.h"
 #include "mem_ops.h"
@@ -192,6 +193,7 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
         // Boot from ram base addr by default
         vm->registers[REGISTER_PC] = vm->mem.begin;
         riscv_switch_priv(vm, PRIVILEGE_MACHINE);
+        riscv_jit_flush_cache(vm);
     }
     return true;
 }
@@ -238,14 +240,14 @@ static void* builtin_eventloop(void* arg)
                     break;
                 }
             }
-            
+
             vector_foreach(machine->harts, i) {
                 // Wake hart thread to check timer interrupt.
                 if (rvtimer_pending(&vector_at(machine->harts, i).timer)) {
                     riscv_hart_check_timer(&vector_at(machine->harts, i));
                 }
             }
-            
+
             vector_foreach(machine->mmio, i) {
                 dev = &vector_at(machine->mmio, i);
                 if (dev->type && dev->type->update) {
@@ -304,6 +306,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
 #ifdef USE_FDT
     rvvm_init_fdt(machine);
 #endif
+    riscv_jit_init_memtracking(machine);
     return machine;
 }
 
@@ -312,6 +315,7 @@ PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, rvvm_addr_t dest, const void
     if (dest < machine->mem.begin
     || (dest - machine->mem.begin + size) > machine->mem.size) return false;
     memcpy(machine->mem.data + (dest - machine->mem.begin), src, size);
+    riscv_jit_mark_dirty_mem(machine, dest, size);
     return true;
 }
 
@@ -327,6 +331,7 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
 {
     if (addr < machine->mem.begin
     || (addr - machine->mem.begin + size) > machine->mem.size) return NULL;
+    riscv_jit_mark_dirty_mem(machine, addr, size);
     return machine->mem.data + (addr - machine->mem.begin);
 }
 
@@ -533,7 +538,7 @@ static void rvvm_cleanup_mmio(rvvm_mmio_dev_t* dev)
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 {
     rvvm_pause_machine(machine);
-    
+
     vector_foreach(machine->harts, i) {
         riscv_hart_free(&vector_at(machine->harts, i));
     }
@@ -541,7 +546,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     vector_foreach(machine->mmio, i) {
         rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
     }
-    
+
     vector_free(machine->harts);
     vector_free(machine->mmio);
     riscv_free_ram(&machine->mem);
@@ -634,7 +639,7 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
         }
     }
     spin_unlock(&global_lock);
-    
+
     if (stop_thread) {
         thread_join(stop_thread);
     }

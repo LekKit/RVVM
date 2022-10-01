@@ -131,7 +131,16 @@ static void riscv_i_fence(rvvm_hart_t* vm, const uint32_t instruction)
 static void riscv_i_zifence(rvvm_hart_t* vm, const uint32_t instruction)
 {
     UNUSED(instruction);
-    riscv_jit_flush_cache(vm);
+#ifdef USE_JIT
+    if (rvvm_has_arg("rvjit_harward")) {
+        riscv_jit_flush_cache(vm);
+    } else {
+        // This eliminates possible dangling dirty blocks in JTLB
+        riscv_jit_tlb_flush(vm);
+    }
+#else
+    UNUSED(vm);
+#endif
 }
 
 static void riscv_zicsr_csrrw(rvvm_hart_t* vm, const uint32_t instruction)
@@ -223,7 +232,7 @@ void riscv_priv_init(rvvm_hart_t* vm)
     if (atomic_cas_uint32(&csr_global_init, 0, 1)) {
         riscv_csr_global_init();
     }
-    
+
     riscv_install_opcode_ISB(vm, RV_PRIV_SYSTEM, riscv_priv_system);
     riscv_install_opcode_ISB(vm, RV_PRIV_FENCE, riscv_i_fence);
     riscv_install_opcode_ISB(vm, RV_PRIV_ZIFENCE_I, riscv_i_zifence);

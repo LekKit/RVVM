@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_mmu.h"
 #include "riscv_csr.h"
 #include "riscv_hart.h"
+#include "riscv_cpu.h"
 #include "bit_ops.h"
 #include "atomics.h"
 #include "utils.h"
@@ -150,7 +151,8 @@ static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t o
             break;
         case MMU_EXEC:
             if (entry->r != vpn) entry->r = vpn - 1;
-            if (entry->w != vpn) entry->w = vpn - 1;
+            //if (entry->w != vpn) entry->w = vpn - 1;
+            entry->w = vpn - 1; // W^X on the TLB to track dirtiness
             entry->e = vpn;
             break;
         default:
@@ -406,15 +408,6 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     return false;
 }
 
-// Stub
-static inline void riscv_jit_flush(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, size_t size)
-{
-    UNUSED(vm);
-    UNUSED(vaddr);
-    UNUSED(paddr);
-    UNUSED(size);
-}
-
 /*
  * Since aligned loads/stores expect relaxed atomicity, MMU should use this
  * instead of a regular memcpy, to prevent other harts from observing
@@ -426,21 +419,20 @@ TSAN_SUPPRESS static inline void atomic_memcpy_relaxed(void* dest, const void* s
         switch(size) {
 #ifdef USE_RV64
             case 8:
-                *(uint64_t*)dest = *(uint64_t*)src;
+                *(uint64_t*)dest = *(const uint64_t*)src;
                 return;
 #endif
             case 4:
-                *(uint32_t*)dest = *(uint32_t*)src;
+                *(uint32_t*)dest = *(const uint32_t*)src;
                 return;
             case 2:
-                *(uint16_t*)dest = *(uint16_t*)src;
-                return;
-            case 1:
-                *(uint8_t*)dest = *(uint8_t*)src;
+                *(uint16_t*)dest = *(const uint16_t*)src;
                 return;
         }
     }
-    memcpy(dest, src, size);
+    for (uint8_t i=0; i<size; ++i) {
+        ((uint8_t*)dest)[i] = ((const uint8_t*)src)[i];
+    }
 }
 
 static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size, uint8_t access)
@@ -466,7 +458,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size
             riscv_tlb_put(vm, addr, ptr, access);
             if (access == MMU_WRITE) {
                 // Clear JITted blocks & flush trace cache if necessary
-                riscv_jit_flush(vm, addr, paddr, size);
+                riscv_jit_mark_dirty_mem(vm->machine, paddr, size);
                 // Should we make this atomic? RVWMO expects ld/st atomicity
                 //memcpy(ptr, dest, size);
                 atomic_memcpy_relaxed(ptr, dest, size);
@@ -534,6 +526,10 @@ vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
     if (riscv_mmu_translate(vm, addr, &paddr, access)) {
         ptr = riscv_phys_translate(vm, paddr);
         if (ptr) {
+            if (access == MMU_WRITE) {
+                // Clear JITted blocks & flush trace cache if necessary
+                riscv_jit_mark_dirty_mem(vm->machine, paddr, 8);
+            }
             // Physical address in main memory, cache address translation
             riscv_tlb_put(vm, addr, ptr, access);
             return ptr;

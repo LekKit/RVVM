@@ -108,6 +108,10 @@ typedef struct {
     size_t size;
     hashmap_t blocks;
     hashmap_t block_links;
+
+    // Dirty memory tracking
+    uint32_t* dirty_pages;
+    size_t    dirty_mask;
 } rvjit_heap_t;
 
 typedef struct {
@@ -167,7 +171,11 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block);
 // Looks up for compiled block by phys_pc, returns NULL when no block was found
 rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, paddr_t phys_pc);
 
-// Cleans up internal heap & lookup cache,
+// Track dirty memory to transparently invalidate JIT caches
+void rvjit_init_memtracking(rvjit_block_t* block, size_t size);
+void rvjit_mark_dirty_mem(rvjit_block_t* block, paddr_t addr, size_t size);
+
+// Cleans up internal heap & lookup cache entirely
 void rvjit_flush_cache(rvjit_block_t* block);
 
 // Internal APIs

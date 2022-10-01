@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvjit_emit.h"
 #include "utils.h"
 #include "vector.h"
+#include "atomics.h"
 
 #define RVJIT_MEM_EXEC 0x1
 #define RVJIT_MEM_RDWR 0x2
@@ -301,6 +302,16 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
     return true;
 }
 
+void rvjit_init_memtracking(rvjit_block_t* block, size_t size)
+{
+    // Each dirty page is marked in atomic bitmask
+    free(block->heap.dirty_pages);
+    block->heap.dirty_mask = 1;
+    while (block->heap.dirty_mask < (size >> 17)) block->heap.dirty_mask <<= 1;
+    block->heap.dirty_pages = safe_calloc(block->heap.dirty_mask, sizeof(uint32_t));
+    block->heap.dirty_mask--;
+}
+
 static void rvjit_linker_cleanup(rvjit_block_t* block)
 {
     vector_t(void*)* linked_blocks;
@@ -321,6 +332,30 @@ void rvjit_ctx_free(rvjit_block_t* block)
     hashmap_destroy(&block->heap.block_links);
     vector_free(block->links);
     free(block->code);
+    free(block->heap.dirty_pages);
+}
+
+static inline void rvjit_mark_dirty_page(rvjit_block_t* block, paddr_t addr)
+{
+    size_t offset = (addr >> 17) & block->heap.dirty_mask;
+    uint32_t mask = 1U << ((addr >> 12) & 0x1F);
+    atomic_or_uint32_ex(block->heap.dirty_pages + offset, mask, ATOMIC_RELAXED);
+}
+
+void rvjit_mark_dirty_mem(rvjit_block_t* block, paddr_t addr, size_t size)
+{
+    if (block->heap.dirty_pages == NULL) return;
+    for (size_t i=0; i<size; i += 4096) {
+        rvjit_mark_dirty_page(block, addr + i);
+    }
+}
+
+static inline bool rvjit_page_needs_flush(rvjit_block_t* block, paddr_t addr)
+{
+    size_t offset = (addr >> 17) & block->heap.dirty_mask;
+    uint32_t mask = 1U << ((addr >> 12) & 0x1F);
+    if (block->heap.dirty_pages == NULL) return false;
+    return atomic_and_uint32_ex(block->heap.dirty_pages + offset, ~mask, ATOMIC_RELAXED) & mask;
 }
 
 void rvjit_block_init(rvjit_block_t* block)
@@ -396,6 +431,21 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 
 rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, paddr_t phys_pc)
 {
+    if (rvjit_page_needs_flush(block, phys_pc)) {
+        vector_t(uint8_t*)* linked_blocks;
+        phys_pc &= ~0xFFFULL;
+
+        for (size_t i=0; i<4096; ++i) {
+            hashmap_remove(&block->heap.blocks, phys_pc + i);
+            linked_blocks = (void*)hashmap_get(&block->heap.block_links, phys_pc + i);
+            if (linked_blocks) {
+                vector_free(*linked_blocks);
+                free(linked_blocks);
+                hashmap_remove(&block->heap.block_links, phys_pc + i);
+            }
+        }
+        return NULL;
+    }
     return (rvjit_func_t)hashmap_get(&block->heap.blocks, phys_pc);
 }
 
@@ -410,6 +460,12 @@ void rvjit_flush_cache(rvjit_block_t* block)
     block->heap.curr = 0;
 
     rvjit_linker_cleanup(block);
+
+    if (block->heap.dirty_pages) {
+        for (size_t i=0; i<=block->heap.dirty_mask; ++i) {
+            atomic_store_uint32_ex(block->heap.dirty_pages + i, 0, ATOMIC_RELAXED);
+        }
+    }
 
     rvjit_block_init(block);
 }

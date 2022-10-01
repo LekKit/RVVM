@@ -110,10 +110,20 @@ NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
         vm->jit.virt_pc = virt_pc;
         vm->jit.phys_pc = phys_pc;
 
+        // Flush JTLB upon hiting a dirty block
+        riscv_jit_tlb_flush(vm);
+
         vm->jit_compiling = true;
         vm->block_ends = false;
     }
     return false;
+}
+
+void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
+{
+    vector_foreach(machine->harts, i) {
+        rvjit_mark_dirty_mem(&vector_at(machine->harts, i).jit, addr, size);
+    }
 }
 
 static void riscv_jit_finalize(rvvm_hart_t* vm)
