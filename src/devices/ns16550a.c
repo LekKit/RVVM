@@ -116,7 +116,7 @@ static uint8_t terminal_readchar(void* addr)
     return 0;
 }
 
-#elif _WIN32
+#elif defined(_WIN32) && !defined(UNDER_CE)
 #include <windows.h>
 #include <conio.h>
 
@@ -155,6 +155,7 @@ static void terminal_rawmode()
 
 static uint8_t terminal_readchar(void* addr)
 {
+    UNUSED(addr);
     return 0;
 }
 #endif
