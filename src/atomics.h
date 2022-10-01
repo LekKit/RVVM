@@ -200,7 +200,7 @@ static forceinline bool atomic_cas_uint32_ex(void* addr, uint32_t exp, uint32_t 
 {
 #if defined(__riscv_a) && defined(GNU_EXTS)
     UNUSED(succ); UNUSED(fail);
-    uint32_t ret = 1, tmp;
+    uint32_t ret = 1, tmp = 0;
     do {
         __asm__ __volatile__ (
             "lr.w.aq %1, (%4) \n\t"
