@@ -455,8 +455,21 @@ out:
     return ret;
 }
 
+static void plic_reset(rvvm_mmio_dev_t* device)
+{
+    struct plic* plic = (struct plic*)device->data;
+    spin_lock(&plic->lock);
+    memset(plic->prio, 0, sizeof(plic->prio));
+    memset(plic->pending, 0, sizeof(plic->pending));
+    memset(plic->enable, 0, sizeof(plic->enable));
+    memset(plic->ctxflags, 0, sizeof(plic->ctxflags));
+    memset(plic->busy, 0, sizeof(plic->busy));
+    spin_unlock(&plic->lock);
+}
+
 static rvvm_mmio_type_t plic_dev_type = {
     .name = "plic",
+    .reset = plic_reset,
 };
 
 // Create PLIC device
