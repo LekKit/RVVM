@@ -78,7 +78,7 @@ struct pci_bus {
     rvvm_machine_t* machine;
     struct pci_device* dev[PCI_BUS_DEVS];
 
-    plic_ctx_t plic;
+    plic_ctx_t* plic;
     uint32_t irq[PCI_BUS_IRQS];
 
     rvvm_addr_t io_addr;
@@ -234,7 +234,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, 
     return true;
 }
 
-PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t plic, uint32_t irq, bool ecam,
+PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32_t irq, bool ecam,
                                rvvm_addr_t base_addr,
                                rvvm_addr_t io_addr, size_t io_len,
                                rvvm_addr_t mem_addr, size_t mem_len)
@@ -327,7 +327,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t plic, uint32_
     return bus;
 }
 
-PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
 {
     bool ecam = true;
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, 1 << (ecam ? 20 : 16));

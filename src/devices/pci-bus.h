@@ -61,12 +61,12 @@ typedef struct pci_device pci_dev_t;
 typedef struct pci_bus pci_bus_t;
 
 // Passing irq = 0 implies auto-allocation of 4 IRQ lanes
-PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t plic, uint32_t irq, bool ecam,
+PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t* plic, uint32_t irq, bool ecam,
                                rvvm_addr_t base_addr,
                                rvvm_addr_t io_addr, size_t io_len,
                                rvvm_addr_t mem_addr, size_t mem_len);
 
-PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t plic);
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic);
 
 // Connect PCI device to the bus, use returned handle to send interrupts
 PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc);
