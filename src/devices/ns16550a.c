@@ -31,7 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define NS16550A_REG_SIZE 0x8
 
 struct ns16550a_data {
-    plic_ctx_t plic;
+    plic_ctx_t* plic;
     uint32_t irq;
     spinlock_t lock;
 
@@ -281,7 +281,7 @@ static rvvm_mmio_type_t ns16550a_dev_type = {
     .update = ns16550a_update,
 };
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     terminal_rawmode();
 
@@ -315,7 +315,7 @@ PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_c
 #endif
 }
 
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
     if (addr == NS16550A_DEFAULT_MMIO) {
