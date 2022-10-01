@@ -259,7 +259,7 @@ static void rvvm_run_with_args(vm_args_t args)
         ps2_keyboard = ps2_keyboard_create();
         altps2_init(machine, 0x20001000, plic, plic_alloc_irq(plic), &ps2_keyboard);
 
-        init_fb(machine, 0x30000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
+        init_fb(machine, 0x28000000, args.fb_x, args.fb_y, &ps2_mouse, &ps2_keyboard);
         rvvm_cmdline_append(machine, "console=tty0");
     }
 #endif
