@@ -235,16 +235,15 @@ static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, 
 }
 
 PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32_t irq, bool ecam,
-                               rvvm_addr_t base_addr,
+                               rvvm_addr_t base_addr, size_t bus_count,
                                rvvm_addr_t io_addr, size_t io_len,
                                rvvm_addr_t mem_addr, size_t mem_len)
 {
-    size_t bus_count = 1;
     size_t bus_shift = ecam ? 20 : 16;
 
     rvvm_mmio_dev_t pci_bus_mmio = {
         .addr = base_addr,
-        .size = (1 << bus_shift),
+        .size = (bus_count << bus_shift),
         .min_op_size = 4,
         .max_op_size = 4,
         .read = pci_bus_read,
@@ -283,8 +282,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
 
     #define FDT_ADDR(addr) (((uint64_t)(addr)) >> 32), ((addr) & ~(uint32_t)0)
 
-    paddr_t len = bus_count << bus_shift;
-    uint32_t reg[4] = { FDT_ADDR(base_addr), FDT_ADDR(len) };
+    uint32_t reg[4] = { FDT_ADDR(base_addr), FDT_ADDR(pci_bus_mmio.size) };
     fdt_node_add_prop_cells(pci_node, "reg", reg, 4);
 
     uint32_t bus_range[2] = { 0, bus_count - 1 };
@@ -292,7 +290,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
 
     // Range header: ((cacheable) << 30 | (space) << 24 | (bus) << 16 | (dev) << 11 | (fun) << 8 | (reg))
     uint32_t ranges[14] = {
-        0x1000000, FDT_ADDR(io_addr), FDT_ADDR(io_addr), FDT_ADDR(io_len),
+        0x1000000, FDT_ADDR(0),        FDT_ADDR(io_addr),  FDT_ADDR(io_len),
         0x2000000, FDT_ADDR(mem_addr), FDT_ADDR(mem_addr), FDT_ADDR(mem_len),
     };
     fdt_node_add_prop_cells(pci_node, "ranges", ranges + (io_len ? 0 : 7), io_len ? 14 : 7);
@@ -330,13 +328,12 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
 PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
 {
     bool ecam = true;
-    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, 1 << (ecam ? 20 : 16));
-    // If there's another colliding bus, move everything by 0x8000000
-    rvvm_addr_t offset = (addr - PCI_BASE_DEFAULT_MMIO) << (27 - (ecam ? 20 : 16));
+    size_t bus_count = 1; // TODO: Support more than 1 bus
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, bus_count << (ecam ? 20 : 16));
     return pci_bus_init(machine, plic, 0, ecam,
-                        addr,
-                        PCI_IO_DEFAULT_ADDR + offset, PCI_IO_DEFAULT_SIZE,
-                        PCI_MEM_DEFAULT_MMIO + offset, PCI_MEM_DEFAULT_SIZE);
+                        addr, bus_count,
+                        PCI_IO_DEFAULT_ADDR, PCI_IO_DEFAULT_SIZE,
+                        PCI_MEM_DEFAULT_MMIO, PCI_MEM_DEFAULT_SIZE);
 }
 
 static inline size_t pci_func_irq_pin_id(struct pci_func* func)
