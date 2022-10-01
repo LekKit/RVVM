@@ -124,6 +124,7 @@ enum a32_cc
     A32_GT, A32_LE,
     A32_AL, A32_UNCOND 
 };
+typedef uint32_t a32_cc_t;
 
 enum a32_shtype
 {
@@ -132,6 +133,7 @@ enum a32_shtype
     A32_ASR = 2,
     A32_ROR = 3,
 };
+typedef uint32_t a32_shtype_t;
 
 enum a32_dp_opcs
 {
@@ -165,6 +167,7 @@ enum a32_dp_opcs
     A32_MVN  = (15 << 21) | (0 << 20),
     A32_MVNS = (15 << 21) | (1 << 20),
 };
+typedef uint32_t a32_dp_opcs_t;
 
 enum a32_ma_opcs
 {
@@ -188,12 +191,14 @@ enum a32_ma_opcs
     A32_SMLAL =  (7 << 21) | (0 << 20),
     A32_SMLALS = (7 << 21) | (0 << 20),
 };
+typedef uint32_t a32_ma_opcs_t;
 
 enum a32_md_opcs
 {
     A32_SDIV = (0x71 << 20),
     A32_UDIV = (0x73 << 20),
 };
+typedef uint32_t a32_md_opcs_t;
 
 static inline void rvjit_a32_insn32(rvjit_block_t* block, uint32_t insn)
 {
@@ -225,7 +230,7 @@ static inline bool rvjit_a32_encode_imm(uint32_t imm, uint8_t *pimm, uint8_t *pr
 
     /* if the value is split between top and the bottom
      * part of the register, rotate it out */
-    if ((imm & 0xffff) && (imm & (0xffff << 16))) {
+    if ((imm & 0xFFFF) && (imm & 0xFFFF0000)) {
         imm = rvjit_a32_ror(imm, 8);
         rotation = 8;
     }
@@ -257,28 +262,28 @@ static inline uint32_t rvjit_a32_shifter_imm(uint8_t imm, uint8_t rotate)
     return (1 << 25) | (rotate << 7) | imm;
 }
 
-static inline uint32_t rvjit_a32_shifter_reg_imm(regid_t rm, enum a32_shtype shtype, uint8_t shamt)
+static inline uint32_t rvjit_a32_shifter_reg_imm(regid_t rm, a32_shtype_t shtype, uint8_t shamt)
 {
     rvjit_a32_assert((rm & ~15) == 0);
     rvjit_a32_assert((shamt & ~31) == 0);
     return (0 << 25) | (shamt << 7) | (shtype << 5) | (0 << 4) | rm;
 }
 
-static inline uint32_t rvjit_a32_shifter_reg_reg(regid_t rm, enum a32_shtype shtype, regid_t rs)
+static inline uint32_t rvjit_a32_shifter_reg_reg(regid_t rm, a32_shtype_t shtype, regid_t rs)
 {
     rvjit_a32_assert((rm & ~15) == 0);
     rvjit_a32_assert((rs & ~15) == 0);
     return (0 << 25) | (rs << 8) | (shtype << 5) | (1 << 4) | rm;
 }
 
-static inline void rvjit_a32_dp(rvjit_block_t* block, enum a32_dp_opcs op, enum a32_cc cc, regid_t rd, regid_t rn, uint32_t shifter)
+static inline void rvjit_a32_dp(rvjit_block_t* block, a32_dp_opcs_t op, a32_cc_t cc, regid_t rd, regid_t rn, uint32_t shifter)
 {
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((rn & ~15) == 0);
     rvjit_a32_insn32(block, (cc << 28) | op | shifter | (rn << 16) | (rd << 12));
 }
 
-static inline void rvjit_a32_ma(rvjit_block_t *block, enum a32_ma_opcs op, enum a32_cc cc, regid_t rdlo, regid_t rdhi, regid_t rn, regid_t rm)
+static inline void rvjit_a32_ma(rvjit_block_t *block, a32_ma_opcs_t op, a32_cc_t cc, regid_t rdlo, regid_t rdhi, regid_t rn, regid_t rm)
 {
     rvjit_a32_assert((rdhi & ~15) == 0);
     rvjit_a32_assert((rdlo & ~15) == 0);
@@ -288,7 +293,7 @@ static inline void rvjit_a32_ma(rvjit_block_t *block, enum a32_ma_opcs op, enum 
     rvjit_a32_insn32(block, (cc << 28) | op | (rdhi << 16) | (rdlo << 12) | (rm << 8) | (1 << 7) | (1 << 4) | rn);
 }
 
-static inline void rvjit_a32_ma2(rvjit_block_t *block, enum a32_ma_opcs op, enum a32_cc cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
+static inline void rvjit_a32_ma2(rvjit_block_t *block, a32_ma_opcs_t op, a32_cc_t cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
 {
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((ra & ~15) == 0);
@@ -298,7 +303,7 @@ static inline void rvjit_a32_ma2(rvjit_block_t *block, enum a32_ma_opcs op, enum
 }
 
 //NOTE: work only with udiv and sdiv
-static inline void rvjit_a32_md(rvjit_block_t *block, enum a32_md_opcs op, enum a32_cc cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
+static inline void rvjit_a32_md(rvjit_block_t *block, a32_md_opcs_t op, a32_cc_t cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
 {
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((rn & ~15) == 0);
@@ -306,12 +311,12 @@ static inline void rvjit_a32_md(rvjit_block_t *block, enum a32_md_opcs op, enum 
     rvjit_a32_insn32(block, (cc << 28) | op | (rd << 16) | (ra << 12) | (rm << 8) | (1 << 4) | rn);
 }
 
-static inline void rvjit_a32_blx_reg(rvjit_block_t* block, enum a32_cc cc, regid_t rm)
+static inline void rvjit_a32_blx_reg(rvjit_block_t* block, a32_cc_t cc, regid_t rm)
 {
     rvjit_a32_dp(block, A32_BX, cc, A32_PC, A32_PC, rvjit_a32_shifter_reg_reg(rm, A32_LSR, A32_PC));
 }
 
-static inline void rvjit_a32_bx_reg(rvjit_block_t* block, enum a32_cc cc, regid_t rm)
+static inline void rvjit_a32_bx_reg(rvjit_block_t* block, a32_cc_t cc, regid_t rm)
 {
     rvjit_a32_dp(block, A32_BX, cc, A32_PC, A32_PC, rvjit_a32_shifter_reg_reg(rm, A32_LSL, A32_PC));
 }
@@ -329,6 +334,7 @@ enum a32_mem_opcs
     A32_STRM  = (1 << 27) | (0 << 20) | (0 << 22),
     A32_LDRM  = (1 << 27) | (1 << 20) | (0 << 22)
 };
+typedef uint32_t a32_mem_opcs_t;
 
 enum a32_addrmode
 {
@@ -336,21 +342,22 @@ enum a32_addrmode
     A32_OFFSET    = (1 << 24) | (0 << 21), /* just use the value */
     A32_PREINDEX  = (1 << 24) | (1 << 21)  /* modify the value, write it to the register and use it */
 };
+typedef uint32_t a32_addrmode_t;
 
-static inline uint32_t rvjit_a32_addrmode_imm(int32_t imm, enum a32_addrmode am)
+static inline uint32_t rvjit_a32_addrmode_imm(int32_t imm, a32_addrmode_t am)
 {
     rvjit_a32_assert(check_imm_bits(imm, 13));
     return (0 << 25) | am | ((imm >= 0) << 23) | (((imm >= 0) ? imm : -imm) & bit_mask(12));
 }
 
-static inline uint32_t rvjit_a32_addrmode_reg(bool add, regid_t rm, enum a32_shtype shtype, uint8_t shimm, enum a32_addrmode am)
+static inline uint32_t rvjit_a32_addrmode_reg(bool add, regid_t rm, a32_shtype_t shtype, uint8_t shimm, a32_addrmode_t am)
 {
     rvjit_a32_assert((rm & ~15) == 0);
     rvjit_a32_assert((shimm & ~31) == 0);
     return (1 << 25) | am | (add << 23) | (shimm << 7) | (shtype << 5) | rm;
 }
 
-static inline uint32_t rvjit_a32_addrmode3_imm(int32_t imm, enum a32_addrmode am)
+static inline uint32_t rvjit_a32_addrmode3_imm(int32_t imm, a32_addrmode_t am)
 {
     rvjit_a32_assert(check_imm_bits(imm, 9));
     bool add = imm >= 0;
@@ -358,13 +365,13 @@ static inline uint32_t rvjit_a32_addrmode3_imm(int32_t imm, enum a32_addrmode am
     return (1 << 22) | am | (add << 23) | ((imm & 0xf0) << 4) | (imm & 0x0f);
 }
 
-static inline uint32_t rvjit_a32_addrmode3_reg(bool add, regid_t rm, enum a32_addrmode am)
+static inline uint32_t rvjit_a32_addrmode3_reg(bool add, regid_t rm, a32_addrmode_t am)
 {
     rvjit_a32_assert((rm & ~15) == 0);
     return (0 << 22) | am | (add << 23) | rm;
 }
 
-static inline uint32_t rvjit_a32_addrmode_multiple_reg(enum a32_addrmode am, uint16_t regsmask)
+static inline uint32_t rvjit_a32_addrmode_multiple_reg(a32_addrmode_t am, uint16_t regsmask)
 {
     rvjit_a32_assert(__builtin_popcount(regsmask) > 1); // one register in mask is undefined behavor
     rvjit_a32_assert((regsmask & (1u << 13)) == 0);
@@ -372,7 +379,7 @@ static inline uint32_t rvjit_a32_addrmode_multiple_reg(enum a32_addrmode am, uin
     return (0 << 22) | am | regsmask;
 }
 
-static inline void rvjit_a32_mem_op(rvjit_block_t* block, enum a32_mem_opcs op, enum a32_cc cc, regid_t rd, regid_t rn, uint32_t addrmode)
+static inline void rvjit_a32_mem_op(rvjit_block_t* block, a32_mem_opcs_t op, a32_cc_t cc, regid_t rd, regid_t rn, a32_addrmode_t addrmode)
 {
     rvjit_a32_assert((rd & ~15) == 0);
     rvjit_a32_assert((rn & ~15) == 0);
@@ -380,7 +387,7 @@ static inline void rvjit_a32_mem_op(rvjit_block_t* block, enum a32_mem_opcs op, 
 }
 
 /*
-static inline void rvjit_a32_push_multiple(rvjit_block_t *block, enum a32_mem_opcs, enum a32_cc cc, regid_t rn, uint16_t regmask)
+static inline void rvjit_a32_push_multiple(rvjit_block_t *block, a32_mem_opcs_t op, a32_cc_t cc, regid_t rn, uint16_t regmask)
 {
     rvjit_a32_assert((rn & ~15) == 0);
 
@@ -434,7 +441,7 @@ static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, uint
     if (wasneg) {
         imm = ~imm;
     }
-    enum a32_dp_opcs op = wasneg ? A32_MVN : A32_MOV;
+    a32_dp_opcs_t op = wasneg ? A32_MVN : A32_MOV;
     regid_t rn = 0;
     while (imm != 0)
     {
@@ -469,7 +476,7 @@ static inline void rvjit_native_setreg32s(rvjit_block_t* block, regid_t reg, int
     rvjit_native_setreg32(block, reg, imm);
 }
 
-static inline void rvjit_a32_b_reloc(void *addr, bool link, enum a32_cc cond, uint32_t offset)
+static inline void rvjit_a32_b_reloc(void *addr, bool link, a32_cc_t cond, uint32_t offset)
 {
     /* ARM PC is offseted by 8 */
     offset -= 8;
@@ -480,7 +487,7 @@ static inline void rvjit_a32_b_reloc(void *addr, bool link, enum a32_cc cond, ui
     write_uint32_le_m(addr, insn);
 }
 
-static inline void rvjit_a32_b(rvjit_block_t* block, bool link, enum a32_cc cond, uint32_t offset)
+static inline void rvjit_a32_b(rvjit_block_t* block, bool link, a32_cc_t cond, uint32_t offset)
 {
     uint32_t insn;
     rvjit_a32_b_reloc((void*) &insn, link, cond, offset);
@@ -539,7 +546,7 @@ static inline void rvjit32_native_xor(rvjit_block_t* block, regid_t hrds, regid_
     rvjit_a32_dp(block, A32_EOR, A32_AL, hrds, hrs1, rvjit_a32_shifter_reg_imm(hrs2, A32_LSL, 0));
 }
 
-static inline void rvjit32_a32_native_shift_op(rvjit_block_t* block, enum a32_shtype sh, regid_t hrds, regid_t hrs1, regid_t hrs2)
+static inline void rvjit32_a32_native_shift_op(rvjit_block_t* block, a32_shtype_t sh, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
     if (hrds == hrs2 && hrs1 != hrs2) {
         rvjit_a32_dp(block, A32_AND, A32_AL, hrds, hrs2, rvjit_a32_shifter_imm(31, 0));
@@ -567,7 +574,7 @@ static inline void rvjit32_native_sll(rvjit_block_t* block, regid_t hrds, regid_
     rvjit32_a32_native_shift_op(block, A32_LSL, hrds, hrs1, hrs2);
 }
 
-static inline void rvjit_a32_native_imm_op(rvjit_block_t* block, enum a32_dp_opcs op, regid_t hrds, regid_t hrs1, int32_t imm)
+static inline void rvjit_a32_native_imm_op(rvjit_block_t* block, a32_dp_opcs_t op, regid_t hrds, regid_t hrs1, int32_t imm)
 {
     uint8_t pimm, prot = 0;
     if (rvjit_a32_encode_imm(imm, &pimm, &prot)) {
@@ -659,7 +666,7 @@ static inline void rvjit32_native_sltu(rvjit_block_t* block, regid_t hrds, regid
     rvjit_a32_dp(block, A32_MOV, A32_CC, hrds, 0, rvjit_a32_shifter_imm(1, 0));
 }
 
-static inline void rvjit_a32_native_mem_op(rvjit_block_t* block, enum a32_mem_opcs op, regid_t dest, regid_t addr, int32_t off)
+static inline void rvjit_a32_native_mem_op(rvjit_block_t* block, a32_mem_opcs_t op, regid_t dest, regid_t addr, int32_t off)
 {
     if (bit_check(op, 26)) {
         if (check_imm_bits(off, 13)) {
@@ -723,7 +730,7 @@ static inline void rvjit32_native_sw(rvjit_block_t* block, regid_t src, regid_t 
     rvjit_a32_native_mem_op(block, A32_STR, src, addr, off);
 }
 
-static inline branch_t rvjit_a32_bcc(rvjit_block_t* block, enum a32_cc cc, regid_t hrs1, uint32_t shifter, branch_t handle, bool label)
+static inline branch_t rvjit_a32_bcc(rvjit_block_t* block, a32_cc_t cc, regid_t hrs1, uint32_t shifter, branch_t handle, bool label)
 {
     if (label) {
         // We want to set a label for a branch
@@ -824,7 +831,7 @@ static inline void rvjit32_native_mulhsu(rvjit_block_t* block, regid_t hrds, reg
     rvjit_free_hreg(block, rdlo);
 }
 
-static inline void rvjit_a32_soft_div_divu(rvjit_block_t* block, enum a32_md_opcs op, regid_t hrds, regid_t hrs1, regid_t hrs2)
+static inline void rvjit_a32_soft_div_divu(rvjit_block_t* block, a32_md_opcs_t op, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
     bool badreg  = (hrds <= 3);
 
