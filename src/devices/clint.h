@@ -1,5 +1,5 @@
 /*
-clint.h - Core-local Interrupt
+clint.h - RISC-V Advanced Core Local Interruptor
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify

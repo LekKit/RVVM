@@ -1,5 +1,5 @@
 /*
-clint.h - Core-local Interrupt
+clint.c - RISC-V Advanced Core Local Interruptor
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -22,46 +22,39 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 
 #define CLINT_MMIO_SIZE    0x10000
+#define ACLINT_MSWI_SIZE   0x4000
+#define ACLINT_MTIMER_SIZE 0x8000
 
-static bool clint_mmio_read_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
+static rvvm_mmio_type_t aclint_mswi_dev_type = {
+    .name = "aclint_mswi",
+};
+
+static rvvm_mmio_type_t aclint_mtimer_dev_type = {
+    .name = "aclint_mtimer",
+};
+
+static bool aclint_mswi_read(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    rvvm_hart_t *vm = (rvvm_hart_t*) device->data;
-    uint8_t tmp[8];
+    size_t hartid = offset >> 2;
+    UNUSED(size);
 
-    // MSIP register, bit 0 drives MSIP interrupt bit of the hart
-    if (offset == 0) {
-        memset(data, 0, size);
-        *(uint8_t*)data = bit_cut(vm->csr.ip, 3, 1);
+    if (hartid < vector_size(device->machine->harts)) {
+        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        write_uint32_le_m(data, bit_cut(vm->csr.ip, 3, 1));
         return true;
     }
 
-    // MTIMECMP register, 64-bit compare register for timer interrupts
-    if (offset >= 0x4000 && (offset + size) <= 0x4008) {
-        write_uint64_le_m(tmp, vm->timer.timecmp);
-        offset -= 0x4000;
-        memcpy(data, tmp + offset, size);
-        return true;
-    }
-
-    // MTIME register, 64-bit timer value
-    if (offset >= 0xBFF8 && (offset + size) <= 0xC000) {
-        write_uint64_le_m(tmp, rvtimer_get(&vm->timer));
-        offset -= 0xBFF8;
-        memcpy(data, tmp + offset, size);
-        return true;
-    }
     return false;
 }
 
-static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
+static bool aclint_mswi_write(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    rvvm_hart_t *vm = (rvvm_hart_t*) device->data;
-    uint8_t tmp[8];
+    size_t hartid = offset >> 2;
+    UNUSED(size);
 
-    // MSIP register, bit 0 drives MSIP interrupt bit of the hart
-    if (offset == 0) {
-        uint8_t msip = ((*(uint8_t*)data) & 1);
-        if (msip) {
+    if (hartid < vector_size(device->machine->harts)) {
+        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        if (read_uint32_le_m(data)) {
             riscv_interrupt(vm, INTERRUPT_MSOFTWARE);
         } else {
             riscv_interrupt_clear(vm, INTERRUPT_MSOFTWARE);
@@ -69,80 +62,101 @@ static bool clint_mmio_write_handler(rvvm_mmio_dev_t* device, void* data, size_t
         return true;
     }
 
-    // MTIMECMP register, 64-bit compare register for timer interrupts
-    if (offset >= 0x4000 && (offset + size) <= 0x4008) {
-        write_uint64_le_m(tmp, vm->timer.timecmp);
-        offset -= 0x4000;
-        memcpy(tmp + offset, data, size);
-        vm->timer.timecmp = read_uint64_le_m(tmp);
+    return false;
+}
+
+static bool aclint_mtimer_read(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
+{
+    size_t hartid = offset >> 3;
+    UNUSED(size);
+
+    if (offset == 0x7FF8) {
+        write_uint64_le_m(data, rvtimer_get(&device->machine->timer));
         return true;
     }
 
-    // MTIME register, 64-bit timer value
-    if (offset >= 0xBFF8 && (offset + size) <= 0xC000) {
-        write_uint64_le_m(tmp, rvtimer_get(&vm->machine->timer));
-        offset -= 0xBFF8;
-        memcpy(tmp + offset, data, size);
-        rvtimer_rebase(&vm->machine->timer, read_uint64_le_m(tmp));
-        vector_foreach(vm->machine->harts, i) {
-            vector_at(vm->machine->harts, i).timer = vm->machine->timer;
-        }
+    if (hartid < vector_size(device->machine->harts)) {
+        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        write_uint64_le_m(data, vm->timer.timecmp);
         return true;
     }
 
     return false;
 }
 
-static void clint_remove(rvvm_mmio_dev_t* device)
+static bool aclint_mtimer_write(rvvm_mmio_dev_t* device, void* data, size_t offset, uint8_t size)
 {
-    UNUSED(device);
-}
+    size_t hartid = offset >> 3;
+    UNUSED(size);
 
-static rvvm_mmio_type_t clint_dev_type = {
-    .name = "clint",
-    .remove = clint_remove,
-};
+    if (offset == 0x7FF8) {
+        rvtimer_rebase(&device->machine->timer, read_uint64_le_m(data));
+        vector_foreach(device->machine->harts, i) {
+            vector_at(device->machine->harts, i).timer = device->machine->timer;
+        }
+        return true;
+    }
+
+    if (hartid < vector_size(device->machine->harts)) {
+        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        vm->timer.timecmp = read_uint64_le_m(data);
+        return true;
+    }
+
+    return false;
+}
 
 PUBLIC void clint_init(rvvm_machine_t* machine, rvvm_addr_t addr)
 {
-    rvvm_mmio_dev_t clint;
-    clint.min_op_size = 1;
-    clint.max_op_size = 8;
-    clint.read = clint_mmio_read_handler;
-    clint.write = clint_mmio_write_handler;
-    clint.type = &clint_dev_type;
+    rvvm_mmio_dev_t aclint_mswi = {
+        .addr = addr,
+        .size = ACLINT_MSWI_SIZE,
+        .min_op_size = 4,
+        .max_op_size = 4,
+        .read = aclint_mswi_read,
+        .write = aclint_mswi_write,
+        .type = &aclint_mswi_dev_type,
+    };
+
+    rvvm_mmio_dev_t aclint_mtimer = {
+        .addr = addr + ACLINT_MSWI_SIZE,
+        .size = ACLINT_MTIMER_SIZE,
+        .min_op_size = 8,
+        .max_op_size = 8,
+        .read = aclint_mtimer_read,
+        .write = aclint_mtimer_write,
+        .type = &aclint_mtimer_dev_type,
+    };
+
+    rvvm_attach_mmio(machine, &aclint_mswi);
+    rvvm_attach_mmio(machine, &aclint_mtimer);
 
 #ifdef USE_FDT
+    struct fdt_node* clint = fdt_node_create_reg("clint", addr);
     struct fdt_node* cpus = fdt_node_find(rvvm_get_fdt_root(machine), "cpus");
-#endif
+    size_t irq_ext_cells = vector_size(machine->harts) << 2;
+    uint32_t* irq_ext = safe_calloc(irq_ext_cells, sizeof(uint32_t));
+
+    fdt_node_add_prop_reg(clint, "reg", addr, CLINT_MMIO_SIZE);
+    fdt_node_add_prop(clint, "compatible", "sifive,clint0\0riscv,clint0", 27);
 
     vector_foreach(machine->harts, i) {
-        clint.addr = addr;
-        clint.size = CLINT_MMIO_SIZE;
-        clint.data = &vector_at(machine->harts, i);
-        rvvm_attach_mmio(machine, &clint);
-
-#ifdef USE_FDT
         struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
         struct fdt_node* cpu_irq = fdt_node_find(cpu, "interrupt-controller");
         if (cpu_irq) {
             uint32_t irq_phandle = fdt_node_get_phandle(cpu_irq);
-            struct fdt_node* clint = fdt_node_create_reg("clint", addr);
-            fdt_node_add_prop_reg(clint, "reg", addr, CLINT_MMIO_SIZE);
-            fdt_node_add_prop_str(clint, "compatible", "riscv,clint0");
-            uint32_t irq_ext[4];
-            irq_ext[0] = irq_ext[2] = irq_phandle;
-            irq_ext[1] = INTERRUPT_MSOFTWARE;
-            irq_ext[3] = INTERRUPT_MTIMER;
-            fdt_node_add_prop_cells(clint, "interrupts-extended", irq_ext, 4);
-            fdt_node_add_child(rvvm_get_fdt_soc(machine), clint);
+            irq_ext[(i << 2)] = irq_ext[(i << 2) + 2] = irq_phandle;
+            irq_ext[(i << 2) + 1] = INTERRUPT_MSOFTWARE;
+            irq_ext[(i << 2) + 3] = INTERRUPT_MTIMER;
         } else {
             rvvm_warn("Missing nodes in FDT!");
         }
-#endif
-
-        addr += CLINT_MMIO_SIZE;
     }
+
+    fdt_node_add_prop_cells(clint, "interrupts-extended", irq_ext, irq_ext_cells);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), clint);
+    free(irq_ext);
+#endif
 }
 
 PUBLIC void clint_init_auto(rvvm_machine_t* machine)
