@@ -623,6 +623,7 @@ static void ethoc_remove(rvvm_mmio_dev_t* device)
     tap_wake(eth->tap);
     thread_join(eth->dma_thread);
     tap_close(eth->tap);
+    free(eth);
 }
 
 static rvvm_mmio_type_t ethoc_dev_type = {
