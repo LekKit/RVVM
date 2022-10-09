@@ -190,7 +190,7 @@ struct ethoc_dev
     thread_handle_t dma_thread;
     uint32_t kill_thread; /* Thanks to the awesome thread API we have to use this */
     rvvm_machine_t* machine; /* Machine to send IRQ to, also used as memory to send/recv packets */
-    plic_ctx_t plic;
+    plic_ctx_t* plic;
     uint32_t irq;
     uint32_t cur_txbd;
     uint32_t cur_rxbd;
@@ -630,7 +630,7 @@ static rvvm_mmio_type_t ethoc_dev_type = {
     .remove = ethoc_remove,
 };
 
-PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t plic, uint32_t irq)
+PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
 #ifdef USE_TAP_LINUX
@@ -677,7 +677,7 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
 #endif
 }
 
-PUBLIC void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t plic)
+PUBLIC void ethoc_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ETHOC_DEFAULT_MMIO, 0x800);
     ethoc_init(machine, addr, plic, plic_alloc_irq(plic));
