@@ -6,6 +6,7 @@ VERSION := 0.5
 # Detect host features
 ifeq ($(OS),Windows_NT)
 # Passed by MinGW/Cygwin Make on Windows hosts
+override OS := $(CROSS_OS)
 HOST_WINDOWS := 1
 NULL_STDERR := 2>NUL
 HOST_UNAME := Windows
@@ -59,39 +60,46 @@ override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
 
 # Get compiler target triplet (arch-vendor-kernel-abi)
 CC_TRIPLET := $(firstword $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR)) $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR)))
+ifeq (,$(findstring -,$(CC_TRIPLET)))
+CC_TRIPLET :=
+$(info [$(YELLOW)INFO$(RESET)] Invalid triplet, specify OS/ARCH manually if cross-compiling)
+endif
 
 tolower = $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(subst G,g,$(subst H,h,$(subst I,i,$(subst J,j,$(subst K,k,$(subst L,l,$(subst M,m,$(subst N,n,$(subst O,o,$(subst P,p,$(subst Q,q,$(subst R,r,$(subst S,s,$(subst T,t,$(subst U,u,$(subst V,v,$(subst W,w,$(subst X,x,$(subst Y,y,$(subst Z,z,$1))))))))))))))))))))))))))
 
 # Detect target OS
 ifneq (,$(findstring android, $(CC_TRIPLET)))
-OS := Android
+override OS := Android
 else
 ifneq (,$(findstring linux, $(CC_TRIPLET)))
-OS := Linux
+override OS := Linux
 else
 ifneq (,$(findstring mingw, $(CC_TRIPLET)))
-OS := Windows
+override OS := Windows
 else
 ifneq (,$(findstring cygwin, $(CC_TRIPLET)))
 # Technically, Cygwin != Windows, since it defines both _WIN32 & __unix__,
 # which may lead to funny API mixing, but let's ignore that for now
-OS := Windows
+override OS := Windows
 else
 ifneq (,$(findstring windows, $(CC_TRIPLET)))
-OS := Windows
+override OS := Windows
 else
 ifneq (,$(findstring darwin, $(CC_TRIPLET)))
-OS := Darwin
+override OS := Darwin
 else
 ifneq (,$(findstring macos, $(CC_TRIPLET)))
-OS := Darwin
+override OS := Darwin
 else
 ifneq (,$(findstring emscripten, $(CC_TRIPLET)))
 # Running Emscripten
-OS := Emscripten
+override OS := Emscripten
 else
+# Failed to determine target toolchain OS
+ifndef OS
 # Use host OS as a target
-OS := $(HOST_UNAME)
+override OS := $(HOST_UNAME)
+endif
 endif
 endif
 endif
@@ -102,7 +110,7 @@ endif
 endif
 
 $(info Detected OS: $(GREEN)$(OS)$(RESET))
-OS := $(call tolower,$(OS))
+override OS := $(call tolower,$(OS))
 
 # Set up OS options
 ifeq ($(OS),emscripten)
@@ -161,7 +169,6 @@ ARCH := $(firstword $(subst -, ,$(CC_TRIPLET)))
 else
 # This may fail on older compilers, fallback to host arch then
 ARCH := $(HOST_ARCH)
-$(info [$(YELLOW)INFO$(RESET)] Picked arch from uname, specify ARCH manually if cross-compiling)
 endif
 # x86 compilers sometimes fail to report -m32 multiarch
 ifneq (,$(findstring -m32, $(CFLAGS)))
@@ -243,7 +250,7 @@ override CFLAGS += -DUSE_FPU
 ifeq (,$(findstring rounding-math, $(shell $(CC) -frounding-math 2>&1)))
 override CFLAGS += -frounding-math
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument
+override CFLAGS += -Wno-unsupported-floating-point-opt -Wno-unknown-warning-option -Wno-ignored-optimization-argument
 endif
 endif
 endif
