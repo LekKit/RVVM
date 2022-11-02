@@ -26,19 +26,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stddef.h>
 #include <stdbool.h>
 
-#ifdef USE_LIB
-#if defined(__GNUC__) || defined(__llvm__) || defined(__INTEL_COMPILER)
-#define PUBLIC        __attribute__((visibility("default")))
-#define HIDDEN        __attribute__((visibility("hidden")))
-#elif defined(_WIN32)
-#define PUBLIC        __declspec(dllexport)
-#define HIDDEN
-#endif
-#endif
-
-#ifndef PUBLIC
+#if defined(USE_LIB) && defined(_WIN32)
+#define PUBLIC __declspec(dllexport)
+#elif defined(RVVM_DLL) && defined(_WIN32)
+#define PUBLIC __declspec(dllimport)
+#elif defined(USE_LIB) && defined(__GNUC__)
+#define PUBLIC __attribute__((visibility("default")))
+#else
 #define PUBLIC
-#define HIDDEN
 #endif
 
 #ifndef RVVM_VERSION
