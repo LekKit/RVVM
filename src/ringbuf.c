@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ringbuf.h"
-#include <utils.h>
+#include "utils.h"
 #include <string.h>
 
 void ringbuf_create(struct ringbuf *rb, size_t size)
