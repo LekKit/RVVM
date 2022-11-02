@@ -120,7 +120,7 @@ BIN_EXT := .html
 LIB_EXT := .so
 else
 ifeq ($(OS),windows)
-# -mwindows for GUI-only
+# Use LDFLAG -mwindows for GUI-only
 override LDFLAGS += -static
 BIN_EXT := .exe
 LIB_EXT := .dll
@@ -128,7 +128,7 @@ else
 LIB_EXT := .so
 # Check for lib presence before linking (there is no pthread on Android, etc)
 ifneq (,$(findstring main, $(shell $(CC) -pthread $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
-override LDFLAGS += -pthread
+override CFLAGS += -pthread
 endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
 override LDFLAGS += -lpthread
@@ -170,46 +170,53 @@ else
 # This may fail on older compilers, fallback to host arch then
 ARCH := $(HOST_ARCH)
 endif
+endif
+
+# Use common arch names (x86_64, arm64)
+ifneq (,$(findstring amd64, $(ARCH)))
+override ARCH = x86_64
+endif
+ifneq (,$(findstring aarch64, $(ARCH)))
+override ARCH = arm64
+endif
 # x86 compilers sometimes fail to report -m32 multiarch
 ifneq (,$(findstring -m32, $(CFLAGS)))
 ifneq (,$(findstring x86_64, $(ARCH)))
 override ARCH = i386
 endif
-ifneq (,$(findstring amd64, $(ARCH)))
-override ARCH = i386
-endif
-endif
 endif
 
 $(info Target arch: $(GREEN)$(ARCH)$(RESET))
 
-# Set up compilation options
-ifeq ($(DEBUG),1)
+# Debugging options
+ifeq ($(USE_DEBUG_FULL),1)
 BUILD_TYPE := debug
-override CFLAGS += -DDEBUG -Og -ggdb
+DBG_OPTS := -DDEBUG -Og -ggdb
 else
-
 BUILD_TYPE := release
-override CFLAGS += -DNDEBUG
+ifeq ($(USE_DEBUG),1)
+# Release with debug info
+DBG_OPTS := -DNDEBUG -g
+else
+DBG_OPTS := -DNDEBUG
+endif
+endif
+
+# Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS := -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -std=gnu11 -Wall -Wextra -O3 $(DBG_OPTS) -flto=auto -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -std=gnu11 -Wall -Wextra -O3 $(DBG_OPTS) -flto=thin -fvisibility=hidden -fno-math-errno $(CFLAGS)
 else
-# Whatever compiler that might be, lets not enable aggressive optimizations
-override CFLAGS := -O2 $(CFLAGS)
+# Whatever compiler that might be, use conservative options
+override CFLAGS := -O2 $(DBG_OPTS) $(CFLAGS)
 endif
-endif
-
 endif
 
 # Version string
-ifndef VERSION
-VERSION := git
-endif
-GIT_OUTPUT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
-VERSION := $(VERSION)-$(GIT_OUTPUT)-$(BUILD_TYPE)
+GIT_COMMIT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
+VERSION := $(VERSION)-$(GIT_COMMIT)-git
 
 $(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
@@ -228,7 +235,6 @@ USE_XSHM ?= 1
 USE_NET ?= 0
 USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
-USE_RTC ?= 1
 USE_PCI ?= 1
 USE_SPINLOCK_DEBUG ?= 1
 
@@ -259,21 +265,12 @@ ifeq ($(USE_JIT),1)
 # Check if RVJIT supports the target
 ifneq (,$(findstring 86, $(ARCH)))
 else
-ifneq (,$(findstring amd64, $(ARCH)))
-else
-ifneq (,$(findstring x64, $(ARCH)))
-else
 ifneq (,$(findstring arm, $(ARCH)))
-else
-ifneq (,$(findstring aarch64, $(ARCH)))
 else
 ifneq (,$(findstring riscv, $(ARCH)))
 else
 override USE_JIT = 0
 $(info [$(YELLOW)INFO$(RESET)] No RVJIT support for current target)
-endif
-endif
-endif
 endif
 endif
 endif
@@ -385,10 +382,6 @@ ifeq ($(USE_FDT),1)
 override CFLAGS += -DUSE_FDT
 endif
 
-ifeq ($(USE_RTC),1)
-override CFLAGS += -DUSE_RTC
-endif
-
 ifeq ($(USE_PCI),1)
 override CFLAGS += -DUSE_PCI
 endif
@@ -402,11 +395,9 @@ override CFLAGS += -DUSE_LIB -fPIC
 endif
 
 # Generic compiler flags
-override CFLAGS := -std=gnu11 -DVERSION=\"$(VERSION)\" -DARCH=\"$(ARCH)\" -Wall -Wextra -I$(SRCDIR) $(CFLAGS)
+override CFLAGS := -I$(SRCDIR) -DRVVM_VERSION=\"$(VERSION)\" $(CFLAGS)
 
-ifndef BUILDDIR
-BUILDDIR := $(BUILD_TYPE).$(OS).$(ARCH)
-endif
+BUILDDIR ?= $(BUILD_TYPE).$(OS).$(ARCH)
 OBJDIR := $(BUILDDIR)/obj
 
 # Select sources to compile
