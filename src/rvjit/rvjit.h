@@ -89,7 +89,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 typedef void (* RVJIT_CALL rvjit_func_t)(void* vm);
-typedef uint8_t regid_t;
 typedef uint8_t regflags_t;
 typedef size_t  branch_t;
 

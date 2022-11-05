@@ -118,6 +118,7 @@ static void nvme_remove(rvvm_mmio_dev_t* dev)
 {
     nvme_dev_t* nvme = (nvme_dev_t*)dev->data;
     nvme_shutdown(nvme);
+    blk_close(nvme->blk);
     free(nvme);
 }
 
@@ -518,10 +519,10 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
     return true;
 }
 
-PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, blkdev_t* image)
+PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev)
 {
     nvme_dev_t* nvme = safe_calloc(sizeof(nvme_dev_t), 1);
-    nvme->blk = image;
+    nvme->blk = blk_dev;
 
     pci_dev_desc_t nvme_desc = {
         .func[0] = {

@@ -22,9 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvmlib.h"
 #include "pci-bus.h"
 
-typedef struct blkdev_t blkdev_t;
-
-PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, blkdev_t* image);
+PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev);
 PUBLIC pci_dev_t* nvme_init(pci_bus_t* pci_bus, const char* image_path, bool rw);
 
 #endif

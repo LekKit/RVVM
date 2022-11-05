@@ -96,6 +96,7 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #include <fcntl.h>
 
 #ifdef __linux__
+// For memfd()
 #include <sys/syscall.h>
 #include <signal.h>
 #endif
@@ -234,35 +235,29 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #ifndef __NR_riscv_flush_icache
 #define __NR_riscv_flush_icache 259
 #endif
-static void flush_icache(const void* addr, size_t size)
-{
-    syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
-}
-#elif defined(RVJIT_APPLE_SILICON)
-static void flush_icache(const void* addr, size_t size)
-{
-    sys_icache_invalidate((void*)addr, size);
-}
-#elif defined(GNU_EXTS)
-static void flush_icache(const void* addr, size_t size)
-{
-    __builtin___clear_cache((char*)addr, ((char*)addr) + size);
-}
-#elif defined(_WIN32)
-static void flush_icache(const void* addr, size_t size)
-{
-    FlushInstructionCache(GetCurrentProcess(), addr, size);
-}
-#else
-#ifndef RVJIT_X86
-#error No flush_icache support!
 #endif
-static void flush_icache(const void* addr, size_t size)
+
+static void rvjit_flush_icache(const void* addr, size_t size)
 {
+#ifdef RVJIT_X86
+    // x86 has coherent instruction caches
     UNUSED(addr);
     UNUSED(size);
-}
+#elif defined(RVJIT_APPLE_SILICON)
+    sys_icache_invalidate((void*)addr, size);
+#elif defined(RVJIT_RISCV) && defined(__linux__)
+    syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
+#elif GCC_CHECK_VER(4, 7) || CLANG_CHECK_VER(3, 5)
+    // Use __builtin___clear_cache on modern toolchains
+    __builtin___clear_cache((char*)addr, ((char*)addr) + size);
+#elif defined(GNU_EXTS)
+    __clear_cache((char*)addr, ((char*)addr) + size);
+#elif defined(_WIN32)
+    FlushInstructionCache(GetCurrentProcess(), addr, size);
+#else
+    #error No rvjit_flush_icache() support!
 #endif
+}
 
 bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
 {
@@ -283,10 +278,10 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
             rvvm_warn("Failed to allocate W^X RVJIT heap!");
             return false;
         }
-        flush_icache(block->heap.code, block->heap.size);
+        rvjit_flush_icache(block->heap.code, block->heap.size);
     }
 
-    flush_icache(block->heap.data, block->heap.size);
+    rvjit_flush_icache(block->heap.data, block->heap.size);
 
     block->space = 1024;
     block->code = safe_malloc(block->space);
@@ -327,6 +322,9 @@ static void rvjit_linker_cleanup(rvjit_block_t* block)
 void rvjit_ctx_free(rvjit_block_t* block)
 {
     rvjit_munmap(block->heap.data, block->heap.size);
+    if (block->heap.code) {
+        rvjit_munmap((void*)block->heap.code, block->heap.size);
+    }
     rvjit_linker_cleanup(block);
     hashmap_destroy(&block->heap.blocks);
     hashmap_destroy(&block->heap.block_links);
@@ -388,7 +386,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 #endif
 
     memcpy(dest, block->code, block->size);
-    flush_icache(code, block->size);
+    rvjit_flush_icache(code, block->size);
     //block->heap.curr = (block->heap.curr + block->size + 31) & ~31ULL;
     block->heap.curr += block->size;
 
@@ -452,9 +450,9 @@ rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, paddr_t phys_pc)
 void rvjit_flush_cache(rvjit_block_t* block)
 {
     if (block->heap.code) {
-        flush_icache(block->heap.code, block->heap.curr);
+        rvjit_flush_icache(block->heap.code, block->heap.curr);
     }
-    flush_icache(block->heap.data, block->heap.curr);
+    rvjit_flush_icache(block->heap.data, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
     block->heap.curr = 0;
