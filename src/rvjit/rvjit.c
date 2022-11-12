@@ -95,6 +95,10 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
 #include <unistd.h>
 #include <fcntl.h>
 
+#ifndef MAP_ANON
+#define MAP_ANON MAP_ANONYMOUS
+#endif
+
 #ifdef __linux__
 // For memfd()
 #include <sys/syscall.h>
@@ -108,12 +112,12 @@ void sys_icache_invalidate(void* start, size_t len);
 #define RVJIT_APPLE_SILICON
 #endif
 #if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 101400
-#define MAP_RVJIT MAP_JIT
+#define MAP_RVJIT (MAP_PRIVATE | MAP_ANON | MAP_JIT)
 #endif
 #endif
 
 #ifndef MAP_RVJIT
-#define MAP_RVJIT 0
+#define MAP_RVJIT (MAP_PRIVATE | MAP_ANON)
 #endif
 
 static size_t page_mask()
@@ -133,7 +137,7 @@ static inline int rvjit_virt_flags(uint8_t flags)
 
 void* rvjit_mmap(size_t size, uint8_t flags)
 {
-    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_PRIVATE | MAP_ANONYMOUS | MAP_RVJIT, -1, 0);
+    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_RVJIT, -1, 0);
     if (tmp == MAP_FAILED) tmp = NULL;
     return tmp;
 }
@@ -452,6 +456,13 @@ void rvjit_flush_cache(rvjit_block_t* block)
     if (block->heap.code) {
         rvjit_flush_icache(block->heap.code, block->heap.curr);
     }
+#if defined(__unix__) && defined(MAP_FIXED)
+    else if (block->heap.curr > 0x10000) {
+        // Deallocate the physical memory used for RWX JIT cache
+        // This reduces average memory usage since the cache is never full
+        mmap(block->heap.data, block->heap.size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_RVJIT, -1, 0);
+    }
+#endif
     rvjit_flush_icache(block->heap.data, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
