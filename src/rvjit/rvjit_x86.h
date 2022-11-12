@@ -471,10 +471,10 @@ static void rvjit_x86_cpuid(uint32_t eax, uint32_t ecx, uint32_t* regs)
     static uint32_t func_max = 0;
     if (!init) {
         // Check maximum allowed EAX value for cpuid
-        uint32_t regs[4];
+        uint32_t tmp[4];
         init = true;
-        rvjit_x86_cpuid_internal(0, 0, regs);
-        func_max = regs[0];
+        rvjit_x86_cpuid_internal(0, 0, tmp);
+        func_max = tmp[0];
     }
 
     if (eax <= func_max) {
