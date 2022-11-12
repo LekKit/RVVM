@@ -39,9 +39,8 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     machine->fdt = fdt_node_create(NULL);
     fdt_node_add_prop_u32(machine->fdt, "#address-cells", 2);
     fdt_node_add_prop_u32(machine->fdt, "#size-cells", 2);
-    // Weird workaround for OpenSBI bug with string copy
-    fdt_node_add_prop_str(machine->fdt, "compatible", "RVVM   ");
-    fdt_node_add_prop_str(machine->fdt, "model", "RVVM   ");
+    fdt_node_add_prop_str(machine->fdt, "compatible", "RVVM v"RVVM_VERSION);
+    fdt_node_add_prop_str(machine->fdt, "model", "RVVM v"RVVM_VERSION);
 
     struct fdt_node* chosen = fdt_node_create("chosen");
     uint8_t rng_buffer[64] = {0};
@@ -131,7 +130,7 @@ static rvvm_addr_t rvvm_gen_dtb(rvvm_machine_t* machine)
     }
 
     size_t dtb_size = fdt_size(machine->fdt);
-    size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
+    paddr_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
     dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
     if (dtb_size) {
         rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->mem.begin + dtb_off, (uint32_t)dtb_size);
@@ -555,6 +554,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     rvclose(machine->dtb_file);
 #ifdef USE_FDT
     fdt_node_free(machine->fdt);
+    free(machine->cmdline);
 #endif
     free(machine);
 }
@@ -571,7 +571,7 @@ PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_
 // Regions of size 0 are ignored (those are non-IO placeholders)
 PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
-    for (size_t i=0; i<64; ++i) {
+    for (size_t attempt=0; attempt<64; ++attempt) {
         if (size && addr >= machine->mem.begin && (addr + size) <= (machine->mem.begin + machine->mem.size)) {
             addr = machine->mem.begin + machine->mem.size;
             continue;
