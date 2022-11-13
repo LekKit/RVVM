@@ -191,26 +191,29 @@ $(info Target arch: $(GREEN)$(ARCH)$(RESET))
 # Debugging options
 ifeq ($(USE_DEBUG_FULL),1)
 BUILD_TYPE := debug
-DBG_OPTS := -DDEBUG -Og -ggdb
+DEBUG_OPTS := -DDEBUG -Og -ggdb
 else
 BUILD_TYPE := release
 ifeq ($(USE_DEBUG),1)
 # Release with debug info
-DBG_OPTS := -DNDEBUG -g
+DEBUG_OPTS := -DNDEBUG -g
 else
-DBG_OPTS := -DNDEBUG
+DEBUG_OPTS := -DNDEBUG
 endif
 endif
 
+# Warning options (Strict safety/portability)
+WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Wframe-larger-than=32768
+
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS := -std=gnu11 -Wall -Wextra -O3 $(DBG_OPTS) -flto=auto -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -std=gnu11 -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS := -std=gnu11 -Wall -Wextra -O3 $(DBG_OPTS) -flto=thin -fvisibility=hidden -fno-math-errno $(CFLAGS)
+override CFLAGS := -std=gnu11 -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 # Whatever compiler that might be, use conservative options
-override CFLAGS := -O2 $(DBG_OPTS) $(CFLAGS)
+override CFLAGS := -std=gnu99 -O2 $(DEBUG_OPTS) $(CFLAGS)
 endif
 endif
 
@@ -513,7 +516,7 @@ test: $(TARGET)
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
 	@echo
 	@for file in $(BUILDDIR)/riscv-tests/rv32*.bin; do \
-		result=$$($(TARGET) $$file -nogui | tr -d '\0'); \
+		result=$$($(TARGET) $$file -nogui -rv32 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [[ "$$result" == "0" ]]; then \
 		echo "[$(GREEN)PASS$(RESET)] $$file"; \
