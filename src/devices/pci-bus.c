@@ -162,7 +162,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
             uint8_t bar_num = (reg - 0x10) >> 2;
             rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
             if (bar && bar->size) {
-                write_uint32_le(dest, (uint32_t)bar->addr | pci_bar_is_io(bar));
+                write_uint32_le(dest, (uint32_t)bar->addr | (pci_bar_is_io(bar) ? 1 : 0));
                 break;
             }
             memset(dest, 0, size);
