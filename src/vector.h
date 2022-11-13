@@ -1,5 +1,5 @@
- /*
-vector.h - Vector container
+/*
+vector.h - Vector Container
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -24,21 +24,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string.h>
 #include "utils.h"
 
-#ifndef VECTOR_GROW_AMOUNT
-#define VECTOR_GROW_AMOUNT(x) (x >> 1)
-#endif
-
 #define vector_t(type) struct {type* data; size_t size; size_t count;}
 
-#define vector_init(vec) \
-{ \
-    if (sizeof(*(vec).data) > 8) (vec).size = 2; \
-    else (vec).size = 32 / sizeof(*(vec).data); \
-    (vec).count = 0; \
-    (vec).data = safe_malloc(sizeof(*(vec).data) * (vec).size); \
-}
+// Empty vectors do not preallocate memory
+// This allows static initialization & conserves memory
+#define VECTOR_INIT {0}
 
-#define vector_free(vec) free((vec).data)
+// Grow factor: 1.5 (Better memory reusage), initial capacity: 2
+#define VECTOR_GROW(vec) \
+    if ((vec).count >= (vec).size) { \
+        (vec).size += (vec).size >> 1; \
+        if ((vec).size == 0) (vec).size = 2; \
+        (vec).data = safe_realloc((vec).data, (vec).size * sizeof(*(vec).data)); \
+    }
+
+#define vector_init(vec) \
+do { \
+    (vec).data = NULL; \
+    (vec).size = 0; \
+    (vec).count = 0; \
+} while(0)
+
+// May be called multiple times, the vector is empty yet reusable afterwards
+// Semantically identical to clear(), but also frees memory
+#define vector_free(vec) \
+do { \
+    free((vec).data); \
+    (vec).data = NULL; \
+    (vec).size = 0; \
+    (vec).count = 0; \
+} while(0)
+
+#define vector_clear(vec) do { (vec).count = 0; } while(0)
 
 #define vector_size(vec) (vec).count
 
@@ -46,57 +63,43 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define vector_at(vec, pos) (vec).data[pos]
 
-#define vector_clear(vec) \
-{ \
-    vector_free(vec); \
-    vector_init(vec); \
-}
-
-#define vector_grow(vec) \
-{ \
-    if ((vec).count >= (vec).size) { \
-        (vec).size += VECTOR_GROW_AMOUNT((vec).size); \
-        (vec).data = safe_realloc((vec).data, (vec).size * sizeof(*(vec).data)); \
-    } \
-}
-
 #define vector_push_back(vec, val) \
-{ \
-    vector_grow(vec); \
-    (vec).data[(vec).count] = val; \
-    (vec).count++; \
-}
+do { \
+    VECTOR_GROW(vec); \
+    (vec).data[(vec).count++] = val; \
+} while(0)
 
 #define vector_insert(vec, pos, val) \
-{ \
-    vector_grow(vec); \
+do { \
+    VECTOR_GROW(vec); \
     for (size_t _vec_i=(vec).count; _vec_i>pos; --_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i-1]; \
     (vec).data[pos] = val; \
     (vec).count++; \
-}
+} while(0)
 
 #define vector_emplace_back(vec) \
-{ \
-    vector_grow(vec); \
-    memset(&(vec).data[(vec).count], 0, sizeof(*(vec).data)); \
-    (vec).count++; \
-}
+do { \
+    VECTOR_GROW(vec); \
+    memset(&(vec).data[(vec).count++], 0, sizeof(*(vec).data)); \
+} while(0)
 
 #define vector_emplace(vec, pos) \
-{ \
-    vector_grow(vec); \
+do { \
+    VECTOR_GROW(vec); \
     for (size_t _vec_i=(vec).count; _vec_i>pos; --_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i-1]; \
-    memset(&(vec).data[(vec).count], 0, sizeof(*(vec).data)); \
+    memset(&(vec).data[pos], 0, sizeof(*(vec).data)); \
     (vec).count++; \
-}
-
-#define vector_foreach(vec, i) \
-    for (size_t i=0; i<(vec).count; ++i)
+} while(0)
 
 #define vector_erase(vec, pos) \
-{ \
-    for (size_t _vec_i=pos; _vec_i<(vec).count-1; ++_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i+1]; \
-    (vec).count--; \
-}
+do { \
+    if (pos < (vec).count) { \
+        (vec).count--; \
+        for (size_t _vec_i=pos; _vec_i<(vec).count; ++_vec_i) (vec).data[_vec_i] = (vec).data[_vec_i+1]; \
+    } \
+} while(0)
+
+#define vector_foreach(vec, iter) \
+    for (size_t iter=0; iter<(vec).count; ++iter)
 
 #endif
