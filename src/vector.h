@@ -99,7 +99,12 @@ do { \
     } \
 } while(0)
 
+// Be sure to break loop after vector_erase() since it invalidates forward iterators
 #define vector_foreach(vec, iter) \
     for (size_t iter=0; iter<(vec).count; ++iter)
 
+// Iterates the vector in reversed order, which is safe for vector_erase()
+#define vector_foreach_back(vec, iter) \
+    for (size_t iter=(vec).count; iter--;)
+        
 #endif
