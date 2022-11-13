@@ -312,7 +312,7 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
         case A_MKIO_COM: {
             size_t q_id = (read_uint16_le(cmd->ptr + 40) << 1) + (cmd->opcode == A_MKIO_COM);
             uint16_t q_size = read_uint16_le(cmd->ptr + 42);
-            if (q_id <= ADMIN_COMQ || q_id > NVME_MAXQ) {
+            if (q_id <= ADMIN_COMQ || q_id >= NVME_MAXQ) {
                 nvme_complete_cmd(nvme, cmd, SC_BAD_QI);
             } else if (q_size == 0 || nvme->queues[q_id].size) {
                 nvme_complete_cmd(nvme, cmd, SC_BAD_QS);
@@ -330,7 +330,7 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
         case A_RMIO_SUB:
         case A_RMIO_COM: {
             size_t q_id = (read_uint16_le(cmd->ptr + 40) << 1) + (cmd->opcode == A_RMIO_COM);
-            if (q_id <= ADMIN_COMQ || q_id > NVME_MAXQ) {
+            if (q_id <= ADMIN_COMQ || q_id >= NVME_MAXQ) {
                 nvme_complete_cmd(nvme, cmd, SC_BAD_QI);
             } else {
                 spin_lock(&nvme->queues[q_id].lock);
@@ -559,7 +559,7 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
         default:
             if (offset >= 0x1000) {
                 size_t queue_id = (offset - 0x1000) >> (NVME_DSTRD + 2);
-                nvme_doorbell(nvme, queue_id, read_uint16_le(data));
+                if (queue_id < NVME_MAXQ) nvme_doorbell(nvme, queue_id, read_uint16_le(data));
             }
             break;
     }
