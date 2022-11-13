@@ -405,7 +405,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         v = vector_at(block->links, i).ptr;
         linked_blocks = (void*)hashmap_get(&block->heap.block_links, k);
         if (!linked_blocks) {
-            linked_blocks = calloc(sizeof(vector_t(uint8_t*)), 1);
+            linked_blocks = safe_calloc(sizeof(vector_t(uint8_t*)), 1);
             vector_init(*linked_blocks);
             hashmap_put(&block->heap.block_links, k, (size_t)linked_blocks);
         }
