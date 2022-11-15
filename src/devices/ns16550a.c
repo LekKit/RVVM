@@ -77,7 +77,7 @@ struct ns16550a_data {
 
 #define NS16550A_LCR_DLAB    0x80
 
-#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
 #include <unistd.h>
 #include <termios.h>
 #include <sys/time.h>
