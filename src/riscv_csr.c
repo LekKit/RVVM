@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifdef USE_FPU
 // For host FPU exception manipulation
-#include <fenv.h>
+#include "fpu_ops.h"
 #endif
 
 riscv_csr_handler_t riscv_csr_list[4096];

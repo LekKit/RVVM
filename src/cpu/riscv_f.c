@@ -31,7 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "riscv_mmu.h"
 #include "riscv_csr.h"
 
-#include <fenv.h>
+#include "fpu_ops.h"
 #include <float.h>
 /* well... */
 #if defined(_WIN32) && defined(__clang__)
@@ -41,6 +41,13 @@ typedef _Complex float _C_float_complex;
 typedef _Complex long double _C_ldouble_complex;
 #endif
 #include <math.h>
+
+static inline uint32_t fpu_signbit(double f)
+{
+    uint64_t i;
+    memcpy(&i, &f, sizeof(i));
+    return i >> 63;
+}
 
 #ifdef RVD
     #define SIGNIFICAND_SIZE DBL_MANT_DIG /* used for sNaN/qNaN classification */
@@ -95,7 +102,7 @@ typedef _Complex long double _C_ldouble_complex;
 #define fpu_eq(x, y)                  ((fnative_t)(x) == (fnative_t)(y))
 #define fpu_lt(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <  (fnative_t)(y))
 #define fpu_le(x, y)                  (check_nan(x), check_nan(y), (fnative_t)(x) <= (fnative_t)(y))
-#define fpu_sign_check(x)             (signbit(x))
+#define fpu_sign_check(x)             (fpu_signbit(x))
 #define fpu_sign_set(x, s) (fnative_t)((s) ? fpu_copysign((fnative_t)(x), (fnative_t)(-1.0)) : fpu_copysign((fnative_t)(x), (fnative_t)(1.0)))
 #define fpu_int2fp(t, i)   canonize_nan((t) (i))
 #define fpu_fp2fp(t, x)    canonize_nan((t)(x))
