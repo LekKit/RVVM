@@ -33,6 +33,10 @@ typedef struct {
 
 #else
 
+#include <time.h>
+#ifndef CLOCK_MONOTONIC
+#include <sys/time.h>
+#endif
 #include <pthread.h>
 
 typedef pthread_t thread_internal_t;
@@ -101,10 +105,20 @@ cond_var_t condvar_create()
 #ifdef _WIN32
         cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (cond->event) return cond;
-#else
-        if (pthread_cond_init(&cond->cond, NULL) == 0
+#elif defined(CLOCK_MONOTONIC)
+        pthread_condattr_t cond_attr;
+        pthread_condattr_init(&cond_attr);
+        if (pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
+         && pthread_cond_init(&cond->cond, &cond_attr)  == 0
          && pthread_mutex_init(&cond->lock, NULL) == 0) {
-             return cond;
+            pthread_condattr_destroy(&cond_attr);
+            return cond;
+        }
+        pthread_condattr_destroy(&cond_attr);
+#else
+        if (pthread_cond_init(&cond->cond, NULL)  == 0
+         && pthread_mutex_init(&cond->lock, NULL) == 0) {
+            return cond;
         }
 #endif
     }
@@ -127,10 +141,17 @@ bool condvar_wait(cond_var_t cond, unsigned timeout_ms)
     if (timeout_ms == CONDVAR_INFINITE) {
         ret = pthread_cond_wait(&cond_p->cond, &cond_p->lock) == 0;
     } else {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
+        struct timespec ts = {0};
+#ifdef CLOCK_MONOTONIC
+        clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_nsec += timeout_ms * 1000000;
-        ts.tv_sec += ts.tv_nsec / 1000000000;
+        ts.tv_sec  += ts.tv_nsec / 1000000000;
+#else
+        struct timeval tv = {0};
+        gettimeofday(&tv, NULL);
+        ts.tv_nsec = (tv.tv_usec * 1000) + (timeout_ms * 1000000);
+        ts.tv_sec  = tv.tv_sec + (ts.tv_nsec / 1000000000);
+#endif
         ts.tv_nsec %= 1000000000;
         ret = pthread_cond_timedwait(&cond_p->cond, &cond_p->lock, &ts) == 0;
     }
