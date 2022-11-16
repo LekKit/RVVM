@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "spinlock.h"
 #include "threading.h"
 
-#if (defined(__unix__) || defined(__APPLE__)) && !defined(USE_STDIO)
+#if (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(USE_STDIO)
 // POSIX implementation using open, pread, pwrite...
 #include <unistd.h>
 #include <fcntl.h>
