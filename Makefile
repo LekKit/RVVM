@@ -56,7 +56,7 @@ endif
 
 # Automatically parallelize build
 JOBS ?= $(HOST_CPUS)
-override MAKEFLAGS += -j $(JOBS) -l $(JOBS)
+override MAKEFLAGS += -j $(JOBS)
 
 # Get compiler target triplet (arch-vendor-kernel-abi)
 CC_TRIPLET := $(firstword $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR)) $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR)))
