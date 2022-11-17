@@ -104,6 +104,11 @@ PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, 
 // Directly access physical memory (returns non-NULL on success)
 PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
 
+// Flush instruction cache for a specified physical/user memory range.
+// This is useful for userspace emulation of syscalls like __riscv_flush_icache (Linux, etc).
+// For machines, this is not needed unless your guest is broken or you bypass DMA APIs.
+PUBLIC uint32_t rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
+
 // Get PLIC, PCI bus for this machine
 PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine);
 PUBLIC pci_bus_t*  rvvm_get_pci_bus(rvvm_machine_t* machine);
@@ -171,8 +176,12 @@ PUBLIC void rvvm_run_eventloop();
 
 typedef void* rvvm_cpu_handle_t;
 
-#define RVVM_REGID_PC   32
-#define RVVM_REGID_TVAL 33
+#define RVVM_REGID_X0   0
+// FP registers are operated on in their binary form
+#define RVVM_REGID_F0   32
+// Reserved range for more kinds of registers
+#define RVVM_REGID_PC   1024
+#define RVVM_REGID_TVAL 1025
 
 // Create a userland context
 // The created machine interacts with host process memory directly,
