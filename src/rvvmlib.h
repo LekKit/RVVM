@@ -170,7 +170,6 @@ PUBLIC void rvvm_run_eventloop();
 //
 
 typedef void* rvvm_cpu_handle_t;
-typedef void (*rvvm_trap_handler_t)(rvvm_cpu_handle_t vm, uint32_t cause);
 
 #define RVVM_REGID_PC   32
 #define RVVM_REGID_TVAL 33
@@ -178,11 +177,14 @@ typedef void (*rvvm_trap_handler_t)(rvvm_cpu_handle_t vm, uint32_t cause);
 // Create a userland context
 // The created machine interacts with host process memory directly,
 // delegates traps to outside code. No harts are created initially.
-PUBLIC rvvm_machine_t* rvvm_create_userland(rvvm_trap_handler_t trap_handler, bool rv64);
+PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64);
 
 // Manage userland threads (Internally, they are RVVM harts)
-PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine, rvvm_addr_t regs[33]);
+PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine);
 PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t vm);
+
+// Run a userland thread until a trap happens. Returns trap cause.
+PUBLIC uint32_t rvvm_run_user_thread(rvvm_cpu_handle_t vm);
 
 PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id);
 PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id, rvvm_addr_t reg);
