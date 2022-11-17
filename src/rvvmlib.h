@@ -22,6 +22,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVVMLIB_H
 #define RVVMLIB_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -43,6 +47,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
 typedef struct rvvm_machine_t rvvm_machine_t;
+
+typedef struct plic    plic_ctx_t;
+typedef struct pci_bus pci_bus_t;
 
 struct fdt_node;
 
@@ -96,6 +103,10 @@ PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, 
 
 // Directly access physical memory (returns non-NULL on success)
 PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
+
+// Get PLIC, PCI bus for this machine
+PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine);
+PUBLIC pci_bus_t*  rvvm_get_pci_bus(rvvm_machine_t* machine);
 
 // Get FDT nodes for FDT generation
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
@@ -153,5 +164,31 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
 // Returns when all VMs are stopped
 // For self-contained VMs this should be used in main thread
 PUBLIC void rvvm_run_eventloop();
+
+//
+// Userland Emulation API (WIP)
+//
+
+typedef void* rvvm_cpu_handle_t;
+typedef void (*rvvm_trap_handler_t)(rvvm_cpu_handle_t vm, uint32_t cause);
+
+#define RVVM_REGID_PC   32
+#define RVVM_REGID_TVAL 33
+
+// Create a userland context
+// The created machine interacts with host process memory directly,
+// delegates traps to outside code. No harts are created initially.
+PUBLIC rvvm_machine_t* rvvm_create_userland(rvvm_trap_handler_t trap_handler, bool rv64);
+
+// Manage userland threads (Internally, they are RVVM harts)
+PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine, rvvm_addr_t regs[33]);
+PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t vm);
+
+PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id);
+PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id, rvvm_addr_t reg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
