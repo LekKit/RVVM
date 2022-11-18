@@ -214,7 +214,11 @@ struct rvvm_hart_t {
     uint8_t priv_mode;
     bool rv64;
     bool trap;
-    maxlen_t trap_pc;
+    
+    bool user_traps;
+    
+    bool lrsc;
+    maxlen_t lrsc_cas;
     
     struct {
         maxlen_t hartid;
@@ -231,8 +235,6 @@ struct rvvm_hart_t {
         maxlen_t ip;
         maxlen_t fcsr;
     } csr;
-    maxlen_t lrsc_cas;
-    bool lrsc;
 #ifdef USE_JIT
     rvjit_block_t jit;
     bool jit_enabled;
@@ -264,9 +266,14 @@ struct rvvm_machine_t {
     rvfile_t* bootrom_file;
     rvfile_t* kernel_file;
     rvfile_t* dtb_file;
+    
     rvvm_reset_handler_t on_reset;
     void* reset_data;
+    
     paddr_t dtb_addr;
+    
+    plic_ctx_t* plic;
+    pci_bus_t*  pci_bus;
 #ifdef USE_FDT
     // FDT nodes for device tree generation
     struct fdt_node* fdt;

@@ -31,11 +31,13 @@ void riscv_hart_free(rvvm_hart_t* vm);
 
 /* Hart-thread routines */
 
-/*
- * Executes the hart in a current thread
- * Returns upon receiving EXT_EVENT_PAUSE
- */
+// Executes the hart in a current thread
+// Returns upon receiving EXT_EVENT_PAUSE
 void riscv_hart_run(rvvm_hart_t* vm);
+
+// Execute a userland context in current thread
+// Returns trap cause upon any CPU trap
+rvvm_addr_t riscv_hart_run_userland(rvvm_hart_t* vm);
 
 // Correctly applies side-effects of switching privileges
 void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode);

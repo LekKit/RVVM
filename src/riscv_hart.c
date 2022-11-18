@@ -121,6 +121,19 @@ void riscv_hart_run(rvvm_hart_t* vm)
     }
 }
 
+rvvm_addr_t riscv_hart_run_userland(rvvm_hart_t* vm)
+{
+    vm->user_traps = true;
+    atomic_store_uint32(&vm->wait_event, HART_RUNNING);
+#ifdef USE_SJLJ
+    setjmp(vm->unwind);
+#endif
+    if (atomic_load_uint32(&vm->wait_event)) {
+        riscv_run_till_event(vm);
+    }
+    return vm->csr.cause[PRIVILEGE_USER];
+}
+
 #ifdef USE_RV64
 void riscv_update_xlen(rvvm_hart_t* vm)
 {
@@ -199,22 +212,30 @@ static void riscv_trap_priv_helper(rvvm_hart_t* vm, uint8_t target_priv)
 
 void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
 {
-    // Target privilege mode
-    uint8_t priv = PRIVILEGE_MACHINE;
-    // Delegate to lower privilege mode if needed
-    while ((priv > vm->priv_mode) && (vm->csr.edeleg[priv] & (1 << cause))) priv--;
-    //rvvm_info("Hart %p trap at %08"PRIxXLEN" -> %08"PRIxXLEN", cause %x, tval %08"PRIxXLEN"\n", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3UL), cause, tval);
-    // Write exception info
-    vm->csr.epc[priv] = vm->registers[REGISTER_PC];
-    vm->csr.cause[priv] = cause;
-    vm->csr.tval[priv] = tval;
-    // Modify exception stack in csr.status
-    riscv_trap_priv_helper(vm, priv);
-    // Jump to trap vector, switch to target priv
-    vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
     vm->trap = true;
-    riscv_switch_priv(vm, priv);
-    if (cause < TRAP_ENVCALL_UMODE || cause > TRAP_ENVCALL_MMODE) riscv_jit_discard(vm);
+    if (cause < TRAP_ENVCALL_UMODE || cause > TRAP_ENVCALL_MMODE) {
+        riscv_jit_discard(vm);
+    }
+    if (vm->user_traps) {
+        // Defer usermode trap
+        vm->csr.cause[PRIVILEGE_USER] = cause;
+        vm->csr.tval[PRIVILEGE_USER] = tval;
+    } else {
+        // Target privilege mode
+        uint8_t priv = PRIVILEGE_MACHINE;
+        // Delegate to lower privilege mode if needed
+        while ((priv > vm->priv_mode) && (vm->csr.edeleg[priv] & (1 << cause))) priv--;
+        //rvvm_info("Hart %p trap at %08"PRIxXLEN" -> %08"PRIxXLEN", cause %x, tval %08"PRIxXLEN"\n", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3UL), cause, tval);
+        // Write exception info
+        vm->csr.epc[priv] = vm->registers[REGISTER_PC];
+        vm->csr.cause[priv] = cause;
+        vm->csr.tval[priv] = tval;
+        // Modify exception stack in csr.status
+        riscv_trap_priv_helper(vm, priv);
+        // Jump to trap vector, switch to target priv
+        vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
+        riscv_switch_priv(vm, priv);
+    }
 #ifdef USE_SJLJ
     longjmp(vm->unwind, 1);
 #else
