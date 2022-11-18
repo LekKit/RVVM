@@ -707,12 +707,15 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
     vector_emplace_back(machine->harts);
     rvvm_hart_t* vm = &vector_at(machine->harts, vector_size(machine->harts) - 1);
     riscv_hart_init(vm, machine->rv64);
-    riscv_switch_priv(vm, PRIVILEGE_USER);
+    vm->machine = machine;
+    vm->mem = machine->mem;
+    riscv_switch_priv(vm, PRIVILEGE_MACHINE);
 #ifdef USE_FPU
-    // Initialize FPU properly
-    fpu_set_fs(vm, FS_INITIAL);
-    riscv_decoder_enable_fpu(vm, true);
+    // Initialize FPU by writing to status CSR
+    maxlen_t mstatus = 0xA00000000 + (FS_INITIAL << 13);
+    riscv_csr_op(vm, 0x300, &mstatus, CSR_SWAP);
 #endif
+    riscv_switch_priv(vm, PRIVILEGE_USER);
     return (rvvm_cpu_handle_t)vm;
 }
 
@@ -743,9 +746,10 @@ PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id)
         return vm->csr.cause[PRIVILEGE_USER];
     } else if (reg_id == RVVM_REGID_TVAL) {
         return vm->csr.tval[PRIVILEGE_USER];
+    } else {
+        rvvm_warn("Unknown register %d in rvvm_read_cpu_reg()!", (uint32_t)reg_id);
+        return 0;
     }
-    rvvm_warn("Unknown register %d in rvvm_read_cpu_reg()!", (uint32_t)reg_id);
-    return 0;
 }
 
 PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg)
@@ -763,6 +767,7 @@ PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t
         vm->csr.cause[PRIVILEGE_USER] = reg;
     } else if (reg_id == RVVM_REGID_TVAL) {
         vm->csr.tval[PRIVILEGE_USER] = reg;
+    } else {
+        rvvm_warn("Unknown register %d in rvvm_write_cpu_reg()!", (uint32_t)reg_id);
     }
-    rvvm_warn("Unknown register %d in rvvm_write_cpu_reg()!", (uint32_t)reg_id);
 }
