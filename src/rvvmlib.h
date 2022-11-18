@@ -72,14 +72,15 @@ typedef struct {
 
 typedef bool (*rvvm_mmio_handler_t)(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size);
 
+// Reads zeros, ignores writes, never faults
 PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size);
 
 struct rvvm_mmio_dev_t {
-    rvvm_addr_t addr;         // MMIO region address in physical memory
-    size_t size;              // Size of the MMIO region, size zero means a device placeholder
-    void* data;               // Device-specific data, or pointer to memory (for native memory regions)
-    rvvm_machine_t* machine;  // Parent machine
-    rvvm_mmio_type_t* type;   // Device-specific operations & info
+    rvvm_addr_t addr;        // MMIO region address in physical memory
+    size_t      size;        // Size of the MMIO region, size zero means a device placeholder
+    void*       data;        // Device-specific data, or pointer to memory (for native memory regions)
+    rvvm_machine_t* machine; // Parent machine
+    rvvm_mmio_type_t* type;  // Device-specific operations & info
 
     // MMIO operations handlers, if these aren't NULL then this is a MMIO device
     // Hint: setting read to NULL and write to rvvm_mmio_none makes memory mapping read-only, etc
@@ -107,11 +108,14 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
 // Flush instruction cache for a specified physical/user memory range.
 // This is useful for userspace emulation of syscalls like __riscv_flush_icache (Linux, etc).
 // For machines, this is not needed unless your guest is broken or you bypass DMA APIs.
-PUBLIC uint32_t rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
+PUBLIC void rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
 
-// Get PLIC, PCI bus for this machine
+// Get/Set default PLIC, PCI bus for this machine
+// Newly created ones are selected automatically
 PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine);
+PUBLIC void        rvvm_set_plic(rvvm_machine_t* machine, plic_ctx_t* plic);
 PUBLIC pci_bus_t*  rvvm_get_pci_bus(rvvm_machine_t* machine);
+PUBLIC void        rvvm_set_pci_bus(rvvm_machine_t* machine, pci_bus_t* pci_bus);
 
 // Get FDT nodes for FDT generation
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
@@ -126,24 +130,24 @@ PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
 
 // Set up handler & userdata to be called when the VM performs reset/shutdown
-// Returning false cancels reset
+// Returning false from handler cancels reset
 PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data);
 
-// Load bootrom, kernel binaries into RAM (handle reset as well)
+// Load bootrom, kernel, device tree binaries into RAM (handles reset as well)
 PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 
-// Dump generated device tree
+// Dump generated device tree to a file
 PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
 
-// Spawns CPU threads and continues VM execution
+// Spawns CPU threads and continues machine execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);
 
-// Stops the CPUs, everything is frozen upon return
+// Stops the CPUs, the machine is frozen upon return
 PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine);
 
-// Reset/shutdown the VM
+// Reset/shutdown the machine
 PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
 
 // Returns true if the machine is powered on (even when it's paused)
@@ -166,7 +170,7 @@ PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_
 // Allows to disable the internal eventloop thread and offload it somewhere
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
 
-// Returns when all VMs are stopped
+// Returns when all machines are stopped
 // For self-contained VMs this should be used in main thread
 PUBLIC void rvvm_run_eventloop();
 
@@ -176,12 +180,13 @@ PUBLIC void rvvm_run_eventloop();
 
 typedef void* rvvm_cpu_handle_t;
 
-#define RVVM_REGID_X0   0
+#define RVVM_REGID_X0    0
 // FP registers are operated on in their binary form
-#define RVVM_REGID_F0   32
+#define RVVM_REGID_F0    32
 // Reserved range for more kinds of registers
-#define RVVM_REGID_PC   1024
-#define RVVM_REGID_TVAL 1025
+#define RVVM_REGID_PC    1024
+#define RVVM_REGID_CAUSE 1025
+#define RVVM_REGID_TVAL  1026
 
 // Create a userland context
 // The created machine interacts with host process memory directly,
@@ -190,13 +195,13 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64);
 
 // Manage userland threads (Internally, they are RVVM harts)
 PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine);
-PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t vm);
+PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu);
 
 // Run a userland thread until a trap happens. Returns trap cause.
-PUBLIC uint32_t rvvm_run_user_thread(rvvm_cpu_handle_t vm);
+PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu);
 
-PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id);
-PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t vm, size_t reg_id, rvvm_addr_t reg);
+PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id);
+PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg);
 
 #ifdef __cplusplus
 }
