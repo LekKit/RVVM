@@ -262,6 +262,14 @@ static void* builtin_eventloop(void* arg)
     return arg;
 }
 
+PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
+{
+    UNUSED(dev);
+    UNUSED(offset);
+    memset(dest, 0, size);
+    return true;
+}
+
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
     rvvm_machine_t* machine;
@@ -334,12 +342,35 @@ PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
     return machine->mem.data + (addr - machine->mem.begin);
 }
 
-PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
+PUBLIC void rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
-    UNUSED(dev);
-    UNUSED(offset);
-    memset(dest, 0, size);
-    return true;
+    // WIP, issue a total cache flush on all harts
+    // Needs improvements in RVJIT
+    UNUSED(addr);
+    UNUSED(size);
+    vector_foreach(machine->harts, i) {
+        riscv_jit_flush_cache(&vector_at(machine->harts, i));
+    }
+}
+
+PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine)
+{
+    return machine->plic;
+}
+
+PUBLIC void rvvm_set_plic(rvvm_machine_t* machine, plic_ctx_t* plic)
+{
+    if (plic) machine->plic = plic;
+}
+
+PUBLIC pci_bus_t* rvvm_get_pci_bus(rvvm_machine_t* machine)
+{
+    return machine->pci_bus;
+}
+
+PUBLIC void rvvm_set_pci_bus(rvvm_machine_t* machine, pci_bus_t* pci_bus)
+{
+    if (pci_bus) machine->pci_bus = pci_bus;
 }
 
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine)
@@ -542,7 +573,8 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
         riscv_hart_free(&vector_at(machine->harts, i));
     }
 
-    vector_foreach(machine->mmio, i) {
+    // Clean up devices in reversed order, something may reference older devices
+    vector_foreach_back(machine->mmio, i) {
         rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
     }
 
@@ -650,4 +682,87 @@ PUBLIC void rvvm_run_eventloop()
     rvvm_enable_builtin_eventloop(false);
     builtin_eventloop_cond = condvar_create();
     builtin_eventloop((void*)(size_t)1);
+}
+
+//
+// Userland emulation API (WIP)
+//
+
+PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
+{
+    rvvm_machine_t* machine = safe_calloc(sizeof(rvvm_machine_t), 1);
+    // Bypass entire process memory except the NULL page
+    // RVVM expects mem.data to be non-NULL, let's leave that for now
+    machine->mem.begin = 0x1000;
+    machine->mem.size = (paddr_t)-0x1000ULL;
+    machine->mem.data = (void*)0x1000;
+    machine->rv64 = rv64;
+    // I don't know what time CSR frequency userspace expects...
+    rvtimer_init(&machine->timer, 1000000);
+    return machine;
+}
+
+PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
+{
+    vector_emplace_back(machine->harts);
+    rvvm_hart_t* vm = &vector_at(machine->harts, vector_size(machine->harts) - 1);
+    riscv_hart_init(vm, machine->rv64);
+    riscv_switch_priv(vm, PRIVILEGE_USER);
+#ifdef USE_FPU
+    // Initialize FPU properly
+    fpu_set_fs(vm, FS_INITIAL);
+    riscv_decoder_enable_fpu(vm, true);
+#endif
+    return (rvvm_cpu_handle_t)vm;
+}
+
+PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
+{
+    riscv_hart_free((rvvm_hart_t*)cpu);
+}
+
+PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu)
+{
+    return riscv_hart_run_userland((rvvm_hart_t*)cpu);
+}
+
+PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id)
+{
+    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
+    if (reg_id < (RVVM_REGID_X0 + 32)) {
+        return vm->registers[reg_id - RVVM_REGID_X0];
+#ifdef USE_FPU
+    } else if (reg_id < (RVVM_REGID_F0 + 32)) {
+        rvvm_addr_t ret;
+        memcpy(&ret, &vm->fpu_registers[reg_id - RVVM_REGID_F0], sizeof(ret));
+        return ret;
+#endif
+    } else if (reg_id == RVVM_REGID_PC) {
+        return vm->registers[REGISTER_PC];
+    } else if (reg_id == RVVM_REGID_CAUSE) {
+        return vm->csr.cause[PRIVILEGE_USER];
+    } else if (reg_id == RVVM_REGID_TVAL) {
+        return vm->csr.tval[PRIVILEGE_USER];
+    }
+    rvvm_warn("Unknown register %d in rvvm_read_cpu_reg()!", (uint32_t)reg_id);
+    return 0;
+}
+
+PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg)
+{
+    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
+    if (reg_id < (RVVM_REGID_X0 + 32)) {
+        vm->registers[reg_id - RVVM_REGID_X0] = reg;
+#ifdef USE_FPU
+    } else if (reg_id < (RVVM_REGID_F0 + 32)) {
+        memcpy(&vm->fpu_registers[reg_id - RVVM_REGID_F0], &reg, sizeof(reg));
+#endif
+    } else if (reg_id == RVVM_REGID_PC) {
+        vm->registers[REGISTER_PC] = reg;
+    } else if (reg_id == RVVM_REGID_CAUSE) {
+        vm->csr.cause[PRIVILEGE_USER] = reg;
+    } else if (reg_id == RVVM_REGID_TVAL) {
+        vm->csr.tval[PRIVILEGE_USER] = reg;
+    }
+    rvvm_warn("Unknown register %d in rvvm_write_cpu_reg()!", (uint32_t)reg_id);
 }
