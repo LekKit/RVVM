@@ -23,6 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "plic.h"
 #include "spinlock.h"
 
+#define ALTPS2_MMIO_SIZE 0x8
+
 struct ps2_device
 {
     // PS/2 device R/W operation
@@ -31,6 +33,10 @@ struct ps2_device
     // is_write - true when writing to device, false otherwise
     // on read - returns bytes available, on write - returns 0 on error
     uint16_t (*ps2_op)(struct ps2_device *ps2dev, uint8_t *val, bool is_write);
+    
+    // Same as rvvm_mmio_dev update(), remove()
+    void (*ps2_update)(struct ps2_device *ps2dev);
+    void (*ps2_remove)(struct ps2_device *ps2dev);
 
     void *data; // private device data
     void *port_data; // private PS/2 port data - used to send IRQ

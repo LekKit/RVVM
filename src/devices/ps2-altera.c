@@ -139,8 +139,27 @@ out:
     return ret;
 }
 
+static void altps2_update(rvvm_mmio_dev_t* device)
+{
+    struct altps2* altera = device->data;
+    if (altera->child->ps2_update) {
+        altera->child->ps2_update(altera->child);
+    }
+}
+
+static void altps2_remove(rvvm_mmio_dev_t* device)
+{
+    struct altps2* altera = device->data;
+    if (altera->child->ps2_remove) {
+        altera->child->ps2_remove(altera->child);
+    }
+    free(altera);
+}
+
 static rvvm_mmio_type_t altps2_dev_type = {
     .name = "altera_ps2",
+    .update = altps2_update,
+    .remove = altps2_remove,
 };
 
 void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq, struct ps2_device *child)
