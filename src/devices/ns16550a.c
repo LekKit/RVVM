@@ -316,8 +316,9 @@ PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_c
 #endif
 }
 
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine)
 {
+    plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
     if (addr == NS16550A_DEFAULT_MMIO) {
         rvvm_cmdline_append(machine, "console=ttyS");
