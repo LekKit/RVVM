@@ -475,7 +475,7 @@ static rvvm_mmio_type_t plic_dev_type = {
 // Create PLIC device
 PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
-    struct plic* plic = safe_calloc(sizeof(struct plic), 1);
+    plic_ctx_t* plic = safe_calloc(sizeof(plic_ctx_t), 1);
     plic->machine = machine;
     spin_init(&plic->lock);
 
@@ -520,6 +520,7 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 
     plic->phandle = fdt_node_get_phandle(plic_node);
 #endif
+    rvvm_set_plic(machine, plic);
     return plic;
 }
 

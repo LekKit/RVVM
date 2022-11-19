@@ -21,8 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvmlib.h"
 
-typedef struct plic plic_ctx_t;
-
 #define PLIC_DEFAULT_MMIO 0xC000000
 
 PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
