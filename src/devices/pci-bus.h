@@ -65,7 +65,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t* plic, uint32
                                rvvm_addr_t io_addr, size_t io_len,
                                rvvm_addr_t mem_addr, size_t mem_len);
 
-PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic);
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine);
 
 // Connect PCI device to the bus, use returned handle to send interrupts
 PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc);

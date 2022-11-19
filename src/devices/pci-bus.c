@@ -326,8 +326,9 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
     return bus;
 }
 
-PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
+PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine)
 {
+    plic_ctx_t* plic = rvvm_get_plic(machine);
     bool ecam = true;
     size_t bus_count = 1; // TODO: Support more than 1 bus
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, bus_count << (ecam ? 20 : 16));
