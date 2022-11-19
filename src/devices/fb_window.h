@@ -19,43 +19,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef FB_WINDOW_H
 #define FB_WINDOW_H
 
-#include "rvvmlib.h"
-#include "ps2-altera.h"
-#include "utils.h"
+#include "framebuffer.h"
+#include "hid_api.h"
 
-/* TODO: pixel format */
+typedef struct win_data win_data_t;
 
-void r5g6b5_to_a8r8b8g8(const void* _in, void* _out, size_t length);
-void a8r8g8b8_to_r5g6b5(const void* _in, void* _out, size_t length);
+typedef struct {
+    win_data_t*     data;
+    fb_ctx_t        fb;
+    // If we want specific rgb format, apply conversion
+    fb_ctx_t        guest_fb;
+    rvvm_machine_t* machine;
+    hid_keyboard_t* keyboard;
+    hid_mouse_t*    mouse;
+} fb_window_t;
 
-struct fb_data
-{
-    char *framebuffer;
-    struct ps2_device *mouse;
-    struct ps2_device *keyboard;
-    void *winsys_data; // private window system data
-};
+// Allocates fb, sets up rgb format
+bool fb_window_create(fb_window_t* window);
+void fb_window_close(fb_window_t* window);
+void fb_window_update(fb_window_t* window);
 
-void init_fb(rvvm_machine_t* machine, rvvm_addr_t addr, uint32_t width, uint32_t height, struct ps2_device *mouse, struct ps2_device *keyboard);
+PUBLIC bool fb_window_init_auto(rvvm_machine_t* machine, uint32_t width, uint32_t height);
 
-#if defined(USE_FB)
-void fb_create_window(struct fb_data *data, unsigned width, unsigned height, const char* name);
-void fb_close_window(struct fb_data *data);
-void fb_update(struct fb_data *data);
-#else
-/* dummy functions when no window system available */
-static inline void fb_create_window(struct fb_data* data, unsigned width, unsigned height, const char* name) {
-    UNUSED(data);
-    UNUSED(width);
-    UNUSED(height);
-    UNUSED(name);
-}
-static inline void fb_close_window(struct fb_data *data) {
-    // Free a dummy framebuffer
-    free(data->framebuffer);
-}
-static inline void fb_update(struct fb_data *data) {
-    UNUSED(data);
-}
-#endif
 #endif
