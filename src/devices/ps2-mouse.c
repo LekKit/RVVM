@@ -1,6 +1,7 @@
 /*
 ps2-mouse.c - PS2 Mouse
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,15 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ps2-altera.h"
+#include "hid_api.h"
 #include "ringbuf.h"
-#include "rvvm.h"
-#include "riscv.h"
-#include "ps2-mouse.h"
-#include "rvtimer.h"
 #include "spinlock.h"
-
-/* The mouse is a state machine, see enum ps2_mouse_state */
-/* TODO: locking? */
+#include "utils.h"
 
 #define PS2_CMD_RESET 0xFF
 #define PS2_CMD_RESEND 0xFE
@@ -47,420 +43,316 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PS2_RSP_ACK 0xFA
 #define PS2_RSP_NAK 0xFE
 
-// can be used to change the behavior of the x/y coordinate
-#define TRANSFORM_COORD(n) (n)
+#define PS2_STATE_CMD             0x0
+#define PS2_STATE_SET_SAMPLE_RATE 0x1
+#define PS2_STATE_WRAP            0x2
+#define PS2_STATE_SET_RESOLUTION  0x3
 
-/* state specifies what the byte read means */
-enum ps2_mouse_state
-{
-	STATE_CMD,
-	STATE_SET_SAMPLE_RATE,
-	STATE_WRAP, /* aka ECHO mode */
-	STATE_SET_RESOLUTION,
+#define PS2_MODE_STREAM 0x0
+#define PS2_MODE_REMOTE 0x1
+
+#define PS2_MOUSE_GENERIC 0x0
+#define PS2_MOUSE_WHEEL   0x3
+
+struct hid_mouse {
+    struct ps2_device ps2_dev;
+    hid_btns_t btns; // Pressed buttons bitmask
+    // Absolute position
+    int32_t x;
+    int32_t y;
+    // Movement counters - these are actually 9-bit
+    int16_t xctr;
+    int16_t yctr;
+    // Counters' overflow flags
+    bool xoverflow;
+    bool yoverflow;
+    
+    int32_t scroll;     // Scroll axis value
+    
+    uint8_t mode;
+    uint8_t state;      // The mouse is a state machine
+    uint8_t resolution; // In pow2, e.g. 2 means multiply by 4
+    uint8_t rate;       // In samples per second
+    uint8_t whl_detect; // Stage of detecting an Intellimouse extension
+    bool reporting;     // Data reporting enabled; needed for STATUS command
+
+    struct ringbuf cmdbuf;
 };
 
-enum ps2_mouse_mode
+static void ps2_mouse_defaults(hid_mouse_t* mice)
 {
-	MODE_STREAM,
-	MODE_REMOTE,
-};
-
-enum ps2_mouse_scale
-{
-	SCALE_1_1, /* no scaling */
-	SCALE_2_1,
-};
-
-struct ps2_mouse
-{
-	// movement counters - these are actually 9-bit
-	int16_t xctr;
-	int16_t yctr;
-	// counters' overflow flags
-	bool xoverflow;
-	bool yoverflow;
-
-	struct mouse_btns btns;
-	rvtimer_t sample_timer; // used in IRQ handling for sample rate
-
-	enum ps2_mouse_scale scale;
-	enum ps2_mouse_mode mode;
-	enum ps2_mouse_state state;
-	uint8_t resolution; // in pow2, e.g. 2 means multiply by 4
-	uint8_t rate; // in samples per second
-	bool reporting; // data reporting enabled; needed for STATUS command
-
-	struct ringbuf cmdbuf;
-};
-
-static int8_t ps2_scale_coord(enum ps2_mouse_scale scale, int8_t n)
-{
-	switch (scale)
-	{
-		case SCALE_1_1: return n;
-		case SCALE_2_1:
-				switch (n)
-				{
-					case 0:
-					case 1: case -1:
-					case 3: case -3:
-						return n;
-					case 2: case -2: return 1;
-					case 4: case -4: return 6;
-					case 5: case -5: return 9;
-					default: return n * 2;
-				}
-		/* make compiler happy */
-		default:
-				assert(false);
-				return n;
-	}
+    mice->mode = PS2_MODE_STREAM;
+    mice->state = PS2_STATE_CMD;
+    mice->reporting = false;
+    mice->resolution = 2;
 }
 
-static void ps2_push_move_pkt(struct ps2_mouse *dev)
+static void ps2_mouse_flush(hid_mouse_t* mice)
 {
-	int8_t x = dev->xctr & 0xff;
-	bool xsign = dev->xctr < 0;
-	int8_t y = dev->yctr & 0xff;
-	bool ysign = dev->yctr < 0;
-
-	x = ps2_scale_coord(dev->scale, x);
-	y = ps2_scale_coord(dev->scale, y);
-
-	ringbuf_put_u8(&dev->cmdbuf,
-			   dev->btns.left
-			 | dev->btns.right << 1
-			 | dev->btns.middle << 2
-			 | 1 << 3
-			 | xsign << 4
-			 | ysign << 5
-			 | dev->xoverflow << 6
-			 | dev->yoverflow << 7
-			 );
-	ringbuf_put_u8(&dev->cmdbuf, x);
-	ringbuf_put_u8(&dev->cmdbuf, y);
+    mice->xctr = 0;
+    mice->yctr = 0;
+    mice->xoverflow = 0;
+    mice->yoverflow = 0;
+    mice->scroll = 0;
 }
 
-static void ps2_set_sample_rate(struct ps2_mouse *dev, uint8_t rate)
+static void ps2_mouse_move_pkt(hid_mouse_t* mice)
 {
-	dev->rate = rate;
-	rvtimer_init(&dev->sample_timer, rate);
-	dev->sample_timer.timecmp = 1; /* one sample */
+    int8_t x   = mice->xctr & 0xff;
+    bool xsign = mice->xctr < 0;
+    int8_t y   = mice->yctr & 0xff;
+    bool ysign = mice->yctr < 0;
+
+    ringbuf_put_u8(&mice->cmdbuf, ((mice->btns & HID_BTN_LEFT) ? 1 : 0)
+                                | ((mice->btns & HID_BTN_RIGHT) ? 2 : 0)
+                                | ((mice->btns & HID_BTN_MIDDLE) ? 4 : 0)
+                                | 1 << 3
+                                | xsign << 4
+                                | ysign << 5
+                                | mice->xoverflow << 6
+                                | mice->yoverflow << 7);
+    ringbuf_put_u8(&mice->cmdbuf, x);
+    ringbuf_put_u8(&mice->cmdbuf, y);
+    
+    if (mice->whl_detect == 3) {
+        // Push scroll axis byte
+        ringbuf_put_u8(&mice->cmdbuf, mice->scroll);
+    }
+    
+    ps2_mouse_flush(mice);
+    altps2_interrupt_unlocked(&mice->ps2_dev);
 }
 
-static void ps2_defaults(struct ps2_mouse *dev)
+static bool ps2_mouse_cmd(hid_mouse_t* mice, uint8_t cmd)
 {
-	dev->scale = SCALE_1_1;
-	dev->mode = MODE_STREAM;
-	dev->state = STATE_CMD;
-	dev->reporting = false;
-	dev->resolution = 2;
-	ps2_set_sample_rate(dev, 100);
-}
-
-static void ps2_reset_counters(struct ps2_mouse *dev)
-{
-	dev->xctr = 0;
-	dev->yctr = 0;
-	dev->xoverflow = 0;
-	dev->yoverflow = 0;
-}
-
-static bool ps2_cmd_set_defaults(struct ps2_mouse *dev)
-{
-	ps2_defaults(dev);
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_reset(struct ps2_mouse *dev)
-{
-	ps2_cmd_set_defaults(dev);
-
-	ringbuf_put_u8(&dev->cmdbuf, 0xAA);
-	ringbuf_put_u8(&dev->cmdbuf, 0x00);
-	return true;
-}
-
-static bool ps2_cmd_resend(struct ps2_mouse *dev)
-{
-	/* TODO: remember the ringbuf state, save it, then send it back */
-	UNUSED(dev);
-	return false;
-}
-
-static bool ps2_cmd_disable_data_reporting(struct ps2_mouse *dev)
-{
-	dev->reporting = false;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_enable_data_reporting(struct ps2_mouse *dev)
-{
-	dev->reporting = true;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_set_sample_rate(struct ps2_mouse *dev)
-{
-	dev->state = STATE_SET_SAMPLE_RATE;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_get_dev_id(struct ps2_mouse *dev)
-{
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	ringbuf_put_u8(&dev->cmdbuf, '\0'); // 0x00 - standard PS/2 mouse
-	return true;
-}
-
-static bool ps2_cmd_set_remote_mode(struct ps2_mouse *dev)
-{
-	ps2_reset_counters(dev);
-	dev->mode = MODE_REMOTE;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_set_wrap_mode(struct ps2_mouse *dev)
-{
-	ps2_reset_counters(dev);
-	dev->state = STATE_WRAP;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_reset_wrap_mode(struct ps2_mouse *dev)
-{
-	ps2_reset_counters(dev);
-	dev->state = STATE_CMD;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_read_data(struct ps2_mouse *dev)
-{
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	ps2_push_move_pkt(dev);
-	ps2_reset_counters(dev);
-	return true;
-}
-
-static bool ps2_cmd_set_stream_mode(struct ps2_mouse *dev)
-{
-	ps2_reset_counters(dev);
-	dev->mode = MODE_STREAM;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_status_req(struct ps2_mouse *dev)
-{
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	ringbuf_put_u8(&dev->cmdbuf,
-			  dev->btns.right
-			| dev->btns.middle << 1
-			| dev->btns.left << 2
-			| (dev->scale == SCALE_2_1) << 4
-			| dev->reporting << 5
-			| (dev->mode == MODE_REMOTE) << 6
-			);
-	ringbuf_put_u8(&dev->cmdbuf, dev->resolution);
-	ringbuf_put_u8(&dev->cmdbuf, dev->rate);
-	return true;
-}
-
-static bool ps2_cmd_set_resolution(struct ps2_mouse *dev)
-{
-	dev->state = STATE_SET_RESOLUTION;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_set_scaling_1_1(struct ps2_mouse *dev)
-{
-	dev->scale = SCALE_1_1;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_set_scaling_2_1(struct ps2_mouse *dev)
-{
-	dev->scale = SCALE_2_1;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
+    switch (cmd) {
+        case PS2_CMD_RESET:
+            ps2_mouse_defaults(mice);
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            ringbuf_put_u8(&mice->cmdbuf, 0xAA);
+            ringbuf_put_u8(&mice->cmdbuf, 0x00);
+            return true;
+        case PS2_CMD_RESEND:
+            // Unimplemented
+            return false;
+        case PS2_CMD_SET_DEFAULTS:
+            ps2_mouse_defaults(mice);
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_DISABLE_DATA_REPORTING:
+            mice->reporting = false;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_ENABLE_DATA_REPORTING:
+            mice->reporting = true;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_SET_SAMPLE_RATE:
+            mice->state = PS2_STATE_SET_SAMPLE_RATE;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_GET_DEV_ID:
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            if (mice->whl_detect == 3) {
+                ringbuf_put_u8(&mice->cmdbuf, PS2_MOUSE_WHEEL);
+            } else {
+                ringbuf_put_u8(&mice->cmdbuf, PS2_MOUSE_GENERIC);
+            }
+            return true;
+        case PS2_CMD_SET_REMOTE_MODE:
+            ps2_mouse_flush(mice);
+            mice->mode = PS2_MODE_REMOTE;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_SET_WRAP_MODE:
+            ps2_mouse_flush(mice);
+            mice->state = PS2_STATE_WRAP;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_RESET_WRAP_MODE:
+            ps2_mouse_flush(mice);
+            mice->state = PS2_STATE_CMD;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_READ_DATA:
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            ps2_mouse_move_pkt(mice);
+            return true;
+        case PS2_CMD_SET_STREAM_MODE:
+            ps2_mouse_flush(mice);
+            mice->mode = PS2_MODE_STREAM;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_STATUS_REQ:
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            ringbuf_put_u8(&mice->cmdbuf, ((mice->btns & HID_BTN_RIGHT) ? 0x1 : 0)
+                    | ((mice->btns & HID_BTN_MIDDLE) ? 0x2 : 0)
+                    | ((mice->btns & HID_BTN_LEFT) ? 0x4 : 0)
+                    | (mice->reporting ? 0x20 : 0)
+                    | ((mice->mode == PS2_MODE_REMOTE) ? 0x40 : 0));
+            ringbuf_put_u8(&mice->cmdbuf, mice->resolution);
+            ringbuf_put_u8(&mice->cmdbuf, mice->rate);
+            return true;
+        case PS2_CMD_SET_RESOLUTION:
+            mice->state = PS2_STATE_SET_RESOLUTION;
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_SET_SCALING_1_1:
+        case PS2_CMD_SET_SCALING_2_1:
+            // Ignored, we don't want acceleration of guest cursor
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+            return true;
+        default:
+            ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_NAK);
+            return true;
+    }
 }
 
 static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_write)
 {
-	struct ps2_mouse *dev = (struct ps2_mouse*)ps2dev->data;
-	if (is_write)
-	{
-		//printf("ps2 mice cmd sent: %02x\n", (int)*val);
-		bool ret = false;
-		switch (dev->state)
-		{
-			case STATE_CMD:
-				/* go to the command switch */
-				break;
-			case STATE_SET_SAMPLE_RATE:
-				ps2_set_sample_rate(dev, *val);
-				dev->state = STATE_CMD;
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				goto out;
-			case STATE_WRAP:
-				if (*val == PS2_CMD_RESET_WRAP_MODE
-						|| *val == PS2_CMD_RESET)
-				{
-					/* exit wrap mode */
-					break;
-				}
-
-				ringbuf_put_u8(&dev->cmdbuf, *val);
-				goto out;
-			case STATE_SET_RESOLUTION:
-				dev->resolution = *val;
-				dev->state = STATE_CMD;
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				goto out;
-		}
-
-		switch (*val)
-		{
-			case PS2_CMD_RESET: ret = ps2_cmd_reset(dev); break;
-			case PS2_CMD_RESEND: ret = ps2_cmd_resend(dev); break;
-			case PS2_CMD_SET_DEFAULTS: ret = ps2_cmd_set_defaults(dev); break;
-			case PS2_CMD_DISABLE_DATA_REPORTING: ret = ps2_cmd_disable_data_reporting(dev); break;
-			case PS2_CMD_ENABLE_DATA_REPORTING: ret = ps2_cmd_enable_data_reporting(dev); break;
-			case PS2_CMD_SET_SAMPLE_RATE: ret = ps2_cmd_set_sample_rate(dev); break;
-			case PS2_CMD_GET_DEV_ID: ret = ps2_cmd_get_dev_id(dev); break;
-			case PS2_CMD_SET_REMOTE_MODE: ret = ps2_cmd_set_remote_mode(dev); break;
-			case PS2_CMD_SET_WRAP_MODE: ret = ps2_cmd_set_wrap_mode(dev); break;
-			case PS2_CMD_RESET_WRAP_MODE: ret = ps2_cmd_reset_wrap_mode(dev); break;
-			case PS2_CMD_READ_DATA: ret = ps2_cmd_read_data(dev); break;
-			case PS2_CMD_SET_STREAM_MODE: ret = ps2_cmd_set_stream_mode(dev); break;
-			case PS2_CMD_STATUS_REQ: ret = ps2_cmd_status_req(dev); break;
-			case PS2_CMD_SET_RESOLUTION: ret = ps2_cmd_set_resolution(dev); break;
-			case PS2_CMD_SET_SCALING_1_1: ret = ps2_cmd_set_scaling_1_1(dev); break;
-			case PS2_CMD_SET_SCALING_2_1: ret = ps2_cmd_set_scaling_2_1(dev); break;
-			default:
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_NAK);
-				ret = true;
-				break;
-		}
-
-out:
-		altps2_interrupt_unlocked(ps2dev);
-		return ret;
-	}
-	else
-	{
-		size_t avail = dev->cmdbuf.consumed;
-		if (avail == 0)
-		{
-			*val = '\0';
-			goto out2;
-		}
-
-		ringbuf_get_u8(&dev->cmdbuf, val);
-		//printf("ps2 mice cmd resp: %02x avail: %d\n", *val, (int)avail);
-out2:
-		return (uint16_t)avail;
-	}
+    hid_mouse_t* mice = (hid_mouse_t*)ps2dev->data;
+    if (is_write) {
+        switch (mice->state) {
+            case PS2_STATE_CMD:
+                ps2_mouse_cmd(mice, *val);
+                break;
+            case PS2_STATE_SET_SAMPLE_RATE:
+                mice->rate = *val;
+                // Magical sequence for detecting Intellimouse extension
+                // See https://wiki.osdev.org/PS/2_Mouse
+                if (mice->whl_detect == 0 && mice->rate == 200) {
+                    mice->whl_detect = 1;
+                } else if (mice->whl_detect == 1 && mice->rate == 100) {
+                    mice->whl_detect = 2;
+                } else if (mice->whl_detect == 2 && mice->rate == 80) {
+                    mice->whl_detect = 3;
+                } else if (mice->whl_detect < 3) {
+                    mice->whl_detect = 0;
+                }
+                mice->state = PS2_STATE_CMD;
+                ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+                break;
+            case PS2_STATE_WRAP:
+                if (*val != PS2_CMD_RESET_WRAP_MODE && *val != PS2_CMD_RESET) {
+                    ringbuf_put_u8(&mice->cmdbuf, *val);
+                }
+                break;
+            case PS2_STATE_SET_RESOLUTION:
+                mice->resolution = *val;
+                mice->state = PS2_STATE_CMD;
+                ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
+                break;
+        }
+        altps2_interrupt_unlocked(ps2dev);
+        return true;
+    } else {
+        size_t avail = mice->cmdbuf.consumed;
+        if (avail) {
+            ringbuf_get_u8(&mice->cmdbuf, val);
+        } else {
+            *val = 0;
+        }
+        return avail;
+    }
 }
 
-struct ps2_device ps2_mouse_create()
+static void ps2_mouse_remove(struct ps2_device *ps2dev)
 {
-	struct ps2_mouse *ptr = safe_calloc(1, sizeof(struct ps2_mouse));
-	struct ps2_device dev;
-	dev.ps2_op = ps2_mouse_op;
-	dev.data = ptr;
-	/* big number is needed because it can overrun when interrupts aren't delivered
-	 * a long time */
-	ringbuf_create(&ptr->cmdbuf, 1024);
-	ps2_cmd_reset(ptr);
-
-	/* consume first ACK from command */
-	uint8_t ack;
-	ringbuf_get_u8(&ptr->cmdbuf, &ack);
-	assert(ack == PS2_RSP_ACK);
-
-	return dev;
+    hid_mouse_t* mice = (hid_mouse_t*)ps2dev->data;
+    ringbuf_destroy(&mice->cmdbuf);
+    free(mice);
 }
 
-void ps2_handle_mouse(struct ps2_device *ps2mouse, int x, int y, struct mouse_btns *btns)
+PUBLIC hid_mouse_t* hid_mouse_init_auto(rvvm_machine_t* machine)
 {
-	x = TRANSFORM_COORD(x);
-	y = TRANSFORM_COORD(y);
+    plic_ctx_t* plic = rvvm_get_plic(machine);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20000000, ALTPS2_MMIO_SIZE);
+    hid_mouse_t* mice = safe_calloc(sizeof(hid_mouse_t), 1);
+    mice->ps2_dev.ps2_op = ps2_mouse_op;
+    mice->ps2_dev.ps2_remove = ps2_mouse_remove;
+    mice->ps2_dev.data = mice;
+    
+    ps2_mouse_defaults(mice);
+    
+    ringbuf_create(&mice->cmdbuf, 1024);
+    ringbuf_put_u8(&mice->cmdbuf, 0xAA);
+    ringbuf_put_u8(&mice->cmdbuf, 0x00);
+    
+    altps2_init(machine, addr, plic, plic_alloc_irq(plic), &mice->ps2_dev);
+    return mice;
+}
 
-	struct ps2_mouse *dev = (struct ps2_mouse *)ps2mouse->data;
-	spin_lock(ps2mouse->lock);
+PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
+{
+    spin_lock(mouse->ps2_dev.lock);
+    bool pressed = mouse->btns != (mouse->btns | btns);
+    mouse->btns |= btns;
+    if (pressed && mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
+        ps2_mouse_move_pkt(mouse);
+    }
+    spin_unlock(mouse->ps2_dev.lock);
+}
 
-	if (x == 0 && y == 0
-			&& (btns == NULL
-				|| (btns->left == dev->btns.left
-					&& btns->middle == dev->btns.middle
-					&& btns->right == dev->btns.right)))
-	{
-		/* nothing to do */
-		goto out;
-	}
+PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
+{
+    spin_lock(mouse->ps2_dev.lock);
+    bool released = mouse->btns != (mouse->btns & ~btns);
+    mouse->btns &= ~btns;
+    if (released && mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
+        ps2_mouse_move_pkt(mouse);
+    }
+    spin_unlock(mouse->ps2_dev.lock);
+}
 
-	if (btns)
-	{
-		dev->btns = *btns;
-	}
+PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset)
+{
+    spin_lock(mouse->ps2_dev.lock);
+    mouse->scroll += offset;
+    if (mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
+        ps2_mouse_move_pkt(mouse);
+    }
+    spin_unlock(mouse->ps2_dev.lock);
+}
 
-	// 8 counts/mm is the default in Linux, make it report original coordinates
-	int shift = 3 - dev->resolution;
-	int32_t newx, newy;
-	if (shift >= 0)
-	{
-		newx = dev->xctr + (x >> shift);
-		newy = dev->yctr + (y >> shift);
-	}
-	else
-	{
-		newx = dev->xctr + (x << -shift);
-		newy = dev->yctr + (y << -shift);
-	}
+static void ps2_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
+{
+    int shift = 3 - mouse->resolution;
+    int32_t newx, newy;
+    mouse->x += x;
+    mouse->y += y;
+    if (shift >= 0) {
+        newx = mouse->xctr + (x >> shift);
+        newy = mouse->yctr - (y >> shift);
+    } else {
+        newx = mouse->xctr + (x << -shift);
+        newy = mouse->yctr - (y << -shift);
+    }
+    if (newx > 255 || newx < -512) {
+        mouse->xoverflow = true;
+        newx = (int8_t)newx;
+    }
+    if (newy > 255 || newy < -512) {
+        mouse->yoverflow = true;
+        newy = (int8_t)newy;
+    }
 
-	if (newx > 0xff || newx < -0x100)
-	{
-		dev->xoverflow = true;
-		newx = (int8_t)newx;
-	}
+    mouse->xctr = newx;
+    mouse->yctr = newy;
+    if (mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
+        ps2_mouse_move_pkt(mouse);
+    }
+}
 
-	if (newy > 0xff || newy < -0x100)
-	{
-		dev->yoverflow = true;
-		newy = (int8_t)newy;
-	}
+PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
+{
+    spin_lock(mouse->ps2_dev.lock);
+    ps2_mouse_move(mouse, x, y);
+    spin_unlock(mouse->ps2_dev.lock);
+}
 
-	dev->xctr = newx;
-	dev->yctr = newy;
-	//printf("mouse move x: %d y: %d shift: %d\n", newx, newy, shift);
-
-	if (dev->mode != MODE_STREAM || !dev->reporting)
-	{
-		goto out;
-	}
-
-	if (!rvtimer_pending(&dev->sample_timer))
-	{
-		goto out;
-	}
-
-	rvtimer_rebase(&dev->sample_timer, 0);
-
-	ps2_push_move_pkt(dev);
-	ps2_reset_counters(dev);
-	altps2_interrupt_unlocked(ps2mouse);
-	spin_unlock(ps2mouse->lock);
-	return;
-out:
-	spin_unlock(ps2mouse->lock);
+PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
+{
+    spin_lock(mouse->ps2_dev.lock);
+    ps2_mouse_move(mouse, x - mouse->x, y - mouse->y);
+    spin_unlock(mouse->ps2_dev.lock);
 }
