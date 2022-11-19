@@ -136,8 +136,9 @@ PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
 #endif
 }
 
-PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine, plic_ctx_t* plic)
+PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine)
 {
+    plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_GOLDFISH_DEFAULT_MMIO, RTC_REG_SIZE);
     rtc_goldfish_init(machine, addr, plic, plic_alloc_irq(plic));
 }
