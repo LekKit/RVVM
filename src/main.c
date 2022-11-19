@@ -207,11 +207,11 @@ static int rvvm_main(int argc, const char** argv)
         return -1;
     }
     clint_init_auto(machine);
-    plic_ctx_t* plic = plic_init_auto(machine);
-    pci_bus_t* pci_bus = pci_bus_init_auto(machine, plic);
+    plic_init_auto(machine);
+    pci_bus_init_auto(machine);
 
-    ns16550a_init_auto(machine, plic);
-    rtc_goldfish_init_auto(machine, plic);
+    ns16550a_init_auto(machine);
+    rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
     
     bool success = rvvm_load_bootrom(machine, bootrom);
@@ -231,7 +231,7 @@ static int rvvm_main(int argc, const char** argv)
         } else if (cmp_arg(arg_name, "k") || cmp_arg(arg_name, "kernel")) {
             success = success && rvvm_load_kernel(machine, arg_val);
         } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image")) {
-            success = success && nvme_init(pci_bus, arg_val, true);
+            success = success && nvme_init_auto(machine, arg_val, true);
         } else if (cmp_arg(arg_name, "cmdline")) {
             rvvm_cmdline_set(machine, arg_val);
         } else if (cmp_arg(arg_name, "append")) {
