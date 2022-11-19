@@ -25,11 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/ns16550a.h"
-#include "devices/ata.h"
 #include "devices/fb_window.h"
-#include "devices/ps2-altera.h"
-#include "devices/ps2-keyboard.h"
-#include "devices/ps2-mouse.h"
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
@@ -221,22 +217,8 @@ static int rvvm_main(int argc, const char** argv)
     bool success = rvvm_load_bootrom(machine, bootrom);
     rvvm_cmdline_append(machine, "root=/dev/nvme0n1 rootflags=discard rw");
     
-#ifdef USE_FB
-    if (gui) {
-        static struct ps2_device ps2_mouse;
-        ps2_mouse = ps2_mouse_create();
-        altps2_init(machine, 0x20000000, plic, plic_alloc_irq(plic), &ps2_mouse);
-
-        static struct ps2_device ps2_keyboard;
-        ps2_keyboard = ps2_keyboard_create();
-        altps2_init(machine, 0x20001000, plic, plic_alloc_irq(plic), &ps2_keyboard);
-
-        init_fb(machine, 0x28000000, fb_x, fb_y, &ps2_mouse, &ps2_keyboard);
-        rvvm_cmdline_append(machine, "console=tty0");
-    }
-#else
-    UNUSED(gui); UNUSED(fb_x); UNUSED(fb_y);
-#endif
+    if (gui) fb_window_init_auto(machine, fb_x, fb_y);
+    
 #ifdef USE_NET
     ethoc_init_auto(machine, plic);
 #endif
