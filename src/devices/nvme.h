@@ -24,5 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev);
 PUBLIC pci_dev_t* nvme_init(pci_bus_t* pci_bus, const char* image_path, bool rw);
+PUBLIC pci_dev_t* nvme_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw);
 
 #endif

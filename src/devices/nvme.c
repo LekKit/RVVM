@@ -608,3 +608,8 @@ PUBLIC pci_dev_t* nvme_init(pci_bus_t* pci_bus, const char* image_path, bool rw)
     if (blk == NULL) return NULL;
     return nvme_init_blk(pci_bus, blk);
 }
+
+PUBLIC pci_dev_t* nvme_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw)
+{
+    return nvme_init(rvvm_get_pci_bus(machine), image_path, rw);
+}
