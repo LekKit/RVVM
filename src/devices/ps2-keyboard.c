@@ -1,6 +1,7 @@
 /*
 ps2-keyboard.c - PS2 Keyboard
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,16 +18,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ps2-altera.h"
+#include "hid_api.h"
 #include "ringbuf.h"
-#include "rvvm.h"
-#include "riscv.h"
 #include "rvtimer.h"
-#include "ps2-keyboard.h"
 #include "spinlock.h"
+#include "utils.h"
 #include <string.h>
-
-/* Based on the ps2-mouse.c */
-/* TODO: locking? */
 
 #define PS2_CMD_RESET 0xFF
 #define PS2_CMD_RESEND 0xFE
@@ -42,377 +39,444 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PS2_RSP_ACK 0xFA
 #define PS2_RSP_NAK 0xFE
 
-/* state specifies what the byte read means */
-enum ps2_keyboard_state
-{
-	STATE_CMD,
-	STATE_SET_SAMPLE_RATE,
-	STATE_SET_SCAN_CODE_SET,
-	STATE_SET_LEDS,
+#define PS2_STATE_CMD               0x0
+#define PS2_STATE_SET_SAMPLE_RATE   0x1
+#define PS2_STATE_SET_SCAN_CODE_SET 0x2
+#define PS2_STATE_SET_LEDS          0x3
+
+struct hid_keyboard {
+    struct ps2_device ps2_dev;
+    uint8_t key_state[32]; // State of all keys to prevent spurious repeat
+    
+    uint8_t state;  // The keyboard is a state machine
+    uint8_t rate;   // Typematic rate in command encoding
+    uint8_t delay;  // Typematic delay in command encoding (0.25sec * (delay + 1))
+    bool reporting; // Data reporting enabled; needed for STATUS command
+
+    // Last key pressed, used for typematic input
+    const uint8_t* lastkey;
+    size_t lastkey_size;
+    
+    // Used in IRQ handling for typematic (repeated) input
+    rvtimer_t sample_timer;
+    
+    struct ringbuf cmdbuf;
 };
 
-struct ps2_keyboard
-{
-	enum ps2_keyboard_state state;
-	struct key lastkey; // last key pressed, used for typematic input
-	rvtimer_t sample_timer; // used in IRQ handling for typematic (repeated) input
-	uint8_t rate : 5; // typematic rate in command encoding
-	uint8_t delay : 2; // typematic delay in command encoding (0.25sec * (delay + 1))
-	bool reporting : 1; // data reporting enabled; needed for STATUS command
+static const uint8_t hid_to_ps2_byte_map[] = {
+    [HID_KEY_A] = 0x1C,
+    [HID_KEY_B] = 0x32,
+    [HID_KEY_C] = 0x21,
+    [HID_KEY_D] = 0x23,
+    [HID_KEY_E] = 0x24,
+    [HID_KEY_F] = 0x2B,
+    [HID_KEY_G] = 0x34,
+    [HID_KEY_H] = 0x33,
+    [HID_KEY_I] = 0x43,
+    [HID_KEY_J] = 0x3B,
+    [HID_KEY_K] = 0x42,
+    [HID_KEY_L] = 0x4B,
+    [HID_KEY_M] = 0x3A,
+    [HID_KEY_N] = 0x31,
+    [HID_KEY_O] = 0x44,
+    [HID_KEY_P] = 0x4D,
+    [HID_KEY_Q] = 0x15,
+    [HID_KEY_R] = 0x2D,
+    [HID_KEY_S] = 0x1B,
+    [HID_KEY_T] = 0x2C,
+    [HID_KEY_U] = 0x3C,
+    [HID_KEY_V] = 0x2A,
+    [HID_KEY_W] = 0x1D,
+    [HID_KEY_X] = 0x22,
+    [HID_KEY_Y] = 0x35,
+    [HID_KEY_Z] = 0x1A,
+    
+    [HID_KEY_1] = 0x16,
+    [HID_KEY_2] = 0x1E,
+    [HID_KEY_3] = 0x26,
+    [HID_KEY_4] = 0x25,
+    [HID_KEY_5] = 0x2E,
+    [HID_KEY_6] = 0x36,
+    [HID_KEY_7] = 0x3D,
+    [HID_KEY_8] = 0x3E,
+    [HID_KEY_9] = 0x46,
+    [HID_KEY_0] = 0x45,
 
-	// TODO: disable typematic, make, break keycodes
+    [HID_KEY_ENTER]      = 0x5A,
+    [HID_KEY_ESC]        = 0x76,
+    [HID_KEY_BACKSPACE]  = 0x66,
+    [HID_KEY_TAB]        = 0x0D,
+    [HID_KEY_SPACE]      = 0x29,
+    [HID_KEY_MINUS]      = 0x4E,
+    [HID_KEY_EQUAL]      = 0x55,
+    [HID_KEY_LEFTBRACE]  = 0x54,
+    [HID_KEY_RIGHTBRACE] = 0x5B,
+    [HID_KEY_BACKSLASH]  = 0x5D,
+    [HID_KEY_SEMICOLON]  = 0x4C,
+    [HID_KEY_APOSTROPHE] = 0x52,
+    [HID_KEY_GRAVE]      = 0x0E,
+    [HID_KEY_COMMA]      = 0x41,
+    [HID_KEY_DOT]        = 0x49,
+    [HID_KEY_SLASH]      = 0x4A,
+    [HID_KEY_CAPSLOCK]   = 0x58,
 
-	struct ringbuf cmdbuf;
+    [HID_KEY_LEFTCTRL]   = 0x14,
+    [HID_KEY_LEFTSHIFT]  = 0x12,
+    [HID_KEY_LEFTALT]    = 0x11,
+    [HID_KEY_RIGHTSHIFT] = 0x59,
+
+    [HID_KEY_F1]  = 0x05,
+    [HID_KEY_F2]  = 0x06,
+    [HID_KEY_F3]  = 0x04,
+    [HID_KEY_F4]  = 0x0C,
+    [HID_KEY_F5]  = 0x03,
+    [HID_KEY_F6]  = 0x0B,
+    [HID_KEY_F7]  = 0x83,
+    [HID_KEY_F8]  = 0x0A,
+    [HID_KEY_F9]  = 0x01,
+    [HID_KEY_F10] = 0x09,
+    [HID_KEY_F11] = 0x78,
+    [HID_KEY_F12] = 0x07,
+
+    [HID_KEY_SCROLLLOCK] = 0x7E,
+
+    [HID_KEY_NUMLOCK]    = 0x77,
+    [HID_KEY_KPASTERISK] = 0x7C,
+    [HID_KEY_KPMINUS]    = 0x7B,
+    [HID_KEY_KPPLUS]     = 0x79,
+    [HID_KEY_KP1] = 0x69,
+    [HID_KEY_KP2] = 0x72,
+    [HID_KEY_KP3] = 0x7A,
+    [HID_KEY_KP4] = 0x6B,
+    [HID_KEY_KP5] = 0x73,
+    [HID_KEY_KP6] = 0x74,
+    [HID_KEY_KP7] = 0x6C,
+    [HID_KEY_KP8] = 0x75,
+    [HID_KEY_KP9] = 0x7D,
+    [HID_KEY_KP0] = 0x70,
+    [HID_KEY_KPDOT] = 0x71,
 };
 
-static void ps2_set_sample_rate(struct ps2_keyboard *dev, uint8_t rate)
+static void ps2_keyboard_set_rate(hid_keyboard_t* kb, uint8_t rate)
 {
-	dev->rate = rate & 0x1f;
-	dev->delay = rate & 3;
+    kb->rate = rate & 0x1f;
+    kb->delay = rate & 3;
 
-	rvtimer_init(&dev->sample_timer, 1000);
-	dev->sample_timer.timecmp = (dev->delay + 1) * 250;
+    rvtimer_init(&kb->sample_timer, 1000);
+    kb->sample_timer.timecmp = (kb->delay + 1) * 250;
 }
 
-static void ps2_defaults(struct ps2_keyboard *dev)
+static void ps2_keyboard_defaults(hid_keyboard_t* kb)
 {
-	dev->rate = 20;
-	dev->delay = 1;
+    memset(&kb->key_state, 0, sizeof(kb->key_state));
+    kb->state = PS2_STATE_CMD;
+    kb->rate = 20;
+    kb->delay = 1;
 }
 
-static bool ps2_cmd_set_defaults(struct ps2_keyboard *dev)
+static bool ps2_keyboard_cmd(hid_keyboard_t* kb, uint8_t cmd)
 {
-	ps2_defaults(dev);
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_reset(struct ps2_keyboard *dev)
-{
-	ps2_cmd_set_defaults(dev);
-	ringbuf_put_u8(&dev->cmdbuf, 0xAA);
-	return true;
-}
-
-static bool ps2_cmd_resend(struct ps2_keyboard *dev)
-{
-	/* TODO: remember the ringbuf state, save it, then send it back */
-	UNUSED(dev);
-	return false;
-}
-
-static bool ps2_cmd_disable_data_reporting(struct ps2_keyboard *dev)
-{
-	dev->reporting = false;
-	ps2_defaults(dev);
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_enable_data_reporting(struct ps2_keyboard *dev)
-{
-	dev->reporting = true;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_set_sample_rate(struct ps2_keyboard *dev)
-{
-	dev->state = STATE_SET_SAMPLE_RATE;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_get_dev_id(struct ps2_keyboard *dev)
-{
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	ringbuf_put_u8(&dev->cmdbuf, 0xAB);
-	ringbuf_put_u8(&dev->cmdbuf, 0x83);
-	return true;
-}
-
-static bool ps2_cmd_set_scan_code_set(struct ps2_keyboard *dev)
-{
-	dev->state = STATE_SET_SCAN_CODE_SET;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
-}
-
-static bool ps2_cmd_echo(struct ps2_keyboard *dev)
-{
-	ringbuf_put_u8(&dev->cmdbuf, 0xEE);
-	return true;
-}
-
-static bool ps2_cmd_leds(struct ps2_keyboard *dev)
-{
-	dev->state = STATE_SET_LEDS;
-	ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-	return true;
+    switch (cmd) {
+        case PS2_CMD_RESET:
+            ps2_keyboard_defaults(kb);
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            ringbuf_put_u8(&kb->cmdbuf, 0xAA);
+            return true;
+        case PS2_CMD_RESEND:
+            // Unimplemented
+            return false;
+        case PS2_CMD_SET_DEFAULTS:
+            ps2_keyboard_defaults(kb);
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_DISABLE_DATA_REPORTING:
+            kb->reporting = false;
+            ps2_keyboard_defaults(kb);
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_ENABLE_DATA_REPORTING:
+            kb->reporting = true;
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_SET_SAMPLE_RATE:
+            kb->state = PS2_STATE_SET_SAMPLE_RATE;
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_GET_DEV_ID:
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            ringbuf_put_u8(&kb->cmdbuf, 0xAB);
+            ringbuf_put_u8(&kb->cmdbuf, 0x83);
+            return true;
+        case PS2_CMD_SET_SCAN_CODE_SET:
+            kb->state = PS2_STATE_SET_SCAN_CODE_SET;
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        case PS2_CMD_ECHO:
+            ringbuf_put_u8(&kb->cmdbuf, 0xEE);
+            return true;
+        case PS2_CMD_LEDS:
+            kb->state = PS2_STATE_SET_LEDS;
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+            return true;
+        default:
+            ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_NAK);
+            return true;
+    }
 }
 
 static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is_write)
 {
-	struct ps2_keyboard *dev = (struct ps2_keyboard*)ps2dev->data;
-	if (is_write)
-	{
-		//printf("ps2 kbd cmd sent: %02x\n", (int)*val);
-		bool ret = false;
-		switch (dev->state)
-		{
-			case STATE_CMD:
-				/* go to the command switch */
-				break;
-			case STATE_SET_SAMPLE_RATE:
-				ps2_set_sample_rate(dev, *val);
-				dev->state = STATE_CMD;
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				goto out;
-			case STATE_SET_SCAN_CODE_SET:
-				if (*val == 0)
-				{
-					ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-					ringbuf_put_u8(&dev->cmdbuf, 2);
-				}
-				else if (*val == 2)
-				{
-					ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				}
-				else
-				{
-					ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_NAK);
-				}
-				dev->state = STATE_CMD;
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				goto out;
-			case STATE_SET_LEDS:
-				/* leds are ignored */
-				dev->state = STATE_CMD;
-				ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_ACK);
-				goto out;
-		}
-
-		switch (*val)
-		{
-			case PS2_CMD_RESET: ret = ps2_cmd_reset(dev); break;
-			case PS2_CMD_RESEND: ret = ps2_cmd_resend(dev); break;
-			case PS2_CMD_SET_DEFAULTS: ret = ps2_cmd_set_defaults(dev); break;
-			case PS2_CMD_DISABLE_DATA_REPORTING: ret = ps2_cmd_disable_data_reporting(dev); break;
-			case PS2_CMD_ENABLE_DATA_REPORTING: ret = ps2_cmd_enable_data_reporting(dev); break;
-			case PS2_CMD_SET_SAMPLE_RATE: ret = ps2_cmd_set_sample_rate(dev); break;
-			case PS2_CMD_GET_DEV_ID: ret = ps2_cmd_get_dev_id(dev); break;
-			case PS2_CMD_SET_SCAN_CODE_SET: ret = ps2_cmd_set_scan_code_set(dev); break;
-			case PS2_CMD_ECHO: ret = ps2_cmd_echo(dev); break;
-			case PS2_CMD_LEDS: ret = ps2_cmd_leds(dev); break;
-			default:
-					   ringbuf_put_u8(&dev->cmdbuf, PS2_RSP_NAK);
-					   ret = true;
-					   break;
-		}
-
-out:
-		altps2_interrupt_unlocked(ps2dev);
-		return ret;
-	}
-	else
-	{
-		size_t avail = dev->cmdbuf.consumed;
-		if (avail == 0)
-		{
-			*val = '\0';
-			goto out2;
-		}
-
-		ringbuf_get_u8(&dev->cmdbuf, val);
-		//printf("ps2 kbd cmd resp: %02x avail: %d\n", *val, (int)avail);
-out2:
-		return (uint16_t)avail;
-	}
+    hid_keyboard_t* kb = (hid_keyboard_t*)ps2dev->data;
+    if (is_write) {
+        switch (kb->state) {
+            case PS2_STATE_CMD:
+                ps2_keyboard_cmd(kb, *val);
+                break;
+            case PS2_STATE_SET_SAMPLE_RATE:
+                ps2_keyboard_set_rate(kb, *val);
+                kb->state = PS2_STATE_CMD;
+                ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+                break;
+            case PS2_STATE_SET_SCAN_CODE_SET:
+                if (*val == 0) {
+                    ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+                    ringbuf_put_u8(&kb->cmdbuf, 2);
+                } else if (*val == 2) {
+                    ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+                } else {
+                    ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_NAK);
+                }
+                kb->state = PS2_STATE_CMD;
+                ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+                break;
+            case PS2_STATE_SET_LEDS:
+                // leds are ignored
+                kb->state = PS2_STATE_CMD;
+                ringbuf_put_u8(&kb->cmdbuf, PS2_RSP_ACK);
+                break;
+        }
+        altps2_interrupt_unlocked(ps2dev);
+        return true;
+    } else {
+        size_t avail = kb->cmdbuf.consumed;
+        if (avail) {
+            ringbuf_get_u8(&kb->cmdbuf, val);
+        } else {
+            *val = 0;
+        }
+        return avail;
+    }
 }
 
-struct ps2_device ps2_keyboard_create()
+static void ps2_keyboard_remove(struct ps2_device *ps2dev)
 {
-	struct ps2_keyboard *ptr = safe_calloc(1, sizeof(struct ps2_keyboard));
-	struct ps2_device dev;
-	dev.ps2_op = ps2_keyboard_op;
-	dev.data = ptr;
-	/* big number is needed because it can overrun when interrupts aren't delivered
-	 * a long time */
-	ringbuf_create(&ptr->cmdbuf, 1024);
-	ps2_cmd_reset(ptr);
-
-	/* consume first ACK from command */
-	uint8_t ack;
-	ringbuf_get_u8(&ptr->cmdbuf, &ack);
-	assert(ack == PS2_RSP_ACK);
-
-	return dev;
+    hid_keyboard_t* kb = (hid_keyboard_t*)ps2dev->data;
+    ringbuf_destroy(&kb->cmdbuf);
+    free(kb);
 }
 
-static void ps2_handle_typematic(struct ps2_device *ps2keyboard)
+static const uint16_t ps2kb_rate2realrate[32] = {
+    [0]  = 300,
+    [1]  = 267,
+    [2]  = 240,
+    [3]  = 218,
+    [4]  = 200,
+    [5]  = 185,
+    [6]  = 171,
+    [7]  = 160,
+    [8]  = 150,
+    [9]  = 133,
+    [10] = 120,
+    [11] = 109,
+    [12] = 100,
+    [13] = 92,
+    [14] = 86,
+    [15] = 80,
+    [16] = 75,
+    [17] = 67,
+    [18] = 60,
+    [19] = 55,
+    [20] = 50,
+    [21] = 46,
+    [22] = 43,
+    [23] = 40,
+    [24] = 37,
+    [25] = 33,
+    [26] = 30,
+    [27] = 28,
+    [28] = 25,
+    [29] = 23,
+    [30] = 21,
+    [31] = 20,
+};
+
+static void ps2_keyboard_update(struct ps2_device *ps2dev)
 {
-	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
-
-	if (!dev->reporting)
-	{
-		/* key reporting is disabled */
-		return;
-	}
-
-	if (dev->lastkey.len == 0)
-	{
-		/* no keys are pressed */
-		return;
-	}
-
-	static const uint16_t rate2realrate[32] =
-	{
-		[0]  = 300,
-		[1]  = 267,
-		[2]  = 240,
-		[3]  = 218,
-		[4]  = 200,
-		[5]  = 185,
-		[6]  = 171,
-		[7]  = 160,
-		[8]  = 150,
-		[9]  = 133,
-		[10] = 120,
-		[11] = 109,
-		[12] = 100,
-		[13] = 92,
-		[14] = 86,
-		[15] = 80,
-		[16] = 75,
-		[17] = 67,
-		[18] = 60,
-		[19] = 55,
-		[20] = 50,
-		[21] = 46,
-		[22] = 43,
-		[23] = 40,
-		[24] = 37,
-		[25] = 33,
-		[26] = 30,
-		[27] = 28,
-		[28] = 25,
-		[29] = 23,
-		[30] = 21,
-		[31] = 20,
-	};
-
-	if (!rvtimer_pending(&dev->sample_timer))
-	{
-		return;
-	}
-
-	//printf("typematic!11 timecmp: %ld freq: %ld\n", dev->sample_timer.timecmp, dev->sample_timer.freq);
-
-	/* update timer to the next rate tick */
-	rvtimer_init(&dev->sample_timer, rate2realrate[dev->rate]);
-	dev->sample_timer.timecmp = 10;
-
-	ringbuf_put(&dev->cmdbuf, dev->lastkey.keycode, dev->lastkey.len);
-	altps2_interrupt_unlocked(ps2keyboard);
+    // Handle typematic
+    hid_keyboard_t* kb = (hid_keyboard_t*)ps2dev->data;
+    spin_lock(ps2dev->lock);
+    if (kb->reporting && kb->lastkey_size && rvtimer_pending(&kb->sample_timer)) {
+        rvtimer_init(&kb->sample_timer, ps2kb_rate2realrate[kb->rate]);
+        kb->sample_timer.timecmp = 10;
+        ringbuf_put(&kb->cmdbuf, kb->lastkey, kb->lastkey_size);
+        altps2_interrupt_unlocked(&kb->ps2_dev);
+    }
+    spin_unlock(ps2dev->lock);
 }
 
-// Send key to the PS/2 keyboard
-// This functions accepts codes as PS/2 makecodes
-// if pressed is false then it will try to make break code from make code and send it
-// Set key to NULL to handle typematic repeat
-void ps2_handle_keyboard(struct ps2_device *ps2keyboard, struct key *key, bool pressed)
+PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine)
 {
-	struct ps2_keyboard *dev = (struct ps2_keyboard *)ps2keyboard->data;
-	spin_lock(ps2keyboard->lock);
-
-	if (key == NULL || key->len == 0)
-	{
-		ps2_handle_typematic(ps2keyboard);
-		goto out;
-	}
-
-	if (!dev->reporting)
-	{
-		/* key reporting is disabled */
-		goto out;
-	}
-
-	uint8_t keycmd[KEY_SIZE];
-	uint8_t keylen;
-	if (pressed)
-	{
-		/* no other key types are known... */
-		if (key->len != 1 && key->len != 2 && key->len != 8) {
-			rvvm_warn("Invalid key size in ps2_handle_keyboard()");
-			return;
-		}
-
-		keylen = dev->lastkey.len = key->len * sizeof(key->keycode[0]) > KEY_SIZE
-			? KEY_SIZE
-			: key->len * sizeof(key->keycode[0]);
-		memcpy(keycmd, key->keycode, keylen);
-
-		memcpy(dev->lastkey.keycode, key->keycode, keylen);
-		rvtimer_init(&dev->sample_timer, 1000);
-		dev->sample_timer.timecmp = (dev->delay + 1) * 250;
-	}
-	else
-	{
-		/* try to make the break code */
-		/* this is for scan set 2 */
-
-		if (dev->lastkey.len == key->len
-				&& !memcmp(key->keycode, dev->lastkey.keycode, key->len))
-			dev->lastkey.len = 0;
-		//memset(dev->lastkey, '\0', KEY_SIZE);
-
-		if (key->len == 1)
-		{
-			keycmd[0] = 0xF0;
-			keycmd[1] = key->keycode[0];
-			keylen = 2;
-		}
-		else if (key->len == 2 && key->keycode[0] == 0xE0)
-		{
-			keycmd[0] = 0xE0;
-			keycmd[1] = 0xF0;
-			keycmd[2] = key->keycode[1];
-			keylen = 3;
-		}
-		else if (key->len == 4
-				&& key->keycode[0] == 0xE0
-				&& key->keycode[2] == 0xE0)
-		{
-			/* print screen is special */
-			keycmd[0] = 0xE0;
-			keycmd[1] = 0xF0;
-			keycmd[2] = key->keycode[3];
-			keycmd[3] = 0xE0;
-			keycmd[4] = 0xF0;
-			keycmd[5] = key->keycode[1];
-			keylen = 6;
-		}
-		else if (key->len == 8 && key->keycode[0] == 0xE1)
-		{
-			/* pause key, ignore */
-			goto out;
-		}
-		else
-		{
-			fputs("PS2 keyboard: unknown make code ", stderr);
-			for (size_t i = 0; i < key->len; ++i)
-			{
-				fprintf(stderr, "%02X ", key->keycode[i]);
-			}
-			fputs("\n", stderr);
-			goto out;
-		}
-	}
-
-	ringbuf_put(&dev->cmdbuf, keycmd, keylen);
-	spin_unlock(ps2keyboard->lock);
-	altps2_interrupt(ps2keyboard);
-	return;
-out:
-	spin_unlock(ps2keyboard->lock);
+    plic_ctx_t* plic = rvvm_get_plic(machine);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20001000, ALTPS2_MMIO_SIZE);
+    hid_keyboard_t* kb = safe_calloc(sizeof(hid_keyboard_t), 1);
+    kb->ps2_dev.ps2_op = ps2_keyboard_op;
+    kb->ps2_dev.ps2_remove = ps2_keyboard_remove;
+    kb->ps2_dev.ps2_update = ps2_keyboard_update;
+    kb->ps2_dev.data = kb;
+    
+    ringbuf_create(&kb->cmdbuf, 1024);
+    ringbuf_put_u8(&kb->cmdbuf, 0xAA);
+    
+    altps2_init(machine, addr, plic, plic_alloc_irq(plic), &kb->ps2_dev);
+    return kb;
 }
+
+static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
+{
+    spin_lock(kb->ps2_dev.lock);
+    if (key != HID_KEY_NONE && kb->reporting) {
+        const uint8_t* keycode = NULL;
+        size_t keycode_size = 0;
+        if (key < sizeof(hid_to_ps2_byte_map) && hid_to_ps2_byte_map[key]) {
+            keycode = &hid_to_ps2_byte_map[key];
+            keycode_size = 1;
+        } else {
+            switch (key) {
+                case HID_KEY_LEFTMETA:
+                    keycode = (const uint8_t*)"\xE0\x1F";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_RIGHTCTRL:
+                    keycode = (const uint8_t*)"\xE0\x14";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_RIGHTALT:
+                    keycode = (const uint8_t*)"\xE0\x11";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_RIGHTMETA:
+                    keycode = (const uint8_t*)"\xE0\x27";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_SYSRQ:
+                    keycode = (const uint8_t*)"\xE0\x12\xE0\x7C";
+                    keycode_size = 4;
+                    break;
+                case HID_KEY_PAUSE:
+                    keycode = (const uint8_t*)"\xE1\x14\x77\xE1\xF0\x14\xF0\x77";
+                    keycode_size = 8;
+                    break;
+                case HID_KEY_INSERT:
+                    keycode = (const uint8_t*)"\xE0\x70";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_HOME:
+                    keycode = (const uint8_t*)"\xE0\x6C";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_PAGEUP:
+                    keycode = (const uint8_t*)"\xE0\x7D";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_DELETE:
+                    keycode = (const uint8_t*)"\xE0\x71";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_END:
+                    keycode = (const uint8_t*)"\xE0\x69";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_PAGEDOWN:
+                    keycode = (const uint8_t*)"\xE0\x7A";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_RIGHT:
+                    keycode = (const uint8_t*)"\xE0\x74";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_LEFT:
+                    keycode = (const uint8_t*)"\xE0\x6B";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_DOWN:
+                    keycode = (const uint8_t*)"\xE0\x72";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_UP:
+                    keycode = (const uint8_t*)"\xE0\x75";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_MENU:
+                    keycode = (const uint8_t*)"\xE0\x2F";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_KPSLASH:
+                    keycode = (const uint8_t*)"\xE0\x4A";
+                    keycode_size = 2;
+                    break;
+                case HID_KEY_KPENTER:
+                    keycode = (const uint8_t*)"\xE0\x5A";
+                    keycode_size = 2;
+                    break;
+            }
+        }
+        if (pressed && !(kb->key_state[key >> 3] & (1 << (key & 0x7)))) {
+            kb->key_state[key >> 3] |= (1 << (key & 0x7));
+            kb->lastkey = keycode;
+            kb->lastkey_size = keycode_size;
+            
+            ringbuf_put(&kb->cmdbuf, keycode, keycode_size);
+            rvtimer_init(&kb->sample_timer, 1000);
+            kb->sample_timer.timecmp = (kb->delay + 1) * 250;
+        } else if (kb->key_state[key >> 3] & (1 << (key & 0x7))) {
+            uint8_t keycmd[8];
+            uint8_t keylen = 0;
+            kb->key_state[key >> 3] &= ~(1 << (key & 0x7));
+            if (kb->lastkey == keycode) kb->lastkey_size = 0;
+
+            if (keycode_size == 1) {
+                keycmd[0] = 0xF0;
+                keycmd[1] = keycode[0];
+                keylen = 2;
+            } else if (keycode_size == 2 && keycode[0] == 0xE0) {
+                keycmd[0] = 0xE0;
+                keycmd[1] = 0xF0;
+                keycmd[2] = keycode[1];
+                keylen = 3;
+            } else if (keycode_size == 4 && keycode[0] == 0xE0 && keycode[2] == 0xE0) {
+                // Print screen is special
+                keycmd[0] = 0xE0;
+                keycmd[1] = 0xF0;
+                keycmd[2] = keycode[3];
+                keycmd[3] = 0xE0;
+                keycmd[4] = 0xF0;
+                keycmd[5] = keycode[1];
+                keylen = 6;
+            }
+            ringbuf_put(&kb->cmdbuf, keycmd, keylen);
+        }
+    }
+    spin_unlock(kb->ps2_dev.lock);
+    altps2_interrupt(&kb->ps2_dev);
+}
+
+PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key)
+{
+    ps2_handle_keyboard(kb, key, true);
+}
+
+PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key)
+{
+    ps2_handle_keyboard(kb, key, false);
+}
+
