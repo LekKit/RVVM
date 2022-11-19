@@ -322,6 +322,7 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
     fdt_node_add_prop_cells(pci_node, "interrupt-map-mask", interrupt_mask, 4);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), pci_node);
 #endif
+    rvvm_set_pci_bus(machine, bus);
     return bus;
 }
 

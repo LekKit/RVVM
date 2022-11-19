@@ -58,7 +58,6 @@ typedef struct {
 } pci_dev_desc_t;
 
 typedef struct pci_device pci_dev_t;
-typedef struct pci_bus pci_bus_t;
 
 // Passing irq = 0 implies auto-allocation of 4 IRQ lanes
 PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t* plic, uint32_t irq, bool ecam,
