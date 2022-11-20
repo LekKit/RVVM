@@ -58,6 +58,9 @@ SAFE_MALLOC void* safe_malloc(size_t size);
 SAFE_CALLOC void* safe_calloc(size_t size, size_t n);
 SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 
+// Safe object allocation with type checking & zeroing
+#define safe_new_obj(type) ((type*)safe_calloc(sizeof(type), 1))
+
 // Portable itoa/atoi replacement
 size_t int_to_str_dec(char* str, size_t size, int val);
 int str_to_int_dec(const char* str);
