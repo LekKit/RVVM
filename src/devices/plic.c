@@ -283,12 +283,12 @@ static bool plic_ctxflag_write_handler(rvvm_machine_t *mach, struct plic *dev, u
         {
             /* if there's no interrupts waiting, clear the pending bit */
             set_hart_busy(dev, hartid, false);
-            riscv_interrupt_clear(&vector_at(mach->harts, hartid), prio);
+            riscv_interrupt_clear(vector_at(mach->harts, hartid), prio);
         }
         else
         {
             /* trigger CPU to execute our next interrupt */
-            riscv_interrupt(&vector_at(mach->harts, hartid), prio);
+            riscv_interrupt(vector_at(mach->harts, hartid), prio);
         }
     }
     else
@@ -475,7 +475,7 @@ static rvvm_mmio_type_t plic_dev_type = {
 // Create PLIC device
 PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
-    plic_ctx_t* plic = safe_calloc(sizeof(plic_ctx_t), 1);
+    plic_ctx_t* plic = safe_new_obj(plic_ctx_t);
     plic->machine = machine;
     spin_init(&plic->lock);
 
@@ -562,7 +562,7 @@ PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq)
                 if (select_int(plic, ctx, irq)) {
                     /* found free hart, update the current selected interrupt ID */
                     set_hart_busy(plic, i, true);
-                    riscv_interrupt(&vector_at(plic->machine->harts, i), CTX2PRIO(ctx));
+                    riscv_interrupt(vector_at(plic->machine->harts, i), CTX2PRIO(ctx));
                     break;
                 }
             }
