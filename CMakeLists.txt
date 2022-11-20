@@ -161,9 +161,10 @@ list(REMOVE_ITEM RVVM_DEVICES_SRC
 
 if (RVVM_USE_FB)
 	if (HAIKU)
-		target_sources(rvvm PRIVATE "${RVVM_HAIKU_SRC}")
 		find_library(RVVM_BE_LIB be REQUIRED)
-		target_link_libraries(rvvm PRIVATE ${RVVM_BE_LIB})
+		list(APPEND RVVM_DEVICES_SRC ${RVVM_HAIKU_SRC})
+		target_link_libraries(rvvm_common INTERFACE ${RVVM_BE_LIB})
+		target_compile_definitions(rvvm_common INTERFACE USE_FB)
 	elseif (UNIX)
 		find_package(X11)
 		if (NOT TARGET X11::X11)
