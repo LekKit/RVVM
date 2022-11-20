@@ -62,7 +62,7 @@ static inline size_t rgb_format_from_bpp(size_t bpp)
 
 static inline size_t framebuffer_size(const fb_ctx_t* fb)
 {
-    return fb->width * fb->height * rgb_format_bytes(fb->format);
+    return rgb_format_bytes(fb->format) * fb->width * fb->height;
 }
 
 // Attach initialized framebuffer context to the machine
