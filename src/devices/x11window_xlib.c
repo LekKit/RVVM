@@ -165,7 +165,7 @@ static hid_key_t x11_event_key_to_hid(fb_window_t* win, int keycode)
         rvvm_warn("XEvent keycode out of keycodemap range!");
         return HID_KEY_NONE;
     } else {
-        size_t entry = (keycode - win->data->min_keycode) * win->data->keysyms_per_keycode;
+        uint32_t entry = (keycode - win->data->min_keycode) * win->data->keysyms_per_keycode;
         return x11_keysym_to_hid(win->data->keycodemap[entry]);
     }
 }
