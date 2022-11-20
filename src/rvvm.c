@@ -72,7 +72,7 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
         fdt_node_add_prop(cpu, "compatible", "rvvm\0riscv\0", 11);
         fdt_node_add_prop_u32(cpu, "clock-frequency", 3000000000);
 #ifdef USE_RV64
-        if (vector_at(machine->harts, i).rv64) {
+        if (vector_at(machine->harts, i)->rv64) {
 #ifdef USE_FPU
             fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdcsu");
 #else
@@ -182,7 +182,7 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
     // Reset CPUs
     rvtimer_init(&machine->timer, 10000000); // 10 MHz timer
     vector_foreach(machine->harts, i) {
-        rvvm_hart_t* vm = &vector_at(machine->harts, i);
+        rvvm_hart_t* vm = vector_at(machine->harts, i);
         vm->timer = machine->timer;
         // a0 register & mhartid csr contain hart ID
         vm->csr.hartid = i;
@@ -212,6 +212,7 @@ static void* builtin_eventloop(void* arg)
             builtin_eventloop_thread = NULL;
             condvar_free(builtin_eventloop_cond);
             builtin_eventloop_cond = NULL;
+            vector_free(global_machines);
             spin_unlock(&global_lock);
             break;
         }
@@ -221,13 +222,13 @@ static void* builtin_eventloop(void* arg)
             if (power_state != RVVM_POWER_ON) {
                 // The machine was shut down or reset
                 vector_foreach(machine->harts, i) {
-                    riscv_hart_pause(&vector_at(machine->harts, i));
+                    riscv_hart_pause(vector_at(machine->harts, i));
                 }
                 // Call reset/poweroff handler
                 if (power_state == RVVM_POWER_RESET && rvvm_reset_machine_state(machine)) {
                     rvvm_info("Machine %p resetting", machine);
                     vector_foreach(machine->harts, i) {
-                        riscv_hart_spawn(&vector_at(machine->harts, i));
+                        riscv_hart_spawn(vector_at(machine->harts, i));
                     }
                 } else {
                     if (machine->on_reset) {
@@ -242,8 +243,8 @@ static void* builtin_eventloop(void* arg)
 
             vector_foreach(machine->harts, i) {
                 // Wake hart thread to check timer interrupt.
-                if (rvtimer_pending(&vector_at(machine->harts, i).timer)) {
-                    riscv_hart_check_timer(&vector_at(machine->harts, i));
+                if (rvtimer_pending(&vector_at(machine->harts, i)->timer)) {
+                    riscv_hart_check_timer(vector_at(machine->harts, i));
                 }
             }
 
@@ -294,7 +295,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
         mem_size = 1U << 30;
     }
 
-    machine = safe_calloc(sizeof(rvvm_machine_t), 1);
+    machine = safe_new_obj(rvvm_machine_t);
     if (!riscv_init_ram(&machine->mem, mem_base, mem_size)) {
         free(machine);
         return NULL;
@@ -302,8 +303,8 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
     vector_init(machine->harts);
     vector_init(machine->mmio);
     for (size_t i=0; i<hart_count; ++i) {
-        vector_emplace_back(machine->harts);
-        vm = &vector_at(machine->harts, i);
+        vm = safe_new_obj(rvvm_hart_t);
+        vector_push_back(machine->harts, vm);
         riscv_hart_init(vm, rv64);
         vm->machine = machine;
         vm->mem = machine->mem;
@@ -348,9 +349,11 @@ PUBLIC void rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
     // Needs improvements in RVJIT
     UNUSED(addr);
     UNUSED(size);
+    spin_lock_slow(&global_lock);
     vector_foreach(machine->harts, i) {
-        riscv_jit_flush_cache(&vector_at(machine->harts, i));
+        riscv_jit_flush_cache(vector_at(machine->harts, i));
     }
+    spin_unlock(&global_lock);
 }
 
 PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine)
@@ -504,10 +507,7 @@ PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
         rvvm_reset_machine_state(machine);
     }
     vector_foreach(machine->harts, i) {
-        riscv_hart_spawn(&vector_at(machine->harts, i));
-    }
-    if (vector_size(global_machines) == 0) {
-        vector_init(global_machines);
+        riscv_hart_spawn(vector_at(machine->harts, i));
     }
     vector_push_back(global_machines, machine);
     if (builtin_eventloop_enabled && builtin_eventloop_thread == NULL) {
@@ -526,12 +526,13 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine)
     spin_lock_slow(&global_lock);
 
     vector_foreach(machine->harts, i) {
-        riscv_hart_pause(&vector_at(machine->harts, i));
+        riscv_hart_pause(vector_at(machine->harts, i));
     }
 
     vector_foreach(global_machines, i) {
         if (vector_at(global_machines, i) == machine) {
             vector_erase(global_machines, i);
+            break;
         }
     }
     spin_unlock(&global_lock);
@@ -544,7 +545,7 @@ PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
 
     // For singlethreaded VMs, returns from riscv_hart_run()
     if (vector_size(machine->harts) == 1) {
-        riscv_hart_queue_pause(&vector_at(machine->harts, 0));
+        riscv_hart_queue_pause(vector_at(machine->harts, 0));
     }
     condvar_wake(builtin_eventloop_cond);
 }
@@ -570,7 +571,8 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     rvvm_pause_machine(machine);
 
     vector_foreach(machine->harts, i) {
-        riscv_hart_free(&vector_at(machine->harts, i));
+        riscv_hart_free(vector_at(machine->harts, i));
+        free(vector_at(machine->harts, i));
     }
 
     // Clean up devices in reversed order, something may reference older devices
@@ -690,7 +692,7 @@ PUBLIC void rvvm_run_eventloop()
 
 PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
 {
-    rvvm_machine_t* machine = safe_calloc(sizeof(rvvm_machine_t), 1);
+    rvvm_machine_t* machine = safe_new_obj(rvvm_machine_t);
     // Bypass entire process memory except the NULL page
     // RVVM expects mem.data to be non-NULL, let's leave that for now
     machine->mem.begin = 0x1000;
@@ -704,8 +706,7 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
 
 PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
 {
-    vector_emplace_back(machine->harts);
-    rvvm_hart_t* vm = &vector_at(machine->harts, vector_size(machine->harts) - 1);
+    rvvm_hart_t* vm = safe_new_obj(rvvm_hart_t);
     riscv_hart_init(vm, machine->rv64);
     vm->machine = machine;
     vm->mem = machine->mem;
@@ -716,12 +717,26 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
     riscv_csr_op(vm, 0x300, &mstatus, CSR_SWAP);
 #endif
     riscv_switch_priv(vm, PRIVILEGE_USER);
+    spin_lock_slow(&global_lock);
+    vector_push_back(machine->harts, vm);
+    spin_unlock(&global_lock);
     return (rvvm_cpu_handle_t)vm;
 }
 
 PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
 {
-    riscv_hart_free((rvvm_hart_t*)cpu);
+    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
+    spin_lock_slow(&global_lock);
+    vector_foreach(vm->machine->harts, i) {
+        if (vector_at(vm->machine->harts, i) == vm) {
+            vector_erase(vm->machine->harts, i);
+            riscv_hart_free(vm);
+            free(vm);
+            spin_unlock(&global_lock);
+            return;
+        }
+    }
+    rvvm_fatal("Corrupted userland context!");
 }
 
 PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu)
