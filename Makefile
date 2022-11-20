@@ -225,7 +225,8 @@ $(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
 
 # Conditionally compiled sources
-SRC_cond := $(SRCDIR)/devices/x11window_xcb.c $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c \
+SRC_cond := $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c \
+		$(SRCDIR)/devices/sdl_window.c $(SRCDIR)/devices/haiku_window.cpp \
 		$(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
 
 # Default build configuration
@@ -233,7 +234,6 @@ USE_RV64 ?= 1
 USE_FPU ?= 1
 USE_JIT ?= 1
 USE_FB ?= 1
-USE_XCB ?= 0
 USE_XSHM ?= 1
 USE_NET ?= 0
 USE_TAP_LINUX ?= 0
@@ -292,39 +292,11 @@ ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lgdi32 2>&1)))
 override LDFLAGS += -lgdi32
 endif
 else
+
 ifeq ($(OS),emscripten)
 $(info [$(YELLOW)INFO$(RESET)] No USE_FB support for Emscripten)
 else
-# XCB Window
-ifeq ($(USE_XCB),1)
-ifeq ($(OS),darwin)
-XCB_CFLAGS := $(shell pkg-config xcb xcb-icccm --cflags $(NULL_STDERR))
-XCB_LDFLAGS := $(shell pkg-config xcb xcb-icccm --libs $(NULL_STDERR) || echo -lxcb-pkg-notfound)
-else
-XCB_LDFLAGS := -lxcb -lxcb-icccm
-endif
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XCB_CFLAGS) $(LDFLAGS) $(XCB_LDFLAGS) 2>&1)))
-SRC_depbuild += $(SRCDIR)/devices/x11window_xcb.c
-override CFLAGS += -DUSE_FB -DUSE_X11 -DUSE_XCB $(XCB_CFLAGS)
-override LDFLAGS += $(XCB_LDFLAGS)
-ifeq ($(USE_XSHM),1)
-ifeq ($(OS),darwin)
-XCB_SHM_CFLAGS := $(shell pkg-config xcb-shm --cflags $(NULL_STDERR))
-XCB_SHM_LDFLAGS := $(shell pkg-config xcb-shm --libs $(NULL_STDERR) || echo -lxcb-shm-pkg-notfound)
-else
-XCB_SHM_LDFLAGS := -lxcb-shm
-endif
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XCB_SHM_CFLAGS) $(LDFLAGS) $(XCB_SHM_LDFLAGS) 2>&1)))
-override CFLAGS += -DUSE_XSHM $(XCB_SHM_CFLAGS)
-override LDFLAGS += $(XCB_SHM_LDFLAGS)
-else
-$(info [$(RED)WARN$(RESET)] libxcb-shm not found, ignoring USE_XSHM)
-endif
-endif
-else
-$(info [$(RED)WARN$(RESET)] libxcb not found, ignoring USE_FB)
-endif
-else
+
 # Xlib Window
 ifeq ($(OS),darwin)
 XLIB_CFLAGS := $(shell pkg-config x11 --cflags $(NULL_STDERR))
@@ -353,7 +325,6 @@ endif
 endif
 else
 $(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
-endif
 endif
 endif
 endif
