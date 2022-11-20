@@ -122,7 +122,7 @@ NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
 void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
     vector_foreach(machine->harts, i) {
-        rvjit_mark_dirty_mem(&vector_at(machine->harts, i).jit, addr, size);
+        rvjit_mark_dirty_mem(&vector_at(machine->harts, i)->jit, addr, size);
     }
 }
 
