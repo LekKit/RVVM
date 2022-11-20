@@ -133,9 +133,10 @@ if (RVVM_USE_JIT)
 		"${RVVM_SRC_DIR}/rvjit/*.h"
 		"${RVVM_SRC_DIR}/rvjit/*.c"
 	)
-	add_library(rvjit EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
-	target_link_libraries(rvjit PRIVATE rvvm_common)
+	add_library(rvjit STATIC EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
 	target_link_libraries(rvvm_common INTERFACE rvjit)
+	target_link_libraries(rvjit PRIVATE rvvm)
+	target_link_libraries(rvjit PRIVATE rvvm_common)
 	target_compile_definitions(rvvm_common INTERFACE USE_JIT)
 endif()
 
