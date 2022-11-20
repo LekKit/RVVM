@@ -39,7 +39,7 @@ static bool aclint_mswi_read(rvvm_mmio_dev_t* device, void* data, size_t offset,
     UNUSED(size);
 
     if (hartid < vector_size(device->machine->harts)) {
-        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
         write_uint32_le_m(data, bit_cut(vm->csr.ip, 3, 1));
         return true;
     }
@@ -53,7 +53,7 @@ static bool aclint_mswi_write(rvvm_mmio_dev_t* device, void* data, size_t offset
     UNUSED(size);
 
     if (hartid < vector_size(device->machine->harts)) {
-        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
         if (read_uint32_le_m(data)) {
             riscv_interrupt(vm, INTERRUPT_MSOFTWARE);
         } else {
@@ -76,7 +76,7 @@ static bool aclint_mtimer_read(rvvm_mmio_dev_t* device, void* data, size_t offse
     }
 
     if (hartid < vector_size(device->machine->harts)) {
-        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
         write_uint64_le_m(data, vm->timer.timecmp);
         return true;
     }
@@ -92,13 +92,13 @@ static bool aclint_mtimer_write(rvvm_mmio_dev_t* device, void* data, size_t offs
     if (offset == 0x7FF8) {
         rvtimer_rebase(&device->machine->timer, read_uint64_le_m(data));
         vector_foreach(device->machine->harts, i) {
-            vector_at(device->machine->harts, i).timer = device->machine->timer;
+            vector_at(device->machine->harts, i)->timer = device->machine->timer;
         }
         return true;
     }
 
     if (hartid < vector_size(device->machine->harts)) {
-        rvvm_hart_t* vm = &vector_at(device->machine->harts, hartid);
+        rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
         vm->timer.timecmp = read_uint64_le_m(data);
         return true;
     }
