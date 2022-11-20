@@ -344,7 +344,9 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine)
 static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
 {
     spin_lock(kb->ps2_dev.lock);
-    if (key != HID_KEY_NONE && kb->reporting) {
+    // Ignore repeated press/release events
+    bool key_state = !!(kb->key_state[key >> 3] & (1 << (key & 0x7)));
+    if (key != HID_KEY_NONE && key_state != pressed && kb->reporting) {
         const uint8_t* keycode = NULL;
         size_t keycode_size = 0;
         if (key < sizeof(hid_to_ps2_byte_map) && hid_to_ps2_byte_map[key]) {
@@ -430,7 +432,7 @@ static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
                     break;
             }
         }
-        if (pressed && !(kb->key_state[key >> 3] & (1 << (key & 0x7)))) {
+        if (pressed) {
             kb->key_state[key >> 3] |= (1 << (key & 0x7));
             kb->lastkey = keycode;
             kb->lastkey_size = keycode_size;
@@ -438,7 +440,7 @@ static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
             ringbuf_put(&kb->cmdbuf, keycode, keycode_size);
             rvtimer_init(&kb->sample_timer, 1000);
             kb->sample_timer.timecmp = (kb->delay + 1) * 250;
-        } else if (kb->key_state[key >> 3] & (1 << (key & 0x7))) {
+        } else {
             uint8_t keycmd[8];
             uint8_t keylen = 0;
             kb->key_state[key >> 3] &= ~(1 << (key & 0x7));
@@ -465,9 +467,9 @@ static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
             }
             ringbuf_put(&kb->cmdbuf, keycmd, keylen);
         }
+        altps2_interrupt_unlocked(&kb->ps2_dev);
     }
     spin_unlock(kb->ps2_dev.lock);
-    altps2_interrupt(&kb->ps2_dev);
 }
 
 PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key)
@@ -479,4 +481,3 @@ PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key)
 {
     ps2_handle_keyboard(kb, key, false);
 }
-
