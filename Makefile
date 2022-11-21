@@ -118,6 +118,7 @@ override CFLAGS += -pthread
 override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
 BIN_EXT := .html
 LIB_EXT := .so
+USE_SDL = 1
 else
 ifeq ($(OS),windows)
 # Use LDFLAG -mwindows for GUI-only
@@ -234,6 +235,7 @@ USE_RV64 ?= 1
 USE_FPU ?= 1
 USE_JIT ?= 1
 USE_FB ?= 1
+USE_SDL ?= 0
 USE_XSHM ?= 1
 USE_NET ?= 0
 USE_TAP_LINUX ?= 0
@@ -284,6 +286,13 @@ endif
 endif
 
 ifeq ($(USE_FB),1)
+# SDL Window
+ifeq ($(USE_SDL),1)
+SRC_depbuild += $(SRCDIR)/devices/sdl_window.c
+override CFLAGS += -DUSE_FB
+override LDFLAGS += -lSDL
+else
+
 # WinAPI Window
 ifeq ($(OS),windows)
 SRC_depbuild += $(SRCDIR)/devices/win32window.c
@@ -291,10 +300,6 @@ override CFLAGS += -DUSE_FB
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lgdi32 2>&1)))
 override LDFLAGS += -lgdi32
 endif
-else
-
-ifeq ($(OS),emscripten)
-$(info [$(YELLOW)INFO$(RESET)] No USE_FB support for Emscripten)
 else
 
 # Xlib Window
