@@ -22,9 +22,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvmlib.h"
 
 #define RGB_FMT_INVALID  0x0
-#define RGB_FMT_R5G6B5   0x2 // BPP 16
-#define RGB_FMT_R8G8B8   0x3 // BPP 24
-#define RGB_FMT_A8R8G8B8 0x4 // BPP 32
+#define RGB_FMT_R5G6B5   0x02
+#define RGB_FMT_R8G8B8   0x03
+#define RGB_FMT_A8R8G8B8 0x04 // Little-endian: BGRA, Big-endian: ARGB
+#define RGB_FMT_A8B8G8R8 0x14 // Little-endian: RGBA, Big-endian: ABGR
 
 typedef uint8_t rgb_fmt_t;
 
@@ -38,9 +39,10 @@ typedef struct {
 static inline size_t rgb_format_bytes(rgb_fmt_t format)
 {
     switch (format) {
-        case RGB_FMT_R5G6B5: return 2;
-        case RGB_FMT_R8G8B8: return 3;
+        case RGB_FMT_R5G6B5:   return 2;
+        case RGB_FMT_R8G8B8:   return 3;
         case RGB_FMT_A8R8G8B8: return 4;
+        case RGB_FMT_A8B8G8R8: return 4;
     }
     return 0;
 }
@@ -55,6 +57,8 @@ static inline size_t rgb_format_from_bpp(size_t bpp)
     switch (bpp) {
         case 16: return RGB_FMT_R5G6B5;
         case 24: return RGB_FMT_R8G8B8;
+        // Default to ARGB when bpp = 32,
+        // this is what most standards suppose
         case 32: return RGB_FMT_A8R8G8B8;
     }
     return RGB_FMT_INVALID;

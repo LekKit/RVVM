@@ -57,6 +57,9 @@ PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb
         case RGB_FMT_A8R8G8B8: 
             fdt_node_add_prop_str(fb_fdt, "format", "a8r8g8b8");
             break;
+        case RGB_FMT_A8B8G8R8: 
+            fdt_node_add_prop_str(fb_fdt, "format", "a8b8g8r8");
+            break;
         default:
             rvvm_warn("Unknown RGB format in framebuffer_init()!");
             break;
