@@ -34,7 +34,7 @@ typedef struct {
 #else
 
 #include <time.h>
-#ifndef CLOCK_MONOTONIC
+#if !defined(CLOCK_MONOTONIC) || defined(__APPLE__)
 #include <sys/time.h>
 #endif
 #include <pthread.h>
@@ -105,7 +105,7 @@ cond_var_t condvar_create()
 #ifdef _WIN32
         cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (cond->event) return cond;
-#elif defined(CLOCK_MONOTONIC)
+#elif defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
         pthread_condattr_t cond_attr;
         pthread_condattr_init(&cond_attr);
         if (pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
@@ -142,7 +142,7 @@ bool condvar_wait(cond_var_t cond, unsigned timeout_ms)
         ret = pthread_cond_wait(&cond_p->cond, &cond_p->lock) == 0;
     } else {
         struct timespec ts = {0};
-#ifdef CLOCK_MONOTONIC
+#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
         clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_nsec += timeout_ms * 1000000;
         ts.tv_sec  += ts.tv_nsec / 1000000000;
