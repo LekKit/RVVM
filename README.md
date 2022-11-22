@@ -10,11 +10,11 @@ RISC-V CPU & System software implementation written in С
 - Passes RISC-V compliance/torture tests for both RV64 & RV32
 - OpenSBI, U-Boot, custom firmwares boot and execute properly
 - Working Linux, FreeBSD, OpenBSD & other cool guest OSes
+- Haiku OS guest support (WIP)
 - Tracing JIT, multicore support
 - Framebuffer graphics, mouse & keyboard, UART shell
 - NVMe storage drives
 - Networking (WIP)
-- Haiku OS guest support (WIP)
 
 ## Tell me more...
 - Feature-complete RV64IMAFDC instruction set
@@ -28,7 +28,7 @@ RISC-V CPU & System software implementation written in С
 - PLIC/ACLINT, Timers, Poweroff/reset
 - Generic PCI Express Bus
 - NVMe storage, image TRIM support, fast IO
-- Graphical framebuffer through X11/WinAPI/Haiku
+- Graphical framebuffer through X11/WinAPI/Haiku/SDL
 - PS2 Altera Controller, PS2 keyboard & mouse
 - ATA hard drive (PIO / IDE PCI), deprecated
 - OpenCores Ethernet through Linux TAP, WIP usernet
@@ -48,7 +48,7 @@ Examples:
 ```
 make lib CC=aarch64-linux-android21-clang USE_FB=0
 make lib all CC=x86_64-w64-mingw32-gcc USE_NET=1
-make CFLAGS=-m32 ARCH=i386 USE_RV64=0 BUILDDIR=build BINARY=build/rvvm
+make CFLAGS=-m32 ARCH=i386 USE_RV64=0 BUILDDIR=build BINARY=rvvm
 make CC=mipseb-linux-gnu-gcc USE_JIT=0
 ```
 Alternatively, you can use CMake:
@@ -82,16 +82,16 @@ Argument explanation:
 Invoke "./rvvm -h" to see extended help.
 
 ## Tested environments
-| OS         | JIT                        |   GUI   |
-|------------|----------------------------|---------|
-| Linux      | Works                      |   X11   |
-| Windows    | Works                      |  Win32  |
-| MacOS X    | Works, need signing for M1 | XQuartz |
-| FreeBSD    | Works                      |   X11   |
-| Haiku OS   | Works                      |  Works  |
-| Serenity   | Broken due to W^X safety   |    -    |
-| Windows CE | Broken                     |  Win32  |
-| Emscripten | -                          |    -    |
+| OS         | JIT                        | GUI          |
+|------------|----------------------------|--------------|
+| Linux      | Works                      | X11, SDL     |
+| Windows    | Works                      | Win32, SDL   |
+| MacOS X    | Works, need signing for M1 | SDL, XQuartz |
+| FreeBSD    | Works                      | X11, SDL     |
+| Haiku OS   | Works                      | Haiku, SDL   |
+| Serenity   | Broken due to W^X safety   | SDL          |
+| Windows CE | Broken                     | Win32        |
+| Emscripten | -                          | SDL          |
 
 ## Contributions
 |                      | Achievments | Working on |
@@ -111,7 +111,7 @@ Invoke "./rvvm -h" to see extended help.
 - Sound (HD Audio or else)
 - Linux userspace syscalls emulation, ELF loader
 - More RVJIT optimizations, shared caches
-- USB HID or something else to replace PS/2
+- USB/I2C HID or something else to replace PS/2
 - *Maybe* virtio devices (Don't like the idea of fictional devices)
 - Other peripherals (OpenCores I2C, SiFive GPIO, other stuff from real boards)
 - *A lot more...*
