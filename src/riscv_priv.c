@@ -85,6 +85,7 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                             timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
                             condvar_wait(vm->wfi_cond, timestamp);
                         }
+                        // Hint interrupt dispatcher to check actual timer expiration
                         vm->csr.ip |= (1 << INTERRUPT_MTIMER);
                         break;
                     } else {
