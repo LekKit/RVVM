@@ -570,14 +570,14 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 {
     rvvm_pause_machine(machine);
 
-    vector_foreach(machine->harts, i) {
-        riscv_hart_free(vector_at(machine->harts, i));
-        free(vector_at(machine->harts, i));
-    }
-
     // Clean up devices in reversed order, something may reference older devices
     vector_foreach_back(machine->mmio, i) {
         rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
+    }
+    
+    vector_foreach(machine->harts, i) {
+        riscv_hart_free(vector_at(machine->harts, i));
+        free(vector_at(machine->harts, i));
     }
 
     vector_free(machine->harts);
