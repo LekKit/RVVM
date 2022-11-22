@@ -208,13 +208,19 @@ WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Wframe-larger-than=32
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
-override CFLAGS := -std=gnu11 -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+CC_STD := -std=gnu11
+CXX_STD := -std=gnu++11
+override CFLAGS := -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-override CFLAGS := -std=gnu11 -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+CC_STD := -std=gnu11
+CXX_STD := -std=gnu++11
+override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 # Whatever compiler that might be, use conservative options
-override CFLAGS := -std=gnu99 -O2 $(DEBUG_OPTS) $(CFLAGS)
+CC_STD := -std=gnu99
+CXX_STD :=
+override CFLAGS := -O2 $(DEBUG_OPTS) $(CFLAGS)
 endif
 endif
 
@@ -225,10 +231,28 @@ VERSION := $(VERSION)-$(GIT_COMMIT)-git
 $(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
 
-# Conditionally compiled sources
+# Generic compiler flags
+override CFLAGS := -I$(SRCDIR) -DRVVM_VERSION=\"$(VERSION)\" $(CFLAGS)
+
+# Conditionally compiled sources, do not build by default
 SRC_cond := $(SRCDIR)/devices/x11window_xlib.c $(SRCDIR)/devices/win32window.c \
 		$(SRCDIR)/devices/sdl_window.c $(SRCDIR)/devices/haiku_window.cpp \
 		$(SRCDIR)/devices/tap_linux.c $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
+
+# Output directories / files
+BUILDDIR ?= $(BUILD_TYPE).$(OS).$(ARCH)
+OBJDIR := $(BUILDDIR)/obj
+ifndef BINARY
+BINARY := $(BUILDDIR)/$(NAME)_$(ARCH)$(BIN_EXT)
+else
+override BINARY := $(BUILDDIR)/$(BINARY)
+endif
+SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
+
+# Select sources to compile
+SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
+# Wipe all platform/config-dependant sources
+SRC := $(filter-out $(SRC_cond),$(SRC))
 
 # Default build configuration
 USE_RV64 ?= 1
@@ -242,12 +266,6 @@ USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
 USE_PCI ?= 1
 USE_SPINLOCK_DEBUG ?= 1
-
-ifneq (,$(findstring lib,$(MAKECMDGOALS)))
-override USE_LIB = 1
-else
-USE_LIB ?= 0
-endif
 
 ifeq ($(USE_RV64),1)
 override CFLAGS += -DUSE_RV64
@@ -280,7 +298,7 @@ endif
 endif
 endif
 ifeq ($(USE_JIT),1)
-SRC_depbuild += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
+SRC += $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
 override CFLAGS += -DUSE_JIT
 endif
 endif
@@ -288,14 +306,21 @@ endif
 ifeq ($(USE_FB),1)
 # SDL Window
 ifeq ($(USE_SDL),1)
-SRC_depbuild += $(SRCDIR)/devices/sdl_window.c
-override CFLAGS += -DUSE_FB
+SRC += $(SRCDIR)/devices/sdl_window.c
+override CFLAGS += -DUSE_FB -DUSE_SDL
 override LDFLAGS += -lSDL
+else
+
+# Haiku Window
+ifeq ($(OS),haiku)
+SRC_CXX += $(SRCDIR)/devices/haiku_window.cpp
+override CFLAGS += -DUSE_FB
+override LDFLAGS += -lbe
 else
 
 # WinAPI Window
 ifeq ($(OS),windows)
-SRC_depbuild += $(SRCDIR)/devices/win32window.c
+SRC += $(SRCDIR)/devices/win32window.c
 override CFLAGS += -DUSE_FB
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lgdi32 2>&1)))
 override LDFLAGS += -lgdi32
@@ -311,7 +336,7 @@ XLIB_LDFLAGS := -lX11
 endif
 # Detect presence of libX11
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XLIB_CFLAGS) $(LDFLAGS) $(XLIB_LDFLAGS) 2>&1)))
-SRC_depbuild += $(SRCDIR)/devices/x11window_xlib.c
+SRC += $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_FB -DUSE_X11 $(XLIB_CFLAGS)
 override LDFLAGS += $(XLIB_LDFLAGS)
 ifeq ($(USE_XSHM),1)
@@ -334,24 +359,42 @@ endif
 endif
 endif
 endif
+endif
 
 ifeq ($(USE_NET),1)
 override CFLAGS += -DUSE_NET
 ifneq ($(OS),linux)
 override USE_TAP_LINUX = 0
 endif
+
+# Networking over Linux TAP
 ifeq ($(USE_TAP_LINUX),1)
-SRC_depbuild += $(SRCDIR)/devices/tap_linux.c
+SRC += $(SRCDIR)/devices/tap_linux.c
 override CFLAGS += -DUSE_TAP_LINUX
 else
-SRC_depbuild += $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
-# Link WinSock
+
+# Userspace networking
+SRC += $(SRCDIR)/devices/tap_user.c $(SRCDIR)/networking.c
+
+# Link WinSock on Win32
 ifeq ($(OS),windows)
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lws2_32 2>&1)))
 override LDFLAGS += -lws2_32
 else
 # On WinCE there is no _32 suffix
 override LDFLAGS += -lws2
+endif
+else
+
+# Link libnetwork on Haiku
+ifeq ($(OS),haiku)
+override LDFLAGS += -lnetwork
+else
+
+# Link libsocket on SunOS and derivatives (Solaris)
+ifeq ($(OS),sunos)
+override LDFLAGS += -lsocket
+endif
 endif
 endif
 endif
@@ -369,44 +412,26 @@ ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
-ifeq ($(USE_LIB),1)
+ifneq (,$(findstring lib,$(MAKECMDGOALS)))
 override CFLAGS += -DUSE_LIB -fPIC
 endif
 
-# Generic compiler flags
-override CFLAGS := -I$(SRCDIR) -DRVVM_VERSION=\"$(VERSION)\" $(CFLAGS)
-
-BUILDDIR ?= $(BUILD_TYPE).$(OS).$(ARCH)
-OBJDIR := $(BUILDDIR)/obj
-
-# Select sources to compile
-SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
-# Wipe all platform/config-dependant sources
-SRC := $(filter-out $(SRC_cond),$(SRC))
-# Put only needed sources to list
-SRC += $(SRC_depbuild)
+# Rules for object files from sources
 OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+OBJ_CXX := $(SRC_CXX:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 
-# Rules to build CPU object files for different architectures
+# Rules to build CPU object files for RV32/RV64
 SRC_CPU   := $(wildcard $(SRCDIR)/cpu/*.c)
 OBJ_CPU32 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.32.o)
 ifeq ($(USE_RV64),1)
 OBJ_CPU64 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
 endif
 
-OBJS := $(OBJ) $(OBJ_CPU32) $(OBJ_CPU64)
-LIB_OBJS := $(filter-out main.c,$(OBJS))
+# Combine the object files
+OBJS := $(OBJ) $(OBJ_CXX) $(OBJ_CPU32) $(OBJ_CPU64)
+LIB_OBJS := $(filter-out main.o,$(OBJS))
 DEPS := $(OBJS:.o=.d)
 DIRS := $(sort $(BUILDDIR) $(OBJDIR) $(dir $(OBJS)))
-
-BINARY := $(BUILDDIR)/$(NAME)_$(ARCH)$(BIN_EXT)
-SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
-
-ifeq ($(USE_LIB),1)
-TARGET := $(BINARY) $(SHARED)
-else
-TARGET := $(BINARY)
-endif
 
 # Create directories for object files
 ifeq ($(HOST_POSIX),1)
@@ -442,11 +467,20 @@ endif
 
 # Check compiler ability to generate header dependencies
 ifeq (,$(findstring MMD, $(shell $(CC) -MMD 2>&1)))
-DO_CC = @$(CC) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
+DO_CC = @$(CC) $(CC_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
+DO_CXX = @$(CXX) $(CXX_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 else
 $(info [$(RED)WARN$(RESET)] No compiler support for header dependencies, forcing rebuild)
 override MAKEFLAGS += -B
-DO_CC = @$(CC) $(CFLAGS) -o $@ -c $<
+DO_CC = @$(CC) $(CC_STD) $(CFLAGS) -o $@ -c $<
+DO_CXX = @$(CXX) $(CXX_STD) $(CFLAGS) -o $@ -c $<
+endif
+
+# Link using CC or CXX if any C++ code is present
+ifndef SRC_CXX
+CC_LD = $(CC)
+else
+CC_LD = $(CXX)
 endif
 
 # Ignore deleted header files
@@ -468,31 +502,36 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
 	$(info [$(YELLOW)CC$(RESET)] $<)
 	$(DO_CC)
 
+# Any C++ code
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
+	$(info [$(YELLOW)CXX$(RESET)] $<)
+	$(DO_CXX)
+
 # Main binary
 $(BINARY): $(OBJS)
 	$(info [$(GREEN)LD$(RESET)] $@)
-	@$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
+	@$(CC_LD) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
 
 # Library
 $(SHARED): $(LIB_OBJS)
 	$(info [$(GREEN)LD$(RESET)] $@)
-	@$(CC) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
+	@$(CC_LD) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
 
 .PHONY: all
-all: $(TARGET)
+all: $(BINARY)
 
 .PHONY: lib
 lib: $(SHARED)
 
 .PHONY: test
-test: $(TARGET)
+test: $(BINARY)
 #@curl url -o $(BUILDDIR)/riscv-tests.tar.gz
 	@tar xf $(BUILDDIR)/riscv-tests.tar.gz -C $(BUILDDIR)
 	@echo
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
 	@echo
 	@for file in $(BUILDDIR)/riscv-tests/rv32*.bin; do \
-		result=$$($(TARGET) $$file -nogui -rv32 | tr -d '\0'); \
+		result=$$($(BINARY) $$file -nogui -rv32 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [[ "$$result" == "0" ]]; then \
 		echo "[$(GREEN)PASS$(RESET)] $$file"; \
@@ -505,7 +544,7 @@ ifeq ($(USE_RV64),1)
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV64)"
 	@echo
 	@for file in $(BUILDDIR)/riscv-tests/rv64*.bin; do \
-		result=$$($(TARGET) $$file -nogui -rv64 | tr -d '\0'); \
+		result=$$($(BINARY) $$file -nogui -rv64 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [[ "$$result" == "0" ]]; then \
 		echo "[$(GREEN)PASS$(RESET)] $$file"; \
