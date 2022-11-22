@@ -1,6 +1,7 @@
 
 # RVVM - The RISC-V Virtual Machine
 ![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)
+![loc](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)
 [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/LekKit/RVVM.svg?style=for-the-badge)](https://lgtm.com/projects/g/LekKit/RVVM/context:cpp)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
