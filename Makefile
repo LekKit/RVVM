@@ -118,14 +118,16 @@ override CFLAGS += -pthread
 override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
 BIN_EXT := .html
 LIB_EXT := .so
-USE_SDL = 1
+USE_SDL ?= 1
 else
+
 ifeq ($(OS),windows)
 # Use LDFLAG -mwindows for GUI-only
 override LDFLAGS += -static
 BIN_EXT := .exe
 LIB_EXT := .dll
 else
+
 LIB_EXT := .so
 # Check for lib presence before linking (there is no pthread on Android, etc)
 ifneq (,$(findstring main, $(shell $(CC) -pthread $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
@@ -137,6 +139,14 @@ endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
 override LDFLAGS += -lrt
 endif
+
+ifeq ($(OS),darwin)
+USE_SDL ?= 1
+endif
+ifeq ($(OS),serenityos)
+USE_SDL ?= 1
+endif
+
 endif
 
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
@@ -306,9 +316,17 @@ endif
 ifeq ($(USE_FB),1)
 # SDL Window
 ifeq ($(USE_SDL),1)
+ifneq ($(OS),emscripten)
+ifeq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lSDL 2>&1)))
+$(info [$(RED)WARN$(RESET)] SDL not found, ignoring USE_FB)
+override USE_SDL = 0
+endif
+endif
+ifeq ($(USE_SDL),1)
 SRC += $(SRCDIR)/devices/sdl_window.c
 override CFLAGS += -DUSE_FB -DUSE_SDL
 override LDFLAGS += -lSDL
+endif
 else
 
 # Haiku Window
