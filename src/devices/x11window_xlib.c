@@ -25,7 +25,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifdef USE_XSHM
 #include <X11/extensions/XShm.h>
-#include <errno.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #endif
@@ -39,6 +38,7 @@ struct win_data {
     int min_keycode;
     int max_keycode;
     int keysyms_per_keycode;
+    Atom del_win;
 #ifdef USE_XSHM
     XShmSegmentInfo seginfo;
 #endif
@@ -200,36 +200,32 @@ static rgb_fmt_t x11_get_rgb_format(Display* display)
 }
 
 #ifdef USE_XSHM
+static bool xshm_error = false;
 static int x11_dummy_error_handler(Display *display, XErrorEvent *error)
 {
     UNUSED(display);
     UNUSED(error);
+    xshm_error = true;
     return 0;
 }
 
 static void* x11_xshm_init(fb_window_t* win)
 {
     Display* dsp = win->data->display;
-    void* ret = NULL;
     int (*old_handler)(Display*, XErrorEvent*) = XSetErrorHandler(x11_dummy_error_handler);
 
     if (XShmQueryExtension(dsp)) {
         win->data->ximage = XShmCreateImage(dsp,
                             DefaultVisual(dsp, DefaultScreen(dsp)),
                             DefaultDepth(dsp, DefaultScreen(dsp)),
-                            ZPixmap,
-                            NULL,
-                            &win->data->seginfo,
-                            win->fb.width,
-                            win->fb.height);
+                            ZPixmap, NULL, &win->data->seginfo,
+                            win->fb.width, win->fb.height);
         if (win->data->ximage) {
             win->data->seginfo.shmid = shmget(IPC_PRIVATE, framebuffer_size(&win->fb), IPC_CREAT | 0777);
             if (win->data->seginfo.shmid > 0) {
                 win->data->seginfo.shmaddr = win->data->ximage->data = shmat(win->data->seginfo.shmid, NULL, 0);
                 if (win->data->seginfo.shmaddr != (void*)-1 && win->data->seginfo.shmaddr != NULL) {
-                    if (XShmAttach(dsp, &win->data->seginfo)) {
-                        ret = win->data->seginfo.shmaddr;
-                    } else rvvm_error("XShmAttach() failed");
+                    if (!XShmAttach(dsp, &win->data->seginfo)) rvvm_error("XShmAttach() failed");
                 } else {
                     win->data->seginfo.shmaddr = NULL;
                     rvvm_error("XShm shmat() failed");
@@ -237,17 +233,20 @@ static void* x11_xshm_init(fb_window_t* win)
             } else rvvm_error("XShm shmget() failed");
         } else rvvm_error("XShmCreateImage() failed");
     } else rvvm_info("XShm extension not supported");
-
-    if (ret == NULL) {
+    // Process errors, if any
+    XSync(dsp, False);
+    // Cleanup on error
+    if (win->data->seginfo.shmaddr == NULL || xshm_error) {
+        rvvm_info("XShm failed to initialize");
         if (win->data->seginfo.shmaddr) shmdt(win->data->seginfo.shmaddr);
         if (win->data->seginfo.shmid > 0) shmctl(win->data->seginfo.shmid, IPC_RMID, NULL);
         if (win->data->ximage) XDestroyImage(win->data->ximage);
+        win->data->seginfo.shmaddr = NULL;
     }
-    
+
     XSetErrorHandler(old_handler);
-    XSync(dsp, False);
-    
-    return ret;
+
+    return win->data->seginfo.shmaddr;
 }
 #endif
 
@@ -258,14 +257,14 @@ bool fb_window_create(fb_window_t* win)
         rvvm_error("Could not open a connection to the X server");
         return false;
     }
-    
+
     win->data = safe_calloc(sizeof(win_data_t), 1);
     win->data->display = dsp;
     win->fb.format = x11_get_rgb_format(dsp);
-    
+
     XDisplayKeycodes(dsp, &win->data->min_keycode, &win->data->max_keycode);
     x11_update_keymap(win);
-    
+
     XSetWindowAttributes attributes = {
         .event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
     };
@@ -281,6 +280,8 @@ bool fb_window_create(fb_window_t* win)
     };
     XSetWMNormalHints(dsp, win->data->window, &hints);
     XStoreName(dsp, win->data->window, "RVVM");
+    win->data->del_win = XInternAtom(dsp, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(dsp, win->data->window, &win->data->del_win, 1);
     XMapWindow(dsp, win->data->window);
 
     win->data->gc = XCreateGC(dsp, win->data->window, 0, NULL);
@@ -329,10 +330,7 @@ void fb_window_update(fb_window_t* win)
                 win->data->window,
                 win->data->gc,
                 win->data->ximage,
-                0, /* src_x */
-                0, /* src_y */
-                0, /* dst_x */
-                0, /* dst_y */
+                0, 0, 0, 0, // src, dst x & y
                 win->data->ximage->width,
                 win->data->ximage->height,
                 False /* send_event */);
@@ -343,14 +341,10 @@ void fb_window_update(fb_window_t* win)
                 win->data->window,
                 win->data->gc,
                 win->data->ximage,
-                0, /* src_x */
-                0, /* src_y */
-                0, /* dst_x */
-                0, /* dst_y */
+                0, 0, 0, 0, // src, dst x & y
                 win->data->ximage->width,
                 win->data->ximage->height);
     }
-
     XSync(dsp, False);
 
     for (int pending = XPending(dsp); pending != 0; --pending) {
@@ -403,6 +397,12 @@ void fb_window_update(fb_window_t* win)
                     win->data->min_keycode = ev.xmapping.first_keycode;
                     win->data->max_keycode = ev.xmapping.first_keycode + ev.xmapping.count - 1;
                     x11_update_keymap(win);
+                }
+                break;
+            case ClientMessage:
+                if (((Atom)ev.xclient.data.l[0]) == win->data->del_win) {
+                    // Power down the machine that owns this window
+                    rvvm_reset_machine(win->machine, false);
                 }
                 break;
         }
