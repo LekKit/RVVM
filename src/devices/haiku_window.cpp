@@ -162,7 +162,7 @@ public:
     void MessageReceived(BMessage *msg) override;
 
     BBitmap *GetBitmap() {return fBitmap.Get();}
-    fb_window_t* GetData() {return fData();}
+    fb_window_t* GetData() {return fData;}
 };
 
 class Window: public BWindow {
