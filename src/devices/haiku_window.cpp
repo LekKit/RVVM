@@ -296,7 +296,8 @@ bool fb_window_create(fb_window_t* win)
     win->data->wnd = new Window(BRect(0, 0, win->fb.width - 1, win->fb.height - 1), "RVVM", win);
     win->fb.format = RGB_FMT_A8R8G8B8;
     win->fb.buffer = win->data->wnd->GetView()->GetBitmap()->Bits();
-    
+
+    win->data->wnd->CenterOnScreen();
     win->data->wnd->Show();
     return true;
 }
