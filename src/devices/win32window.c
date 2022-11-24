@@ -29,18 +29,7 @@ struct win_data {
     HWND hwnd;
 };
 
-static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    if (uMsg == WM_CLOSE) {
-        DestroyWindow(hwnd);
-        exit(0);
-    }
-    return DefWindowProc(hwnd, uMsg, wParam, lParam);
-}
-
 static ATOM winclass_atom = 0;
-static uint32_t winborder_x;
-static uint32_t winborder_y;
 
 static const hid_key_t win32_key_to_hid_byte_map[] = {
     [0x41] = HID_KEY_A,
@@ -157,6 +146,15 @@ static hid_key_t win32_key_to_hid(uint32_t win32_key)
     return HID_KEY_NONE;
 }
 
+static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    if (uMsg == WM_CLOSE) {
+        rvvm_reset_machine(((fb_window_t*)GetWindowLongPtrW(hwnd, GWLP_USERDATA))->machine, false);
+        return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
 bool fb_window_create(fb_window_t* win)
 {
     if (winclass_atom == 0) {
@@ -170,28 +168,9 @@ bool fb_window_create(fb_window_t* win)
             MessageBoxW(NULL, L"Failed to register window class!", L"RVVM Error", MB_OK | MB_ICONERROR);
             return false;
         }
-
-        HWND tmp_window = CreateWindowW(
-            L"RVVM_window", L"tmp",
-            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-            CW_USEDEFAULT, CW_USEDEFAULT, 128, 128,
-            NULL, NULL, GetModuleHandle(NULL), NULL);
-        if (tmp_window) {
-            // Workaround to calculate client rectangle size
-            RECT rect;
-            GetClientRect(tmp_window, &rect);
-            if ((rect.right - rect.left) <= 128 && (rect.bottom - rect.top) <= 128) {
-                winborder_x = 128 - (rect.right - rect.left);
-                winborder_y = 128 - (rect.bottom - rect.top);
-            } else rvvm_warn("Invalid win32 client rectangle!");
-            DestroyWindow(tmp_window);
-        } else {
-            rvvm_error("CreateWindowW() failed");
-            return false;
-        }
     }
     
-    win->data = safe_calloc(sizeof(win_data_t), 1);
+    win->data = safe_new_obj(win_data_t);
     win->fb.format = RGB_FMT_A8R8G8B8;
     win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
     
@@ -209,12 +188,17 @@ void fb_window_close(fb_window_t* win)
 void fb_window_update(fb_window_t* win)
 {
     if (win->data->hwnd == NULL) {
-        win->data->hwnd = CreateWindowW(
-            L"RVVM_window", L"RVVM",
+        RECT rect = {
+            .right = win->fb.width,
+            .bottom = win->fb.height,
+        };
+        AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, false, 0);
+        win->data->hwnd = CreateWindowW(L"RVVM_window", L"RVVM",
             WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, win->fb.width + winborder_x, win->fb.height + winborder_y,
+            CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
             NULL, NULL, GetModuleHandle(NULL), NULL);
         if (win->data->hwnd == NULL) return;
+        SetWindowLongPtrW(win->data->hwnd, GWLP_USERDATA, (size_t)win);
     }
 
     InvalidateRect(win->data->hwnd, NULL, 1);
@@ -234,7 +218,7 @@ void fb_window_update(fb_window_t* win)
                 }
                 break;
             case WM_KEYUP:
-            case WM_SYSKEYUP: // For handling F10
+            case WM_SYSKEYUP:
                 if ((Msg.lParam & KF_REPEAT) == 0) {
                     hid_keyboard_release(win->keyboard, win32_key_to_hid(Msg.wParam));
                 }
