@@ -241,7 +241,7 @@ void View::MessageReceived(BMessage *msg)
 }
 
 Window::Window(BRect frame, const char* title, fb_window_t* data):
-    BWindow(frame, title, B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL, B_NOT_MINIMIZABLE | B_NOT_RESIZABLE)
+    BWindow(frame, title, B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL, B_NOT_ZOOMABLE | B_NOT_RESIZABLE)
 {
     fView = new View(frame.OffsetToCopy(B_ORIGIN), "view", B_FOLLOW_ALL, 0, data);
     AddChild(fView);
