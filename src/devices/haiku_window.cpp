@@ -162,6 +162,7 @@ public:
     void MessageReceived(BMessage *msg) override;
 
     BBitmap *GetBitmap() {return fBitmap.Get();}
+    fb_window_t* GetData() {return fData();}
 };
 
 class Window: public BWindow {
@@ -253,9 +254,8 @@ Window::~Window()
 
 bool Window::QuitRequested()
 {
-    //be_app_messenger.SendMessage(B_QUIT_REQUESTED);
-    exit(0);
-    return BWindow::QuitRequested();
+    rvvm_reset_machine(fView->GetData()->machine, false);
+    return false;
 }
 
 static thread_id sAppThread = B_ERROR;
