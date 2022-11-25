@@ -114,13 +114,14 @@ static inline bool pci_bar_is_io(const rvvm_mmio_dev_t* bar)
 static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, uint8_t size)
 {
     pci_bus_t* bus = (pci_bus_t*)mmio_dev->data;
+    uint8_t bus_id = offset >> bus->bus_shift;
     uint8_t dev_id = bit_cut(offset, bus->bus_shift - 5, 5);
     uint8_t fun_id = bit_cut(offset, bus->bus_shift - 8, 3);
     uint8_t reg = bit_cut(offset, 0, bus->bus_shift - 8);
-    //rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus->bus_id, dev_id, fun_id, reg, size);
+    //rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus_id, dev_id, fun_id, reg, size);
 
     struct pci_device* dev = bus->dev[dev_id];
-    if (dev == NULL) {
+    if (bus_id != bus->bus_id || dev == NULL) {
         // Nonexistent devices have vendor ID 0xFFFF
         memset(dest, 0xFF, size);
         return true;
@@ -185,14 +186,15 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
 static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, uint8_t size)
 {
     pci_bus_t* bus = (pci_bus_t*)mmio_dev->data;
+    uint8_t bus_id = offset >> bus->bus_shift;
     uint8_t dev_id = bit_cut(offset, bus->bus_shift - 5, 5);
     uint8_t fun_id = bit_cut(offset, bus->bus_shift - 8, 3);
     uint8_t reg = bit_cut(offset, 0, bus->bus_shift - 8);
     UNUSED(size);
-    //rvvm_info("PCI write %x:%x.%x reg 0x%x size %d", bus->bus_id, dev_id, fun_id, reg, size);
+    //rvvm_info("PCI write %x:%x.%x reg 0x%x size %d", bus_id, dev_id, fun_id, reg, size);
 
     struct pci_device* dev = bus->dev[dev_id];
-    if (dev == NULL) {
+    if (bus_id != bus->bus_id || dev == NULL) {
         return true;
     }
     struct pci_func* func = &dev->func[fun_id];
@@ -330,7 +332,7 @@ PUBLIC pci_bus_t* pci_bus_init_auto(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     bool ecam = true;
-    size_t bus_count = 1; // TODO: Support more than 1 bus
+    size_t bus_count = 256; // TODO: Support more than 1 working bus
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, PCI_BASE_DEFAULT_MMIO, bus_count << (ecam ? 20 : 16));
     return pci_bus_init(machine, plic, 0, ecam,
                         addr, bus_count,
