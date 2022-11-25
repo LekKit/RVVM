@@ -272,13 +272,13 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
     pci_bus_add_device(bus, &bridge_desc);
 #ifdef USE_FDT
     struct fdt_node* pci_node = fdt_node_create_reg("pci", base_addr);
-    const char *compatible = ecam ? "pci-host-ecam-generic" : "pci-host-cam-generic";
-    fdt_node_add_prop_str(pci_node, "compatible", compatible);
-    fdt_node_add_prop_str(pci_node, "device_type", "pci");
-    fdt_node_add_prop(pci_node, "dma-coherent", NULL, 0);
     fdt_node_add_prop_u32(pci_node, "#address-cells", 3);
     fdt_node_add_prop_u32(pci_node, "#size-cells", 2);
     fdt_node_add_prop_u32(pci_node, "#interrupt-cells", 1);
+    fdt_node_add_prop_str(pci_node, "device_type", "pci");
+    const char *compatible = ecam ? "pci-host-ecam-generic" : "pci-host-cam-generic";
+    fdt_node_add_prop_str(pci_node, "compatible", compatible);
+    fdt_node_add_prop(pci_node, "dma-coherent", NULL, 0);
 
     #define FDT_ADDR(addr) (((uint64_t)(addr)) >> 32), ((addr) & ~(uint32_t)0)
 
@@ -372,7 +372,7 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
         func->rev = desc->func[fun_id].rev;
         func->irq_pin = desc->func[fun_id].irq_pin;
         func->command = PCI_CMD_DEFAULT;
-        func->irq_line = bus->irq[pci_func_irq_pin_id(func)];
+        if (func->irq_pin) func->irq_line = bus->irq[pci_func_irq_pin_id(func)];
         spin_init(&func->lock);
 
         for (size_t bar_id = 0; bar_id < PCI_FUNC_BARS; ++bar_id) {
