@@ -118,12 +118,13 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
     uint8_t dev_id = bit_cut(offset, bus->bus_shift - 5, 5);
     uint8_t fun_id = bit_cut(offset, bus->bus_shift - 8, 3);
     uint8_t reg = bit_cut(offset, 0, bus->bus_shift - 8);
+    UNUSED(size);
     //rvvm_info("PCI read %x:%x.%x reg 0x%x size %d", bus_id, dev_id, fun_id, reg, size);
 
     struct pci_device* dev = bus->dev[dev_id];
     if (bus_id != bus->bus_id || dev == NULL) {
         // Nonexistent devices have vendor ID 0xFFFF
-        memset(dest, 0xFF, size);
+        write_uint32_le(dest, 0xFFFFFFFF);
         return true;
     }
     struct pci_func* func = &dev->func[fun_id];
@@ -141,14 +142,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
             write_uint32_le(dest, func->class_code << 16| (uint32_t)func->prog_if << 8 | func->rev);
             break;
         case PCI_REG_BIST_HDR_LATENCY_CACHE:
-            for (size_t i = 1; i < PCI_DEV_FUNCS; ++i) {
-                for (size_t j = 0; j < PCI_FUNC_BARS; ++j) {
-                    if (dev->func[i].bar_handle[j] != RVVM_INVALID_MMIO) {
-                        write_uint32_le(dest, (1 << 23) | 16);
-                        break;
-                    }
-                }
-            }
+            // Set (1 << 16) for PCI-PCI bridges (func->class_code == 0x0604)
             write_uint32_le(dest, 16);
             break;
         case PCI_REG_IRQ_PIN_LINE:
@@ -160,13 +154,13 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
         case PCI_REG_BAR3:
         case PCI_REG_BAR4:
         case PCI_REG_BAR5: {
-            uint8_t bar_num = (reg - 0x10) >> 2;
+            uint8_t bar_num = (reg - PCI_REG_BAR0) >> 2;
             rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
             if (bar && bar->size) {
                 write_uint32_le(dest, (uint32_t)bar->addr | (pci_bar_is_io(bar) ? 1 : 0));
-                break;
+            } else {
+                write_uint32_le(dest, 0);
             }
-            memset(dest, 0, size);
             break;
         }
         case PCI_REG_SSID_SVID:
@@ -175,7 +169,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
         case PCI_REG_CAP_PTR: /* currently no capabilities supported */
         case PCI_REG_EXPANSION_ROM: /* not needed for now */
         default:
-            memset(dest, 0x0, size);
+            write_uint32_le(dest, 0);
             break;
     }
 
@@ -211,7 +205,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, 
         case PCI_REG_BAR3:
         case PCI_REG_BAR4:
         case PCI_REG_BAR5: {
-            uint8_t bar_num = (reg - 0x10) >> 2;
+            uint8_t bar_num = (reg - PCI_REG_BAR0) >> 2;
             rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
             if (bar && bar->size) {
                 uint32_t addr = read_uint32_le(dest) & ~(uint32_t)15;
