@@ -1,6 +1,7 @@
 /*
-tap.c - TUN/TAP network device for Linux
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+tap_linux.c - Linux TUN/TAP Networking
+Copyright (C) 2021  LekKit <github.com/LekKit>
+                    cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,245 +17,139 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifdef USE_NET
-
-#include "riscv.h"
-#include "tap.h"
-#include "hashmap.h"
-#include "networking.h"
+#include "tap_api.h"
+#include "threading.h"
 #include "utils.h"
 
 #include <string.h>
-
+#include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <sys/poll.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <linux/if_tun.h>
-#include <poll.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
-struct tap_dev_linux {
-    int _fd;
-    int _sockfd; /* For stuff like setting the interface up */
-    char _ifname[IFNAMSIZ];
-    /* used to wake up the poll thread for tx operation */
-    int _wakefds[2];
+struct tap_dev {
+    tap_net_dev_t   net;
+    thread_handle_t thread;
+    int             fd;
+    int             shut[2];
+    char            name[IFNAMSIZ];
 };
 
-bool tap_linux_is_up(struct tap_dev *dev)
+static void* tap_thread(void* arg)
 {
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    struct ifreq ifr = { };
-    strncpy(ifr.ifr_name, td->_ifname, sizeof(ifr.ifr_name));
-    int err = ioctl(td->_sockfd, SIOCGIFFLAGS, &ifr);
-    if (err < 0) {
-        return false;
+    tap_dev_t* tap = (tap_dev_t*)arg;
+    uint8_t buffer[TAP_FRAME_SIZE];
+    int ret = 0;
+    struct pollfd pfds[2] = {
+        {
+            .fd = tap->fd,
+            .events = POLLIN,
+        },
+        {
+            .fd = tap->shut[0],
+            .events = POLLIN | POLLHUP,
+        }
+    };
+    while (true) {
+        // Poll events
+        poll(pfds, 2, -1);
+        // Check for shutdown notification
+        if (pfds[1].revents) break;
+        // We received a packet
+        if (pfds[0].revents & POLLIN) {
+            ret = read(tap->fd, buffer, sizeof(buffer));
+            if (ret > 0) {
+                tap->net.feed_rx(tap->net.net_dev, buffer, ret);
+            }
+        }
     }
-
-    return !!(ifr.ifr_flags & IFF_UP);
+    return arg;
 }
 
-bool tap_linux_set_up(struct tap_dev *dev, bool up)
+tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
 {
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    struct ifreq ifr;
-    strncpy(ifr.ifr_name, td->_ifname, sizeof(ifr.ifr_name));
-    int err = ioctl(td->_sockfd, SIOCGIFFLAGS, &ifr);
-    if (err < 0) {
-        return false;
+    tap_dev_t* tap = safe_calloc(sizeof(tap_dev_t), 1);
+    tap->net = *net_dev;
+    // Open TUN
+    tap->fd = open("/dev/net/tun", O_RDWR);
+    if (tap->fd < 0) {
+        rvvm_error("Failed to open /dev/net/tun: %s", strerror(errno));
+        free(tap);
+        return NULL;
+    }
+    // Assign ifname, set TAP mode
+    struct ifreq ifr = {0};
+    strncpy(ifr.ifr_name, "tap0", sizeof(ifr.ifr_name));
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+    if (ioctl(tap->fd, TUNSETIFF, &ifr) < 0) {
+        rvvm_error("ioctl(TUNSETIFF) failed: %s", strerror(errno));
+        close(tap->fd);
+        free(tap);
+        return NULL;
+    }
+    // TAP may be assigned a different name
+    strncpy(tap->name, ifr.ifr_name, sizeof(tap->name));
+    
+    // Create shutdown pipe
+    if (pipe(tap->shut) < 0) {
+        rvvm_error("pipe() failed: %s", strerror(errno));
+        close(tap->fd);
+        free(tap);
+        return NULL;
     }
 
-    if (up) {
-        ifr.ifr_flags |= IFF_UP;
-    } else {
-        ifr.ifr_flags &= ~IFF_UP;
-    }
-
-    return ioctl(td->_sockfd, SIOCSIFFLAGS, &ifr) >= 0;
+    // Set the interface up
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    ioctl(sock, SIOCGIFFLAGS, &ifr);
+    ifr.ifr_flags |= IFF_UP;    
+    ioctl(sock, SIOCSIFFLAGS, &ifr);
+    close(sock);
+    
+    // Run TAP thread
+    tap->thread = thread_create(tap_thread, tap);
+    
+    return tap;
 }
 
-bool tap_linux_get_mac(struct tap_dev *dev, uint8_t mac[6])
+bool tap_send(tap_dev_t* tap, const void* data, size_t size)
 {
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    struct ifreq ifr;
-    strncpy(ifr.ifr_name, td->_ifname, sizeof(ifr.ifr_name));
-    int err = ioctl(td->_fd, SIOCGIFHWADDR, &ifr);
-    if (err < 0) {
-        return false;
-    }
+    return write(tap->fd, data, size) >= 0;
+}
 
+bool tap_get_mac(tap_dev_t* tap, uint8_t mac[6])
+{
+    struct ifreq ifr = {0};
+    strncpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
+    if (ioctl(tap->fd, SIOCGIFHWADDR, &ifr) < 0) return false;
     if (ifr.ifr_hwaddr.sa_family != ARPHRD_ETHER) {
         return false;
     }
-
     memcpy(mac, ifr.ifr_hwaddr.sa_data, 6);
     return true;
 }
 
-bool tap_linux_set_mac(struct tap_dev *dev, const uint8_t mac[6])
+bool tap_set_mac(tap_dev_t* tap, const uint8_t mac[6])
 {
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    struct ifreq ifr;
-    strncpy(ifr.ifr_name, td->_ifname, sizeof(ifr.ifr_name));
+    struct ifreq ifr = {0};
+    strncpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
     ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
     memcpy(ifr.ifr_hwaddr.sa_data, mac, 6);
-    return ioctl(td->_fd, SIOCSIFHWADDR, &ifr) >= 0;
+    return ioctl(tap->fd, SIOCSIFHWADDR, &ifr) >= 0;
 }
 
-ptrdiff_t tap_linux_send(struct tap_dev *dev, const void *buf, size_t len)
+void tap_close(tap_dev_t* tap)
 {
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    return write(td->_fd, buf, len);
+    // Shut down the TAP thread
+    close(tap->shut[1]);
+    thread_join(tap->thread);
+    
+    // Cleanup
+    close(tap->fd);
+    close(tap->shut[0]);
+    free(tap);
 }
-
-ptrdiff_t tap_linux_recv(struct tap_dev *dev, void *buf, size_t len)
-{
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    return read(td->_fd, buf, len);
-}
-
-void tap_linux_wake(struct tap_dev *dev)
-{
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    char x = '\0';
-    write(td->_wakefds[1], &x, 1);
-}
-
-bool tap_linux_open(const char* dev, struct tap_dev *td)
-{
-    struct tap_dev_linux *ret = (struct tap_dev_linux*) malloc(sizeof(struct tap_dev_linux));
-    if (ret == NULL) {
-        return false;
-    }
-
-    td->data = ret;
-
-    if (dev == NULL) {
-        strncpy(ret->_ifname, "tap0", IFNAMSIZ);
-    } else {
-        strncpy(ret->_ifname, dev, IFNAMSIZ);
-    }
-
-    int err;
-    ret->_fd = open("/dev/net/tun", O_RDWR);
-    if (ret->_fd < 0) {
-        rvvm_error("/dev/net/tun open error\n");
-        err = ret->_fd;
-        goto err;
-    }
-
-    struct ifreq ifr = { };
-    strncpy(ifr.ifr_name, dev ? dev : "tap0", IFNAMSIZ);
-    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
-    err = ioctl(ret->_fd, TUNSETIFF, &ifr);
-    if (err < 0) {
-        rvvm_error("ioctl(TUNSETIFF) error %d\n", err);
-        goto err_close;
-    }
-
-    /* fd now describes the virtual interface */
-
-    /* Note: the device name may be different after the call above */
-    strncpy(ret->_ifname, ifr.ifr_name, sizeof(ret->_ifname));
-
-    /* Get the socket */
-    ret->_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (ret->_sockfd < 0) {
-        goto err_close;
-    }
-
-    if (pipe(ret->_wakefds) < 0)
-    {
-        rvvm_error("pipe failed\n");
-        goto err_close;
-    }
-
-    /* Up the interface. Ignore errors since this is a privilleged operation */
-    tap_linux_set_up(td, true);
-    return true;
-err_close:
-    close(ret->_fd);
-err:
-    free(ret);
-    return false;
-}
-
-void tap_linux_close(struct tap_dev *dev)
-{
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    tap_linux_set_up(dev, false);
-    close(td->_wakefds[0]);
-    close(td->_wakefds[1]);
-    close(td->_sockfd);
-    free(td);
-}
-
-static enum tap_poll_result tap_linux_poll(struct tap_dev *dev, enum tap_poll_result req, int timeout)
-{
-    struct tap_dev_linux *td = (struct tap_dev_linux*) dev->data;
-    struct pollfd tapfd[2] = {
-        {
-            .fd = td->_fd,
-        },
-        {
-            .fd = td->_wakefds[0],
-            .events = POLLIN,
-        }
-    };
-
-    if (req & TAPPOLL_IN) {
-        tapfd[0].events |= POLLIN;
-    }
-
-    if (req & TAPPOLL_OUT) {
-        tapfd[0].events |= POLLOUT;
-    }
-
-    int pollret = poll(tapfd, 2, timeout);
-    if (pollret < 0) {
-        printf("poll error %d\n", pollret);
-        return TAPPOLL_ERR;
-    }
-
-    int ret = 0;
-    if (tapfd[0].revents & POLLIN) {
-        ret |= TAPPOLL_IN;
-    }
-
-    if (tapfd[0].revents & POLLOUT) {
-        ret |= TAPPOLL_OUT;
-    }
-
-    if (tapfd[1].revents & POLLIN) {
-        /* Clear the kernel FIFO */
-        char x;
-        read(tapfd[1].fd, &x, 1);
-
-        /* Actually we want to send something. Do not care if we'll block */
-        ret |= TAPPOLL_OUT;
-    }
-
-    if (ret == 0) {
-        /* timeout, possibly */
-        return pollret == 0 ? 0 : TAPPOLL_ERR;
-    }
-
-    return ret;
-}
-
-struct tap_ops tap_linux_ops = {
-    .tap_open = tap_linux_open,
-    .tap_wake = tap_linux_wake,
-    .tap_poll = tap_linux_poll,
-    .tap_send = tap_linux_send,
-    .tap_recv = tap_linux_recv,
-    .tap_is_up = tap_linux_is_up,
-    .tap_set_up = tap_linux_set_up,
-    .tap_get_mac = tap_linux_get_mac,
-    .tap_set_mac = tap_linux_set_mac,
-    .tap_close = tap_linux_close,
-};
-#endif
