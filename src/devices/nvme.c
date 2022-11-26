@@ -314,7 +314,7 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             uint16_t q_size = read_uint16_le(cmd->ptr + 42);
             if (q_id <= ADMIN_COMQ || q_id >= NVME_MAXQ) {
                 nvme_complete_cmd(nvme, cmd, SC_BAD_QI);
-            } else if (q_size == 0 || nvme->queues[q_id].size) {
+            } else if (q_size == 0) {
                 nvme_complete_cmd(nvme, cmd, SC_BAD_QS);
             } else {
                 spin_lock(&nvme->queues[q_id].lock);
@@ -570,7 +570,7 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
 PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev)
 {
     static uint16_t cntlid = 0;
-    nvme_dev_t* nvme = safe_calloc(sizeof(nvme_dev_t), 1);
+    nvme_dev_t* nvme = safe_new_obj(nvme_dev_t);
     nvme->blk = blk_dev;
     nvme->cntlid = cntlid++;
 
