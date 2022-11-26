@@ -220,7 +220,7 @@ static int rvvm_main(int argc, const char** argv)
     if (gui) fb_window_init_auto(machine, fb_x, fb_y);
     
 #ifdef USE_NET
-    ethoc_init_auto(machine, plic);
+    ethoc_init_auto(machine);
 #endif
     
     // Post-creation setup
