@@ -365,9 +365,22 @@ net_sock_t* net_tcp_connect(const net_addr_t* dst, const net_addr_t* src, bool b
     if (fd == NET_HANDLE_INVALID) return NULL;
     // Bind to local address if needed
     if (src) {
-        net_addr_t local = *src;
-        local.port = 0;
-        if (!net_bind_handle(fd, &local)) {
+#if defined(SOL_SOCKET) && defined(IP_BIND_ADDRESS_NO_PORT)
+        if (src->port == 0) {
+            // Prevent bind errors due to ephemeral port exhaustion
+            // Kernel now knows we won't listen() and allows local 2-tuple reuse
+            int noport = 1;
+            setsockopt(fd, SOL_SOCKET, IP_BIND_ADDRESS_NO_PORT, (const void*)&noport, sizeof(noport));
+        }
+#endif
+#if defined(SOL_SOCKET) && defined(SO_REUSEADDR)
+        if (src->port) {
+            // Allow connecting to different destinations from a single local port
+            int reuse = 1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&reuse, sizeof(reuse));
+        }
+#endif
+        if (!net_bind_handle(fd, src)) {
             net_close_handle(fd);
             return NULL;
         }
