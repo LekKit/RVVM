@@ -1,5 +1,5 @@
 /*
-networking.c - Network sockets, listeners, multiplexing
+networking.c - Network sockets (IPv4/IPv6), Event polling
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -16,178 +16,877 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "networking.h"
-#include "utils.h"
-#include <string.h>
-
 #ifdef _WIN32
 
+// Override maximum amount of sockets for select()
 #define FD_SETSIZE 1024
-
 #include <winsock2.h>
-typedef SOCKET nethandle_t;
-typedef int netaddrlen_t;
+#include <ws2tcpip.h> // For IPv6
+
+typedef SOCKET net_handle_t;
+typedef int net_addrlen_t;
 #define NET_HANDLE_INVALID INVALID_SOCKET
 
+// Experimental WSAEventSelect implementation for net_poll
+// Basically emulates epoll() on Win32. Needs testing!
+//#define WSA_NET_IMPL
+
+#else
+
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+
+typedef int net_handle_t;
+typedef socklen_t net_addrlen_t;
+#define NET_HANDLE_INVALID -1
+
+#ifdef __linux__
+// Use Linux epoll() for net_poll
+#include <sys/epoll.h>
+#define EPOLL_NET_IMPL
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) \
+   || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) \
+   || (defined(__APPLE__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1060)
+// Use BSD kqueue() for net_poll
+#include <sys/event.h>
+#define KQUEUE_NET_IMPL
+#endif
+
+#endif
+
+#if !(defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL) || defined(WSA_NET_IMPL))
+// Use select() for net_poll
+// Scales poorly, but it's a fairly portable fallback.
+// Thread safety & other epoll-like features are well emulated.
+#define SELECT_NET_IMPL
+#endif
+
+#ifdef AF_INET6
+// Compile IPv6 support on systems where it's actually exposed
+#define IPV6_NET_IMPL
+#endif
+
+#include "networking.h"
+#include "utils.h"
+#include "mem_ops.h"
+#include "vector.h"
+#include "hashmap.h"
+#include "threading.h"
+#include "spinlock.h"
+
+#if defined(SELECT_NET_IMPL)
+typedef struct {
+    net_sock_t* sock;
+    void*       data;
+    uint32_t    flags;
+} net_monitor_t;
+#endif
+
+#if defined(WSA_NET_IMPL)
+typedef struct {
+    net_poll_t* poll;
+    void*       data;
+    uint32_t    flags;
+} net_watch_t;
+#endif
+
+struct net_sock {
+    net_handle_t fd;
+    net_addr_t   addr;
+#if defined(WSA_NET_IMPL)
+    HANDLE event;
+    HANDLE wait;
+    vector_t(net_watch_t) watchers;
+#elif defined(SELECT_NET_IMPL)
+    vector_t(net_poll_t*) watchers;
+#endif
+};
+
+struct net_poll {
+#if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
+    net_handle_t fd;
+#elif defined(WSA_NET_IMPL)
+    spinlock_t lock;
+    hashmap_t  events;
+    cond_var_t cond;
+#else
+    spinlock_t lock;
+    vector_t(net_monitor_t) events;
+    fd_set r_set,   w_set;
+    fd_set r_ready, w_ready;
+    int    max_fd;
+    size_t consumed;
+#endif
+};
+
+const net_addr_t net_ipv4_any_addr   = { .type = NET_TYPE_IPV4, };
+const net_addr_t net_ipv4_local_addr = { .type = NET_TYPE_IPV4, .ip[0] = 127, .ip[3] = 1, };
+const net_addr_t net_ipv6_any_addr   = { .type = NET_TYPE_IPV6, };
+const net_addr_t net_ipv6_local_addr = { .type = NET_TYPE_IPV6, .ip[15] = 1, };
+
+// Address types conversion (net_addr_t <-> sockaddr_in/sockaddr_in6)
+static void net_sockaddr_from_addr(struct sockaddr_in* sock_addr, const net_addr_t* addr)
+{
+    memset(sock_addr, 0, sizeof(struct sockaddr_in));
+    sock_addr->sin_family = AF_INET;
+    if (addr) {
+        write_uint16_be_m(&sock_addr->sin_port, addr->port);
+        memcpy(&sock_addr->sin_addr.s_addr, addr->ip, 4);
+    }
+}
+
+static void net_addr_from_sockaddr(net_addr_t* addr, const struct sockaddr_in* sock_addr)
+{
+    memset(addr, 0, sizeof(net_addr_t));
+    addr->type = NET_TYPE_IPV4;
+    addr->port = read_uint16_be_m(&sock_addr->sin_port);
+    memcpy(addr->ip, &sock_addr->sin_addr.s_addr, 4);
+}
+
+#if defined(IPV6_NET_IMPL)
+static void net_sockaddr6_from_addr(struct sockaddr_in6* sock_addr, const net_addr_t* addr)
+{
+    memset(sock_addr, 0, sizeof(struct sockaddr_in6));
+    sock_addr->sin6_family = AF_INET6;
+    write_uint16_be_m(&sock_addr->sin6_port, addr->port);
+    memcpy(&sock_addr->sin6_addr.s6_addr, addr->ip, 16);
+}
+
+static void net_addr_from_sockaddr6(net_addr_t* addr, const struct sockaddr_in6* sock_addr)
+{
+    memset(addr, 0, sizeof(net_addr_t));
+    addr->type = NET_TYPE_IPV6;
+    addr->port = read_uint16_be_m(&sock_addr->sin6_port);
+    memcpy(addr->ip, &sock_addr->sin6_addr.s6_addr, 16);
+}
+#endif
+
+// Initialize networking automatically
 static void net_init()
 {
-    static bool wsa_init = false;
-    if (!wsa_init) {
-        wsa_init = true;
+    static bool init = false;
+    if (!init) {
+        init = true;
+#ifdef _WIN32
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
         if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
             rvvm_warn("Failed to initialize WinSock");
         }
+#elif defined(SIGPIPE)
+        // Ignore SIGPIPE (Do not crash on writes to closed socket)
+        void (*handler)(int);
+        handler = signal(SIGPIPE, SIG_IGN);
+        if (handler != SIG_DFL) signal(SIGPIPE, handler);
+#endif
     }
 }
 
-#else
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <unistd.h>
-typedef int nethandle_t;
-typedef socklen_t netaddrlen_t;
-#define NET_HANDLE_INVALID -1
-
-static inline void net_init() {}
-
+// Wrappers for generic operations on socket handles
+static net_handle_t net_create_handle(int type, const net_addr_t* addr)
+{
+    net_handle_t fd = NET_HANDLE_INVALID;
+    net_init();
+    if (addr == NULL || addr->type == NET_TYPE_IPV4) {
+        fd = socket(AF_INET, type, 0);
+#if defined(IPV6_NET_IMPL)
+    } else if (addr->type == NET_TYPE_IPV6) {
+        fd = socket(AF_INET6, type, 0);
 #endif
+    }
+#if defined(IPPROTO_TCP) && defined(TCP_NODELAY)
+    if (type == SOCK_STREAM && fd != NET_HANDLE_INVALID) {
+        // Disable transmit buffering to improve latency
+        int nodelay = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void*)&nodelay, sizeof(nodelay));
+    }
+#endif
+    return fd;
+}
 
-struct net_selector {
-    fd_set sockets;
-    fd_set ready;
-    int max_handle;
-    int count;
-};
+static void net_close_handle(net_handle_t fd)
+{
+#ifdef _WIN32
+    closesocket(fd);
+#else
+    close(fd);
+#endif
+}
 
-netsocket_t net_create_udp()
+static bool net_handle_set_blocking(net_handle_t fd, bool block)
+{
+#ifdef _WIN32
+    u_long blocking = block ? 0 : 1;
+    return ioctlsocket(fd, FIONBIO, &blocking) == 0;
+#elif defined(O_NONBLOCK)
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) return false;
+    flags = block ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
+    return fcntl(fd, F_SETFL, flags) == 0;
+#else
+    UNUSED(fd);
+    if (!block) rvvm_warn("Non-blocking sockets are not supported on this OS");
+    return false;
+#endif
+}
+
+static bool net_bind_handle(net_handle_t fd, const net_addr_t* addr)
+{
+    if (addr == NULL || addr->type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr;
+        net_sockaddr_from_addr(&sock_addr, addr);
+        return bind(fd, (struct sockaddr*)&sock_addr, sizeof(sock_addr)) == 0;
+#if defined(IPV6_NET_IMPL)
+    } else if (addr->type == NET_TYPE_IPV6) {
+#if defined(SOL_IPV6) && defined(IPV6_V6ONLY)
+        // Disable dual-stack explicitly (may be configurable in future)
+        int v6only = 1;
+        setsockopt(fd, SOL_IPV6, IPV6_V6ONLY, (const void*)&v6only, sizeof(v6only));
+#endif
+        struct sockaddr_in6 sock_addr;
+        net_sockaddr6_from_addr(&sock_addr, addr);
+        return bind(fd, (struct sockaddr*)&sock_addr, sizeof(sock_addr)) == 0;
+#endif
+    }
+    return false;
+}
+
+static bool net_conn_initiated()
+{
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    return errno == EINPROGRESS;
+#endif
+}
+
+static bool net_connect_handle(net_handle_t fd, const net_addr_t* addr)
+{
+    if (addr == NULL || addr->type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr;
+        net_sockaddr_from_addr(&sock_addr, addr);
+        return connect(fd, (struct sockaddr*)&sock_addr, sizeof(sock_addr)) == 0
+            || net_conn_initiated();
+#if defined(IPV6_NET_IMPL)
+    } else if (addr->type == NET_TYPE_IPV6) {
+        struct sockaddr_in6 sock_addr;
+        net_sockaddr6_from_addr(&sock_addr, addr);
+        return connect(fd, (struct sockaddr*)&sock_addr, sizeof(sock_addr)) == 0
+            || net_conn_initiated();
+#endif
+    }
+    return false;
+}
+
+// Wrap native handles in net_sock_t
+static net_sock_t* net_wrap_handle(net_handle_t fd)
+{
+    if (fd == NET_HANDLE_INVALID) return NULL;
+    net_sock_t* sock = safe_calloc(sizeof(net_sock_t), 1);
+    sock->fd = fd;
+    return sock;
+}
+
+// Wrap assigned local address after net_bind_handle()
+static net_sock_t* net_init_localaddr(net_sock_t* sock, const net_addr_t* addr)
+{
+    if (sock) {
+        if (addr == NULL || addr->type == NET_TYPE_IPV4) {
+            struct sockaddr_in sock_addr;
+            net_addrlen_t addr_len = sizeof(struct sockaddr_in);
+            // Win32 getsockname may not set sin_family/sin_addr...
+            net_sockaddr_from_addr(&sock_addr, addr);
+            getsockname(sock->fd, (struct sockaddr*)&sock_addr, &addr_len);
+            net_addr_from_sockaddr(&sock->addr, &sock_addr);
+#if defined(IPV6_NET_IMPL)
+        } else if (addr->type == NET_TYPE_IPV6) {
+            struct sockaddr_in6 sock_addr;
+            net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
+            net_sockaddr6_from_addr(&sock_addr, addr);
+            getsockname(sock->fd, (struct sockaddr*)&sock_addr, &addr_len);
+            net_addr_from_sockaddr6(&sock->addr, &sock_addr);
+#endif
+        }
+    }
+    return sock;
+}
+
+// Public socket API
+
+net_sock_t* net_tcp_listen(const net_addr_t* addr)
+{
+    net_handle_t fd = net_create_handle(SOCK_STREAM, addr);
+    if (fd == NET_HANDLE_INVALID) return NULL;
+#if defined(SOL_SOCKET) && defined(SO_REUSEADDR)
+    // Prevent bind errors due to TIME_WAIT
+    int reuse = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&reuse, sizeof(reuse));
+#endif
+    if (!net_bind_handle(fd, addr) || listen(fd, SOMAXCONN)) {
+        net_close_handle(fd);
+        return NULL;
+    }
+
+    return net_init_localaddr(net_wrap_handle(fd), addr);
+}
+
+net_sock_t* net_tcp_accept(net_sock_t* listener)
+{
+    if (listener == NULL) return NULL;
+    net_handle_t fd = NET_HANDLE_INVALID;
+    net_addr_t addr = {0};
+    if (listener->addr.type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in);
+        fd = accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len);
+        net_addr_from_sockaddr(&addr, &sock_addr);
+#if defined(IPV6_NET_IMPL)
+    } else if (listener->addr.type == NET_TYPE_IPV6) {
+        struct sockaddr_in6 sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
+        fd = accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len);
+        net_addr_from_sockaddr6(&addr, &sock_addr);
+#endif
+    }
+    net_sock_t* sock = net_wrap_handle(fd);
+    if (sock) sock->addr = addr;
+    return sock;
+}
+
+net_sock_t* net_tcp_connect(const net_addr_t* dst, const net_addr_t* src, bool block)
+{
+    if (dst == NULL) return NULL;
+    net_handle_t fd = net_create_handle(SOCK_STREAM, dst);
+    if (fd == NET_HANDLE_INVALID) return NULL;
+    // Bind to local address if needed
+    if (src) {
+        net_addr_t local = *src;
+        local.port = 0;
+        if (!net_bind_handle(fd, &local)) {
+            net_close_handle(fd);
+            return NULL;
+        }
+    }
+    // Make a non-blocking connect possible
+    if (!block) net_handle_set_blocking(fd, false);
+    
+    if (!net_connect_handle(fd, dst)) {
+        net_close_handle(fd);
+        return NULL;
+    }
+
+    net_sock_t* sock = net_wrap_handle(fd);
+    if (sock) sock->addr = *dst;
+
+    return sock;
+}
+
+bool net_tcp_sockpair(net_sock_t* pair[2])
+{
+    net_sock_t* listener = net_tcp_listen(NET_IPV4_LOCAL);
+    pair[0] = net_tcp_connect(net_sock_addr(listener), NULL, false);
+    pair[1] = net_tcp_accept(listener);
+    net_sock_close(listener);
+    if (!net_tcp_status(pair[0]) || !net_tcp_status(pair[1])) {
+        net_sock_close(pair[0]);
+        net_sock_close(pair[1]);
+        return false;
+    }
+    return true;
+}
+
+bool net_tcp_status(net_sock_t* sock)
+{
+    if (sock == NULL) return false;
+    if (sock->addr.type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in);
+        return getpeername(sock->fd, (struct sockaddr*)&sock_addr, &addr_len) == 0;
+#if defined(IPV6_NET_IMPL)
+    } else if (sock->addr.type == NET_TYPE_IPV6) {
+        struct sockaddr_in6 sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
+        return getpeername(sock->fd, (struct sockaddr*)&sock_addr, &addr_len) == 0;
+#endif
+    }
+    return false;
+}
+
+bool net_tcp_shutdown(net_sock_t* sock)
+{
+    return sock && shutdown(sock->fd, 1) == 0;
+}
+
+size_t net_tcp_send(net_sock_t* sock, const void* buffer, size_t size)
+{
+    int ret = sock ? send(sock->fd, buffer, size, 0) : 0;
+    return ret > 0 ? ret : 0;
+}
+
+size_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size)
+{
+    int ret = sock ? recv(sock->fd, buffer, size, 0) : 0;
+    return ret > 0 ? ret : 0;
+}
+
+net_sock_t* net_udp_bind(const net_addr_t* addr)
+{
+    net_handle_t fd = net_create_handle(SOCK_DGRAM, addr);
+    if (fd == NET_HANDLE_INVALID) return NULL;
+
+    if (!net_bind_handle(fd, addr)) {
+        net_close_handle(fd);
+        return NULL;
+    }
+
+    return net_init_localaddr(net_wrap_handle(fd), addr);
+}
+
+size_t net_udp_send(net_sock_t* sock, const void* buffer, size_t size, const net_addr_t* addr)
+{
+    int ret = 0;
+    if (sock == NULL) return 0;
+    if (sock->addr.type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr;
+        net_sockaddr_from_addr(&sock_addr, addr);
+        ret = sendto(sock->fd, buffer, size, 0, (struct sockaddr*)&sock_addr, sizeof(sock_addr));
+#if defined(IPV6_NET_IMPL)
+    } else if (sock->addr.type == NET_TYPE_IPV6) {
+        struct sockaddr_in6 sock_addr;
+        net_sockaddr6_from_addr(&sock_addr, addr);
+        ret = sendto(sock->fd, buffer, size, 0, (struct sockaddr*)&sock_addr, sizeof(sock_addr));
+#endif
+    }
+    return ret > 0 ? ret : 0;
+}
+
+size_t net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* addr)
+{
+    int ret = 0;
+    if (sock == NULL) return 0;
+    if (sock->addr.type == NET_TYPE_IPV4) {
+        struct sockaddr_in sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in);
+        ret = recvfrom(sock->fd, buffer, size, 0, (struct sockaddr*)&sock_addr, &addr_len);
+        net_addr_from_sockaddr(addr, &sock_addr);
+#if defined(IPV6_NET_IMPL)
+    } else if (sock->addr.type == NET_TYPE_IPV6) {
+        struct sockaddr_in6 sock_addr = {0};
+        net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
+        ret = recvfrom(sock->fd, buffer, size, 0, (struct sockaddr*)&sock_addr, &addr_len);
+        net_addr_from_sockaddr6(addr, &sock_addr);
+#endif
+    }
+    return ret > 0 ? ret : 0;
+}
+
+// Generic socket operations
+
+const net_addr_t* net_sock_addr(net_sock_t* sock)
+{
+    return sock ? &sock->addr : NET_IPV4_ANY;
+}
+
+uint16_t net_sock_port(net_sock_t* sock)
+{
+    return sock ? sock->addr.port : 0;
+}
+
+bool net_sock_set_blocking(net_sock_t* sock, bool block)
+{
+    return sock && net_handle_set_blocking(sock->fd, block);
+}
+
+void net_sock_close(net_sock_t* sock)
+{
+    if (sock == NULL) return;
+#if defined(SELECT_NET_IMPL)
+    vector_foreach_back(sock->watchers, i) {
+        net_poll_remove(vector_at(sock->watchers, i), sock);
+    }
+    vector_free(sock->watchers);
+#endif
+    net_close_handle(sock->fd);
+#if defined(WSA_NET_IMPL)
+    if (sock->event != NULL && sock->event != WSA_INVALID_EVENT) {
+        UnregisterWaitEx(sock->wait, WSA_INVALID_EVENT);
+        WSACloseEvent(sock->event);
+        vector_foreach_back(sock->watchers, i) {
+            net_poll_remove(vector_at(sock->watchers, i).poll, sock);
+        }
+        vector_free(sock->watchers);
+    }
+#endif
+    free(sock);
+}
+
+// Event polling
+
+net_poll_t* net_poll_create()
 {
     net_init();
-    nethandle_t sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock != NET_HANDLE_INVALID) {
-        return (netsocket_t)sock;
-    } else {
-        return NET_SOCK_INVALID;
+    net_poll_t* poll = calloc(sizeof(net_poll_t), 1);
+    if (poll == NULL) return NULL;
+#if defined(EPOLL_NET_IMPL)
+    poll->fd = epoll_create(16);
+    if (poll->fd < 0) {
+        free(poll);
+        return NULL;
+    }
+#elif defined(KQUEUE_NET_IMPL)
+    poll->fd = kqueue();
+    if (poll->fd < 0) {
+        free(poll);
+        return NULL;
+    }
+#elif defined(WSA_NET_IMPL)
+    hashmap_init(&poll->events, 16);
+    poll->cond = condvar_create();
+#else
+    vector_init(poll->events);
+    FD_ZERO(&poll->r_set);
+    FD_ZERO(&poll->w_set);
+    poll->max_fd = 1;
+#endif
+    return poll;
+}
+
+#if defined(WSA_NET_IMPL)
+static void CALLBACK wsa_callback(void* param, BOOLEAN timeout)
+{
+    if (timeout) return;
+    net_sock_t* sock = (net_sock_t*)param;
+
+    WSANETWORKEVENTS ev;
+    if (WSAEnumNetworkEvents(sock->fd, sock->event, &ev) == 0) {
+        vector_foreach(sock->watchers, i) {
+            net_watch_t* watch = &vector_at(sock->watchers, i);
+            net_poll_t* poll = watch->poll;
+            uint32_t flags = watch->flags & ev.lNetworkEvents;
+            if (flags) {
+                spin_lock(&poll->lock);
+                size_t tmp = hashmap_get(&poll->events, (size_t)watch->data);
+                hashmap_put(&poll->events, (size_t)watch->data, tmp | flags);
+                spin_unlock(&poll->lock);
+                condvar_wake(poll->cond);
+            }
+        }
     }
 }
-
-netselector_t net_create_selector()
-{
-    net_init();
-    struct net_selector* selector = safe_calloc(sizeof(struct net_selector), 1);
-    FD_ZERO(&selector->sockets);
-    FD_ZERO(&selector->ready);
-    selector->max_handle = 1;
-    selector->count = 0;
-    return selector;
-}
-
-void net_close(netsocket_t sock)
-{
-#ifdef _WIN32
-    closesocket((nethandle_t)sock);
-#else
-    close((nethandle_t)sock);
 #endif
-}
 
-void net_close_selector(netselector_t selector)
+bool net_poll_add(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
 {
-    free(selector);
-}
-
-static void create_sockaddr_in(struct sockaddr_in* addr, uint32_t ip, uint16_t port)
-{
-    memset(addr, 0, sizeof(struct sockaddr_in));
-    addr->sin_addr.s_addr = htonl(ip);
-    addr->sin_family = AF_INET;
-    addr->sin_port = htons(port);
-#if defined(__APPLE__)
-    addr->sin_len = sizeof(struct sockaddr_in);
-#endif
-}
-
-bool net_udp_bind(netsocket_t sock, uint16_t port, bool local)
-{
-    struct sockaddr_in addr;
-    create_sockaddr_in(&addr, local ? NET_IP_LOCAL : NET_IP_ANY, port);
-    return bind((nethandle_t)sock, (struct sockaddr*)&addr, sizeof(addr)) == 0;
-}
-
-uint16_t net_udp_port(netsocket_t sock)
-{
-    struct sockaddr_in addr;
-    netaddrlen_t addr_len = sizeof(struct sockaddr_in);
-    if (getsockname((nethandle_t)sock, (struct sockaddr*)&addr, &addr_len)) addr.sin_port = 0;
-    return ntohs(addr.sin_port);
-}
-
-size_t net_udp_send(netsocket_t sock, const void* buffer, size_t size, uint32_t ip, uint16_t port)
-{
-    struct sockaddr_in addr;
-    create_sockaddr_in(&addr, ip, port);
-    int ret = sendto((nethandle_t)sock, buffer, size, 0, (struct sockaddr*)&addr, sizeof(addr));
-    return ret > 0 ? ret : 0;
-}
-
-size_t net_udp_recv(netsocket_t sock, void* buffer, size_t size, uint32_t* ip, uint16_t* port)
-{
-    struct sockaddr_in addr;
-    netaddrlen_t addr_len = sizeof(struct sockaddr_in);
-    int ret = recvfrom((nethandle_t)sock, buffer, size, 0, (struct sockaddr*)&addr, &addr_len);
-    *ip = ntohl(addr.sin_addr.s_addr);
-    *port = ntohs(addr.sin_port);
-    return ret > 0 ? ret : 0;
-}
-
-void net_selector_add(netselector_t selector, netsocket_t sock)
-{
-    struct net_selector* sl = (struct net_selector*)selector;
-    nethandle_t handle = (nethandle_t)sock;
-    if (handle == NET_HANDLE_INVALID) return;
-#ifdef _WIN32
-    if (sl->count >= FD_SETSIZE)
+    if (poll == NULL || sock == NULL) return false;
+    bool poll_wr = !!(event->flags & NET_POLL_SEND);
+#if defined(EPOLL_NET_IMPL)
+    struct epoll_event ev = {
+        .events = EPOLLIN | (poll_wr ? EPOLLOUT : 0),
+        .data.ptr = event->data,
+    };
+    return epoll_ctl(poll->fd, EPOLL_CTL_ADD, sock->fd, &ev) == 0;
+#elif defined(KQUEUE_NET_IMPL)
+    struct kevent ev[2];
+    EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
+    EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+#elif defined(WSA_NET_IMPL)
+    net_watch_t watch = {
+        .poll = poll,
+        .data = event->data,
+        .flags = FD_READ | FD_ACCEPT | FD_CLOSE | (poll_wr ? (FD_WRITE | FD_CONNECT) : 0),
+    };
+    if (sock->event == NULL || sock->event == WSA_INVALID_EVENT) {
+        sock->event = WSACreateEvent();
+        // We cannot attach multiple events to socket, thus it's slightly inefficient
+        WSAEventSelect(sock->fd, sock->event, FD_READ | FD_ACCEPT | FD_CLOSE | FD_WRITE | FD_CONNECT);
+        RegisterWaitForSingleObject(&sock->wait, sock->event, wsa_callback, sock, INFINITE, 0);
+    }
+    vector_foreach(sock->watchers, i) {
+        if (vector_at(sock->watchers, i).poll == poll) return false;
+    }
+    vector_push_back(sock->watchers, watch);
+    return true;
 #else
-    if (handle >= FD_SETSIZE)
+    net_monitor_t monitor = {
+        .sock = sock,
+        .data = event->data,
+        .flags = event->flags | NET_POLL_RECV,
+    };
+    spin_lock(&poll->lock);
+    if (FD_ISSET(sock->fd, &poll->r_set) || FD_ISSET(sock->fd, &poll->w_set)) {
+        // Socket already monitored
+        spin_unlock(&poll->lock);
+        return false;
+    }
+#ifdef _WIN32
+    if (vector_size(poll->events) >= FD_SETSIZE)
+#else
+    if (sock->fd >= FD_SETSIZE)
 #endif
     {
-        rvvm_warn("select(): ignoring sockets above FD_SETSIZE");
-        return;
+        rvvm_warn("select(): ignoring sockets above FD_SETSIZE (%d)", (uint32_t)FD_SETSIZE);
+        spin_unlock(&poll->lock);
+        return false;
     }
-    if (FD_ISSET(handle, &sl->sockets)) return;
 #ifndef _WIN32
-    if (sl->max_handle < handle) sl->max_handle = handle;
+    if (poll->max_fd < sock->fd) poll->max_fd = sock->fd;
 #endif
-    FD_SET(handle, &sl->sockets);
-    sl->count++;
-}
-
-void net_selector_remove(netselector_t selector, netsocket_t sock)
-{
-    struct net_selector* sl = (struct net_selector*)selector;
-    nethandle_t handle = (nethandle_t)sock;
-    if (handle == NET_HANDLE_INVALID) return;
-#ifndef _WIN32
-    if (handle >= FD_SETSIZE) return;
+    // Monitor for requested events
+    FD_SET(sock->fd, &poll->r_set);
+    if (poll_wr) FD_SET(sock->fd, &poll->w_set);
+    vector_push_back(poll->events, monitor);
+    // Link the socket to the watcher to remove() it on close()
+    vector_push_back(sock->watchers, poll);
+    spin_unlock(&poll->lock);
+    return true;
 #endif
-    if (!FD_ISSET(handle, &sl->sockets)) return;
-    FD_CLR(handle, &sl->sockets);
-    FD_CLR(handle, &sl->ready); // do not trigger selector_ready
-    sl->count--;
 }
 
-bool net_selector_ready(netselector_t selector, netsocket_t sock)
+bool net_poll_mod(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
 {
-    struct net_selector* sl = (struct net_selector*)selector;
-    nethandle_t handle = (nethandle_t)sock;
-    return FD_ISSET(handle, &sl->ready);
+    if (poll == NULL || sock == NULL) return false;
+    bool poll_wr = !!(event->flags & NET_POLL_SEND);
+#if defined(EPOLL_NET_IMPL)
+    struct epoll_event ev = {
+        .events = EPOLLIN | (poll_wr ? EPOLLOUT : 0),
+        .data.ptr = event->data,
+    };
+    return epoll_ctl(poll->fd, EPOLL_CTL_MOD, sock->fd, &ev) == 0;
+#elif defined(KQUEUE_NET_IMPL)
+    struct kevent ev[2];
+    EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
+    EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+#elif defined(WSA_NET_IMPL)
+    vector_foreach(sock->watchers, i) {
+        net_watch_t* watch = &vector_at(sock->watchers, i);
+        if (watch->poll == poll) {
+            watch->data = event->data;
+            watch->flags = FD_READ | FD_ACCEPT | FD_CLOSE
+             | (poll_wr ? (FD_WRITE | FD_CONNECT) : 0);
+            return true;
+        }
+    }
+    return false;
+#else
+    spin_lock(&poll->lock);
+    vector_foreach(poll->events, i) {
+        net_monitor_t* monitor = &vector_at(poll->events, i);
+        if (monitor->sock == sock) {
+            monitor->data = event->data;
+            monitor->flags = NET_POLL_RECV | (poll_wr ? NET_POLL_SEND : 0);
+            spin_unlock(&poll->lock);
+            return true;
+        }
+    }
+    spin_unlock(&poll->lock);
+    return false;
+#endif
 }
 
-bool net_selector_wait(netselector_t selector)
+bool net_poll_remove(net_poll_t* poll, net_sock_t* sock)
 {
-    struct net_selector* sl = (struct net_selector*)selector;
-    sl->ready = sl->sockets;
-    return select(sl->max_handle + 1, &sl->ready, NULL, NULL, NULL) > 0;
+    if (poll == NULL || sock == NULL) return false;
+#if defined(EPOLL_NET_IMPL)
+    struct epoll_event ev = {0};
+    return epoll_ctl(poll->fd, EPOLL_CTL_DEL, sock->fd, &ev) == 0;
+#elif defined(KQUEUE_NET_IMPL)
+    struct kevent ev[2];
+    EV_SET(&ev[0], sock->fd, EVFILT_READ,  EV_DELETE, 0, 0, NULL);
+    EV_SET(&ev[1], sock->fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+#elif defined(WSA_NET_IMPL)
+    vector_foreach(sock->watchers, i) {
+        net_watch_t* watch = &vector_at(sock->watchers, i);
+        if (watch->poll == poll) {
+            spin_lock(&watch->poll->lock);
+            hashmap_remove(&watch->poll->events, (size_t)watch->data);
+            spin_unlock(&watch->poll->lock);
+            vector_erase(sock->watchers, i);
+            return true;
+        }
+    }
+    return false;
+#else
+    spin_lock(&poll->lock);
+    vector_foreach(poll->events, i) {
+        if (vector_at(poll->events, i).sock == sock) {
+            vector_erase(poll->events, i);
+            FD_CLR(sock->fd, &poll->r_set);
+            FD_CLR(sock->fd, &poll->w_set);
+            // Invalidate buffered events
+            poll->consumed = 0;
+            // Unlink watcher from the socket
+            vector_foreach(sock->watchers, j) {
+                if (vector_at(sock->watchers, j) == poll) {
+                    vector_erase(sock->watchers, j);
+                    spin_unlock(&poll->lock);
+                    return true;
+                }
+            }
+            rvvm_warn("Corrupted socket watcher list!");
+            break;
+        }
+    }
+    spin_unlock(&poll->lock);
+    return false;
+#endif
+}
+
+#define NET_POLL_MAX_EVENTS 64
+
+size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_t wait_ms)
+{
+    if (poll == NULL || size == 0) return 0;
+#if defined(EPOLL_NET_IMPL)
+    struct epoll_event ev[NET_POLL_MAX_EVENTS];
+    if (size > NET_POLL_MAX_EVENTS) size = NET_POLL_MAX_EVENTS;
+    int ret = epoll_wait(poll->fd, ev, size, wait_ms);
+    if (ret < 0) ret = 0;
+    for (int i=0; i<ret; ++i) {
+        events[i].data = ev[i].data.ptr;
+        events[i].flags = ((ev[i].events & ~EPOLLOUT) ? NET_POLL_RECV : 0)
+                        | ((ev[i].events & EPOLLOUT) ? NET_POLL_SEND : 0);
+    }
+#elif defined(KQUEUE_NET_IMPL)
+    struct kevent ev[NET_POLL_MAX_EVENTS];
+    struct timespec ts = {
+        .tv_sec = wait_ms / 1000,
+        .tv_nsec = (wait_ms % 1000) * 1000000,
+    };
+    struct timespec* wait = (wait_ms == NET_POLL_INF) ? NULL : &ts;
+    if (size > NET_POLL_MAX_EVENTS) size = NET_POLL_MAX_EVENTS;
+    int ret = kevent(poll->fd, NULL, 0, ev, size, wait);
+    if (ret < 0) ret = 0;
+    for (int i=0; i<ret; ++i) {
+        events[i].data = ev[i].udata;
+        events[i].flags = ((ev[i].filter == EVFILT_READ) ? NET_POLL_RECV : 0)
+                        | ((ev[i].filter == EVFILT_WRITE) ? NET_POLL_SEND : 0);
+    }
+#elif defined(WSA_NET_IMPL)
+    size_t ret = 0;
+    do {
+        // Try consuming existing events
+        spin_lock(&poll->lock);
+        hashmap_foreach(&poll->events, k, v) {
+            events[ret].data = (void*)k;
+            events[ret].flags = v;
+            if (++ret >= size) break;
+        }
+        if (ret) {
+            // Clear consumed event flags
+            for (size_t i=0; i<ret; ++i) {
+                uint32_t flags = events[i].flags;
+                if (flags & (FD_READ | FD_ACCEPT)) {
+                    flags &= ~(FD_READ | FD_ACCEPT);
+                    events[i].flags = NET_POLL_RECV;
+                } else if (flags & (FD_WRITE | FD_CONNECT)) {
+                    flags &= ~(FD_WRITE | FD_CONNECT);
+                    events[i].flags = NET_POLL_SEND;
+                } else if (flags & FD_CLOSE) {
+                    flags = FD_CLOSE;
+                    events[i].flags = NET_POLL_RECV;
+                } else {
+                    rvvm_warn("Unknown watch flags %x in net_poll_wait()!", flags);
+                    flags = 0;
+                    events[i].flags = 0;
+                }
+                if (flags) {
+                    hashmap_put(&poll->events, (size_t)events[i].data, flags);
+                } else {
+                    hashmap_remove(&poll->events, (size_t)events[i].data);
+                }
+            }
+        }
+        spin_unlock(&poll->lock);
+        // If no events are available, wait for a condvar signal
+        if (ret == 0 && wait_ms) {
+            if (!condvar_wait(poll->cond, wait_ms)) {
+                wait_ms = 0;
+            }
+        } else break;
+    } while (ret == 0);
+#else
+    spin_lock(&poll->lock);
+    size_t ret = 0;
+    size_t consumed = poll->consumed;
+    int    nfds = poll->max_fd + 1;
+    if (consumed == 0) {
+        // No available buffered events to consume
+        struct timeval tv = {0};
+        bool timeout = false;
+        do {
+            // Wait for small intervals, allowing to modify polled events
+            tv.tv_sec = 0;
+            tv.tv_usec = (wait_ms < 10) ? wait_ms : 10;
+            wait_ms -= tv.tv_usec;
+            tv.tv_usec *= 1000;
+            
+            poll->r_ready = poll->r_set;
+            poll->w_ready = poll->w_set;
+            spin_unlock(&poll->lock);
+            timeout = select(nfds, &poll->r_ready, &poll->w_ready, NULL, &tv) <= 0;
+            spin_lock(&poll->lock);
+        } while (wait_ms && timeout);
+        if (timeout) {
+            // Timeout or error
+            spin_unlock(&poll->lock);
+            return 0;
+        }
+    }
+    // Loop over buffered socket state
+    for (size_t i=consumed; i<vector_size(poll->events); ++i) {
+        net_monitor_t* monitor = &vector_at(poll->events, i);
+        uint32_t flags = 0;
+        if (monitor->flags & NET_POLL_RECV) {
+            if (FD_ISSET(monitor->sock->fd, &poll->r_ready)) flags |= NET_POLL_RECV;
+        }
+        if (monitor->flags & NET_POLL_SEND) {
+            if (FD_ISSET(monitor->sock->fd, &poll->w_ready)) flags |= NET_POLL_SEND;
+        }
+        if (flags) {
+            events[ret].data = monitor->data;
+            events[ret].flags = flags;
+            if (++ret >= size) {
+                // We filled caller event buffer
+                poll->consumed = i;
+                break;
+            }
+        }
+    }
+    // All events consumed, call select() next time
+    poll->consumed = 0;
+    spin_unlock(&poll->lock);
+#endif
+    return ret;
+}
+
+void net_poll_close(net_poll_t* poll)
+{
+    if (poll == NULL) return;
+#if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
+    net_close_handle(poll->fd);
+#elif defined(WSA_NET_IMPL)
+    hashmap_destroy(&poll->events);
+    condvar_free(poll->cond);
+#else
+    // Unlink watcher from related sockets
+    vector_foreach(poll->events, i) {
+        net_sock_t* sock = vector_at(poll->events, i).sock;
+        vector_foreach(sock->watchers, j) {
+            if (vector_at(sock->watchers, j) == poll) {
+                vector_erase(sock->watchers, j);
+                break;
+            }
+        }
+    }
+    vector_free(poll->events);
+#endif
+    free(poll);
 }
