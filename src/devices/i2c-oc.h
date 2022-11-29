@@ -26,14 +26,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef struct i2c_bus i2c_bus_t;
 
 typedef struct {
+    // I2C bus address
     uint16_t addr;
+    // Device-specific data
     void*    data;
+    
+    // Start transaction, return device availability
+    bool (*start)(void* dev, bool is_write);
     // Return false on NACK or no data to read
     bool (*write)(void* dev, uint8_t byte);
     bool (*read)(void* dev, uint8_t* byte);
-    //void (*start)(); // Not needed since r/w implicitly starts a transaction?
-    void (*stop)();    // Stop the current transaction
-    void (*remove)();  // Device cleanup
+    // Stop the current transaction
+    void (*stop)(void* dev);
+    // Device cleanup
+    void (*remove)(void* dev);
 } i2c_dev_t;
 
 PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
