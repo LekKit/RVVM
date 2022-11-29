@@ -628,15 +628,20 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
-    rvvm_mmio_dev_t* dev;
-    if (atomic_load_uint32(&machine->running)) return RVVM_INVALID_MMIO;
-    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
-        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
+    rvvm_mmio_dev_t tmp = *mmio;
+    if (atomic_load_uint32(&machine->running)) {
+        rvvm_warn("Cannot attach MMIO device \"%s\" to running machine", mmio->type ? mmio->type->name : "null");
+        rvvm_cleanup_mmio(&tmp);
         return RVVM_INVALID_MMIO;
     }
-    vector_push_back(machine->mmio, *mmio);
+    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
+        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
+        rvvm_cleanup_mmio(&tmp);
+        return RVVM_INVALID_MMIO;
+    }
+    vector_push_back(machine->mmio, tmp);
     rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
-    dev = &vector_at(machine->mmio, ret);
+    rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, ret);
     dev->machine = machine;
     rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"", dev->addr, dev->type ? dev->type->name : "null");
     return ret;
