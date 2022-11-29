@@ -1,5 +1,5 @@
 /*
-i2c_oc.c - OpenCores I2C Controller
+i2c-oc.c - OpenCores I2C Controller
 Copyright (C) 2022  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -140,9 +140,13 @@ static bool i2c_oc_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
             }
             if ((cmd & I2C_OC_CR_WR)) {
                 if (bus->sel_addr == 0xFFFF) {
-                    // Get device address
+                    // Get device address, signal start of transaction
                     bus->sel_addr = bus->tx_byte >> 1;
-                    if (i2c_oc_get_dev(bus, bus->sel_addr)) bus->status &= ~I2C_OC_SR_ACK;
+                    i2c_dev_t* i2c_dev = i2c_oc_get_dev(bus, bus->sel_addr);
+                    bool is_write = !(bus->tx_byte & 1);
+                    if (i2c_dev && (!i2c_dev->start || i2c_dev->start(i2c_dev, is_write))) {
+                        bus->status &= ~I2C_OC_SR_ACK;
+                    }
                 } else {
                     // Write byte
                     i2c_dev_t* i2c_dev = i2c_oc_get_dev(bus, bus->sel_addr);
