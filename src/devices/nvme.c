@@ -60,6 +60,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define IDENT_CTRL 0x1   // Identify Controller
 #define IDENT_NSLS 0x2   // Identify Namespace List
 #define IDENT_NIDS 0x3   // Identify Namespace Descriptors
+#define FEAT_NQES  0x7   // Number of Queues feature
 
 // NVM Command Set
 #define NVM_FLUSH  0x0
@@ -152,7 +153,7 @@ static rvvm_mmio_type_t nvme_type = {
     .remove = nvme_remove,
 };
 
-static void nvme_complete_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd, uint16_t sf)
+static void nvme_complete_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd, uint32_t sf)
 {
     nvme_queue_t* queue = cmd->queue;
     spin_lock(&queue->lock);
@@ -162,7 +163,7 @@ static void nvme_complete_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd, uint16_t sf)
     atomic_store_uint32(&queue->tail, tail);
     if (ptr) {
         uint8_t phase = (~read_uint16_le(ptr + 14)) & 1;
-        write_uint32_le(ptr, (sf & 0x100) ? sf & 0xFF : 0);  // Command Specific
+        write_uint32_le(ptr,      sf >> 8);                  // Command Specific
         write_uint32_le(ptr + 4,  0);                        // Reserved
         write_uint16_le(ptr + 8,  cmd->sq_head);             // SQ Head Pointer
         write_uint16_le(ptr + 10, cmd->sq_id);               // SQ Identifier
@@ -345,11 +346,17 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
         }
         case A_SET_FEAT:
         case A_GET_FEAT:
+            if (cmd->ptr[40] == FEAT_NQES) {
+                nvme_complete_cmd(nvme, cmd, SC_SUCCESS | (NVME_MAXQ << 8));
+            } else {
+                nvme_complete_cmd(nvme, cmd, SC_BAD_FIL);
+            }
+            break;
         case A_ABORTCMD: // Ignored, all the commands could be already executing
             nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         default:
-            rvvm_info("NVMe unknown admin cmd %02x", cmd->opcode);
+            //rvvm_info("NVMe unknown admin cmd %02x", cmd->opcode);
             nvme_complete_cmd(nvme, cmd, SC_BAD_OP);
             break;
     }
@@ -405,7 +412,7 @@ static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         default:
-            rvvm_info("NVMe unknown IO cmd %02x", cmd->opcode);
+            //rvvm_info("NVMe unknown IO cmd %02x", cmd->opcode);
             nvme_complete_cmd(nvme, cmd, SC_BAD_OP);
             break;
     }
