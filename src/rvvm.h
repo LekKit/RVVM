@@ -1,9 +1,10 @@
- /*
+/*
 rvvm.h - RISC-V Virtual Machine
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
                     KotB <github.com/0xCatPKG>
+                    X547 <github.com/X547>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -274,6 +275,7 @@ struct rvvm_machine_t {
     
     plic_ctx_t* plic;
     pci_bus_t*  pci_bus;
+    i2c_bus_t*  i2c_bus;
 #ifdef USE_FDT
     // FDT nodes for device tree generation
     struct fdt_node* fdt;

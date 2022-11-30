@@ -376,6 +376,16 @@ PUBLIC void rvvm_set_pci_bus(rvvm_machine_t* machine, pci_bus_t* pci_bus)
     if (pci_bus) machine->pci_bus = pci_bus;
 }
 
+PUBLIC i2c_bus_t* rvvm_get_i2c_bus(rvvm_machine_t* machine)
+{
+    return machine->i2c_bus;
+}
+
+PUBLIC void rvvm_set_i2c_bus(rvvm_machine_t* machine, i2c_bus_t* i2c_bus)
+{
+    if (i2c_bus) machine->i2c_bus = i2c_bus;
+}
+
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine)
 {
 #ifdef USE_FDT
