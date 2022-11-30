@@ -4,6 +4,7 @@ Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
                     KotB <github.com/0xCatPKG>
+                    X547 <github.com/X547>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -50,6 +51,7 @@ typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;
 typedef struct pci_bus pci_bus_t;
+typedef struct i2c_bus i2c_bus_t;
 
 struct fdt_node;
 
@@ -116,6 +118,8 @@ PUBLIC plic_ctx_t* rvvm_get_plic(rvvm_machine_t* machine);
 PUBLIC void        rvvm_set_plic(rvvm_machine_t* machine, plic_ctx_t* plic);
 PUBLIC pci_bus_t*  rvvm_get_pci_bus(rvvm_machine_t* machine);
 PUBLIC void        rvvm_set_pci_bus(rvvm_machine_t* machine, pci_bus_t* pci_bus);
+PUBLIC i2c_bus_t*  rvvm_get_i2c_bus(rvvm_machine_t* machine);
+PUBLIC void        rvvm_set_i2c_bus(rvvm_machine_t* machine, i2c_bus_t* i2c_bus);
 
 // Get FDT nodes for FDT generation
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
