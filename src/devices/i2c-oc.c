@@ -30,8 +30,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 struct i2c_bus {
     vector_t(i2c_dev_t) devices;
     plic_ctx_t* plic;
-    uint32_t    irq;
-    spinlock_t  lock;
+    struct fdt_node* fdt_node;
+    uint32_t irq;
+    spinlock_t lock;
     uint16_t sel_addr;
     uint16_t clock;
     uint8_t  control;
@@ -224,7 +225,9 @@ PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
     fdt_node_add_prop_u32(i2c_fdt, "#size-cells", 0);
     fdt_node_add_prop_str(i2c_fdt, "status", "okay");
     fdt_node_add_child(rvvm_get_fdt_soc(machine), i2c_fdt);
+    bus->fdt_node = i2c_fdt;
 #endif
+    rvvm_set_i2c_bus(machine, bus);
     return bus;
 }
 
@@ -235,12 +238,25 @@ PUBLIC i2c_bus_t* i2c_oc_init_auto(rvvm_machine_t* machine)
     return i2c_oc_init(machine, addr, plic, plic_alloc_irq(plic));
 }
 
-PUBLIC bool i2c_attach_dev(i2c_bus_t* bus, const i2c_dev_t* dev_desc)
+PUBLIC uint16_t i2c_attach_dev(i2c_bus_t* bus, const i2c_dev_t* dev_desc)
 {
-    if (i2c_oc_get_dev(bus, dev_desc->addr)) {
-        rvvm_warn("Duplicate I2C device address on a single bus");
-        return false;
+    if (bus == NULL) return 0;
+    i2c_dev_t tmp = *dev_desc;
+    if (dev_desc->addr == I2C_AUTO_ADDR) tmp.addr = 0x8;
+    while (i2c_oc_get_dev(bus, tmp.addr)) {
+        if (dev_desc->addr == I2C_AUTO_ADDR) {
+            tmp.addr++;
+        } else {
+            rvvm_warn("Duplicate I2C device address on a single bus");
+            return 0;
+        }
     }
-    vector_push_back(bus->devices, *dev_desc);
-    return true;
+    vector_push_back(bus->devices, tmp);
+    return tmp.addr;
+}
+
+PUBLIC struct fdt_node* i2c_bus_fdt_node(i2c_bus_t* bus)
+{
+    if (bus == NULL) return NULL;
+    return bus->fdt_node;
 }

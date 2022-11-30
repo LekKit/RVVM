@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define I2C_OC_DEFAULT_MMIO 0x10030000
 
-typedef struct i2c_bus i2c_bus_t;
+#define I2C_AUTO_ADDR 0x0 // Auto-pick I2C device address
 
 typedef struct {
     // I2C bus address
@@ -45,6 +45,10 @@ typedef struct {
 PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
 PUBLIC i2c_bus_t* i2c_oc_init_auto(rvvm_machine_t* machine);
 
-PUBLIC bool       i2c_attach_dev(i2c_bus_t* bus, const i2c_dev_t* dev_desc);
+// Returns assigned device address or zero on error
+PUBLIC uint16_t   i2c_attach_dev(i2c_bus_t* bus, const i2c_dev_t* dev_desc);
+
+// Get I2C controller FDT node for nested device nodes
+PUBLIC struct fdt_node* i2c_bus_fdt_node(i2c_bus_t* bus);
 
 #endif
