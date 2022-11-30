@@ -209,6 +209,7 @@ static int rvvm_main(int argc, const char** argv)
     clint_init_auto(machine);
     plic_init_auto(machine);
     pci_bus_init_auto(machine);
+    i2c_oc_init_auto(machine);
 
     ns16550a_init_auto(machine);
     rtc_goldfish_init_auto(machine);
