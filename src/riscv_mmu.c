@@ -372,9 +372,9 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
-        if (paddr >= dev->addr && paddr < (dev->addr + dev->size)) {
+        if (paddr >= dev->addr && (paddr + size) <= (dev->addr + dev->size)) {
+            // Found the device, access lies in range
             //rvvm_info("Hart %p accessing MMIO at 0x%08x", vm, paddr);
-            // Found the device
             offset = paddr - dev->addr;
             if (access == MMU_WRITE) {
                 rwfunc = dev->write;
