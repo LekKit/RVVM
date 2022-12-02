@@ -390,8 +390,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
                 } else {
                     memcpy(dest, ((vmptr_t)dev->data) + offset, size);
                 }
-                if ((offset >= PAGE_SIZE || riscv_block_aligned(dev->addr, PAGE_SIZE)) &&
-                    (dev->size - offset  >= PAGE_SIZE || riscv_block_aligned(dev->addr + dev->size, PAGE_SIZE))) {
+                if ((paddr & PAGE_PNMASK) >= dev->addr && dev->size - (offset & PAGE_PNMASK) >= PAGE_SIZE) {
                     riscv_tlb_put(vm, vaddr, ((vmptr_t)dev->data) + offset, access);
                 }
                 return true;
