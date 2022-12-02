@@ -31,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/pci-bus.h"
 #include "devices/nvme.h"
 #include "devices/eth-oc.h"
+#include "devices/i2c-oc.h"
 
 #include <stdio.h>
 #include <string.h>
