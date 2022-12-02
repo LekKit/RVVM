@@ -462,6 +462,9 @@ static void nvme_doorbell(nvme_dev_t* nvme, size_t queue_id, uint16_t val)
 {
     nvme_queue_t* queue = &nvme->queues[queue_id];
     
+    // Ignore attempts to overrun queue
+    if (val > queue->size) return;
+    
     if (queue_id & 1) {
         // Update completion queue head
         atomic_store_uint32(&queue->head, val);
