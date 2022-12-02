@@ -145,7 +145,7 @@ static bool i2c_oc_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
                     bus->sel_addr = bus->tx_byte >> 1;
                     i2c_dev_t* i2c_dev = i2c_oc_get_dev(bus, bus->sel_addr);
                     bool is_write = !(bus->tx_byte & 1);
-                    if (i2c_dev && (!i2c_dev->start || i2c_dev->start(i2c_dev, is_write))) {
+                    if (i2c_dev && (!i2c_dev->start || i2c_dev->start(i2c_dev->data, is_write))) {
                         bus->status &= ~I2C_OC_SR_ACK;
                     }
                 } else {
