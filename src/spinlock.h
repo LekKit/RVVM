@@ -1,5 +1,5 @@
 /*
-spinlock.h - Atomic spinlock
+spinlock.h - Hybrid Spinlock
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -19,33 +19,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef SPINLOCK_H
 #define SPINLOCK_H
 
+#include <stddef.h>
 #include "atomics.h"
-
-#define SPINLOCK_DBG_DEF_INFO "[not locked(?)]"
 
 typedef struct {
     uint32_t flag;
 #ifdef USE_SPINLOCK_DEBUG
-    const char* lock_info;
+    const char* location;
 #endif
 } spinlock_t;
 
-NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite);
+// Internal locking operations
+NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location);
 NOINLINE void spin_lock_wake(spinlock_t* lock);
 
-// For static initialization
-#ifdef USE_SPINLOCK_DEBUG
-#define SPINLOCK_INIT {0, SPINLOCK_DBG_DEF_INFO}
-#else
+// Static initialization
 #define SPINLOCK_INIT {0}
-#endif
 
 // Initialize a lock
 static inline void spin_init(spinlock_t* lock)
 {
     lock->flag = 0;
 #ifdef USE_SPINLOCK_DEBUG
-    lock->lock_info = SPINLOCK_DBG_DEF_INFO;
+    lock->location = NULL;
 #endif
 }
 
@@ -57,33 +53,35 @@ static forceinline bool spin_try_lock(spinlock_t* lock)
 
 // Perform locking on small critical section
 // Reports a deadlock upon waiting for too long
-static forceinline void _spin_lock(spinlock_t* lock, const char* info)
+static forceinline void spin_lock_real(spinlock_t* lock, const char* location)
 {
     if (unlikely(!spin_try_lock(lock))) {
-        spin_lock_wait(lock, info, false);
+        spin_lock_wait(lock, location);
     }
 #ifdef USE_SPINLOCK_DEBUG
-    lock->lock_info = info;
+    lock->location = location;
 #endif
 }
 
 // Perform locking around heavy operation, wait indefinitely
-static inline void _spin_lock_slow(spinlock_t* lock, const char* info)
+static forceinline void spin_lock_slow_real(spinlock_t* lock, const char* location)
 {
     if (unlikely(!spin_try_lock(lock))) {
-        spin_lock_wait(lock, info, true);
+        spin_lock_wait(lock, NULL);
     }
 #ifdef USE_SPINLOCK_DEBUG
-    lock->lock_info = info;
+    lock->location = location;
+#else
+    UNUSED(location);
 #endif
 }
 
 #ifdef USE_SPINLOCK_DEBUG
-#define spin_lock(lock) _spin_lock(lock, SOURCE_LINE)
-#define spin_lock_slow(lock) _spin_lock_slow(lock, SOURCE_LINE)
+#define spin_lock(lock) spin_lock_real(lock, SOURCE_LINE)
+#define spin_lock_slow(lock) spin_lock_slow_real(lock, SOURCE_LINE)
 #else
-#define spin_lock(lock) _spin_lock(lock, "[no debug]")
-#define spin_lock_slow(lock) _spin_lock_slow(lock, "[no debug]")
+#define spin_lock(lock) spin_lock_real(lock, "[no debug]")
+#define spin_lock_slow(lock) spin_lock_slow_real(lock, NULL)
 #endif
 
 // Release the lock

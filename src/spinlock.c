@@ -1,5 +1,5 @@
 /*
-spinlock.c - Atomic spinlock
+spinlock.c - Hybrid Spinlock
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -18,18 +18,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "spinlock.h"
 #include "threading.h"
-#include "utils.h"
 #include "rvtimer.h"
+#include "utils.h"
+#include "rvvmlib.h" // For RVVM_VERSION
 
 // Maximum allowed lock time, warns and recovers the lock upon expiration
-#define SPINLOCK_MAX_MS 1000
-#define SPINLOCK_MAX_SLEEP 1
+#define SPINLOCK_MAX_MS 5000
 
 // Attemts to claim the lock before sleep throttle
-#define SPINLOCK_RETRIES 100
+#define SPINLOCK_RETRIES 60
 
-// It might use Linux futex() at some point,
-// but let's just use a condvar for now
 static cond_var_t global_cond;
 static uint32_t global_cond_init = 0;
 
@@ -56,28 +54,45 @@ static void spin_cond_init()
     }
 }
 
-NOINLINE void spin_lock_wait(spinlock_t* lock, const char* info, bool infinite)
+NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
 {
     for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
-        if (spin_try_lock(lock)) return;
+        // Read lock flag until there's any chance to grab it
+        // Improves performance due to cacheline bouncing elimination
+        if (atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE) == 0) {
+            if (spin_try_lock(lock)) return;
+        }
     }
-
+    
     spin_cond_init();
 
     rvtimer_t timer;
     rvtimer_init(&timer, 1000);
     do {
-        if (atomic_swap_uint32(&lock->flag, 2) == 0) {
-            atomic_store_uint32(&lock->flag, 1);
+        uint32_t flag = atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE);
+        if (flag == 0 && spin_try_lock(lock)) {
+            // Succesfully grabbed the lock
             return;
         }
-        condvar_wait(global_cond, SPINLOCK_MAX_SLEEP);
-    } while (infinite || rvtimer_get(&timer) < SPINLOCK_MAX_MS);
+        // Someone else grabbed the lock, indicate that we are still waiting
+        if (flag != 2 && atomic_swap_uint32(&lock->flag, 2) == 0) {
+            // A datarace could result in dangling value 2 without waiters,
+            // but a rare spurious wake is harmless and doesn't affect performance
+            return;
+        }
+        // Wait upon wakeup from lock owner
+        bool woken = condvar_wait(global_cond, 1);
+        if (woken || flag != 2) {
+            // Reset deadlock timer upon noticing any forward progress
+            rvtimer_init(&timer, 1000);
+        }
+    } while (location == NULL || rvtimer_get(&timer) < SPINLOCK_MAX_MS);
 
-    rvvm_warn("Possible deadlock at %s", info);
+    rvvm_warn("Possible deadlock at %s", location);
 #ifdef USE_SPINLOCK_DEBUG
-    rvvm_warn("The lock was previously held at %s", lock->lock_info);
+    rvvm_warn("The lock was previously held at %s", lock->location ? lock->location : "[nowhere?]");
 #endif
+    rvvm_warn("Version: RVVM v"RVVM_VERSION);
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
 }
 
