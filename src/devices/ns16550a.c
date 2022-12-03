@@ -137,7 +137,7 @@ static uint8_t terminal_readchar(void* addr)
     if (t_head == t_tail && _kbhit()) {
         wchar_t w_buff[8];
         DWORD w_chars;
-        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buff, sizeof(w_buff), &w_chars, NULL);
+        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buff, ARRAYSIZE(w_buff), &w_chars, NULL);
         t_head = WideCharToMultiByte(CP_UTF8, 0, w_buff, w_chars, t_buff, sizeof(t_buff), NULL, NULL);
         t_tail = 0;
     }
