@@ -78,7 +78,6 @@ struct hid_mouse {
     hid_btns_t btns;
 };
 
-
 static void hid_mouse_reset(void* dev)
 {
     hid_mouse_t* mouse = (hid_mouse_t*)dev;
@@ -215,7 +214,7 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
     if (mouse->width > 0 && mouse->height > 0) {
         if (x < 0) x = 0;
         else if (x > mouse->width) x = mouse->width;
-        if (y < 0) mouse->y = 0;
+        if (y < 0) y = 0;
         else if (y > mouse->height) y = mouse->height;
         mouse->x = (int32_t)((int64_t)x * 0x7fff / mouse->width);
         mouse->y = (int32_t)((int64_t)y * 0x7fff / mouse->height);
