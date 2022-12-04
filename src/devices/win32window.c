@@ -1,5 +1,5 @@
 /*
-win32window.c - Win32 VM Window
+win32window.c - Win32 RVVM Window
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -152,6 +152,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
         rvvm_reset_machine(((fb_window_t*)GetWindowLongPtrW(hwnd, GWLP_USERDATA))->machine, false);
         return 0;
     }
+    if (uMsg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT) SetCursor(NULL);
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
@@ -161,7 +162,6 @@ bool fb_window_create(fb_window_t* win)
         WNDCLASSW wc = {0};
         wc.lpfnWndProc   = WindowProc;
         wc.hInstance     = GetModuleHandle(NULL);
-        wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
         wc.lpszClassName = L"RVVM_window";
         winclass_atom = RegisterClassW(&wc);
         if (winclass_atom == 0) {
