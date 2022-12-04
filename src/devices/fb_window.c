@@ -122,14 +122,15 @@ bool fb_window_init_auto(rvvm_machine_t* machine, uint32_t width, uint32_t heigh
     window->fb.width = width;
     window->fb.height = height;
     window->fb.format = RGB_FMT_A8R8G8B8;
+    window->machine = machine;
+    window->keyboard = hid_keyboard_init_auto(machine);
+    window->mouse = hid_mouse_init_auto(machine);
+    hid_mouse_resolution(window->mouse, width, height);
     if (!fb_window_create(window)) {
         rvvm_error("Window creation failed");
         free(window);
         return false;
     }
-    window->machine = machine;
-    window->keyboard = hid_keyboard_init_auto(machine);
-    window->mouse = hid_mouse_init_auto(machine);
     
     framebuffer_init_auto(machine, &window->fb);
     
