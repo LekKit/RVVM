@@ -45,6 +45,9 @@ PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns);
 // Mouse wheel scrolling
 PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset);
 
+// Set workspace resolution, must be called before sending any cursor movement
+PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t x, uint32_t y);
+
 // Relative movement
 PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y);
 
