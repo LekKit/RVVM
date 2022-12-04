@@ -57,6 +57,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 struct hid_mouse {
     struct ps2_device ps2_dev;
     hid_btns_t btns; // Pressed buttons bitmask
+    bool res_init;   // Validate hid_mouse_resolution() was called
     // Absolute position
     int32_t x;
     int32_t y;
@@ -284,6 +285,7 @@ PUBLIC hid_mouse_t* hid_mouse_init_auto(rvvm_machine_t* machine)
 
 PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
 {
+    if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
     bool pressed = mouse->btns != (mouse->btns | btns);
     mouse->btns |= btns;
@@ -295,6 +297,7 @@ PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
 
 PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
 {
+    if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
     bool released = mouse->btns != (mouse->btns & ~btns);
     mouse->btns &= ~btns;
@@ -306,6 +309,7 @@ PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
 
 PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset)
 {
+    if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
     mouse->scroll += offset;
     if (mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
@@ -343,8 +347,17 @@ static void ps2_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
     }
 }
 
+PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t x, uint32_t y)
+{
+    if (mouse == NULL) return;
+    spin_lock(mouse->ps2_dev.lock);
+    mouse->res_init = x != 0 && y != 0;
+    spin_unlock(mouse->ps2_dev.lock);
+}
+
 PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
+    if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
     ps2_mouse_move(mouse, x, y);
     spin_unlock(mouse->ps2_dev.lock);
@@ -352,7 +365,9 @@ PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
 
 PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
+    if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
+    if (!mouse->res_init) rvvm_warn("hid_mouse_resolution() was not called!");
     ps2_mouse_move(mouse, x - mouse->x, y - mouse->y);
     spin_unlock(mouse->ps2_dev.lock);
 }
