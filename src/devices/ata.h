@@ -17,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef ATA_H
-#define ATA_H
+#ifndef RVVM_ATA_H
+#define RVVM_ATA_H
 
 #include "rvvmlib.h"
 #include "pci-bus.h"
@@ -27,9 +27,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ATA_DATA_DEFAULT_MMIO 0x40000000
 #define ATA_CTL_DEFAULT_MMIO  0x40001000
 
-PUBLIC void ata_init_pio(rvvm_machine_t* machine, rvvm_addr_t data_base_addr, rvvm_addr_t ctl_base_addr, blkdev_t* master, blkdev_t* slave);
-PUBLIC void ata_init_pci(pci_bus_t* pci_bus, blkdev_t* master, blkdev_t* slave);
+PUBLIC bool ata_init_pio(rvvm_machine_t* machine, rvvm_addr_t data_base_addr, rvvm_addr_t ctl_base_addr, const char* image_path, bool rw);
+PUBLIC bool ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw);
 
-PUBLIC void ata_init_auto(rvvm_machine_t* machine, pci_bus_t* pci_bus, blkdev_t* image);
+PUBLIC bool ata_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw);
 
 #endif
