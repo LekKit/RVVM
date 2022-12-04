@@ -168,7 +168,7 @@ static void i2c_hid_read_report(i2c_hid_t* i2c_hid, uint8_t report_type, uint8_t
     i2c_hid->hid_dev->read_report(i2c_hid->hid_dev->dev, report_type, report_id, offset, val);
     if (offset < 2)
         i2c_hid->report_size = bit_replace(i2c_hid->report_size, offset*8, 8, *val);
-    if (report_type == REPORT_TYPE_INPUT && offset >= 1 && offset == (i2c_hid->report_size > 2 ? i2c_hid->report_size - 1 : 1)) {
+    if (report_type == REPORT_TYPE_INPUT && offset >= 1 && offset == (uint32_t)(i2c_hid->report_size > 2 ? i2c_hid->report_size - 1 : 1)) {
         report_id_queue_remove_at(&i2c_hid->report_id_queue, report_id);
         if (report_id_queue_get(&i2c_hid->report_id_queue) >= 0)
             plic_send_irq(i2c_hid->plic, i2c_hid->irq);
