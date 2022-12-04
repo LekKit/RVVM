@@ -264,7 +264,7 @@ static void ps2_mouse_remove(struct ps2_device *ps2dev)
     free(mice);
 }
 
-PUBLIC hid_mouse_t* hid_mouse_init_auto(rvvm_machine_t* machine)
+PUBLIC hid_mouse_t* hid_mouse_init_auto_ps2(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20000000, ALTPS2_MMIO_SIZE);
@@ -283,7 +283,7 @@ PUBLIC hid_mouse_t* hid_mouse_init_auto(rvvm_machine_t* machine)
     return mice;
 }
 
-PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
+PUBLIC void hid_mouse_press_ps2(hid_mouse_t* mouse, hid_btns_t btns)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
@@ -295,7 +295,7 @@ PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
     spin_unlock(mouse->ps2_dev.lock);
 }
 
-PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
+PUBLIC void hid_mouse_release_ps2(hid_mouse_t* mouse, hid_btns_t btns)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
@@ -307,7 +307,7 @@ PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
     spin_unlock(mouse->ps2_dev.lock);
 }
 
-PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset)
+PUBLIC void hid_mouse_scroll_ps2(hid_mouse_t* mouse, int32_t offset)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
@@ -347,7 +347,7 @@ static void ps2_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
     }
 }
 
-PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t x, uint32_t y)
+PUBLIC void hid_mouse_resolution_ps2(hid_mouse_t* mouse, uint32_t x, uint32_t y)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
@@ -355,7 +355,7 @@ PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t x, uint32_t y)
     spin_unlock(mouse->ps2_dev.lock);
 }
 
-PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
+PUBLIC void hid_mouse_move_ps2(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);
@@ -363,7 +363,7 @@ PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
     spin_unlock(mouse->ps2_dev.lock);
 }
 
-PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
+PUBLIC void hid_mouse_place_ps2(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
     if (mouse == NULL) return;
     spin_lock(mouse->ps2_dev.lock);

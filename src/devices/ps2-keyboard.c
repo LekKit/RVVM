@@ -324,7 +324,7 @@ static void ps2_keyboard_update(struct ps2_device *ps2dev)
     spin_unlock(ps2dev->lock);
 }
 
-PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine)
+PUBLIC hid_keyboard_t* hid_keyboard_init_auto_ps2(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20001000, ALTPS2_MMIO_SIZE);
@@ -472,12 +472,12 @@ static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
     spin_unlock(kb->ps2_dev.lock);
 }
 
-PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key)
+PUBLIC void hid_keyboard_press_ps2(hid_keyboard_t* kb, hid_key_t key)
 {
     ps2_handle_keyboard(kb, key, true);
 }
 
-PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key)
+PUBLIC void hid_keyboard_release_ps2(hid_keyboard_t* kb, hid_key_t key)
 {
     ps2_handle_keyboard(kb, key, false);
 }
