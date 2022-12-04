@@ -1,5 +1,5 @@
 /*
-x11window.c - X11 VM Window, Xlib backend
+x11window.c - X11 RVVM Window, Xlib backend
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -280,8 +280,18 @@ bool fb_window_create(fb_window_t* win)
     };
     XSetWMNormalHints(dsp, win->data->window, &hints);
     XStoreName(dsp, win->data->window, "RVVM");
+    // Handle window close
     win->data->del_win = XInternAtom(dsp, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(dsp, win->data->window, &win->data->del_win, 1);
+    // Hide cursor
+    XColor color = {0};
+    const char pixels[8] = {0};
+    Pixmap pixmap = XCreateBitmapFromData(dsp, win->data->window, pixels, 8, 8);
+    Cursor cursor = XCreatePixmapCursor(dsp, pixmap, pixmap, &color, &color, 0, 0);
+    XDefineCursor(dsp, win->data->window, cursor);
+    XFreeCursor(dsp, cursor);
+    XFreePixmap(dsp, pixmap);
+    // Show window
     XMapWindow(dsp, win->data->window);
 
     win->data->gc = XCreateGC(dsp, win->data->window, 0, NULL);
