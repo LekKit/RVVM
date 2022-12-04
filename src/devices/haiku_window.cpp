@@ -26,6 +26,7 @@ extern "C" {
 #include <Window.h>
 #include <View.h>
 #include <Bitmap.h>
+#include <Cursor.h>
 #include <OS.h>
 #include <private/shared/AutoDeleter.h>
 
@@ -158,6 +159,7 @@ public:
     View(BRect frame, const char* name, uint32 resizingMode, uint32 flags, fb_window_t* data);
     virtual ~View();
 
+    void AttachedToWindow() override;
     void Draw(BRect dirty) override;
     void MessageReceived(BMessage *msg) override;
 
@@ -191,6 +193,12 @@ View::~View()
 {
 }
 
+void View::AttachedToWindow()
+{
+    BCursor cursor(B_CURSOR_ID_NO_CURSOR);
+    SetViewCursor(&cursor);
+}
+
 void View::Draw(BRect dirty)
 {
     UNUSED(dirty);
@@ -221,6 +229,7 @@ void View::MessageReceived(BMessage *msg)
             hid_keyboard_release(fData->keyboard, haiku_key_to_hid(key));
             return;
         case B_MOUSE_DOWN:
+            SetMouseEventMask(B_POINTER_EVENTS);
             msg->FindInt32("buttons", &btns);
             hid_mouse_press(fData->mouse, btns);
             return;
