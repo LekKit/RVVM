@@ -1,5 +1,5 @@
 /*
-sdl_window.c - SDL VM Window
+sdl_window.c - SDL RVVM Window
 Copyright (C) 2022  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -165,6 +165,7 @@ bool fb_window_create(fb_window_t* win)
                         rgb_format_bpp(win->fb.format), SDL_ANYFORMAT);
         if (sdl_surface == NULL) return false;
         SDL_WM_SetCaption("RVVM", NULL);
+        SDL_ShowCursor(SDL_DISABLE);
         win->fb.format = sdl_get_rgb_format(sdl_surface->format);
         if (SDL_MUSTLOCK(sdl_surface)) {
             win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
