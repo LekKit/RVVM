@@ -88,7 +88,8 @@ typedef struct {
     uint8_t command;
     uint8_t report_type;
     uint8_t report_id;
-    uint16_t report_size;
+    uint16_t data_size;
+    uint16_t data_val;
     bool is_reset;
 } i2c_hid_t;
 
@@ -163,12 +164,21 @@ static void i2c_hid_input_available(void* host, uint8_t report_id)
     spin_unlock(&i2c_hid->lock);
 }
 
+static bool i2c_hid_read_data_size(i2c_hid_t* i2c_hid, uint32_t offset, uint8_t val)
+{
+    if (offset < 2)
+        i2c_hid->data_size = bit_replace(i2c_hid->data_size, offset*8, 8, val);
+    if (offset >= 1 && offset >= i2c_hid->data_size)
+        return false;
+    return true;
+}
+
 static void i2c_hid_read_report(i2c_hid_t* i2c_hid, uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t* val)
 {
     i2c_hid->hid_dev->read_report(i2c_hid->hid_dev->dev, report_type, report_id, offset, val);
     if (offset < 2)
-        i2c_hid->report_size = bit_replace(i2c_hid->report_size, offset*8, 8, *val);
-    if (report_type == REPORT_TYPE_INPUT && offset >= 1 && offset == (uint32_t)(i2c_hid->report_size > 2 ? i2c_hid->report_size - 1 : 1)) {
+        i2c_hid->data_size = bit_replace(i2c_hid->data_size, offset*8, 8, *val);
+    if (report_type == REPORT_TYPE_INPUT && offset >= 1 && offset == (uint32_t)(i2c_hid->data_size > 2 ? i2c_hid->data_size - 1 : 1)) {
         report_id_queue_remove_at(&i2c_hid->report_id_queue, report_id);
         if (report_id_queue_get(&i2c_hid->report_id_queue) >= 0)
             plic_send_irq(i2c_hid->plic, i2c_hid->irq);
@@ -179,9 +189,7 @@ static void i2c_hid_read_report(i2c_hid_t* i2c_hid, uint8_t report_type, uint8_t
 
 static bool i2c_hid_write_report(i2c_hid_t* i2c_hid, uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t val)
 {
-    if (offset < 2)
-        i2c_hid->report_size = bit_replace(i2c_hid->report_size, offset*8, 8, val);
-    if (offset >= 1 && offset >= i2c_hid->report_size)
+    if (!i2c_hid_read_data_size(i2c_hid, offset, val))
         return false;
     i2c_hid->hid_dev->write_report(i2c_hid->hid_dev->dev, report_type, report_id, offset, val);
     return true;
@@ -226,12 +234,32 @@ static uint8_t i2c_hid_read_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offse
     }
     case I2C_HID_DATA_REG:
         switch (i2c_hid->command) {
-        case I2C_HID_COMMAND_RESET:
-            break;
         case I2C_HID_COMMAND_GET_REPORT: {
             uint8_t val = 0;
             i2c_hid_read_report(i2c_hid, i2c_hid->report_type, i2c_hid->report_id, offset, &val);
             return val;
+        }
+        case I2C_HID_COMMAND_GET_IDLE: {
+            uint16_t field_val = 0;
+            switch (offset/2) {
+            case 0: field_val = 4; break;
+            case 1:
+                if (i2c_hid->hid_dev->get_idle)
+                    i2c_hid->hid_dev->get_idle(i2c_hid->hid_dev->dev, i2c_hid->report_id, &field_val);
+                break;
+            }
+            return bit_cut(field_val, 8*(offset%2), 8);
+        }
+        case I2C_HID_COMMAND_GET_PROTOCOL: {
+            uint16_t field_val = 0;
+            switch (offset/2) {
+            case 0: field_val = 4; break;
+            case 1:
+                if (i2c_hid->hid_dev->get_protocol)
+                    i2c_hid->hid_dev->get_protocol(i2c_hid->hid_dev->dev, &field_val);
+                break;
+            }
+            return bit_cut(field_val, 8*(offset%2), 8);
         }
         }
         break;
@@ -253,16 +281,25 @@ static bool i2c_hid_write_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offset,
         case 1:
             i2c_hid->command = bit_cut(val, 0, 4);
             //fprintf(stderr, "  command: %u\n", i2c_hid->command);
-            switch (i2c_hid->command) {
-            case I2C_HID_COMMAND_GET_REPORT:
-            case I2C_HID_COMMAND_SET_REPORT:
-                if (i2c_hid->report_id == 0b1111)
-                    return true;
-                break;
-            }
+            if (i2c_hid->report_id == 0b1111)
+                return true;
             break;
         case 2:
             i2c_hid->report_id = val;
+            break;
+        }
+        switch (i2c_hid->command) {
+        case I2C_HID_COMMAND_SET_IDLE:
+            if (i2c_hid->data_size == 4 && i2c_hid->hid_dev->set_idle)
+                i2c_hid->hid_dev->set_idle(i2c_hid->hid_dev->dev, i2c_hid->report_id, i2c_hid->data_val);
+            break;
+        case I2C_HID_COMMAND_SET_PROTOCOL:
+            if (i2c_hid->data_size == 4 && i2c_hid->hid_dev->set_protocol)
+                i2c_hid->hid_dev->set_protocol(i2c_hid->hid_dev->dev, i2c_hid->data_val);
+            break;
+        case I2C_HID_COMMAND_SET_POWER:
+            if (i2c_hid->hid_dev->set_power)
+                i2c_hid->hid_dev->set_power(i2c_hid->hid_dev->dev, i2c_hid->report_id%4);
             break;
         }
         break;
@@ -270,6 +307,12 @@ static bool i2c_hid_write_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offset,
         switch (i2c_hid->command) {
         case I2C_HID_COMMAND_SET_REPORT:
             return i2c_hid_write_report(i2c_hid, i2c_hid->report_type, i2c_hid->report_id, offset, val);
+        default:
+            if (!i2c_hid_read_data_size(i2c_hid, offset, val))
+                return false;
+            if (offset/2 == 1)
+                i2c_hid->data_val = bit_replace(i2c_hid->data_val, offset*8, 8, val);           
+            return true;
         }
         break;
     }
@@ -336,6 +379,7 @@ static void i2c_hid_stop(void* dev)
     }
     i2c_hid->reg = I2C_HID_INPUT_REG;
     i2c_hid->command = 0;
+    i2c_hid->data_size = 0;
     spin_unlock(&i2c_hid->lock);
 }
 

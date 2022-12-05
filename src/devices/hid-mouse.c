@@ -165,24 +165,24 @@ PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns)
 {
     spin_lock(&mouse->lock);
     mouse->btns |= btns;
-    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
     spin_unlock(&mouse->lock);
+    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
 }
 
 PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns)
 {
     spin_lock(&mouse->lock);
     mouse->btns &= ~btns;
-    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
     spin_unlock(&mouse->lock);
+    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
 }
 
 PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset)
 {
     spin_lock(&mouse->lock);
     mouse->scroll_y += offset;
-    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
     spin_unlock(&mouse->lock);
+    mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
 }
 
 PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t width, uint32_t height)
@@ -195,6 +195,7 @@ PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t width, uint32_t he
 
 PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
+    bool is_input_avail = false;
     spin_lock(&mouse->lock);
     if (mouse->width > 0 && mouse->height > 0) {
         mouse->x += (int32_t)((int64_t)x * 0x7fff / mouse->width);
@@ -203,13 +204,16 @@ PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
         else if (mouse->x > 0x7fff) mouse->x = 0x7fff;
         if (mouse->y < 0) mouse->y = 0;
         else if (mouse->y > 0x7fff) mouse->y = 0x7fff;
-        mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
+        is_input_avail = true;
     }
     spin_unlock(&mouse->lock);
+    if (is_input_avail)
+        mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
 }
 
 PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
+    bool is_input_avail = false;
     spin_lock(&mouse->lock);
     if (mouse->width > 0 && mouse->height > 0) {
         if (x < 0) x = 0;
@@ -218,7 +222,9 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y)
         else if (y > mouse->height) y = mouse->height;
         mouse->x = (int32_t)((int64_t)x * 0x7fff / mouse->width);
         mouse->y = (int32_t)((int64_t)y * 0x7fff / mouse->height);
-        mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
+        is_input_avail = true;
     }
     spin_unlock(&mouse->lock);
+    if (is_input_avail)
+        mouse->hid_dev.input_available(mouse->hid_dev.host, 0);
 }
