@@ -1,7 +1,6 @@
 
 # RVVM - The RISC-V Virtual Machine
 ![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)
-![loc](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)
 [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/LekKit/RVVM.svg?style=for-the-badge)](https://lgtm.com/projects/g/LekKit/RVVM/context:cpp)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
@@ -30,9 +29,10 @@ RISC-V CPU & System software implementation written in С
 - Generic PCI Express Bus
 - NVMe storage, image TRIM support, fast IO
 - Graphical framebuffer through X11/WinAPI/Haiku/SDL
-- PS2 Altera Controller, PS2 keyboard & mouse
-- ATA hard drive (PIO / IDE PCI), deprecated
-- OpenCores Ethernet through Linux TAP, WIP usernet
+- I2C HID (keyboard/mouse), OpenCores I2C controller
+- OpenCores Ethernet through Linux TAP / WIP usernet
+- PS2 Altera (keyboard/mouse), *deprecated*
+- ATA hard drive (PIO / IDE PCI), *deprecated*
 
 ## Building
 Currently builds using GNU Make (recommended) or CMake and works on Linux, Windows, MacOS, and many other POSIX systems.
@@ -65,7 +65,7 @@ cd build
 
 ## Running
 ```
-./rvvm fw_jump.bin -k u-boot_s.bin -i drive.img -m 2G -smp 2 -res 1280x720
+./rvvm fw_jump.bin -k u-boot_s.bin -i drive.img -m 2G -smp 2 -res 1280x720 -jitcache 64M
 ```
 Argument explanation:
 ```
@@ -75,6 +75,7 @@ Argument explanation:
 -m, -mem 2G            Memory amount (may be suffixed by k/M/G), default 256M
 -s, -smp 2             Amount of cores, single-core machine by default
 -res 1280x720          Changes framebuffer & VM window resolution
+-jitcache 64M          Raise JIT cache limit (64M recommended for complex guests)
  . . .
 -rv32                  Enable 32-bit RISC-V, 64-bit by default
 -cmdline, -append ...  Override/append default kernel command line
@@ -101,19 +102,19 @@ Invoke "./rvvm -h" to see extended help.
 | **cerg2010cerg2010** | Important fixes, initial RV64 work <br> PLIC, PCI bus, PS2 devices, ATA drive, Ethernet OC <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
 | **Mr0maks**          | Initial C/M ext interpreter, VM debugger, CSR work, basic UART <br> ARM32 mul/div JIT intrinsics | - |
 | **0xCatPKG**         | Userspace network, new argument parser <br> Extended testing & portability fixes | HD Audio |
-| **X547**             | Haiku GUI, Userland API assistance | Guest Haiku support, UserlandVM |
+| **X547**             | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
 
 *Hoping to see more contributors here*
 
 ## TODO
-- Stable userspace CPU emulation
-- Userspace networking, a better NIC
-- Sparse HDD image format, compression/deduplication
+- Stable TCP buffering, a better NIC
+- Sparse block image format, compression/deduplication
 - Sound (HD Audio or else)
 - Linux userspace syscalls emulation, ELF loader
+- VFIO for GPU passthrough
 - More RVJIT optimizations, shared caches
-- USB/I2C HID or something else to replace PS/2
+- FPU JIT, Vector/Bitmanip extensions (Waiting for GCC V ext support)
+- Other peripherals from real boards (SiFive GPIO, flash)
 - *Maybe* virtio devices (Don't like the idea of fictional devices)
-- Other peripherals (OpenCores I2C, SiFive GPIO, other stuff from real boards)
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
