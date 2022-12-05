@@ -51,8 +51,8 @@ typedef struct {
     void (*reset)(void* dev);
     void (*read_report )(void* dev, uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t *val);
     void (*write_report)(void* dev, uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t val);
-    void (*get_idle)(void* dev, uint16_t* idle /* milliseconds */);
-    void (*set_idle)(void* dev, uint16_t idle);
+    void (*get_idle)(void* dev, uint8_t report_id, uint16_t* idle /* milliseconds */);
+    void (*set_idle)(void* dev, uint8_t report_id, uint16_t idle);
     void (*get_protocol)(void* dev, uint16_t* protocol);
     void (*set_protocol)(void* dev, uint16_t protocol);
     void (*set_power)(void* dev, uint16_t power);
