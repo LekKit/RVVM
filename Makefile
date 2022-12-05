@@ -235,8 +235,8 @@ endif
 endif
 
 # Version string
-GIT_COMMIT := $(firstword $(shell git rev-parse --short=7 HEAD $(NULL_STDERR)) unknown)
-VERSION := $(VERSION)-$(GIT_COMMIT)-git
+GIT_COMMIT := $(firstword $(shell git describe --match=NeVeRmAtCh_TaG --always --dirty $(NULL_STDERR)) unknown)
+VERSION := $(VERSION)-$(GIT_COMMIT)
 
 $(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
