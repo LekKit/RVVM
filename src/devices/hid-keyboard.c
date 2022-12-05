@@ -178,21 +178,27 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine)
 
 PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key)
 {
+    bool is_input_avail = false;
     spin_lock(&kb->lock);
     // key is guaranteed to be 1 byte according to HID spec
     if (key != HID_KEY_NONE) {
         kb->keys[key/32] |= 1U << (key%32);
-        kb->hid_dev.input_available(kb->hid_dev.host, 0);
+        is_input_avail = true;
     }
     spin_unlock(&kb->lock);
+    if (is_input_avail)
+        kb->hid_dev.input_available(kb->hid_dev.host, 0);
 }
 
 PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key)
 {
+    bool is_input_avail = false;
     spin_lock(&kb->lock);
     if (key != HID_KEY_NONE) {
         kb->keys[key/32] &= ~(1U << (key%32));
-        kb->hid_dev.input_available(kb->hid_dev.host, 0);
+        is_input_avail = true;
     }
     spin_unlock(&kb->lock);
+    if (is_input_avail)
+        kb->hid_dev.input_available(kb->hid_dev.host, 0);
 }
