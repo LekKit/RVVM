@@ -17,12 +17,12 @@ option(RVVM_USE_XSHM "Use XSHM shared memory extension for X11" ON)
 option(RVVM_USE_NET "Use networking" OFF)
 option(RVVM_USE_TAP_LINUX "Use Linux TAP implementation" OFF)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
-option(RVVM_USE_PCI "Use PCI bus emulation" ON)
+option(RVVM_USE_PCI "Use ATA over PCI, PIO mode is used otherwise" ON)
 option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking" OFF)
 
 if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
-	message(FATAL_ERROR "CMake in-source build is not allowed")
+	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
 endif()
 
 if (NOT CMAKE_BUILD_TYPE OR NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
@@ -34,10 +34,18 @@ endif()
 
 set(RVVM_SRC_DIR "${RVVM_SOURCE_DIR}/src")
 
+# Get commit id
+find_package(Git)
+execute_process(COMMAND
+  "${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh_TaG --always --dirty
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  OUTPUT_VARIABLE RVVM_COMMIT
+  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+
 # Common pseudo-library to pass parameters to other targets
 add_library(rvvm_common INTERFACE)
 target_include_directories(rvvm_common INTERFACE "${RVVM_SRC_DIR}")
-target_compile_definitions(rvvm_common INTERFACE "VERSION=\"${RVVM_VERSION}\"")
+target_compile_definitions(rvvm_common INTERFACE "RVVM_VERSION=\"${RVVM_VERSION}-${RVVM_COMMIT}\"")
 if (MSVC)
 	# Suppress warnings: casts between int sizes, unsigned minus, cast after shift
 	target_compile_definitions(rvvm_common INTERFACE _CRT_SECURE_NO_WARNINGS)
@@ -68,12 +76,18 @@ if (RVVM_LTO)
 	endif()
 endif()
 
-if (RVVM_IS_TOP_LEVEL)
-	# Add some cool fancy stuff if we're running as top level project
-
-	# Warning checks
-	if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-		add_compile_options(-Wall -Wextra)
+if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+	# Warning options (Strict safety/portability)
+	add_compile_options(-Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Wframe-larger-than=32768)
+	if (NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+		# Optimization options
+		add_compile_options(-O3 -DNDEBUG)
+	endif()
+	# Disable unsafe FPU optimizations, hide internal symbols
+	add_compile_options(-fvisibility=hidden -fno-math-errno -frounding-math)
+	if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+		# Shut off bogus warnings on older Clang
+		add_compile_options(-Wno-unsupported-floating-point-opt -Wno-unknown-warning-option -Wno-ignored-optimization-argument)
 	endif()
 endif()
 
