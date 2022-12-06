@@ -137,7 +137,15 @@ typedef struct {
 static void nvme_shutdown(nvme_dev_t* nvme)
 {
     while (atomic_load_uint32(&nvme->threads));
+    rvvm_addr_t asq = nvme->queues[ADMIN_SUBQ].addr;
+    rvvm_addr_t acq = nvme->queues[ADMIN_COMQ].addr;
+    uint32_t asqs = nvme->queues[ADMIN_SUBQ].size;
+    uint32_t acqs = nvme->queues[ADMIN_COMQ].size;
     memset(nvme->queues, 0, sizeof(nvme->queues));
+    nvme->queues[ADMIN_SUBQ].addr = asq;
+    nvme->queues[ADMIN_COMQ].addr = acq;
+    nvme->queues[ADMIN_SUBQ].size = asqs;
+    nvme->queues[ADMIN_COMQ].size = acqs;
 }
 
 static void nvme_remove(rvvm_mmio_dev_t* dev)
@@ -548,7 +556,9 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
             break;
         case NVME_CC:
             nvme->conf = read_uint32_le(data);
-            if (nvme->conf & 0xC000) nvme_shutdown(nvme);
+            // Shutdown or reset the controller
+            if ((nvme->conf & 0xC000) || !(nvme->conf & 0x1))
+                nvme_shutdown(nvme);
             break;
         case NVME_AQA:
             nvme->queues[ADMIN_SUBQ].size = bit_cut(read_uint32_le(data), 0, 12);
