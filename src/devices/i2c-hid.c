@@ -281,7 +281,7 @@ static bool i2c_hid_write_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offset,
         case 1:
             i2c_hid->command = bit_cut(val, 0, 4);
             //fprintf(stderr, "  command: %u\n", i2c_hid->command);
-            if (i2c_hid->report_id == 0b1111)
+            if (i2c_hid->report_id == 0xF)
                 return true;
             break;
         case 2:
