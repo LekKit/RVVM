@@ -157,15 +157,19 @@ endif
 
 endif
 
-# Detect compiler type
+# Detect compiler type, version
 CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
+CC_VERSION := $(shell $(CC) -dumpversion $(NULL_STDERR))
+ifneq (,$(findstring Emscripten,$(CC_HELP)))
+CC_VERSION := (EMCC $(CC_VERSION))
+endif
 ifneq (,$(findstring clang,$(CC_HELP)))
 CC_TYPE := clang
-$(info Detected CC: $(GREEN)LLVM Clang$(RESET))
+$(info Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
 CC_TYPE := gcc
-$(info Detected CC: $(GREEN)GCC$(RESET))
+$(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
 else
 CC_TYPE := unknown
 $(info Detected CC: $(RED)Unknown$(RESET))
