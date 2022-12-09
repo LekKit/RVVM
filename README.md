@@ -1,7 +1,9 @@
 
 # RVVM - The RISC-V Virtual Machine
 ![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/LekKit/RVVM.svg?style=for-the-badge)](https://lgtm.com/projects/g/LekKit/RVVM/context:cpp)
+![](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)
+[![LGTM grade](https://img.shields.io/lgtm/grade/cpp/g/LekKit/RVVM.svg?style=for-the-badge&label=LGTM%20Grade)](https://lgtm.com/projects/g/LekKit/RVVM/context:cpp)
+![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
 RISC-V CPU & System software implementation written in С
@@ -98,8 +100,8 @@ Invoke "./rvvm -h" to see extended help.
 ## Contributions
 |                      | Achievments | Working on |
 |----------------------|-------------|------------|
-| **LekKit**           | RVVM API & codebase infrastructure <br> RV64IMAFDC interpreter, IRQ/MMU/Priv <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, ACLINT, UART, graphics <br> Rework of PCIe, Ethernet, PS/2 | Networking, Userspace emulation |
-| **cerg2010cerg2010** | Important fixes, initial RV64 work <br> PLIC, PCI bus, PS2 devices, ATA drive, Ethernet OC <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
+| **LekKit**           | RVVM API & codebase infrastructure <br> RV64IMAFDC interpreter, IRQ/MMU/Priv <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, ACLINT, UART, I2C, graphics <br> Rework of PCIe, Ethernet, PS/2 | Networking, Userspace emulation |
+| **cerg2010cerg2010** | Important fixes, initial RV64 work <br> PLIC, PCI bus, PS2 HID, ATA, Ethernet OC <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
 | **Mr0maks**          | Initial C/M ext interpreter, VM debugger, CSR work, basic UART <br> ARM32 mul/div JIT intrinsics | - |
 | **0xCatPKG**         | Userspace network, new argument parser <br> Extended testing & portability fixes | HD Audio |
 | **X547**             | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
@@ -108,6 +110,7 @@ Invoke "./rvvm -h" to see extended help.
 
 ## TODO
 - Stable TCP buffering, a better NIC
+- Suspend/resume to file, VM migration
 - Sparse block image format, compression/deduplication
 - Sound (HD Audio or else)
 - Linux userspace syscalls emulation, ELF loader
