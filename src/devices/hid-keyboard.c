@@ -107,8 +107,7 @@ static void hid_keyboard_read_report(void* dev,
     UNUSED(report_id);
     hid_keyboard_t* kb = (hid_keyboard_t*)dev;
     spin_lock(&kb->lock);
-    switch (report_type) {
-    case REPORT_TYPE_INPUT:
+    if (report_type == REPORT_TYPE_INPUT) {
         if (offset == 0) {
             kb->input_report[0] = bit_cut(sizeof(kb->input_report), 0, 8);
             kb->input_report[1] = bit_cut(sizeof(kb->input_report), 8, 8);
@@ -118,10 +117,8 @@ static void hid_keyboard_read_report(void* dev,
         }
         if (offset < sizeof(kb->input_report))
             *val = kb->input_report[offset];
-        break;
-    default:
+    } else {
         *val = 0;
-        break;
     }
     spin_unlock(&kb->lock);
 }
@@ -132,14 +129,12 @@ static void hid_keyboard_write_report(void* dev,
     UNUSED(report_id);
     hid_keyboard_t* kb = (hid_keyboard_t*)dev;
     spin_lock(&kb->lock);
-    switch (report_type) {
-    case REPORT_TYPE_OUTPUT:
+    if (report_type == REPORT_TYPE_OUTPUT) {
         if (offset < sizeof(kb->output_report)) {
             kb->output_report[offset] = val;
             if (offset == sizeof(kb->output_report) - 1)
                 kb->leds = kb->output_report[2];
         }
-        break;
     }
     spin_unlock(&kb->lock);
 }
