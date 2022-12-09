@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches: [ "staging" ]
+  pull_request:
+    branches: [ "staging" ]
+  workflow_dispatch:
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build Release
+      run: make lib all
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3.1.1
+      with:
+        name: rvvm_linux_x86_64
+        path: |
+          release.linux.x86_64/rvvm_x86_64
+          release.linux.x86_64/librvvm.so
+
+  win32-build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up MinGW
+      run: sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends gcc-mingw-w64-x86-64-win32
+    - name: Build Release
+      run: make CC=x86_64-w64-mingw32-gcc all lib
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3.1.1
+      with:
+        name: rvvm_win32_x86_64.exe
+        path: |
+          release.windows.x86_64/rvvm_x86_64.exe
+          release.windows.x86_64/librvvm.dll
+        
+  macos-build:
+    runs-on: macos-12
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install SDL
+        run: brew install sdl12-compat
+      - name: Build Release
+        run: make all lib
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3.1.1
+        with:
+          name: rvvm_darwin_x86_64
+          path: |
+            release.darwin.x86_64/rvvm_x86_64
+            release.darwin.x86_64/librvvm.so
