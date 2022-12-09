@@ -95,8 +95,7 @@ static void hid_mouse_read_report(void* dev,
     UNUSED(report_id);
     hid_mouse_t* mouse = (hid_mouse_t*)dev;
     spin_lock(&mouse->lock);
-    switch (report_type) {
-    case REPORT_TYPE_INPUT:
+    if (report_type == REPORT_TYPE_INPUT) {
         if (offset == 0) {
             mouse->input_report[0] = bit_cut(sizeof(mouse->input_report), 0, 8);
             mouse->input_report[1] = bit_cut(sizeof(mouse->input_report), 8, 8);
@@ -110,10 +109,8 @@ static void hid_mouse_read_report(void* dev,
         }
         if (offset < sizeof(mouse->input_report))
             *val = mouse->input_report[offset];
-        break;
-    default:
+    } else {
         *val = 0;
-        break;
     }
     spin_unlock(&mouse->lock);
 }
