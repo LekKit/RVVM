@@ -133,7 +133,6 @@ static void report_id_queue_remove_at(struct report_id_queue* queue, uint8_t rep
     queue->list[report_id] = -1;
 }
 
-
 static void i2c_hid_reset(i2c_hid_t* i2c_hid, bool is_init)
 {
     report_id_queue_init(&i2c_hid->report_id_queue);
@@ -304,10 +303,9 @@ static bool i2c_hid_write_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offset,
         }
         break;
     case I2C_HID_DATA_REG:
-        switch (i2c_hid->command) {
-        case I2C_HID_COMMAND_SET_REPORT:
+        if (i2c_hid->command == I2C_HID_COMMAND_SET_REPORT) {
             return i2c_hid_write_report(i2c_hid, i2c_hid->report_type, i2c_hid->report_id, offset, val);
-        default:
+        } else {
             if (!i2c_hid_read_data_size(i2c_hid, offset, val))
                 return false;
             if (offset/2 == 1)
@@ -372,11 +370,7 @@ static void i2c_hid_stop(void* dev)
     spin_lock(&i2c_hid->lock);
     //fprintf(stderr, "i2c_hid_stop\n");
     i2c_hid->is_reset = false;
-    switch (i2c_hid->command) {
-    case I2C_HID_COMMAND_RESET:
-        i2c_hid_reset(i2c_hid, false);
-        break;
-    }
+    if (i2c_hid->command == I2C_HID_COMMAND_RESET) i2c_hid_reset(i2c_hid, false);
     i2c_hid->reg = I2C_HID_INPUT_REG;
     i2c_hid->command = 0;
     i2c_hid->data_size = 0;
