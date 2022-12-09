@@ -341,133 +341,125 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto_ps2(rvvm_machine_t* machine)
     return kb;
 }
 
+static const uint8_t* hid_to_ps2_keycode(hid_key_t key, size_t* size)
+{
+    if (key < sizeof(hid_to_ps2_byte_map) && hid_to_ps2_byte_map[key]) {
+        // Convert small & common keycodes using a table, fallback to switch
+        *size = 1;
+        return &hid_to_ps2_byte_map[key];
+    } else {
+        switch (key) {
+            case HID_KEY_LEFTMETA:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x1F";
+            case HID_KEY_RIGHTCTRL:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x14";
+            case HID_KEY_RIGHTALT:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x11";
+            case HID_KEY_RIGHTMETA:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x27";
+            case HID_KEY_SYSRQ:
+                *size = 4;
+                return (const uint8_t*)"\xE0\x12\xE0\x7C";
+            case HID_KEY_PAUSE:
+                *size = 8;
+                return (const uint8_t*)"\xE1\x14\x77\xE1\xF0\x14\xF0\x77";
+            case HID_KEY_INSERT:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x70";
+            case HID_KEY_HOME:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x6C";
+            case HID_KEY_PAGEUP:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x7D";
+            case HID_KEY_DELETE:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x71";
+            case HID_KEY_END:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x69";
+            case HID_KEY_PAGEDOWN:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x7A";
+            case HID_KEY_RIGHT:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x74";
+            case HID_KEY_LEFT:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x6B";
+            case HID_KEY_DOWN:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x72";
+            case HID_KEY_UP:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x75";
+            case HID_KEY_MENU:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x2F";
+            case HID_KEY_KPSLASH:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x4A";
+            case HID_KEY_KPENTER:
+                *size = 2;
+                return (const uint8_t*)"\xE0\x5A";
+            default:
+                return NULL;
+        }
+    }
+}
+
 static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
 {
     spin_lock(kb->ps2_dev.lock);
     // Ignore repeated press/release events
     bool key_state = !!(kb->key_state[key >> 3] & (1 << (key & 0x7)));
     if (key != HID_KEY_NONE && key_state != pressed && kb->reporting) {
-        const uint8_t* keycode = NULL;
         size_t keycode_size = 0;
-        if (key < sizeof(hid_to_ps2_byte_map) && hid_to_ps2_byte_map[key]) {
-            keycode = &hid_to_ps2_byte_map[key];
-            keycode_size = 1;
-        } else {
-            switch (key) {
-                case HID_KEY_LEFTMETA:
-                    keycode = (const uint8_t*)"\xE0\x1F";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_RIGHTCTRL:
-                    keycode = (const uint8_t*)"\xE0\x14";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_RIGHTALT:
-                    keycode = (const uint8_t*)"\xE0\x11";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_RIGHTMETA:
-                    keycode = (const uint8_t*)"\xE0\x27";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_SYSRQ:
-                    keycode = (const uint8_t*)"\xE0\x12\xE0\x7C";
-                    keycode_size = 4;
-                    break;
-                case HID_KEY_PAUSE:
-                    keycode = (const uint8_t*)"\xE1\x14\x77\xE1\xF0\x14\xF0\x77";
-                    keycode_size = 8;
-                    break;
-                case HID_KEY_INSERT:
-                    keycode = (const uint8_t*)"\xE0\x70";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_HOME:
-                    keycode = (const uint8_t*)"\xE0\x6C";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_PAGEUP:
-                    keycode = (const uint8_t*)"\xE0\x7D";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_DELETE:
-                    keycode = (const uint8_t*)"\xE0\x71";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_END:
-                    keycode = (const uint8_t*)"\xE0\x69";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_PAGEDOWN:
-                    keycode = (const uint8_t*)"\xE0\x7A";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_RIGHT:
-                    keycode = (const uint8_t*)"\xE0\x74";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_LEFT:
-                    keycode = (const uint8_t*)"\xE0\x6B";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_DOWN:
-                    keycode = (const uint8_t*)"\xE0\x72";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_UP:
-                    keycode = (const uint8_t*)"\xE0\x75";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_MENU:
-                    keycode = (const uint8_t*)"\xE0\x2F";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_KPSLASH:
-                    keycode = (const uint8_t*)"\xE0\x4A";
-                    keycode_size = 2;
-                    break;
-                case HID_KEY_KPENTER:
-                    keycode = (const uint8_t*)"\xE0\x5A";
-                    keycode_size = 2;
-                    break;
-            }
-        }
-        if (pressed) {
-            kb->key_state[key >> 3] |= (1 << (key & 0x7));
-            kb->lastkey = keycode;
-            kb->lastkey_size = keycode_size;
-            
-            ringbuf_put(&kb->cmdbuf, keycode, keycode_size);
-            rvtimer_init(&kb->sample_timer, 1000);
-            kb->sample_timer.timecmp = (kb->delay + 1) * 250;
-        } else {
-            uint8_t keycmd[8];
-            uint8_t keylen = 0;
-            kb->key_state[key >> 3] &= ~(1 << (key & 0x7));
-            if (kb->lastkey == keycode) kb->lastkey_size = 0;
+        const uint8_t* keycode = hid_to_ps2_keycode(key, &keycode_size);
 
-            if (keycode_size == 1) {
-                keycmd[0] = 0xF0;
-                keycmd[1] = keycode[0];
-                keylen = 2;
-            } else if (keycode_size == 2 && keycode[0] == 0xE0) {
-                keycmd[0] = 0xE0;
-                keycmd[1] = 0xF0;
-                keycmd[2] = keycode[1];
-                keylen = 3;
-            } else if (keycode_size == 4 && keycode[0] == 0xE0 && keycode[2] == 0xE0) {
-                // Print screen is special
-                keycmd[0] = 0xE0;
-                keycmd[1] = 0xF0;
-                keycmd[2] = keycode[3];
-                keycmd[3] = 0xE0;
-                keycmd[4] = 0xF0;
-                keycmd[5] = keycode[1];
-                keylen = 6;
+        if (keycode) {
+            // Send key event to the guest
+            if (pressed) {
+                kb->key_state[key >> 3] |= (1 << (key & 0x7));
+                kb->lastkey = keycode;
+                kb->lastkey_size = keycode_size;
+                
+                ringbuf_put(&kb->cmdbuf, keycode, keycode_size);
+                rvtimer_init(&kb->sample_timer, 1000);
+                kb->sample_timer.timecmp = (kb->delay + 1) * 250;
+            } else {
+                uint8_t keycmd[8];
+                uint8_t keylen = 0;
+                kb->key_state[key >> 3] &= ~(1 << (key & 0x7));
+                if (kb->lastkey == keycode) kb->lastkey_size = 0;
+
+                if (keycode_size == 1) {
+                    keycmd[0] = 0xF0;
+                    keycmd[1] = keycode[0];
+                    keylen = 2;
+                } else if (keycode_size == 2 && keycode[0] == 0xE0) {
+                    keycmd[0] = 0xE0;
+                    keycmd[1] = 0xF0;
+                    keycmd[2] = keycode[1];
+                    keylen = 3;
+                } else if (keycode_size == 4 && keycode[0] == 0xE0 && keycode[2] == 0xE0) {
+                    // Print screen is special
+                    keycmd[0] = 0xE0;
+                    keycmd[1] = 0xF0;
+                    keycmd[2] = keycode[3];
+                    keycmd[3] = 0xE0;
+                    keycmd[4] = 0xF0;
+                    keycmd[5] = keycode[1];
+                    keylen = 6;
+                }
+                ringbuf_put(&kb->cmdbuf, keycmd, keylen);
             }
-            ringbuf_put(&kb->cmdbuf, keycmd, keylen);
+            altps2_interrupt_unlocked(&kb->ps2_dev);
         }
-        altps2_interrupt_unlocked(&kb->ps2_dev);
     }
     spin_unlock(kb->ps2_dev.lock);
 }
