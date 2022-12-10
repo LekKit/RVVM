@@ -182,6 +182,7 @@ bool fb_window_create(fb_window_t* win)
 void fb_window_close(fb_window_t* win)
 {
     DestroyWindow(win->data->hwnd);
+    free(win->fb.buffer);
     free(win->data);
 }
 
