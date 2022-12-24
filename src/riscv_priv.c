@@ -225,14 +225,9 @@ static void riscv_zicsr_csrrci(rvvm_hart_t *vm, const uint32_t instruction)
     }
 }
 
-static uint32_t csr_global_init = 0;
-
 void riscv_priv_init(rvvm_hart_t* vm)
 {
-    // Thread-safe csr initialization
-    if (atomic_cas_uint32(&csr_global_init, 0, 1)) {
-        riscv_csr_global_init();
-    }
+    DO_ONCE(riscv_csr_global_init());
 
     riscv_install_opcode_ISB(vm, RV_PRIV_SYSTEM, riscv_priv_system);
     riscv_install_opcode_ISB(vm, RV_PRIV_FENCE, riscv_i_fence);
