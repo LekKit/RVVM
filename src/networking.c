@@ -169,22 +169,22 @@ static void net_addr_from_sockaddr6(net_addr_t* addr, const struct sockaddr_in6*
 // Initialize networking automatically
 static void net_init()
 {
-    static bool init = false;
-    if (!init) {
-        init = true;
 #ifdef _WIN32
+    DO_ONCE ({
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
         if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
             rvvm_warn("Failed to initialize WinSock");
         }
+    });
 #elif defined(SIGPIPE)
+    DO_ONCE ({
         // Ignore SIGPIPE (Do not crash on writes to closed socket)
         void (*handler)(int);
         handler = signal(SIGPIPE, SIG_IGN);
         if (handler != SIG_DFL) signal(SIGPIPE, handler);
+    });
 #endif
-    }
 }
 
 // Wrappers for generic operations on socket handles
