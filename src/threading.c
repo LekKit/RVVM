@@ -265,11 +265,7 @@ static void thread_workers_terminate()
 
 static bool thread_queue_task(thread_func_t func, void** arg, unsigned arg_count, bool va)
 {
-    static bool exit_init = false;
-    if (!exit_init) {
-        exit_init = true;
-        atexit(thread_workers_terminate);
-    }
+    DO_ONCE(atexit(thread_workers_terminate));
 
     for (size_t i=0; i<THREAD_MAX_WORKERS; ++i) {
         if (!atomic_swap_uint32(&threadpool[i].busy, 1)) {
