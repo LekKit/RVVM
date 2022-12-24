@@ -467,17 +467,11 @@ static void rvjit_x86_cpuid_internal(uint32_t eax, uint32_t ecx, uint32_t* regs)
 
 static void rvjit_x86_cpuid(uint32_t eax, uint32_t ecx, uint32_t* regs)
 {
-    static bool init = false;
-    static uint32_t func_max = 0;
-    if (!init) {
-        // Check maximum allowed EAX value for cpuid
-        uint32_t tmp[4];
-        init = true;
-        rvjit_x86_cpuid_internal(0, 0, tmp);
-        func_max = tmp[0];
-    }
+    // Check maximum allowed EAX value for cpuid
+    uint32_t tmp_regs[4];
+    rvjit_x86_cpuid_internal(0, 0, tmp_regs);
 
-    if (eax <= func_max) {
+    if (eax <= tmp_regs[0]) {
         rvjit_x86_cpuid_internal(eax, ecx, regs);
     } else {
         memset(regs, 0, sizeof(uint32_t) * 4);
@@ -486,9 +480,8 @@ static void rvjit_x86_cpuid(uint32_t eax, uint32_t ecx, uint32_t* regs)
 
 static inline bool rvjit_x86_has_bmi2()
 {
-    static bool init = false, bmi2 = false;
-    if (!init) {
-        init = true;
+    static bool bmi2 = false;
+    DO_ONCE ({
         if (rvvm_has_arg("rvjit_force_bmi2")) {
             bmi2 = rvvm_getarg_bool("rvjit_force_bmi2");
         } else {
@@ -497,8 +490,8 @@ static inline bool rvjit_x86_has_bmi2()
             bmi2 = !!(regs[1] & 0x100);
         }
         if (bmi2) rvvm_info("RVJIT detected x86 BMI2 extension");
-    }
-     return bmi2;
+    });
+    return bmi2;
 }
 
 static inline void rvjit_x86_3reg_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
