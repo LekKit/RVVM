@@ -29,7 +29,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SPINLOCK_RETRIES 60
 
 static cond_var_t global_cond;
-static uint32_t global_cond_init = 0;
 
 static void spin_atexit()
 {
@@ -42,16 +41,10 @@ static void spin_atexit()
 
 static void spin_cond_init()
 {
-    uint32_t tmp = atomic_or_uint32(&global_cond_init, 1);
-    if (tmp == 0) {
-        // We are initializing the condvar
+    DO_ONCE ({
         global_cond = condvar_create();
         atexit(spin_atexit);
-        atomic_or_uint32(&global_cond_init, 2);
-    } else if (tmp == 1) {
-        // Someone is not done initializing it
-        while (atomic_load_uint32(&global_cond_init) < 2) sleep_ms(1);
-    }
+    });
 }
 
 NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
