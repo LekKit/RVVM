@@ -1,5 +1,5 @@
 # RVVM - The RISC-V Virtual Machine
-[![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)](#installing) [![](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)](https://github.com/LekKit/RVVM/graphs/contributors) [![Build](https://img.shields.io/github/actions/workflow/status/LekKit/RVVM/build.yml?branch=staging&style=for-the-badge)](https://github.com/LekKit/RVVM/actions/workflows/build.yml) [![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)](https://app.codacy.com/gh/LekKit/RVVM/dashboard)
+[![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)](#-installing) [![](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)](https://github.com/LekKit/RVVM/graphs/contributors) [![Build](https://img.shields.io/github/actions/workflow/status/LekKit/RVVM/build.yml?branch=staging&style=for-the-badge)](https://github.com/LekKit/RVVM/actions/workflows/build.yml) [![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)](https://app.codacy.com/gh/LekKit/RVVM/dashboard)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
 RISC-V CPU & System software implementation written in С
@@ -34,7 +34,7 @@ RISC-V CPU & System software implementation written in С
 - ATA hard drive (PIO / IDE PCI), *deprecated*
 
 ## 📦 Installing
-[![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#building)
+[![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
 
 ## 🛠 Building
 Currently builds using GNU Make (recommended) or CMake and is extremely portable.
