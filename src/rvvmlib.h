@@ -6,15 +6,13 @@ Copyright (C) 2021  LekKit <github.com/LekKit>
                     KotB <github.com/0xCatPKG>
                     X547 <github.com/X547>
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+Alternatively, the contents of this file may be used under the terms
+of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or any later version.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
@@ -82,9 +80,13 @@ struct rvvm_mmio_dev_t {
     size_t      size;        // Size of the MMIO region, size zero means a device placeholder
     void*       data;        // Device-specific data, or pointer to memory (for native memory regions)
     rvvm_machine_t* machine; // Parent machine
-    rvvm_mmio_type_t* type;  // Device-specific operations & info
 
-    // MMIO operations handlers, if these aren't NULL then this is a MMIO device
+    // Device class specific operations & info
+    const rvvm_mmio_type_t* type;
+
+    // MMIO operations handlers
+    // If these aren't NULL then this is a MMIO device
+    // If these are NULL, then the device data is directly mapped into guest memory
     // Hint: setting read to NULL and write to rvvm_mmio_none makes memory mapping read-only, etc
     rvvm_mmio_handler_t read;
     rvvm_mmio_handler_t write;
