@@ -1,28 +1,25 @@
 /*
-bit_ops.h - bit operations functions
-Copyright (C) 2021  Mr0maks <mr.maks0443@gmail.com>
-                    LekKit <github.com/LekKit>
+bit_ops.h - Bit operations
+Copyright (C) 2021  LekKit <github.com/LekKit>
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+Alternatively, the contents of this file may be used under the terms
+of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or any later version.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_BIT_OPS_H
-#define RISCV_BIT_OPS_H
+#ifndef RVVM_BIT_OPS_H
+#define RVVM_BIT_OPS_H
 
 #include "rvvm_types.h"
 
-// Simple math operations (sign-extend int bits, etc) for internal usage
+// Simple bit operations (sign-extend, etc) for internal usage
 
 /*
 * Sign-extend bits in the lower part of val into signed long
@@ -42,16 +39,16 @@ static inline maxlen_t bit_mask(bitcnt_t count)
     return (1ULL << count) - 1;
 }
 
-// Cut N bits from val at given position (from lower bit)
-static inline maxlen_t bit_cut(maxlen_t val, bitcnt_t pos, bitcnt_t count)
+// Cut bits from val at given position (from lower bit)
+static inline maxlen_t bit_cut(maxlen_t val, bitcnt_t pos, bitcnt_t bits)
 {
-    return (val >> pos) & bit_mask(count);
+    return (val >> pos) & bit_mask(bits);
 }
 
-// Replace N bits in val at given position (from lower bit) by p
-static inline maxlen_t bit_replace(maxlen_t val, bitcnt_t pos, bitcnt_t bits, maxlen_t p)
+// Replace bits in val at given position (from lower bit) by rep
+static inline maxlen_t bit_replace(maxlen_t val, bitcnt_t pos, bitcnt_t bits, maxlen_t rep)
 {
-    return (val & (~(bit_mask(bits) << pos))) | ((p & bit_mask(bits)) << pos);
+    return (val & (~(bit_mask(bits) << pos))) | ((rep & bit_mask(bits)) << pos);
 }
 
 // Check if Nth bit of val is 1
@@ -60,7 +57,7 @@ static inline bool bit_check(maxlen_t val, bitcnt_t pos)
     return (val >> pos) & 0x1;
 }
 
-// Reverse N bits in val (from lower bit), remaining bits are zero
+// Reverse bits in val (from lower bit), remaining bits are zero
 static inline maxlen_t bit_reverse(maxlen_t val, bitcnt_t bits)
 {
     maxlen_t ret = 0;
@@ -74,6 +71,7 @@ static inline maxlen_t bit_reverse(maxlen_t val, bitcnt_t bits)
     return ret;
 }
 
+// Bswap 32-bit value (From BE to LE or vice versa)
 static inline uint32_t byteswap_uint32(uint32_t val)
 {
     return (((val & 0xFF000000) >> 24) |
@@ -82,6 +80,7 @@ static inline uint32_t byteswap_uint32(uint32_t val)
             ((val & 0x000000FF) << 24));
 }
 
+// Bswap 64-bit value (From BE to LE or vice versa)
 static inline uint64_t byteswap_uint64(uint64_t val)
 {
     return (((val & 0xFF00000000000000) >> 56) |
@@ -94,6 +93,7 @@ static inline uint64_t byteswap_uint64(uint64_t val)
             ((val & 0x00000000000000FF) << 56));
 }
 
+// Get high 64 bits from signed i64 x i64 -> 128 bit multiplication
 static inline uint64_t mulh_uint64(int64_t a, int64_t b)
 {
 #ifdef INT128_SUPPORT
@@ -108,6 +108,7 @@ static inline uint64_t mulh_uint64(int64_t a, int64_t b)
 #endif
 }
 
+// Get high 64 bits from unsigned u64 x u64 -> 128 bit multiplication
 static inline uint64_t mulhu_uint64(uint64_t a, uint64_t b)
 {
 #ifdef INT128_SUPPORT
@@ -122,6 +123,7 @@ static inline uint64_t mulhu_uint64(uint64_t a, uint64_t b)
 #endif
 }
 
+// Get high 64 bits from signed * unsigned i64 x u64 -> 128 bit multiplication
 static inline uint64_t mulhsu_uint64(int64_t a, uint64_t b)
 {
 #ifdef INT128_SUPPORT
