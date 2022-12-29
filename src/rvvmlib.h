@@ -57,7 +57,9 @@ typedef uint64_t rvvm_addr_t;
 
 typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
 typedef int rvvm_mmio_handle_t;
+
 #define RVVM_INVALID_MMIO (-1)
+#define RVVM_VM_IS_RUNNING_ERR (-2)
 
 typedef struct {
     void (*remove)(rvvm_mmio_dev_t* dev);
@@ -167,6 +169,13 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
 PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
 
 // Connect devices to the machine (only when it's stopped!)
+//
+// Returns:
+// - Success: Non-negative (>= 0) integer, describes the device's handle
+// - Machine is running error: RVVM_VM_IS_RUNNING_ERR, tried
+//   to attach mmio device while machine is still running
+// - Invalid MMIO: Tried to attach an invalid MMIO device
+//   (possibly attach region is occupied by another device)
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup);
 
