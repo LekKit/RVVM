@@ -180,6 +180,10 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup);
 
 // Manipulate attached mmio zone by handle, may be done on a running VM
+// 
+// Returns:
+// - Success: non-null pointer to the `rvvm_mmio_dev_t`
+// - No such MMIO: null pointer
 PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
 
 // Allows to disable the internal eventloop thread and offload it somewhere
