@@ -642,7 +642,7 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
     if (atomic_load_uint32(&machine->running)) {
         rvvm_warn("Cannot attach MMIO device \"%s\" to running machine", mmio->type ? mmio->type->name : "null");
         rvvm_cleanup_mmio(&tmp);
-        return RVVM_INVALID_MMIO;
+        return RVVM_VM_IS_RUNNING_ERR;
     }
     if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
         rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
