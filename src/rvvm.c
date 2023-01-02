@@ -505,10 +505,10 @@ PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
     return false;
 }
 
-PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
+PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
 {
     if (atomic_swap_uint32(&machine->running, true)) {
-        return;
+        return false;
     }
 
     spin_lock_slow(&global_lock);
@@ -525,12 +525,13 @@ PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
         builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
     }
     spin_unlock(&global_lock);
+    return true;
 }
 
-PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine)
+PUBLIC bool rvvm_pause_machine(rvvm_machine_t* machine)
 {
     if (!atomic_swap_uint32(&machine->running, false)) {
-        return;
+        return false;
     }
 
     spin_lock_slow(&global_lock);
@@ -546,6 +547,7 @@ PUBLIC void rvvm_pause_machine(rvvm_machine_t* machine)
         }
     }
     spin_unlock(&global_lock);
+    return true;
 }
 
 PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
@@ -584,7 +586,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     vector_foreach_back(machine->mmio, i) {
         rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
     }
-    
+
     vector_foreach(machine->harts, i) {
         riscv_hart_free(vector_at(machine->harts, i));
         free(vector_at(machine->harts, i));
@@ -638,28 +640,24 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
-    rvvm_mmio_dev_t tmp = *mmio;
-    if (atomic_load_uint32(&machine->running)) {
-        rvvm_warn("Cannot attach MMIO device \"%s\" to running machine", mmio->type ? mmio->type->name : "null");
-        rvvm_cleanup_mmio(&tmp);
-        return RVVM_VM_IS_RUNNING_ERR;
-    }
+    bool was_running = rvvm_pause_machine(machine);
+    rvvm_mmio_dev_t dev = *mmio;
+    dev.machine = machine;
     if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
         rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
-        rvvm_cleanup_mmio(&tmp);
+        rvvm_cleanup_mmio(&dev);
         return RVVM_INVALID_MMIO;
     }
-    vector_push_back(machine->mmio, tmp);
+    vector_push_back(machine->mmio, dev);
     rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
-    rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, ret);
-    dev->machine = machine;
-    rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"", dev->addr, dev->type ? dev->type->name : "null");
+    rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"", dev.addr, dev.type ? dev.type->name : "null");
+    if (was_running) rvvm_start_machine(machine);
     return ret;
 }
 
 PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup)
 {
-    if (atomic_load_uint32(&machine->running)) return;
+    bool was_running = rvvm_pause_machine(machine);
     vector_foreach(machine->mmio, i) {
         struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
         if (mmio_addr >= dev->addr
@@ -670,6 +668,7 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, boo
             if (cleanup) rvvm_cleanup_mmio(dev);
         }
     }
+    if (was_running) rvvm_start_machine(machine);
 }
 
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
