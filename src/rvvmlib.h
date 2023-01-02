@@ -45,6 +45,12 @@ extern "C" {
 #define RVVM_ABI_VERSION     3
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
+typedef enum {
+    DTB_DUMP_ERROR_OPEN = 0,
+    DTB_DUMP_ERROR_NO_FDT = 1,
+    DTB_DUMP_OK = 2,
+} dtb_dump_result_t;
+
 typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;
@@ -147,7 +153,18 @@ PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 
 // Dump generated device tree to a file
-PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
+//
+// Returns:
+// - DTB_DUMP_OK: success
+// - DTB_DUMP_ERR_OPEN: failed to open `path` for write
+// - DTB_DUMP_ERR_NO_FDT: RVVM is compiled without FDT support,
+//   so dumping dtb is impossible
+PUBLIC dtb_dump_result_t rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
+
+// Check if dtb was successfully dumped
+PUBLIC static bool rvvm_dump_dtb_is_ok(dtb_dump_result_t result) {
+    return result == DTB_DUMP_OK;
+}
 
 // Spawns CPU threads and continues machine execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);

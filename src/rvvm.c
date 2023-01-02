@@ -485,7 +485,7 @@ PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path)
     return file_reopen_check_size(&machine->dtb_file, path, machine->mem.size >> 1);
 }
 
-PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
+PUBLIC dtb_dump_result_t rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
 {
 #ifdef USE_FDT
     rvfile_t* file = rvopen(path, RVFILE_RW | RVFILE_CREAT | RVFILE_TRUNC);
@@ -495,14 +495,16 @@ PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
         size = fdt_serialize(rvvm_get_fdt_root(machine), buffer, size, 0);
         rvwrite(file, buffer, size, 0);
         rvclose(file);
-        return true;
+        return DTB_DUMP_OK;
+    } else {
+        return DTB_DUMP_ERROR_OPEN;
     }
 #else
     UNUSED(machine);
     UNUSED(path);
     rvvm_error("This build doesn't support FDT generation");
+    return DTB_DUMP_ERROR_NO_FDT;
 #endif
-    return false;
 }
 
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine)
