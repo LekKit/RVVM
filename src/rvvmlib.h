@@ -162,9 +162,7 @@ PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 PUBLIC dtb_dump_result_t rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
 
 // Check if dtb was successfully dumped
-PUBLIC static bool rvvm_dump_dtb_is_ok(dtb_dump_result_t result) {
-    return result == DTB_DUMP_OK;
-}
+PUBLIC bool rvvm_dump_dtb_is_ok(dtb_dump_result_t result);
 
 // Spawns CPU threads and continues machine execution
 PUBLIC void rvvm_start_machine(rvvm_machine_t* machine);

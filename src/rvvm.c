@@ -485,6 +485,10 @@ PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path)
     return file_reopen_check_size(&machine->dtb_file, path, machine->mem.size >> 1);
 }
 
+PUBLIC bool rvvm_dump_dtb_is_ok(dtb_dump_result_t result) {
+    return result == DTB_DUMP_OK;
+}
+
 PUBLIC dtb_dump_result_t rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
 {
 #ifdef USE_FDT
