@@ -262,6 +262,7 @@ else
 override BINARY := $(BUILDDIR)/$(BINARY)
 endif
 SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
+STATIC := $(BUILDDIR)/lib$(NAME).a
 
 # Select sources to compile
 SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
@@ -435,7 +436,7 @@ override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
 ifneq (,$(findstring lib,$(MAKECMDGOALS)))
-override CFLAGS += -DUSE_LIB -fPIC
+override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
 endif
 
 # Rules for object files from sources
@@ -534,16 +535,21 @@ $(BINARY): $(OBJS)
 	$(info [$(GREEN)LD$(RESET)] $@)
 	@$(CC_LD) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
 
-# Library
+# Shared library
 $(SHARED): $(LIB_OBJS)
 	$(info [$(GREEN)LD$(RESET)] $@)
 	@$(CC_LD) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
+
+# Static library
+$(STATIC): $(LIB_OBJS)
+	$(info [$(GREEN)AR$(RESET)] $@)
+	@$(AR) -rcs $@ $(LIB_OBJS)
 
 .PHONY: all
 all: $(BINARY)
 
 .PHONY: lib
-lib: $(SHARED)
+lib: $(SHARED) $(STATIC)
 
 .PHONY: test
 test: $(BINARY)
