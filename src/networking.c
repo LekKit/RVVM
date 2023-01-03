@@ -48,6 +48,7 @@ typedef socklen_t net_addrlen_t;
 #ifdef __linux__
 // Use Linux epoll() for net_poll
 #include <sys/epoll.h>
+#include <sys/resource.h>
 #define EPOLL_NET_IMPL
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) \
    || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) \
@@ -166,25 +167,37 @@ static void net_addr_from_sockaddr6(net_addr_t* addr, const struct sockaddr_in6*
 }
 #endif
 
+static void net_init_once()
+{
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+        rvvm_warn("Failed to initialize WinSock");
+    }
+#elif defined(SIGPIPE)
+    // Ignore SIGPIPE (Do not crash on writes to closed socket)
+    void (*handler)(int);
+    handler = signal(SIGPIPE, SIG_IGN);
+    if (handler != SIG_DFL) signal(SIGPIPE, handler);
+#endif
+#if defined(__linux__) && defined(EPOLL_NET_IMPL)
+    struct rlimit rlim = {0};
+    if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+        if (rlim.rlim_cur < rlim.rlim_max && rlim.rlim_max > 1024) {
+            rlim.rlim_cur = rlim.rlim_max;
+            if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+                rvvm_info("Raising RLIMIT_NOFILE to %ld", rlim.rlim_cur);
+            }
+        }
+    }
+#endif
+}
+
 // Initialize networking automatically
 static void net_init()
 {
-#ifdef _WIN32
-    DO_ONCE ({
-        WSADATA wsaData;
-        WSAStartup(MAKEWORD(2, 2), &wsaData);
-        if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
-            rvvm_warn("Failed to initialize WinSock");
-        }
-    });
-#elif defined(SIGPIPE)
-    DO_ONCE ({
-        // Ignore SIGPIPE (Do not crash on writes to closed socket)
-        void (*handler)(int);
-        handler = signal(SIGPIPE, SIG_IGN);
-        if (handler != SIG_DFL) signal(SIGPIPE, handler);
-    });
-#endif
+    DO_ONCE(net_init_once());
 }
 
 // Wrappers for generic operations on socket handles
