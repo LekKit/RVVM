@@ -33,6 +33,8 @@ static cond_var_t builtin_eventloop_cond;
 static thread_handle_t builtin_eventloop_thread;
 static bool builtin_eventloop_enabled = true;
 
+static rv_thread_local rvvm_errno_t rvvm_errno;
+
 #ifdef USE_FDT
 static void rvvm_init_fdt(rvvm_machine_t* machine)
 {
@@ -698,6 +700,35 @@ PUBLIC void rvvm_run_eventloop()
     rvvm_enable_builtin_eventloop(false);
     builtin_eventloop_cond = condvar_create();
     builtin_eventloop((void*)(size_t)1);
+}
+
+//
+// Error reporting
+//
+
+PUBLIC void rvvm_set_errno(rvvm_errno_t errno)
+{
+    rvvm_errno = errno;
+}
+
+PUBLIC void rvvm_clear_errno()
+{
+    rvvm_set_errno(RVVM_OK);
+}
+
+PUBLIC rvvm_errno_t rvvm_get_errno()
+{
+    return rvvm_errno;
+}
+
+PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t errno)
+{
+    switch (errno) {
+        case RVVM_OK:
+            return "Ok (No errors)";
+        default:
+            return NULL;
+    }
 }
 
 //

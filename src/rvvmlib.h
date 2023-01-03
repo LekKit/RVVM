@@ -45,6 +45,14 @@ extern "C" {
 #define RVVM_ABI_VERSION     3
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
+// ERRNO
+typedef int rvvm_errno_t;
+
+#define RVVM_OK ((rvvm_errno_t)0)
+
+#undef _RV_ERRNO
+//
+
 typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;
@@ -191,6 +199,29 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
 // Returns when all machines are stopped
 // For self-contained VMs this should be used in main thread
 PUBLIC void rvvm_run_eventloop();
+
+//
+// Error reporting.
+// Error reporting is done through the `errno` pattern,
+// errno is thread-local, so you can observe errno changes
+// only if it was changed in the same thread
+//
+
+// Set error code
+PUBLIC void         rvvm_set_errno(rvvm_errno_t errno);
+
+// Clear error code. Same as calling `rvvm_set_errno(RVVM_OK)`
+PUBLIC void         rvvm_clear_errno();
+
+// Get error code.
+PUBLIC rvvm_errno_t rvvm_get_errno();
+
+// Convert error to string.
+//
+// Returns:
+// - Success: non-null pointer to the static nul-terminated string
+// - Error: null pointer, indicates that error code is not defined
+PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t errno);
 
 //
 // Userland Emulation API (WIP)

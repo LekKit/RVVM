@@ -21,6 +21,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdbool.h>
 
+#ifndef rv_thread_local
+# if __STDC_VERSION__ >= 201112 && !defined __STDC_NO_THREADS__
+#  define rv_thread_local _Thread_local
+# elif defined _WIN32 && ( \
+       defined _MSC_VER || \
+       defined __ICL || \
+       defined __DMC__ || \
+       defined __BORLANDC__ )
+#  define rv_thread_local __declspec(thread)
+# elif defined __GNUC__ || \
+       defined __SUNPRO_C || \
+       defined __xlC__ || \
+       defined GNU_EXTS
+#  define rv_thread_local __thread
+# else
+#  error "Cannot define thread_local"
+# endif
+#endif
+
 typedef void* thread_handle_t;
 typedef void* (*thread_func_t)(void*);
 typedef void* (*thread_func_va_t)(void**);
