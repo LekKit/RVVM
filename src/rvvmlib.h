@@ -217,7 +217,7 @@ PUBLIC void rvvm_run_eventloop();
 //
 
 // Set error code
-PUBLIC void         rvvm_set_errno(rvvm_errno_t errno);
+PUBLIC void         rvvm_set_errno(rvvm_errno_t rv_errno);
 
 // Clear error code. Same as calling `rvvm_set_errno(RVVM_OK)`
 PUBLIC void         rvvm_clear_errno();
@@ -230,7 +230,7 @@ PUBLIC rvvm_errno_t rvvm_get_errno();
 // Returns:
 // - Success: non-null pointer to the static nul-terminated string
 // - Error: null pointer, indicates that error code is not defined
-PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t errno);
+PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t rv_errno);
 
 //
 // Userland Emulation API (WIP)

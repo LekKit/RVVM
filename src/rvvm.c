@@ -731,9 +731,9 @@ PUBLIC void rvvm_run_eventloop()
 // Error reporting
 //
 
-PUBLIC void rvvm_set_errno(rvvm_errno_t errno)
+PUBLIC void rvvm_set_errno(rvvm_errno_t rv_errno)
 {
-    rvvm_errno = errno;
+    rvvm_errno = rv_errno;
 }
 
 PUBLIC void rvvm_clear_errno()
@@ -746,9 +746,9 @@ PUBLIC rvvm_errno_t rvvm_get_errno()
     return rvvm_errno;
 }
 
-PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t errno)
+PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t rv_errno)
 {
-    switch (errno) {
+    switch (rv_errno) {
         case RVVM_OK:
             return "Ok (No errors)";
         case RVVM_INVALID_HARTS_NUM:
