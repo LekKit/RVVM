@@ -29,6 +29,7 @@ jobs:
         path: |
           release.linux.x86_64/rvvm_x86_64
           release.linux.x86_64/librvvm.so
+          release.linux.x86_64/librvvm.a
 
   win32-build:
     runs-on: ubuntu-22.04
@@ -47,6 +48,7 @@ jobs:
         path: |
           release.windows.x86_64/rvvm_x86_64.exe
           release.windows.x86_64/librvvm.dll
+          release.windows.x86_64/librvvm.a
         
   macos-build:
     runs-on: macos-12
@@ -65,3 +67,4 @@ jobs:
           path: |
             release.darwin.x86_64/rvvm_x86_64
             release.darwin.x86_64/librvvm.so
+            release.darwin.x86_64/librvvm.a
