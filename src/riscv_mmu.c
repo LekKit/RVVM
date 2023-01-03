@@ -48,6 +48,7 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
     // Memory boundaries should be always aligned to page size
     if ((begin & PAGE_MASK) || (size & PAGE_MASK)) {
         rvvm_error("Memory boundaries misaligned: 0x%08"PRIxXLEN" - 0x%08"PRIxXLEN, begin, begin+size);
+        rvvm_set_errno(RVVM_MEM_BOUNDS_MISALIGN);
         return false;
     }
 #ifdef __unix__
@@ -77,6 +78,8 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
         mem->size = size;
         return true;
     }
+
+    rvvm_set_errno(RVVM_MEM_ALLOC_FAILURE);
     rvvm_error("Memory allocation failure");
     return false;
 }

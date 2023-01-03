@@ -280,15 +280,20 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
 #ifndef USE_RV64
     if (rv64) {
         rvvm_error("RV64 is disabled in this RVVM build");
+        rvvm_set_errno(RVVM_RV64_DISABLED);
         return NULL;
     }
 #endif
     if (hart_count == 0) {
         rvvm_error("Creating machine with no harts at all... What are you even??");
+        rvvm_set_errno(RVVM_NO_HARTS);
+
         return NULL;
     }
     if (hart_count > 1024) {
         rvvm_error("Invalid machine core count");
+        rvvm_set_errno(RVVM_INVALID_HARTS_NUM);
+
         return NULL;
     }
     if (!rv64 && mem_size > (1U << 30)) {
@@ -298,6 +303,8 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
     }
 
     machine = safe_new_obj(rvvm_machine_t);
+
+    // sets errno if failed
     if (!riscv_init_ram(&machine->mem, mem_base, mem_size)) {
         free(machine);
         return NULL;
@@ -323,7 +330,10 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
 PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, rvvm_addr_t dest, const void* src, size_t size)
 {
     if (dest < machine->mem.begin
-    || (dest - machine->mem.begin + size) > machine->mem.size) return false;
+    || (dest - machine->mem.begin + size) > machine->mem.size) {
+        rvvm_set_errno(RVVM_MEM_OUT_OF_RANGE);
+        return false;
+    }
     memcpy(machine->mem.data + (dest - machine->mem.begin), src, size);
     riscv_jit_mark_dirty_mem(machine, dest, size);
     return true;
@@ -332,7 +342,10 @@ PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, rvvm_addr_t dest, const void
 PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, size_t size)
 {
     if (src < machine->mem.begin
-    || (src - machine->mem.begin + size) > machine->mem.size) return false;
+    || (src - machine->mem.begin + size) > machine->mem.size) {
+        rvvm_set_errno(RVVM_MEM_OUT_OF_RANGE);
+        return false;
+    }
     memcpy(dest, machine->mem.data + (src - machine->mem.begin), size);
     return true;
 }
@@ -340,7 +353,11 @@ PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, 
 PUBLIC void* rvvm_get_dma_ptr(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
     if (addr < machine->mem.begin
-    || (addr - machine->mem.begin + size) > machine->mem.size) return NULL;
+    || (addr - machine->mem.begin + size) > machine->mem.size) {
+        rvvm_set_errno(RVVM_MEM_OUT_OF_RANGE);
+        return NULL;
+    }
+
     riscv_jit_mark_dirty_mem(machine, addr, size);
     return machine->mem.data + (addr - machine->mem.begin);
 }
@@ -456,10 +473,14 @@ static bool file_reopen_check_size(rvfile_t** dest, const char* path, size_t siz
         *dest = rvopen(path, 0);
         if (*dest == NULL) {
             rvvm_error("Could not open file %s", path);
+            rvvm_set_errno(RVVM_FAILED_TO_OPEN_FILE);
+
             return false;
         }
         if (rvfilesize(*dest) > size) {
             rvvm_error("File %s doesn't fit in RAM", path);
+            rvvm_set_errno(RVVM_FILE_DOESENT_FIT);
+
             rvclose(*dest);
             *dest = NULL;
             return false;
@@ -498,10 +519,14 @@ PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
         rvwrite(file, buffer, size, 0);
         rvclose(file);
         return true;
+    } else {
+        rvvm_set_errno(RVVM_FAILED_TO_OPEN_FILE);
     }
 #else
     UNUSED(machine);
     UNUSED(path);
+
+    rvvm_set_errno(RVVM_FDT_IS_DISABLED);
     rvvm_error("This build doesn't support FDT generation");
 #endif
     return false;
@@ -726,6 +751,27 @@ PUBLIC const char*  rvvm_errno_strerror(rvvm_errno_t errno)
     switch (errno) {
         case RVVM_OK:
             return "Ok (No errors)";
+        case RVVM_INVALID_HARTS_NUM:
+            return "Invalid number of harts specified (> 1024)";
+        case RVVM_NO_HARTS:
+            return "Invalid number of harts specified (0)";
+        case RVVM_MEM_BOUNDS_MISALIGN:
+            return "Memory size is misaligned to page size (4KB)";
+        case RVVM_MEM_ALLOC_FAILURE:
+            return "Failed to allocate memory";
+        case RVVM_RV64_DISABLED:
+            return "RVVM library is compiled without RV64 support";
+        case RVVM_MEM_OUT_OF_RANGE:
+            return "Specified size + offset is out of bounds";
+        case RVVM_MACHINE_IS_RUNNING:
+            return "Machine is running";
+        case RVVM_FDT_IS_DISABLED:
+            return "RVVM library is compiled without the FDT support";
+        case RVVM_FILE_DOESENT_FIT:
+            return "Specified file doesen't fits in memory";
+        case RVVM_FAILED_TO_OPEN_FILE:
+            return "Failed to open specified file";
+
         default:
             return NULL;
     }

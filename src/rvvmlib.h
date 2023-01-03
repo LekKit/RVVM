@@ -48,9 +48,18 @@ extern "C" {
 // ERRNO
 typedef int rvvm_errno_t;
 
-#define RVVM_OK ((rvvm_errno_t)0)
+#define RVVM_OK                   ((rvvm_errno_t)0)
+#define RVVM_FAILED_TO_OPEN_FILE  ((rvvm_errno_t)1)
+#define RVVM_FILE_DOESENT_FIT     ((rvvm_errno_t)2)
+#define RVVM_FDT_IS_DISABLED      ((rvvm_errno_t)3)
+#define RVVM_MACHINE_IS_RUNNING   ((rvvm_errno_t)4)
+#define RVVM_MEM_OUT_OF_RANGE     ((rvvm_errno_t)5)
+#define RVVM_RV64_DISABLED        ((rvvm_errno_t)6)
+#define RVVM_NO_HARTS             ((rvvm_errno_t)7)
+#define RVVM_INVALID_HARTS_NUM    ((rvvm_errno_t)8)
+#define RVVM_MEM_BOUNDS_MISALIGN  ((rvvm_errno_t)9)
+#define RVVM_MEM_ALLOC_FAILURE    ((rvvm_errno_t)10)
 
-#undef _RV_ERRNO
 //
 
 typedef struct rvvm_machine_t rvvm_machine_t;
