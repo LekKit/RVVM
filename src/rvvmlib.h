@@ -118,9 +118,20 @@ struct rvvm_mmio_dev_t {
 typedef bool (*rvvm_reset_handler_t)(rvvm_machine_t* machine, void* data, bool reset);
 
 // Memory starts at 0x80000000 by default, machine boots from there as well
+//
+// Returns:
+// - Success: non-null pointer to the created machine
+// - Error: null pointer, also sets errno (see rvvm_get_errno) to
+//   the following set of errors: RVVM_RV64_DISABLED, RVVM_NO_HARTS,
+//   RVVM_INVALID_HARTS_NUM, RVVM_MEM_BOUNDS_MISALIGN, RVVM_MEM_ALLOC_FAILURE
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
 // Copy to/from physical memory (Returns true on success)
+//
+// Returns:
+// - Success: true
+// - Error: false, also sets errno (see `rvvm_get_errno`) to the following set of errors:
+//   RVVM_MEM_OUT_OF_RANGE
 PUBLIC bool rvvm_write_ram(rvvm_machine_t* machine, rvvm_addr_t dest, const void* src, size_t size);
 PUBLIC bool rvvm_read_ram(rvvm_machine_t* machine, void* dest, rvvm_addr_t src, size_t size);
 
@@ -158,11 +169,21 @@ PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data);
 
 // Load bootrom, kernel, device tree binaries into RAM (Handles reset as well)
+//
+// Returns:
+// - Success: true
+// - Error: false, also sets the errno (see `rvvm_get_errno`) to the following set of errors:
+//   RVVM_FAILED_TO_OPEN_FILE, RVVM_FILE_DOESENT_FIT
 PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 
 // Dump generated device tree to a file
+//
+// Returns:
+// - Success: true
+// - Error: false, also sets the errno (see `rvvm_get_errno`) to the following set of errors:
+//   RVVM_FAILED_TO_OPEN_FILE, RVVM_FDT_IS_DISABLED
 PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
 
 // Spawns CPU threads and continues machine execution
@@ -222,7 +243,8 @@ PUBLIC void         rvvm_set_errno(rvvm_errno_t rv_errno);
 // Clear error code. Same as calling `rvvm_set_errno(RVVM_OK)`
 PUBLIC void         rvvm_clear_errno();
 
-// Get error code.
+// Get error code. To get detailed description of the error code
+// see the `rvvm_errno_strerror`
 PUBLIC rvvm_errno_t rvvm_get_errno();
 
 // Convert error to string.
