@@ -171,6 +171,7 @@ static bool i2c_oc_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
                 if (i2c_dev && i2c_dev->stop) i2c_dev->stop(i2c_dev->data);
                 bus->sel_addr = 0xFFFF;
                 bus->status &= ~I2C_OC_SR_BSY;
+                i2c_oc_interrupt(bus);
             }
             break;
         }
