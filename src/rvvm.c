@@ -242,8 +242,9 @@ static void* builtin_eventloop(void* arg)
             }
 
             vector_foreach(machine->harts, i) {
+                rvvm_hart_t* vm = vector_at(machine->harts, i);
                 // Wake hart thread to check timer interrupt.
-                if (rvtimer_pending(&vector_at(machine->harts, i)->timer)) {
+                if ((vm->csr.ip & INTERRUPT_MTIMER) && rvtimer_pending(&vm->timer)) {
                     riscv_hart_check_timer(vector_at(machine->harts, i));
                 }
             }
