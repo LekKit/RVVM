@@ -202,7 +202,7 @@ static inline void rvjit_native_setreg32s(rvjit_block_t* block, regid_t reg, int
         }
         rvjit_riscv_lui(block, reg, imm);
         if ((imm & 0xFFF) != 0) {
-            rvjit_riscv_i_op_internal(block, RISCV_I_ADDI, reg, reg, imm & 0xFFF);
+            rvjit_riscv_i_op_internal(block, RISCV32_I_ADDI, reg, reg, imm & 0xFFF);
         }
     } else {
         rvjit_riscv_i_op_internal(block, RISCV_I_ADDI, reg, RISCV_REG_ZERO, imm & 0xFFF);
