@@ -153,6 +153,7 @@ struct ethoc_dev
     struct ethoc_bd bdbuf[ETHOC_BD_COUNT];
     tap_dev_t* tap;
     spinlock_t lock;
+    spinlock_t rx_lock;
 
     rvvm_machine_t* machine;
     plic_ctx_t* plic;
@@ -179,122 +180,89 @@ struct ethoc_dev
     uint8_t macaddr[6];
 };
 
-static bool ethoc_interrupt(struct ethoc_dev *eth, uint8_t int_num)
+static void ethoc_interrupt(struct ethoc_dev *eth, uint8_t int_num)
 {
-    eth->int_src |= (1 << int_num);
-    if (!(eth->int_mask & (1 << int_num))) {
-        return false;
-    }
-
-    plic_send_irq(eth->plic, eth->irq);
-    return true;
+    uint32_t irqs = atomic_or_uint32(&eth->int_src, (1 << int_num)) | (1 << int_num);
+    if (irqs & atomic_load_uint32(&eth->int_mask)) plic_send_irq(eth->plic, eth->irq);
 }
 
 static void ethoc_process_tx(struct ethoc_dev *eth)
 {
-    struct ethoc_bd* txbd = &eth->bdbuf[eth->cur_txbd];
-    if (!(eth->moder & ETHOC_MODER_TXEN) || !(txbd->data & ETHOC_TXBD_RD)) {
-        // Nothing to send
-        return;
-    }
+    // Loop until the queue is drained
+    for (size_t i=0; i<ETHOC_BD_COUNT; ++i) {
+        struct ethoc_bd* txbd = &eth->bdbuf[eth->cur_txbd];
+        if (!(eth->moder & ETHOC_MODER_TXEN) || !(txbd->data & ETHOC_TXBD_RD)) {
+            // Nothing to send
+            return;
+        }
 
-    if (txbd->data & ETHOC_BD_WRAP || eth->cur_txbd == eth->rx_bd_num) {
-        eth->cur_txbd = 0;
-    } else {
-        ++eth->cur_txbd;
-    }
-
-    size_t size = (txbd->data >> 16) & 0xFFFF;
-    void* dma = rvvm_get_dma_ptr(eth->machine, txbd->ptr, size);
-    if (dma) {
-        spin_unlock(&eth->lock);
-        // Unlock around tap_send, cur_txbd isn't here anymore
-        // Maybe per-BD locks could be helpful
-        int ret = tap_send(eth->tap, dma, size);
-        spin_lock(&eth->lock);
-        txbd->data &= ~ETHOC_TXBD_RD;
-        if (ret > 0) {
-            // Success
-            if (txbd->data & ETHOC_BD_IRQ) {
-                ethoc_interrupt(eth, ETHOC_INT_TXB);
-            }
-        } else {
-            // Transmit error
-            txbd->data |= ETHOC_TXBD_RL;
+        size_t size = (txbd->data >> 16) & 0xFFFF;
+        void* dma = rvvm_get_dma_ptr(eth->machine, txbd->ptr, size);
+        if (dma == NULL) {
+            // DMA Error
+            txbd->data = (txbd->data & ~ETHOC_TXBD_RD) | ETHOC_TXBD_CS;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
         }
-    } else {
-        // DMA Error
-        txbd->data &= ~ETHOC_TXBD_RD;
-        txbd->data |= ETHOC_TXBD_CS;
-        ethoc_interrupt(eth, ETHOC_INT_TXE);
+
+        int ret = tap_send(eth->tap, dma, size);
+        if (ret > 0) {
+            // Success
+            txbd->data &= ~ETHOC_TXBD_RD;
+            if (txbd->data & ETHOC_BD_IRQ) ethoc_interrupt(eth, ETHOC_INT_TXB);
+        } else {
+            // Transmit error
+            txbd->data = (txbd->data & ~ETHOC_TXBD_RD) | ETHOC_TXBD_RL;
+            ethoc_interrupt(eth, ETHOC_INT_TXE);
+        }
+
+        if (txbd->data & ETHOC_BD_WRAP || eth->cur_txbd == eth->rx_bd_num) {
+            eth->cur_txbd = 0;
+        } else {
+            eth->cur_txbd++;
+        }
     }
 }
 
 static bool ethoc_feed_rx(void* net_dev, const void* data, size_t size)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)net_dev;
-    bool ret = false;
 
-    spin_lock(&eth->lock);
-    if (eth->moder & ETHOC_MODER_RXEN) {
-        uint32_t prevbd = eth->cur_rxbd;
-        struct ethoc_bd* rxbd;
+    // Receiver disabled
+    if (!(atomic_load_uint32(&eth->moder) & ETHOC_MODER_RXEN)) return false;
 
-        // Find a free BD for incoming data
-        while (true) {
-            rxbd = &eth->bdbuf[eth->cur_rxbd];
-
-            if ((rxbd->data & ETHOC_BD_WRAP) || eth->cur_rxbd == ETHOC_BD_COUNT) {
-                eth->cur_rxbd = eth->rx_bd_num;
-            } else {
-                eth->cur_rxbd++;
-            }
-
-            if (rxbd->data & ETHOC_RXBD_E) {
-                // Size with Frame Check Sequence
-                size_t f_size = size + 4;
-                // Empy RXBD found
-                rxbd->data &= ~ETHOC_RXBD_E;
-                if (f_size > (eth->packetlen & 0xFFFF)) {
-                    // Packet too big
-                    rxbd->data |= ETHOC_RXBD_TL;
-                    ethoc_interrupt(eth, ETHOC_INT_RXE);
-                } else if (f_size < ((eth->packetlen >> 16) & 0xFFFF)
-                       && !(eth->moder & ETHOC_MODER_PAD)
-                       && !(eth->moder & ETHOC_MODER_RECSMALL)) {
-                    // Packet too small
-                    rxbd->data |= ETHOC_RXBD_SF;
-                    ethoc_interrupt(eth, ETHOC_INT_RXE);
-                } else {
-                    uint8_t* dma = rvvm_get_dma_ptr(eth->machine, rxbd->ptr, f_size);
-                    if (dma) {
-                        // Success
-                        memcpy(dma, data, size);
-                        // Append bogus CRC32 FCS
-                        memset(dma + size, 0, 4);
-                        rxbd->data = (f_size & 0xFFFF) << 16 | (rxbd->data & 0xFFFF);
-                        if (rxbd->data & ETHOC_BD_IRQ) {
-                            ethoc_interrupt(eth, ETHOC_INT_RXB);
-                        }
-                        ret = true;
-                    } else {
-                        // DMA Error
-                        rxbd->data |= ETHOC_RXBD_OR;
-                        ethoc_interrupt(eth, ETHOC_INT_RXE);
-                    }
-                }
-                break;
-            }
-
-            if (prevbd == eth->cur_rxbd) {
-                // No free buffers when receiving a frame
-                break;
-            }
-        }
+    spin_lock(&eth->rx_lock);
+    struct ethoc_bd* rxbd = &eth->bdbuf[eth->cur_rxbd];
+    uint32_t flags = atomic_load_uint32(&rxbd->data);
+    if (!(flags & ETHOC_RXBD_E)) {
+        // Ring overrun
+        spin_unlock(&eth->rx_lock);
+        return false;
     }
-    spin_unlock(&eth->lock);
-    return ret;
+    flags &= ~ETHOC_RXBD_E;
+
+    size_t f_size = size + 4;
+    uint8_t* dma = rvvm_get_dma_ptr(eth->machine, atomic_load_uint32(&rxbd->ptr), f_size);
+    if (dma == NULL) {
+        // DMA Error
+        atomic_store_uint32(&rxbd->data, flags | ETHOC_RXBD_OR);
+        spin_unlock(&eth->rx_lock);
+        ethoc_interrupt(eth, ETHOC_INT_RXE);
+        return false;
+    }
+
+    memcpy(dma, data, size);
+    memset(dma + size, 0, 4); // Append bogus CRC32 FCS
+    atomic_store_uint32(&rxbd->data, (f_size & 0xFFFF) << 16 | (flags & 0xFFFF));
+
+    if ((flags & ETHOC_BD_WRAP) || eth->cur_rxbd == ETHOC_BD_COUNT) {
+        eth->cur_rxbd = eth->rx_bd_num;
+    } else {
+        eth->cur_rxbd++;
+    }
+
+    spin_unlock(&eth->rx_lock);
+    if (flags & ETHOC_BD_IRQ) ethoc_interrupt(eth, ETHOC_INT_RXB);
+    return true;
 }
 
 static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
@@ -303,16 +271,15 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset
     UNUSED(size);
 
     spin_lock(&eth->lock);
-    switch (offset)
-    {
+    switch (offset) {
         case ETHOC_MODER:
-            write_uint32_le_m(data, eth->moder);
+            write_uint32_le_m(data, atomic_load_uint32(&eth->moder));
             break;
         case ETHOC_INT_SRC:
-            write_uint32_le_m(data, eth->int_src);
+            write_uint32_le_m(data, atomic_load_uint32(&eth->int_src));
             break;
         case ETHOC_INT_MASK:
-            write_uint32_le_m(data, eth->int_mask);
+            write_uint32_le_m(data, atomic_load_uint32(&eth->int_mask));
             break;
         case ETHOC_IPGT:
         case ETHOC_IPGR1:
@@ -370,14 +337,16 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset
         default:
             if (offset >= ETHOC_BD_ADDR && offset < ETHOC_BD_ADDR + ETHOC_BD_BUFSIZ) {
                 size_t bdid = (offset - ETHOC_BD_ADDR) >> 3;
+                struct ethoc_bd* bd = &eth->bdbuf[bdid];
                 if (offset & 4) {
-                    write_uint32_le_m(data, eth->bdbuf[bdid].ptr);
+                    write_uint32_le_m(data, atomic_load_uint32(&bd->ptr));
                 } else {
-                    write_uint32_le_m(data, eth->bdbuf[bdid].data);
+                    write_uint32_le_m(data, atomic_load_uint32(&bd->data));
                 }
             } else {
                 write_uint32_le_m(data, 0);
             }
+            break;
     }
 
     spin_unlock(&eth->lock);
@@ -392,16 +361,16 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
     spin_lock(&eth->lock);
     switch (offset) {
         case ETHOC_MODER: {
-                bool prev_rx = !!(eth->moder & ETHOC_MODER_RXEN);
-                bool prev_tx = !!(eth->moder & ETHOC_MODER_TXEN);
-
-                eth->moder = read_uint32_le_m(data);
-
-                if (!prev_rx && eth->moder & ETHOC_MODER_RXEN) {
+                uint32_t prev_moder = atomic_swap_uint32(&eth->moder, read_uint32_le_m(data));
+                if ((prev_moder ^ read_uint32_le_m(data)) & ETHOC_MODER_RXEN) {
+                    // Toggled RX
+                    spin_lock(&eth->rx_lock);
                     eth->cur_rxbd = eth->rx_bd_num;
+                    spin_unlock(&eth->rx_lock);
                 }
 
-                if (!prev_tx && eth->moder & ETHOC_MODER_TXEN) {
+                if ((prev_moder ^ read_uint32_le_m(data)) & ETHOC_MODER_TXEN) {
+                    // Toggled TX
                     eth->cur_txbd = 0;
                     ethoc_process_tx(eth);
                 }
@@ -409,16 +378,12 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
             }
         case ETHOC_INT_SRC:
             // Bits are cleared by writing 1 to them
-            eth->int_src &= ~read_uint32_le_m(data);
-
-            if ((eth->int_src & eth->int_mask) != 0) {
-                plic_send_irq(eth->plic, eth->irq);
-            }
+            atomic_and_uint32(&eth->int_src, ~read_uint32_le_m(data));
             break;
         case ETHOC_INT_MASK:
-            eth->int_mask = read_uint32_le_m(data);
+            atomic_store_uint32(&eth->int_mask, read_uint32_le_m(data));
 
-            if ((eth->int_src & eth->int_mask) != 0) {
+            if (atomic_load_uint32(&eth->int_src) & read_uint32_le_m(data)) {
                 plic_send_irq(eth->plic, eth->irq);
             }
             break;
@@ -485,17 +450,19 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
         default:
             if (offset >= ETHOC_BD_ADDR && offset < ETHOC_BD_ADDR + ETHOC_BD_BUFSIZ) {
                 size_t bdid = (offset - ETHOC_BD_ADDR) >> 3;
+                struct ethoc_bd* bd = &eth->bdbuf[bdid];
                 if (offset & 4) {
-                    eth->bdbuf[bdid].ptr = read_uint32_le_m(data);
+                    atomic_store_uint32(&bd->ptr, read_uint32_le_m(data));
                 } else {
-                    eth->bdbuf[bdid].data = read_uint32_le_m(data);
+                    atomic_store_uint32(&bd->data, read_uint32_le_m(data));
                 }
 
                 // TX BD might be modified
-                if (offset + size >= eth->rx_bd_num) {
+                if (bdid < eth->rx_bd_num) {
                     ethoc_process_tx(eth);
                 }
             }
+            break;
     }
 
     spin_unlock(&eth->lock);
