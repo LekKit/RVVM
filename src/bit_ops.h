@@ -28,39 +28,55 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-static inline smaxlen_t sign_extend(maxlen_t val, bitcnt_t bits)
+static inline int64_t sign_extend(uint64_t val, bitcnt_t bits)
 {
-    return ((smaxlen_t)(val << (MAX_XLEN - bits))) >> (MAX_XLEN - bits);
+    return ((int64_t)(val << (MAX_XLEN - bits))) >> (MAX_XLEN - bits);
 }
 
 // Generate bitmask of given size
-static inline maxlen_t bit_mask(bitcnt_t count)
+static inline uint64_t bit_mask(bitcnt_t count)
 {
     return (1ULL << count) - 1;
 }
 
 // Cut bits from val at given position (from lower bit)
-static inline maxlen_t bit_cut(maxlen_t val, bitcnt_t pos, bitcnt_t bits)
+static inline uint64_t bit_cut(uint64_t val, bitcnt_t pos, bitcnt_t bits)
 {
     return (val >> pos) & bit_mask(bits);
 }
 
 // Replace bits in val at given position (from lower bit) by rep
-static inline maxlen_t bit_replace(maxlen_t val, bitcnt_t pos, bitcnt_t bits, maxlen_t rep)
+static inline uint64_t bit_replace(uint64_t val, bitcnt_t pos, bitcnt_t bits, uint64_t rep)
 {
     return (val & (~(bit_mask(bits) << pos))) | ((rep & bit_mask(bits)) << pos);
 }
 
 // Check if Nth bit of val is 1
-static inline bool bit_check(maxlen_t val, bitcnt_t pos)
+static inline bool bit_check(uint64_t val, bitcnt_t pos)
 {
     return (val >> pos) & 0x1;
 }
 
-// Reverse bits in val (from lower bit), remaining bits are zero
-static inline maxlen_t bit_reverse(maxlen_t val, bitcnt_t bits)
+// Normalize the value to nearest next power of two
+static inline uint64_t bit_next_pow2(uint64_t val)
 {
-    maxlen_t ret = 0;
+    // Fast path for proper pow2 values
+    if (!(val & (val - 1))) return val;
+    // Bit twiddling hacks
+    val -= 1;
+    val |= (val >> 1);
+    val |= (val >> 2);
+    val |= (val >> 4);
+    val |= (val >> 8);
+    val |= (val >> 16);
+    val |= (val >> 32);
+    return val + 1;
+}
+
+// Reverse bits in val (from lower bit), remaining bits are zero
+static inline uint64_t bit_reverse(uint64_t val, bitcnt_t bits)
+{
+    uint64_t ret = 0;
 
     for (bitcnt_t i=0; i<bits; ++i) {
         ret <<= 1;
