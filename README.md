@@ -130,3 +130,5 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - *Maybe* virtio devices (Don't like the idea of fictional devices)
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
+
+The RISC-V trade name is a registered trade mark of RISC-V International.
