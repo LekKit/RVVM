@@ -15,7 +15,7 @@ RISC-V CPU & System software implementation written in С
 - NVMe storage drives
 - Networking (WIP)
 
-## 🚬 Tell me more...
+## 💡 Tell me more...
 - Feature-complete RV64IMAFDC instruction set
 - Multicore support (SMP), SV32/SV39/SV48/SV57 MMU
 - Tracing RVJIT with x86_64, ARM64, RISC-V, i386, ARM backends
