@@ -641,17 +641,28 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
-    bool was_running = rvvm_pause_machine(machine);
     rvvm_mmio_dev_t dev = *mmio;
     dev.machine = machine;
-    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
-        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"", mmio->type ? mmio->type->name : "null", mmio->addr);
+    if (mmio->min_op_size > mmio->max_op_size || mmio->max_op_size > 8) {
+        rvvm_warn("MMIO device \"%s\" has invalid op sizes: min %u, max %u",
+                  mmio->type ? mmio->type->name : "null", mmio->min_op_size, mmio->max_op_size);
         rvvm_cleanup_mmio(&dev);
         return RVVM_INVALID_MMIO;
     }
+    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
+        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"",
+                  mmio->type ? mmio->type->name : "null", mmio->addr);
+        rvvm_cleanup_mmio(&dev);
+        return RVVM_INVALID_MMIO;
+    }
+    bool was_running = rvvm_pause_machine(machine);
+    // Normalize access properties: Power of two, default 1 - 8 bytes
+    dev.min_op_size = dev.min_op_size ? bit_next_pow2(dev.min_op_size) : 1;
+    dev.max_op_size = dev.max_op_size ? bit_next_pow2(dev.max_op_size) : 8;
     vector_push_back(machine->mmio, dev);
     rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
-    rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"", dev.addr, dev.type ? dev.type->name : "null");
+    rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"",
+              dev.addr, dev.type ? dev.type->name : "null");
     if (was_running) rvvm_start_machine(machine);
     return ret;
 }
