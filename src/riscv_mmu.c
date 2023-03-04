@@ -323,43 +323,46 @@ static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* 
     }
 }
 
-static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, rvvm_mmio_handler_t rwfunc, void* dest, paddr_t offset, uint8_t size)
+static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size, uint8_t access)
 {
-    if (unlikely(dev->max_op_size < dev->min_op_size)) {
-        rvvm_warn("Device \"%s\" has incorrect access properties: min %u, max %u",
-                  dev->type ? dev->type->name : "null", dev->min_op_size, dev->max_op_size);
+    uint8_t tmp[16] = {0};
+    size_t align = (size < dev->min_op_size) ? dev->min_op_size :
+                   ((size > dev->max_op_size) ? dev->max_op_size : size);
+    size_t offset_align = offset & ~(size_t)(align - 1);
+    size_t offset_diff = offset - offset_align;
+    size_t offset_dest = 0, size_dest = 0;
+
+    if (align > sizeof(tmp)) {
+        // This should not happen, but a sanity check is always nice
+        rvvm_warn("MMIO realign bounce buffer overflow!");
         return false;
     }
-    if ((size < dev->min_op_size) || (offset & (dev->min_op_size - 1))) {
-        // Operation size smaller than possible or address misaligned
-        // Read bigger chunk, then use only part of it
-        paddr_t aligned_offset = offset & ~(paddr_t)(dev->min_op_size - 1);
-        uint8_t offset_diff = offset - aligned_offset;
-        uint8_t new_size = dev->min_op_size;
-        uint8_t misaligned_size = size + offset_diff;
-        uint8_t tmp[16] = {0};
-        if (unlikely(new_size > 8)) {
-            rvvm_warn("Device \"%s\" has incorrect min op size: %u",
-                  dev->type ? dev->type->name : "null", dev->min_op_size);
-            return false;
+
+    while (size) {
+        // Amount of bytes actually being read/written by this iteration
+        size_dest = (align - offset_diff > size) ? size : (align - offset_diff);
+        if (access != MMU_WRITE || offset_diff != 0 || size_dest != align) {
+            // Either this is a read operation, or an RMW due to misaligned write
+            if (dev->read == NULL || !dev->read(dev, tmp, offset_align, align)) return false;
         }
-        while (new_size < misaligned_size) new_size <<= 1;
-        if (!riscv_mmio_unaligned_op(dev, dev->read, tmp, aligned_offset, new_size)) return false;
-        if (rwfunc == dev->write) {
-            memcpy(tmp + offset_diff, dest, size);
-            if (!riscv_mmio_unaligned_op(dev, rwfunc, tmp, aligned_offset, new_size)) return false;
+
+        if (access == MMU_WRITE) {
+            // Carry the changed bytes in the RMW operation, write back to the device
+            memcpy(tmp + offset_diff, ((uint8_t*)dest) + offset_dest, size_dest);
+            if (dev->write == NULL || !dev->write(dev, tmp, offset_align, align)) return false;
         } else {
-            memcpy(dest, tmp + offset_diff, size);
+            // Copy the read bytes from the aligned buffer
+            memcpy(((uint8_t*)dest) + offset_dest, tmp + offset_diff, size_dest);
         }
-        return true;
+
+        // Advance the pointers
+        offset_dest += size_dest;
+        offset_align += align;
+        size -= size_dest;
+        // First iteration always takes care of offset diff
+        offset_diff = 0;
     }
-    if (size > dev->max_op_size) {
-        // Max operation size exceeded, cut into smaller parts
-        uint8_t size_half = size >> 1;
-        return riscv_mmio_unaligned_op(dev, rwfunc, dest, offset, size_half) &&
-               riscv_mmio_unaligned_op(dev, rwfunc, ((vmptr_t)dest) + size_half, offset + size_half, size_half);
-    }
-    return rwfunc(dev, dest, offset, size);
+    return true;
 }
 
 // Receives any operation on physical address space out of RAM region
@@ -367,7 +370,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
 {
     rvvm_mmio_dev_t* dev;
     rvvm_mmio_handler_t rwfunc;
-    paddr_t offset;
+    size_t offset;
     
     //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
     
@@ -397,9 +400,10 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
                 return true;
             }
             
-            if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (dev->min_op_size-1)))) {
+            if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (size - 1)))) {
+                // Misaligned or poorly sized operation, attempt fixup
                 //rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
-                return riscv_mmio_unaligned_op(dev, rwfunc, dest, offset, size);
+                return riscv_mmio_unaligned_op(dev, dest, offset, size, access);
             }
             return rwfunc(dev, dest, offset, size);
         }
