@@ -198,20 +198,20 @@ static void ethoc_process_tx(struct ethoc_dev *eth)
 
         size_t size = (txbd->data >> 16) & 0xFFFF;
         void* dma = rvvm_get_dma_ptr(eth->machine, txbd->ptr, size);
-        if (dma == NULL) {
+        if (dma) {
+            int ret = tap_send(eth->tap, dma, size);
+            if (ret > 0) {
+                // Success
+                txbd->data &= ~ETHOC_TXBD_RD;
+                if (txbd->data & ETHOC_BD_IRQ) ethoc_interrupt(eth, ETHOC_INT_TXB);
+            } else {
+                // Transmit error
+                txbd->data = (txbd->data & ~ETHOC_TXBD_RD) | ETHOC_TXBD_RL;
+                ethoc_interrupt(eth, ETHOC_INT_TXE);
+            }
+        } else {
             // DMA Error
             txbd->data = (txbd->data & ~ETHOC_TXBD_RD) | ETHOC_TXBD_CS;
-            ethoc_interrupt(eth, ETHOC_INT_TXE);
-        }
-
-        int ret = tap_send(eth->tap, dma, size);
-        if (ret > 0) {
-            // Success
-            txbd->data &= ~ETHOC_TXBD_RD;
-            if (txbd->data & ETHOC_BD_IRQ) ethoc_interrupt(eth, ETHOC_INT_TXB);
-        } else {
-            // Transmit error
-            txbd->data = (txbd->data & ~ETHOC_TXBD_RD) | ETHOC_TXBD_RL;
             ethoc_interrupt(eth, ETHOC_INT_TXE);
         }
 
