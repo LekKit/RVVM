@@ -31,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/pci-bus.h"
 #include "devices/nvme.h"
 #include "devices/eth-oc.h"
+#include "devices/rtl8169.h"
 #include "devices/i2c-oc.h"
 
 #include <stdio.h>
@@ -222,7 +223,7 @@ static int rvvm_main(int argc, const char** argv)
     if (gui) fb_window_init_auto(machine, fb_x, fb_y);
     
 #ifdef USE_NET
-    ethoc_init_auto(machine);
+    rtl8169_init_auto(machine);
 #endif
     
     // Post-creation setup
