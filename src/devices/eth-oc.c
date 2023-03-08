@@ -241,8 +241,9 @@ static bool ethoc_feed_rx(void* net_dev, const void* data, size_t size)
     flags &= ~ETHOC_RXBD_E;
 
     size_t f_size = size + 4;
+    uint32_t size_lim = atomic_load_uint32(&eth->packetlen);
     uint8_t* dma = rvvm_get_dma_ptr(eth->machine, atomic_load_uint32(&rxbd->ptr), f_size);
-    if (dma == NULL) {
+    if (dma == NULL || f_size > (size_lim & 0xFFFF)) {
         // DMA Error
         atomic_store_uint32(&rxbd->data, flags | ETHOC_RXBD_OR);
         spin_unlock(&eth->rx_lock);
@@ -288,7 +289,7 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset
             write_uint32_le_m(data, 0);
             break;
         case ETHOC_PACKETLEN:
-            write_uint32_le_m(data, eth->packetlen);
+            write_uint32_le_m(data, atomic_load_uint32(&eth->packetlen));
             break;
         case ETHOC_COLLCONF:
             write_uint32_le_m(data, eth->collconf);
@@ -393,7 +394,7 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
             // Ignore
             break;
         case ETHOC_PACKETLEN:
-            eth->packetlen = read_uint32_le_m(data);
+            atomic_store_uint32(&eth->packetlen, read_uint32_le_m(data));
             break;
         case ETHOC_COLLCONF:
             eth->collconf = read_uint32_le_m(data);
@@ -469,8 +470,9 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
     return true;
 }
 
-static void ethoc_reset(struct ethoc_dev *eth)
+static void ethoc_reset(rvvm_mmio_dev_t* dev)
 {
+    struct ethoc_dev* eth = dev->data;
     spin_lock(&eth->lock);
     memset(&eth->bdbuf, 0, sizeof(eth->bdbuf));
     eth->moder = ETHOC_MODER_PAD | ETHOC_MODER_CRCEN;
@@ -502,6 +504,7 @@ static void ethoc_remove(rvvm_mmio_dev_t* device)
 static rvvm_mmio_type_t ethoc_dev_type = {
     .name = "ethernet_oc",
     .remove = ethoc_remove,
+    .reset = ethoc_reset,
 };
 
 PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
@@ -515,7 +518,6 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
     eth->plic = plic;
     eth->irq = irq;
     eth->machine = machine;
-    ethoc_reset(eth);
     
     eth->tap = tap_open(&tap_net);
     if (eth->tap == NULL) {
