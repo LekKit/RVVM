@@ -118,7 +118,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 | **X547**             | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
 
 ## 🔍 TODO
-- Stable TCP buffering, a better NIC
+- TCP buffering & NAT in userspace networking
 - Suspend/resume to file, VM migration
 - Sparse block image format, compression/deduplication
 - Sound (HD Audio or else)
@@ -127,7 +127,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - More RVJIT optimizations, shared caches
 - FPU JIT, Vector/Bitmanip extensions (Waiting for GCC V ext support)
 - Other peripherals from real boards (SiFive GPIO, flash)
-- *Maybe* virtio devices (Don't like the idea of fictional devices)
+- *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
 
