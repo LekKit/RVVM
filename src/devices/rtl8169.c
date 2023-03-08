@@ -92,6 +92,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RTL8169_DESC_GRX 0x34000000 // Generic RX packet flags
 
 #define RTL8169_MAX_FIFO_SIZE 1024
+#define RTL8169_MAC_SIZE 6
 
 typedef struct {
     rvvm_addr_t addr;
@@ -110,7 +111,7 @@ typedef struct {
     uint32_t phyar;
     uint32_t imr;
     uint32_t isr;
-    uint8_t  mac[6];
+    uint8_t  mac[RTL8169_MAC_SIZE];
 } rtl8169_dev_t;
 
 static void rtl8169_reset(rvvm_mmio_dev_t* dev)
@@ -244,7 +245,12 @@ static bool rtl8169_pci_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, ui
     rtl8169_dev_t* rtl8169 = dev->data;
     uint8_t tmp[4] = {0};
     spin_lock(&rtl8169->lock);
-    switch (offset) {
+    if (offset < RTL8169_MAC_SIZE) {
+        size_t size_clamp = (offset + size > RTL8169_MAC_SIZE)
+                        ? (RTL8169_MAC_SIZE - offset) : size;
+        tap_get_mac(rtl8169->tap, rtl8169->mac);
+        memcpy(tmp, rtl8169->mac + offset, size_clamp);
+    } else switch (offset) {
         case RTL8169_REG_ISR:
             write_uint16_le(tmp, atomic_load_uint32(&rtl8169->isr));
             break;
@@ -287,14 +293,6 @@ static bool rtl8169_pci_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, ui
         case RTL8169_REG_MTPS:
             write_uint32_le(tmp, 0x3B);
             break;
-        case RTL8169_REG_IDR0:
-            tap_get_mac(rtl8169->tap, rtl8169->mac);
-            memcpy(tmp, rtl8169->mac, size);
-            break;
-        case RTL8169_REG_IDR4:
-            tap_get_mac(rtl8169->tap, rtl8169->mac);
-            memcpy(tmp, rtl8169->mac + 4, size < 2 ? size : 2);
-            break;
     }
     spin_unlock(&rtl8169->lock);
     memcpy(data, tmp, size);
@@ -316,6 +314,11 @@ static bool rtl8169_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
     } else if (offset == RTL8169_REG_CR) {
         atomic_store_uint32(&rtl8169->cr, read_uint8(data) & RTL8169_CR_RW);
         if (read_uint8(data) & RTL8169_CR_RST) rtl8169_reset(dev);
+    } else if (offset < RTL8169_MAC_SIZE) {
+        size_t size_clamp = (offset + size > RTL8169_MAC_SIZE)
+                        ? (RTL8169_MAC_SIZE - offset) : size;
+        memcpy(rtl8169->mac + offset, data, size_clamp);
+        tap_set_mac(rtl8169->tap, rtl8169->mac);
     }
     if (size >= 2) {
         switch (offset) {
@@ -327,10 +330,6 @@ static bool rtl8169_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
                 break;
             case RTL8169_REG_ISR:
                 atomic_and_uint32(&rtl8169->isr, ~read_uint16_le(data));
-                break;
-            case RTL8169_REG_IDR4:
-                memcpy(rtl8169->mac + 4, data, 2);
-                tap_set_mac(rtl8169->tap, rtl8169->mac);
                 break;
         }
     }
@@ -356,10 +355,6 @@ static bool rtl8169_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
                 break;
             case RTL8169_REG_PHYAR:
                 rtl8169->phyar = rtl8169_handle_phy(read_uint32_le(data));
-                break;
-            case RTL8169_REG_IDR0:
-                memcpy(rtl8169->mac, data, 4);
-                tap_set_mac(rtl8169->tap, rtl8169->mac);
                 break;
         }
     }
@@ -401,7 +396,7 @@ PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus)
             .device_id = 0x8169,  // RTL8169 Gigabit NIC
             .class_code = 0x0200, // Ethernet
             .irq_pin = PCI_IRQ_PIN_INTA,
-            .bar[0] = {
+            .bar[1] = {
                 .addr = PCI_BAR_ADDR_64,
                 .size = 0x100,
                 .min_op_size = 1,
