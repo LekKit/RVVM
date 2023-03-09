@@ -397,7 +397,6 @@ PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus)
             .class_code = 0x0200, // Ethernet
             .irq_pin = PCI_IRQ_PIN_INTA,
             .bar[1] = {
-                .addr = PCI_BAR_ADDR_64,
                 .size = 0x100,
                 .min_op_size = 1,
                 .max_op_size = 4,
