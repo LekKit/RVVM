@@ -707,6 +707,11 @@ bool net_poll_mod(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
         if (monitor->sock == sock) {
             monitor->data = event->data;
             monitor->flags = NET_POLL_RECV | (poll_wr ? NET_POLL_SEND : 0);
+            if (poll_wr) {
+                FD_SET(sock->fd, &poll->w_set);
+            } else {
+                FD_CLR(sock->fd, &poll->w_set);
+            }
             spin_unlock(&poll->lock);
             return true;
         }
@@ -746,8 +751,8 @@ bool net_poll_remove(net_poll_t* poll, net_sock_t* sock)
             vector_erase(poll->events, i);
             FD_CLR(sock->fd, &poll->r_set);
             FD_CLR(sock->fd, &poll->w_set);
-            // Invalidate buffered events
-            poll->consumed = 0;
+            // Skip this socket in events buffer
+            if (poll->consumed > i) poll->consumed--;
             // Unlink watcher from the socket
             vector_foreach(sock->watchers, j) {
                 if (vector_at(sock->watchers, j) == poll) {
@@ -839,55 +844,52 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
         } else break;
     } while (ret == 0);
 #else
-    spin_lock(&poll->lock);
     size_t ret = 0;
-    size_t consumed = poll->consumed;
-    int    nfds = poll->max_fd + 1;
-    if (consumed == 0) {
-        // No available buffered events to consume
-        struct timeval tv = {0};
-        bool timeout = false;
-        do {
+
+    spin_lock(&poll->lock);
+    do {
+        bool has_events = poll->consumed;
+        if (!has_events) {
+            // No available buffered events to consume
             // Wait for small intervals, allowing to modify polled events
-            tv.tv_sec = 0;
-            tv.tv_usec = (wait_ms < 10) ? wait_ms : 10;
-            wait_ms -= tv.tv_usec;
+            int nfds = poll->max_fd + 1;
+            struct timeval tv = {
+                .tv_usec = (wait_ms < 10) ? wait_ms : 10,
+            };
+            if (wait_ms != NET_POLL_INF) wait_ms -= tv.tv_usec;
             tv.tv_usec *= 1000;
-            
+
             poll->r_ready = poll->r_set;
             poll->w_ready = poll->w_set;
             spin_unlock(&poll->lock);
-            timeout = select(nfds, &poll->r_ready, &poll->w_ready, NULL, &tv) <= 0;
+            has_events = select(nfds, &poll->r_ready, &poll->w_ready, NULL, &tv) > 0;
             spin_lock(&poll->lock);
-        } while (wait_ms && timeout);
-        if (timeout) {
-            // Timeout or error
-            spin_unlock(&poll->lock);
-            return 0;
         }
-    }
-    // Loop over buffered socket state
-    for (size_t i=consumed; i<vector_size(poll->events); ++i) {
-        net_monitor_t* monitor = &vector_at(poll->events, i);
-        uint32_t flags = 0;
-        if (monitor->flags & NET_POLL_RECV) {
-            if (FD_ISSET(monitor->sock->fd, &poll->r_ready)) flags |= NET_POLL_RECV;
-        }
-        if (monitor->flags & NET_POLL_SEND) {
-            if (FD_ISSET(monitor->sock->fd, &poll->w_ready)) flags |= NET_POLL_SEND;
-        }
-        if (flags) {
-            events[ret].data = monitor->data;
-            events[ret].flags = flags;
-            if (++ret >= size) {
-                // We filled caller event buffer
-                poll->consumed = i;
-                break;
+
+        // Loop over buffered socket state
+        if (has_events) for (size_t i=poll->consumed; i<vector_size(poll->events); ++i) {
+            net_monitor_t* monitor = &vector_at(poll->events, i);
+            uint32_t flags = 0;
+            if (monitor->flags & NET_POLL_RECV) {
+                if (FD_ISSET(monitor->sock->fd, &poll->r_ready)) flags |= NET_POLL_RECV;
+            }
+            if (monitor->flags & NET_POLL_SEND) {
+                if (FD_ISSET(monitor->sock->fd, &poll->w_ready)) flags |= NET_POLL_SEND;
+            }
+            if (flags) {
+                events[ret].data = monitor->data;
+                events[ret].flags = flags;
+                if (++ret >= size) {
+                    // We filled caller event buffer, leave trailing buffered events
+                    poll->consumed = i + 1;
+                    spin_unlock(&poll->lock);
+                    return ret;
+                }
             }
         }
-    }
-    // All events consumed, call select() next time
-    poll->consumed = 0;
+        // All events consumed, call select() next time
+        poll->consumed = 0;
+    } while (wait_ms && ret == 0);
     spin_unlock(&poll->lock);
 #endif
     return ret;
