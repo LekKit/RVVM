@@ -1,6 +1,7 @@
 /*
-plic.h - Platform-level Interrupt Controller
-Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+plic.h - Platform-Level Interrupt Controller
+Copyright (C) 2023  LekKit <github.com/LekKit>
+              2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef DEV_PLIC_H
-#define DEV_PLIC_H
+#ifndef RVVM_PLIC_H
+#define RVVM_PLIC_H
 
 #include "rvvmlib.h"
 
@@ -34,5 +35,9 @@ PUBLIC uint32_t plic_get_phandle(plic_ctx_t* plic);
 
 // Send IRQ through PLIC
 PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq);
+
+// Assert IRQ line level
+PUBLIC bool plic_raise_irq(plic_ctx_t* plic, uint32_t irq);
+PUBLIC bool plic_lower_irq(plic_ctx_t* plic, uint32_t irq);
 
 #endif
