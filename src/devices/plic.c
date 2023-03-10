@@ -66,17 +66,15 @@ static bool plic_assign_irq(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
     if (!plic_irq_enabled(plic, ctx, irq)) return false;
 
     uint32_t cur_irq = atomic_load_uint32(&plic->ctx_claim[ctx]);
-    if (atomic_load_uint32(&plic->prio[irq]) <= atomic_load_uint32(&plic->prio[cur_irq])) {
-        // This IRQ priority isn't high enough to preempt another IRQ
+    uint32_t prio = atomic_load_uint32(&plic->prio[irq]);
+    if (prio <= atomic_load_uint32(&plic->prio[cur_irq])
+     || prio <= atomic_load_uint32(&plic->threshold[ctx])) {
+        // This IRQ priority isn't high enough
         return false;
     }
 
     atomic_store_uint32(&plic->ctx_claim[ctx], irq);
-
-    // Is interrupt of this priority above notification threshold?
-    if (atomic_load_uint32(&plic->prio[irq]) > atomic_load_uint32(&plic->threshold[ctx])) {
-        riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
-    }
+    riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     return true;
 }
 
