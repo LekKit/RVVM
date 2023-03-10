@@ -29,6 +29,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/shm.h>
 #endif
 
+enum key_mask {
+    KEY_MASK_LEFTCTRL = 1 << 0,
+    KEY_MASK_RIGHTCTRL = 1 << 1,
+    KEY_MASK_LEFTALT = 1 << 2,
+    KEY_MASK_RIGHTALT = 1 << 3,
+};
+
+static const char x11_title[] = "RVVM";
+
+static const char x11_title_capture[] = "RVVM - Press Ctrl+Alt+G to release mouse/keyboard";
+
 struct win_data {
     Display* display;
     Window window;
@@ -39,6 +50,13 @@ struct win_data {
     int max_keycode;
     int keysyms_per_keycode;
     Atom del_win;
+    enum key_mask pressed_modkeys;
+    bool grabbed;
+
+    // These are used to restore the original pointer position
+    Window grab_root;
+    int grab_pointer_x;
+    int grab_pointer_y;
 #ifdef USE_XSHM
     XShmSegmentInfo seginfo;
 #endif
@@ -156,6 +174,17 @@ static hid_key_t x11_keysym_to_hid(KeySym keysym)
     return HID_KEY_NONE;
 }
 
+static enum key_mask hid_to_key_mask(hid_key_t key)
+{
+    switch (key) {
+        case HID_KEY_LEFTCTRL:  return KEY_MASK_LEFTCTRL;
+        case HID_KEY_LEFTALT:   return KEY_MASK_LEFTALT;
+        case HID_KEY_RIGHTCTRL: return KEY_MASK_RIGHTCTRL;
+        case HID_KEY_RIGHTALT:  return KEY_MASK_RIGHTALT;
+        default:                return 0;
+    }
+}
+
 static hid_key_t x11_event_key_to_hid(fb_window_t* win, int keycode)
 {
     if (win->data->keycodemap == NULL) {
@@ -197,6 +226,73 @@ static rgb_fmt_t x11_get_rgb_format(Display* display)
         XFree(fmts);
     }
     return format;
+}
+
+static void x11_restore_pointer(fb_window_t* win)
+{
+    if (win->data->grab_root) {
+        XWarpPointer(win->data->display, None, win->data->grab_root, 0, 0, 0, 0,
+                win->data->grab_pointer_x, win->data->grab_pointer_y);
+        win->data->grab_root = None;
+    }
+}
+
+static void x11_handle_keypress(fb_window_t* win, hid_key_t hid_key)
+{
+    Display* dsp = win->data->display;
+
+    if (hid_key == HID_KEY_G
+            && (win->data->pressed_modkeys & (KEY_MASK_LEFTCTRL | KEY_MASK_RIGHTCTRL))
+            && (win->data->pressed_modkeys & (KEY_MASK_LEFTALT | KEY_MASK_RIGHTALT))) {
+        win->data->grabbed = !win->data->grabbed;
+        if (win->data->grabbed) {
+            XStoreName(dsp, win->data->window, x11_title_capture);
+            XGrabKeyboard(dsp, win->data->window, True, GrabModeAsync,
+                    GrabModeAsync, CurrentTime);
+            XGrabPointer(dsp, win->data->window, True,
+                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                    GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+
+            Window child;
+            int win_x, win_y;
+            unsigned int mask;
+	    win->data->grab_root = None;
+            XQueryPointer(dsp, win->data->window, &win->data->grab_root,
+                    &child, &win->data->grab_pointer_x,
+		    &win->data->grab_pointer_y,
+                    &win_x, &win_y, &mask);
+            XWarpPointer(dsp, None, win->data->window, 0, 0, 0, 0,
+                    win->fb.width / 2, win->fb.height / 2);
+        } else {
+            XUngrabKeyboard(dsp, CurrentTime);
+            XUngrabPointer(dsp, CurrentTime);
+            XStoreName(dsp, win->data->window, x11_title);
+	    x11_restore_pointer(win);
+        }
+        return;
+    }
+
+    hid_keyboard_press(win->keyboard, hid_key);
+    win->data->pressed_modkeys |= hid_to_key_mask(hid_key);
+}
+
+static void x11_handle_mouse_motion(fb_window_t* win, XMotionEvent* xmotion)
+{
+    Display* dsp = win->data->display;
+    if (win->data->grabbed) {
+        int center_x = win->fb.width / 2;
+        int center_y = win->fb.height / 2;
+        int dx = xmotion->x - center_x;
+        int dy = xmotion->y - center_y;
+        if (dx == 0 && dy == 0) {
+            return;
+        }
+        XWarpPointer(dsp, None, win->data->window, 0, 0, 0, 0, center_x, center_y);
+        XFlush(dsp);
+        hid_mouse_move(win->mouse, dx, dy);
+    } else {
+        hid_mouse_place(win->mouse, xmotion->x, xmotion->y);
+    }
 }
 
 #ifdef USE_XSHM
@@ -315,6 +411,7 @@ bool fb_window_create(fb_window_t* win)
 void fb_window_close(fb_window_t* win)
 {
     Display* dsp = win->data->display;
+    x11_restore_pointer(win);
 #ifdef USE_XSHM
     if (win->data->seginfo.shmaddr != NULL) {
         XShmDetach(dsp, &win->data->seginfo);
@@ -384,10 +481,10 @@ void fb_window_update(fb_window_t* win)
                 }
                 break;
             case MotionNotify:
-                hid_mouse_place(win->mouse, ev.xmotion.x, ev.xmotion.y);
+                x11_handle_mouse_motion(win, &ev.xmotion);
                 break;
             case KeyPress:
-                hid_keyboard_press(win->keyboard, x11_event_key_to_hid(win, ev.xkey.keycode));
+                x11_handle_keypress(win, x11_event_key_to_hid(win, ev.xkey.keycode));
                 break;
             case KeyRelease:
                 if (pending > 1) {
@@ -400,7 +497,9 @@ void fb_window_update(fb_window_t* win)
                         break;
                     }
                 }
-                hid_keyboard_release(win->keyboard, x11_event_key_to_hid(win, ev.xkey.keycode));
+                hid_key_t hid_key = x11_event_key_to_hid(win, ev.xkey.keycode);
+                hid_keyboard_release(win->keyboard, hid_key);
+                win->data->pressed_modkeys &= ~hid_to_key_mask(hid_key);
                 break;
             case MappingNotify:
                 if (ev.xmapping.request == MappingKeyboard) {
