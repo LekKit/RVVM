@@ -80,8 +80,7 @@ static bool plic_select_irq(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
     if (!plic_is_irq_valid(plic, ctx, irq)) return false;
 
     uint32_t cur_irq = atomic_load_uint32(&plic->ctx_claim[ctx]);
-    if (atomic_load_uint32(&plic->prio[irq]) <= atomic_load_uint32(&plic->prio[cur_irq])
-     && irq >= cur_irq) {
+    if (atomic_load_uint32(&plic->prio[irq]) <= atomic_load_uint32(&plic->prio[cur_irq])) {
         // This IRQ priority is not high enough to preempt another IRQ
         return false;
     }
