@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PLIC_CTXFLAG_THRESHOLD     0x0
 #define PLIC_CTXFLAG_CLAIMCOMPLETE 0x1
 
-#define PLIC_SOURCE_MAX 256 // Max 1024
+#define PLIC_SOURCE_MAX 64 // Max 1024
 
 #define PLIC_SRC_REG_COUNT ((PLIC_SOURCE_MAX + 0x1F) >> 5)
 
@@ -117,7 +117,7 @@ static void plic_scan_irqs(plic_ctx_t* plic, uint32_t ctx)
         if (irqs) for (size_t j=0; j<32; ++j) {
             if (bit_check(irqs, j)) {
                 uint32_t irq = (i << 5) | j;
-                plic_notify_irq(plic, ctx, irq);
+                if (plic_notify_irq(plic, ctx, irq)) break;
             }
         }
     }
@@ -282,7 +282,7 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
     fdt_node_add_prop_u32(plic_node, "#interrupt-cells", 1);
     fdt_node_add_prop_reg(plic_node, "reg", base_addr, 0x4000000);
     fdt_node_add_prop_str(plic_node, "compatible", "sifive,plic-1.0.0");
-    fdt_node_add_prop_u32(plic_node, "riscv,ndev", PLIC_SOURCE_MAX);
+    fdt_node_add_prop_u32(plic_node, "riscv,ndev", PLIC_SOURCE_MAX - 1);
     fdt_node_add_prop(plic_node, "interrupt-controller", NULL, 0);
     fdt_node_add_prop_cells(plic_node, "interrupts-extended", irq_ext, vector_size(machine->harts) * 4);
     free(irq_ext);
@@ -305,7 +305,7 @@ PUBLIC plic_ctx_t* plic_init_auto(rvvm_machine_t* machine)
 PUBLIC uint32_t plic_alloc_irq(plic_ctx_t* plic)
 {
     if (plic == NULL) return 0;
-    uint32_t irq = atomic_add_uint32(&plic->alloc_irq, 1);
+    uint32_t irq = atomic_add_uint32(&plic->alloc_irq, 1) + 1;
     if (irq >= PLIC_SOURCE_MAX) {
         rvvm_warn("Ran out of PLIC interrupt IDs");
         irq = 0;
