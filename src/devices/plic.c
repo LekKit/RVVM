@@ -45,7 +45,6 @@ struct plic {
     uint32_t raised[PLIC_SRC_REG_COUNT];
     uint32_t** enable;    // [CTX][SRC_REG]
     uint32_t*  threshold; // [CTX]
-    uint32_t*  ctx_claim; // [CTX]
 };
 
 static inline uint32_t plic_ctx_count(plic_ctx_t* plic)
@@ -59,57 +58,69 @@ static inline bool plic_irq_enabled(plic_ctx_t* plic, uint32_t ctx, uint32_t irq
     return bit_check(atomic_load_uint32(&plic->enable[ctx][irq >> 5]), irq & 0x1F);
 }
 
-// Try assigning a new IRQ to CTX
-static bool plic_assign_irq(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
+// Notify CTX about inbound IRQ
+static bool plic_notify_irq(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
 {
     // Can we deliver this IRQ to this CTX?
     if (!plic_irq_enabled(plic, ctx, irq)) return false;
 
-    uint32_t cur_irq = atomic_load_uint32(&plic->ctx_claim[ctx]);
-    uint32_t prio = atomic_load_uint32(&plic->prio[irq]);
-    if (prio <= atomic_load_uint32(&plic->prio[cur_irq])
-     || prio <= atomic_load_uint32(&plic->threshold[ctx])) {
+    if (atomic_load_uint32(&plic->prio[irq]) <= atomic_load_uint32(&plic->threshold[ctx])) {
         // This IRQ priority isn't high enough
         return false;
     }
 
-    atomic_store_uint32(&plic->ctx_claim[ctx], irq);
     riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     return true;
 }
 
-// Try consuming another pending IRQ for this CTX
-static uint32_t plic_try_consume_irq(plic_ctx_t* plic, uint32_t ctx)
+static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
 {
-    for (size_t irq=1; irq<PLIC_SOURCE_MAX;) {
-        uint32_t raised = atomic_load_uint32(&plic->raised[irq >> 5]);
-        uint32_t irqs = atomic_load_uint32(&plic->pending[irq >> 5]);
+    size_t nirqs = 0;
+    uint32_t ret = 0;
+    uint32_t threshold = atomic_load_uint32(&plic->threshold[ctx]);
+    for (size_t i=0; i<PLIC_SRC_REG_COUNT; ++i) {
+        uint32_t irqs = atomic_load_uint32(&plic->pending[i]);
+
+        if (irqs) for (size_t j=0; j<32; ++j) {
+            if (bit_check(irqs, j)) {
+                uint32_t irq = (i << 5) | j;
+                uint32_t prio = atomic_load_uint32(&plic->prio[irq]);
+                if (plic_irq_enabled(plic, ctx, irq) && prio > threshold) {
+                    threshold = prio;
+                    ret = irq;
+                    nirqs++;
+                }
+            }
+        }
+    }
+    if (nirqs <= 1) {
+        riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
+    }
+    uint32_t mask = 1 << (ret & 0x1F);
+    if (!(atomic_and_uint32(&plic->pending[ret >> 5], ~mask) & mask)) {
+        return 0;
+    }
+    return ret;
+}
+
+static void plic_scan_irqs(plic_ctx_t* plic, uint32_t ctx)
+{
+    for (size_t i=0; i<PLIC_SRC_REG_COUNT; ++i) {
+        uint32_t raised = atomic_load_uint32(&plic->raised[i]);
+        uint32_t irqs = atomic_load_uint32(&plic->pending[i]);
         // If we have completed but still asserted IRQs, fire them up again
         if (raised & ~irqs) {
             irqs |= raised;
-            atomic_or_uint32(&plic->pending[irq >> 5], raised);
+            atomic_or_uint32(&plic->pending[i], raised);
         }
-        if (irqs) {
-            if (bit_check(irqs, irq & 0x1F) && plic_assign_irq(plic, ctx, irq)) {
-                return irq;
-            }
-            irq++;
-        } else {
-            irq += 32;
-        }
-    }
-    return 0;
-}
 
-static inline uint32_t plic_try_claim_irq(plic_ctx_t* plic, uint32_t ctx)
-{
-    uint32_t irq = atomic_swap_uint32(&plic->ctx_claim[ctx], 0);
-    uint32_t mask = 1 << (irq & 0x1F);
-    if (atomic_and_uint32(&plic->pending[irq >> 5], ~mask) & mask) {
-        // Successfully claimed the IRQ
-        return irq;
+        if (irqs) for (size_t j=0; j<32; ++j) {
+            if (bit_check(irqs, j)) {
+                uint32_t irq = (i << 5) | j;
+                plic_notify_irq(plic, ctx, irq);
+            }
+        }
     }
-    return 0;
 }
 
 static bool plic_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
@@ -146,13 +157,7 @@ static bool plic_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
         uint32_t ctx = (offset - 0x200000) >> 12;
         if (ctx < plic_ctx_count(plic)) {
             if (flag == PLIC_CTXFLAG_CLAIMCOMPLETE) {
-                riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
-                uint32_t irq = plic_try_claim_irq(plic, ctx);
-                if (!irq) {
-                    plic_try_consume_irq(plic, ctx);
-                    irq = plic_try_claim_irq(plic, ctx);
-                }
-                write_uint32_le(data, irq);
+                write_uint32_le(data, plic_claim_irq(plic, ctx));
             } else if (flag == PLIC_CTXFLAG_THRESHOLD) {
                 write_uint32_le(data, atomic_load_uint32(&plic->threshold[ctx]));
             }
@@ -191,7 +196,7 @@ static bool plic_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uin
         uint32_t ctx = (offset - 0x200000) >> 12;
         if (ctx < plic_ctx_count(plic)) {
             if (flag == PLIC_CTXFLAG_CLAIMCOMPLETE) {
-                plic_try_consume_irq(plic, ctx);
+                plic_scan_irqs(plic, ctx);
             } else if (flag == PLIC_CTXFLAG_THRESHOLD) {
                 atomic_store_uint32(&plic->threshold[ctx], read_uint32_le(data));
             }
@@ -210,7 +215,6 @@ static void plic_remove(rvvm_mmio_dev_t* dev)
     }
     free(plic->enable);
     free(plic->threshold);
-    free(plic->ctx_claim);
     free(plic);
 }
 
@@ -226,7 +230,6 @@ static void plic_reset(rvvm_mmio_dev_t* dev)
     memset(plic->pending, 0, sizeof(plic->pending));
     memset(plic->raised, 0, sizeof(plic->raised));
     memset(plic->threshold, 0, plic_ctx_count(plic) << 2);
-    memset(plic->ctx_claim, 0, plic_ctx_count(plic) << 2);
 }
 
 static rvvm_mmio_type_t plic_dev_type = {
@@ -245,7 +248,6 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
         plic->enable[ctx] = safe_calloc(sizeof(uint32_t), PLIC_SRC_REG_COUNT);
     }
     plic->threshold = safe_calloc(sizeof(uint32_t), plic_ctx_count(plic));
-    plic->ctx_claim = safe_calloc(sizeof(uint32_t), plic_ctx_count(plic));
 
     rvvm_mmio_dev_t plic_mmio = {
         .addr = base_addr,
@@ -330,7 +332,7 @@ PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq)
 
     // Assign & notify hart responsible for this IRQ
     for (size_t ctx=0; ctx<plic_ctx_count(plic); ++ctx) {
-        if (plic_assign_irq(plic, ctx, irq)) break;
+        if (plic_notify_irq(plic, ctx, irq)) break;
     }
 
     return true;
