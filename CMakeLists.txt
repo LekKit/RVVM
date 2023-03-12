@@ -25,11 +25,10 @@ if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
 endif()
 
-if (NOT CMAKE_BUILD_TYPE OR NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
+if (NOT CMAKE_BUILD_TYPE AND NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
 	message(STATUS "Setting build type to Release as none was specified.")
-	set(CMAKE_BUILD_TYPE "Release" CACHE
-		STRING "Choose the type of build." FORCE)
-	set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+	set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+	set(CMAKE_CONFIGURATION_TYPES "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(RVVM_SRC_DIR "${RVVM_SOURCE_DIR}/src")
@@ -182,7 +181,7 @@ list(REMOVE_ITEM RVVM_DEVICES_SRC
 	${RVVM_TAP_USER_SRC})
 
 if (RVVM_USE_FB)
-	if (RVVM_USE_SDL)
+	if (RVVM_USE_SDL OR APPLE)
 		find_library(RVVM_SDL_LIB SDL REQUIRED)
 		list(APPEND RVVM_DEVICES_SRC ${RVVM_SDL_SRC})
 		target_link_libraries(rvvm_common INTERFACE ${RVVM_SDL_LIB})
