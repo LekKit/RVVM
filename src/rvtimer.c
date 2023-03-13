@@ -95,7 +95,7 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 
 uint64_t rvtimer_clocksource(uint64_t freq)
 {
-    return rvtimer_fixup(time(0)) * freq;
+    return time(0) * freq;
 }
 
 #endif
