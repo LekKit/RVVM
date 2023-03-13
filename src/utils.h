@@ -62,6 +62,7 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 // Safe object allocation with type checking & zeroing
 #define safe_new_obj(type) ((type*)safe_calloc(sizeof(type), 1))
 
+// Run a function only once upon reaching this, for lazy init, etc
 #define DO_ONCE(expr) \
 do { \
     static uint32_t already_done_once = 0; \
@@ -73,6 +74,10 @@ do { \
         while (atomic_load_uint32_ex(&already_done_once, ATOMIC_ACQUIRE) != 2); \
     } \
 } while (0)
+
+// Evaluate max/min value
+#define EVAL_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define EVAL_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // Portable itoa/atoi replacement
 size_t int_to_str_dec(char* str, size_t size, int val);
