@@ -310,6 +310,14 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
     }
     vector_init(machine->harts);
     vector_init(machine->mmio);
+
+    // Default opts setup
+    machine->opts[RVVM_OPT_JIT] = 1;
+    machine->opts[RVVM_OPT_JITCACHE] = rvvm_getarg_size("jitcache");
+    machine->opts[RVVM_OPT_MAX_CPU_CENT] = 100;
+
+    if (!machine->opts[RVVM_OPT_JITCACHE]) machine->opts[RVVM_OPT_JITCACHE] = 16 << 20; // Default 16M JIT cache per hart
+
     for (size_t i=0; i<hart_count; ++i) {
         vm = safe_new_obj(rvvm_hart_t);
         vector_push_back(machine->harts, vm);
@@ -429,6 +437,25 @@ PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str)
     UNUSED(machine);
     UNUSED(str);
 #endif
+}
+
+PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt)
+{
+    if (opt >= RVVM_MAX_OPTS) {
+        return 0;
+    } else {
+        return machine->opts[opt];
+    }
+}
+
+PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t value)
+{
+    if (opt >= RVVM_MAX_OPTS) {
+        return false;
+    } else {
+        machine->opts[opt] = value;
+        return true;
+    }
 }
 
 PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str)

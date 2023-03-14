@@ -276,6 +276,8 @@ struct rvvm_machine_t {
     plic_ctx_t* plic;
     pci_bus_t*  pci_bus;
     i2c_bus_t*  i2c_bus;
+
+    rvvm_addr_t opts[RVVM_MAX_OPTS];
 #ifdef USE_FDT
     // FDT nodes for device tree generation
     struct fdt_node* fdt;
