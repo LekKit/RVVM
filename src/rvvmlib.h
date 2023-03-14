@@ -45,6 +45,15 @@ extern "C" {
 #define RVVM_ABI_VERSION     3
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
+#define RVVM_OPT_NONE           0
+#define RVVM_OPT_JIT            1
+#define RVVM_OPT_JITCACHE       2
+#define RVVM_OPT_VERBOSE        3
+#define RVVM_OPT_DEBUG          4
+#define RVVM_OPT_HW_IMITATE     5
+#define RVVM_OPT_MAX_CPU_CENT   6
+#define RVVM_MAX_OPTS           7
+
 typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;
@@ -135,6 +144,10 @@ PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr);
 // Manipulate cmdline passed to guest kernel in FDT prop /chosen/bootargs
 PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
+
+// Machine configuration
+PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt);
+PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t value);
 
 // Set up handler & userdata to be called when the VM performs reset/shutdown
 // Returning false from handler cancels reset
