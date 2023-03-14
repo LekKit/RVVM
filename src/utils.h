@@ -100,7 +100,9 @@ static inline size_t mem_suffix_shift(char suffix)
     switch (suffix) {
         case 'k': return 10;
         case 'K': return 10;
+        case 'm': return 20;
         case 'M': return 20;
+        case 'g': return 30;
         case 'G': return 30;
         default: return 0;
     }
