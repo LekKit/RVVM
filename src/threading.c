@@ -25,11 +25,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 
-typedef HANDLE thread_internal_t;
-typedef struct {
-    HANDLE event;
+struct thread_ctx {
+    HANDLE handle;
+};
+
+struct cond_var {
     uint32_t flag;
-} cond_var_internal_t;
+    uint32_t waiters;
+    HANDLE handles[2]; // 0 is Event, 1 is WaitableTimer
+};
 
 #else
 
@@ -39,165 +43,195 @@ typedef struct {
 #endif
 #include <pthread.h>
 
-typedef pthread_t thread_internal_t;
-typedef struct {
+struct thread_ctx {
+    pthread_t pthread;
+};
+
+struct cond_var {
+    uint32_t flag;
+    uint32_t waiters;
     pthread_cond_t cond;
     pthread_mutex_t lock;
-    uint32_t flag;
-} cond_var_internal_t;
+};
 
 #endif
 
-thread_handle_t thread_create(thread_func_t func_name, void *arg)
+thread_ctx_t* thread_create(thread_func_t func, void *arg)
 {
-    thread_handle_t handle = calloc(sizeof(thread_internal_t), 1);
-    if (handle) {
+    thread_ctx_t* thread = safe_new_obj(thread_ctx_t);
 #ifdef _WIN32
-        *(HANDLE*)handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func_name, arg, 0, NULL);
-        if (*(HANDLE*)handle) {
-            return handle;
-        }
+    thread->handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func, arg, 0, NULL);
+    if (thread->handle) return thread;
 #else
-        if (pthread_create((pthread_t*)handle, NULL, func_name, arg) == 0) {
-            return handle;
-        }
-#endif
+    if (pthread_create(&thread->pthread, NULL, func, arg) == 0) {
+        return thread;
     }
+#endif
     rvvm_warn("Failed to spawn thread!");
-    free(handle);
+    free(thread);
     return NULL;
 }
 
-void* thread_join(thread_handle_t handle)
+void* thread_join(thread_ctx_t* thread)
 {
-    if (handle == NULL) return NULL;
-    void* ret;
+    void* ret = 0;
+    if (thread == NULL) return NULL;
 #ifdef _WIN32
-    DWORD ltmp;
-    WaitForSingleObject(*(HANDLE*)handle, INFINITE);
-    GetExitCodeThread(*(HANDLE*)handle, &ltmp);
+    DWORD ltmp = 0;
+    WaitForSingleObject(thread->handle, INFINITE);
+    GetExitCodeThread(thread->handle, &ltmp);
     ret = (void*)(size_t)ltmp;
 #else
-    pthread_join(*(pthread_t*)handle, &ret);
+    pthread_join(thread->pthread, &ret);
 #endif
-    free(handle);
+    free(thread);
     return ret;
 }
 
-bool thread_detach(thread_handle_t handle)
+bool thread_detach(thread_ctx_t* thread)
 {
-    if (handle == NULL) return false;
-    bool ret;
+    bool ret = false;
+    if (thread == NULL) return false;
 #ifdef _WIN32
-    ret = CloseHandle(*(HANDLE*)handle);
+    ret = CloseHandle(thread->handle);
 #else
-    ret = pthread_detach(*(pthread_t*)handle) == 0;
+    ret = pthread_detach(thread->pthread) == 0;
 #endif
-    free(handle);
+    free(thread);
     return ret;
 }
 
-cond_var_t condvar_create()
+cond_var_t* condvar_create()
 {
-    cond_var_internal_t* cond = calloc(sizeof(cond_var_internal_t), 1);
-    if (cond) {
-        atomic_store_uint32(&cond->flag, 0);
+    cond_var_t* cond = safe_new_obj(cond_var_t);
+    atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
-        cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
-        if (cond->event) return cond;
+    cond->handles[0] = CreateEventW(NULL, FALSE, FALSE, NULL);
+    cond->handles[1] = CreateWaitableTimerW(NULL, TRUE, NULL);
+    if (cond->handles[0] && cond->handles[1]) return cond;
 #elif defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
-        pthread_condattr_t cond_attr;
-        pthread_condattr_init(&cond_attr);
-        if (pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
-         && pthread_cond_init(&cond->cond, &cond_attr)  == 0
-         && pthread_mutex_init(&cond->lock, NULL) == 0) {
-            pthread_condattr_destroy(&cond_attr);
-            return cond;
-        }
+    pthread_condattr_t cond_attr;
+    if (pthread_condattr_init(&cond_attr) == 0
+     && pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
+     && pthread_cond_init(&cond->cond, &cond_attr)  == 0
+     && pthread_mutex_init(&cond->lock, NULL) == 0) {
         pthread_condattr_destroy(&cond_attr);
-#else
-        if (pthread_cond_init(&cond->cond, NULL)  == 0
-         && pthread_mutex_init(&cond->lock, NULL) == 0) {
-            return cond;
-        }
-#endif
+        return cond;
     }
+#else
+    if (pthread_cond_init(&cond->cond, NULL)  == 0
+     && pthread_mutex_init(&cond->lock, NULL) == 0) {
+        return cond;
+    }
+#endif
     rvvm_warn("Failed to create conditional variable!");
-    free(cond);
+    condvar_free(cond);
     return NULL;
 }
 
-bool condvar_wait(cond_var_t cond, unsigned timeout_ms)
+bool condvar_wait(cond_var_t* cond, uint64_t timeout_ms)
 {
-    cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
-    if (!cond) return false;
-    if (atomic_swap_uint32(&cond_p->flag, 0)) return true;
+    uint64_t timeout_ns = CONDVAR_INFINITE;
+    if (timeout_ms != CONDVAR_INFINITE) timeout_ns = timeout_ms * 1000000;
+    return condvar_wait_ns(cond, timeout_ns);
+}
+
+bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
+{
+    bool ret = false;
+    if (!cond || !timeout_ns) return false;
+    if (atomic_swap_uint32(&cond->flag, 0)) return true;
+    atomic_add_uint32(&cond->waiters, 1);
 #ifdef _WIN32
-    DWORD ms = (timeout_ms == CONDVAR_INFINITE) ? INFINITE : timeout_ms;
-    return WaitForSingleObject(cond_p->event, ms) == WAIT_OBJECT_0;
+    if (timeout_ns == CONDVAR_INFINITE) {
+        ret = WaitForSingleObject(cond->handles[0], INFINITE) == WAIT_OBJECT_0;
+    } else if ((timeout_ns % 1000000) == 0) {
+        // Millisecond precision timeout
+        timeBeginPeriod(1);
+        ret = WaitForSingleObject(cond->handles[0], timeout_ns / 1000000) == WAIT_OBJECT_0;
+        timeEndPeriod(1);
+    } else {
+        // Nanosecond precision timeout
+        LARGE_INTEGER delay = { .QuadPart = -(timeout_ns / 100ULL), };
+        timeBeginPeriod(1);
+        SetWaitableTimer(cond->handles[1], &delay, 0, NULL, NULL, false);
+        ret = WaitForMultipleObjects(2, cond->handles, FALSE, INFINITE) == WAIT_OBJECT_0;
+        timeEndPeriod(1);
+    }
 #else
-    bool ret = true;
-    pthread_mutex_lock(&cond_p->lock);
-    if (timeout_ms == CONDVAR_INFINITE) {
-        ret = pthread_cond_wait(&cond_p->cond, &cond_p->lock) == 0;
+    pthread_mutex_lock(&cond->lock);
+    if (timeout_ns == CONDVAR_INFINITE) {
+        ret = pthread_cond_wait(&cond->cond, &cond->lock) == 0;
     } else {
         struct timespec ts = {0};
 #if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
         clock_gettime(CLOCK_MONOTONIC, &ts);
-        ts.tv_nsec += timeout_ms * 1000000;
-        ts.tv_sec  += ts.tv_nsec / 1000000000;
 #else
+        // Some targets lack clock_gettime(), use gettimeofday()
         struct timeval tv = {0};
         gettimeofday(&tv, NULL);
-        ts.tv_nsec = (tv.tv_usec * 1000) + (timeout_ms * 1000000);
-        ts.tv_sec  = tv.tv_sec + (ts.tv_nsec / 1000000000);
+        ts.tv_sec  = tv.tv_sec;
+        ts.tv_nsec = tv.tv_usec * 1000;
 #endif
-        ts.tv_nsec %= 1000000000;
-        ret = pthread_cond_timedwait(&cond_p->cond, &cond_p->lock, &ts) == 0;
+        // Properly handle timespec addition without an overflow
+        timeout_ns += ts.tv_nsec;
+        ts.tv_sec += timeout_ns / 1000000000;
+        ts.tv_nsec = timeout_ns % 1000000000;
+        ret = pthread_cond_timedwait(&cond->cond, &cond->lock, &ts) == 0;
     }
-    pthread_mutex_unlock(&cond_p->lock);
+    pthread_mutex_unlock(&cond->lock);
+#endif
+    atomic_sub_uint32(&cond->waiters, 1);
     return ret;
-#endif
 }
 
-void condvar_wake(cond_var_t cond)
+bool condvar_wake(cond_var_t* cond)
 {
-    cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
-    if (!cond) return;
-    atomic_store_uint32(&cond_p->flag, 1);
+    if (!cond) return false;
+    atomic_store_uint32(&cond->flag, 1);
+    if (!atomic_load_uint32(&cond->waiters)) return false;
 #ifdef _WIN32
-    SetEvent(cond_p->event);
+    SetEvent(cond->handles[0]);
 #else
-    pthread_mutex_lock(&cond_p->lock);
-    pthread_cond_signal(&cond_p->cond);
-    pthread_mutex_unlock(&cond_p->lock);
+    pthread_mutex_lock(&cond->lock);
+    pthread_cond_signal(&cond->cond);
+    pthread_mutex_unlock(&cond->lock);
 #endif
+    return true;
 }
 
-void condvar_wake_all(cond_var_t cond)
+bool condvar_wake_all(cond_var_t* cond)
 {
-    cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
-    if (!cond) return;
-    atomic_store_uint32(&cond_p->flag, 1);
+    if (!cond) return false;
+    atomic_store_uint32(&cond->flag, 1);
+    if (!atomic_load_uint32(&cond->waiters)) return false;
 #ifdef _WIN32
-    SetEvent(cond_p->event);
+    SetEvent(cond->handles[0]);
 #else
-    pthread_mutex_lock(&cond_p->lock);
-    pthread_cond_broadcast(&cond_p->cond);
-    pthread_mutex_unlock(&cond_p->lock);
+    pthread_mutex_lock(&cond->lock);
+    pthread_cond_broadcast(&cond->cond);
+    pthread_mutex_unlock(&cond->lock);
 #endif
+    return true;
 }
 
-void condvar_free(cond_var_t cond)
+uint32_t condvar_waiters(cond_var_t* cond)
 {
-    cond_var_internal_t* cond_p = (cond_var_internal_t*)cond;
+    if (!cond) return false;
+    return atomic_load_uint32(&cond->waiters);
+}
+
+void condvar_free(cond_var_t* cond)
+{
     if (!cond) return;
-    condvar_wake_all(cond);
+    uint32_t waiters = condvar_waiters(cond);
+    if (waiters) rvvm_warn("Destroying a condvar with %u waiters!", waiters);
 #ifdef _WIN32
-    CloseHandle(cond_p->event);
+    CloseHandle(cond->handles[0]);
+    CloseHandle(cond->handles[1]);
 #else
-    pthread_cond_destroy(&cond_p->cond);
-    pthread_mutex_destroy(&cond_p->lock);
+    pthread_cond_destroy(&cond->cond);
+    pthread_mutex_destroy(&cond->lock);
 #endif
     free(cond);
 }
@@ -214,8 +248,8 @@ void condvar_free(cond_var_t cond)
 
 typedef struct {
     uint32_t busy;
-    thread_handle_t thread;
-    cond_var_t cond;
+    thread_ctx_t* thread;
+    cond_var_t* cond;
     thread_func_t func;
     void* arg[THREAD_MAX_VA_ARGS];
     bool func_va;

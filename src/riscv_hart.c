@@ -368,7 +368,7 @@ void riscv_hart_pause(rvvm_hart_t* vm)
     riscv_hart_notify(vm);
 
     // Clear vm->thread before freeing it
-    thread_handle_t thread = vm->thread;
+    thread_ctx_t* thread = vm->thread;
     vm->thread = NULL;
     thread_join(thread);
 }

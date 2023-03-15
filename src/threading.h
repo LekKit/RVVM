@@ -19,24 +19,30 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef THREADING_H
 #define THREADING_H
 
+#include <stdint.h>
 #include <stdbool.h>
 
-typedef void* thread_handle_t;
+typedef struct thread_ctx thread_ctx_t;
+typedef struct cond_var cond_var_t;
+
 typedef void* (*thread_func_t)(void*);
 typedef void* (*thread_func_va_t)(void**);
-typedef void* cond_var_t;
 
-thread_handle_t thread_create(thread_func_t func, void* arg);
-void* thread_join(thread_handle_t handle);
-bool thread_detach(thread_handle_t handle);
+// Threading
+thread_ctx_t* thread_create(thread_func_t func, void* arg);
+void*         thread_join(thread_ctx_t* handle);
+bool          thread_detach(thread_ctx_t* handle);
 
-#define CONDVAR_INFINITE ((unsigned)-1)
+#define CONDVAR_INFINITE ((uint64_t)-1)
 
-cond_var_t condvar_create();
-bool condvar_wait(cond_var_t cond, unsigned timeout_ms);
-void condvar_wake(cond_var_t cond);
-void condvar_wake_all(cond_var_t cond);
-void condvar_free(cond_var_t cond);
+// Conditional variables
+cond_var_t* condvar_create();
+bool        condvar_wait(cond_var_t* cond, uint64_t timeout_ms);
+bool        condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns);
+bool        condvar_wake(cond_var_t* cond);
+bool        condvar_wake_all(cond_var_t* cond);
+uint32_t    condvar_waiters(cond_var_t* cond);
+void        condvar_free(cond_var_t* cond);
 
 #define THREAD_MAX_VA_ARGS 8
 

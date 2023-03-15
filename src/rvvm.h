@@ -243,8 +243,8 @@ struct rvvm_hart_t {
     bool block_ends;
     bool ldst_trace;
 #endif
-    thread_handle_t thread;
-    cond_var_t wfi_cond;
+    thread_ctx_t* thread;
+    cond_var_t* wfi_cond;
     rvtimer_t timer;
     uint32_t pending_irqs;
     uint32_t pending_events;

@@ -29,8 +29,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static spinlock_t global_lock = SPINLOCK_INIT;
 static vector_t(rvvm_machine_t*) global_machines = {0};
 
-static cond_var_t builtin_eventloop_cond;
-static thread_handle_t builtin_eventloop_thread;
+static cond_var_t* builtin_eventloop_cond;
+static thread_ctx_t* builtin_eventloop_thread;
 static bool builtin_eventloop_enabled = true;
 
 #ifdef USE_FDT
@@ -719,7 +719,7 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, boo
 
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
 {
-    thread_handle_t stop_thread = NULL;
+    thread_ctx_t* stop_thread = NULL;
     spin_lock_slow(&global_lock);
     if (builtin_eventloop_enabled != enabled) {
         builtin_eventloop_enabled = enabled;

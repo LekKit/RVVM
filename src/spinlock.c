@@ -28,11 +28,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Attemts to claim the lock before sleep throttle
 #define SPINLOCK_RETRIES 60
 
-static cond_var_t global_cond;
+static cond_var_t* global_cond;
 
 static void spin_atexit()
 {
-    cond_var_t cond = global_cond;
+    cond_var_t* cond = global_cond;
     global_cond = NULL;
     // Make sure no use-after-free happens on running threads
     atomic_fence();
