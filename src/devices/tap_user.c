@@ -112,7 +112,7 @@ struct tap_dev {
     net_poll_t*   poll;
     hashmap_t     udp_ports;
     hashmap_t     tcp_socks;
-    thread_handle_t thread;
+    thread_ctx_t* thread;
     net_sock_t*   shut[2];
     uint8_t       mac[6];
 };
@@ -638,6 +638,7 @@ static void* tap_thread(void* arg)
     net_event_t events[64];
     while (true) {
         size_t size = net_poll_wait(tap->poll, events, 64, NET_POLL_INF);
+        bool tcp = false;
         spin_lock(&tap->lock);
         for (size_t i=0; i<size; ++i) {
             if (events[i].data == NULL) {
@@ -648,6 +649,7 @@ static void* tap_thread(void* arg)
             tap_sock_t* ts = events[i].data;
             if (ts->tcp) {
                 // TCP socket
+                tcp = true;
                 if (events[i].flags & NET_POLL_SEND) {
                     if (net_tcp_status(ts->sock)) {
                         // Connection succeeded
@@ -674,7 +676,7 @@ static void* tap_thread(void* arg)
             }
         }
         spin_unlock(&tap->lock);
-        sleep_ms(1);
+        if (tcp) sleep_ms(1);
     }
     return NULL;
 }
@@ -683,6 +685,9 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
 {
     tap_dev_t* tap = safe_new_obj(tap_dev_t);
     tap->net = *net_dev;
+    // Generate a random local unicast MAC
+    rvvm_randombytes(tap->mac, 6);
+    tap->mac[0] = (tap->mac[0] & 0xFE) | 0x2;
 
     tap->poll = net_poll_create();
     
