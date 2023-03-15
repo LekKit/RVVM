@@ -126,9 +126,12 @@ bool rvtimer_pending(rvtimer_t* timer)
 void sleep_ms(uint32_t ms)
 {
 #ifdef _WIN32
+    timeBeginPeriod(1);
     Sleep(ms);
+    timeEndPeriod(1);
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
-    usleep(ms * 1000);
+    struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000, };
+    while (nanosleep(&ts, &ts) < 0);
 #else
     UNUSED(ms);
 #endif
