@@ -82,8 +82,8 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                         // Calculate sleep period
                         uint64_t timestamp = rvtimer_get(&vm->timer);
                         if (vm->timer.timecmp > timestamp) {
-                            timestamp = (vm->timer.timecmp - timestamp) * 1000 / vm->timer.freq;
-                            condvar_wait(vm->wfi_cond, timestamp);
+                            timestamp = (vm->timer.timecmp - timestamp) * 1000000000 / vm->timer.freq;
+                            condvar_wait_ns(vm->wfi_cond, timestamp);
                         }
                         // Hint interrupt dispatcher to check actual timer expiration
                         vm->csr.ip |= (1 << INTERRUPT_MTIMER);
