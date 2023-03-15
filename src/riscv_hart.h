@@ -75,6 +75,9 @@ void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq_mask);
 // Forces hart to check timecmp register for interrupts
 void riscv_hart_check_timer(rvvm_hart_t* vm);
 
+// Preempt the hart from consuming CPU
+void riscv_hart_preempt(rvvm_hart_t* vm, uint32_t preempt_ms);
+
 // Pauses hart in a consistent state, terminates executing thread
 // This function is blocking
 void riscv_hart_pause(rvvm_hart_t* vm);

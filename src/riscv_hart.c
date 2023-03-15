@@ -84,7 +84,6 @@ void riscv_hart_free(rvvm_hart_t* vm)
 
 void riscv_hart_run(rvvm_hart_t* vm)
 {
-    uint32_t events;
     rvvm_info("Hart %p started", vm);
     atomic_store_uint32(&vm->wait_event, HART_RUNNING);
 #ifdef USE_SJLJ
@@ -102,19 +101,19 @@ void riscv_hart_run(rvvm_hart_t* vm)
 #endif
 
         vm->csr.ip |= atomic_swap_uint32(&vm->pending_irqs, 0);
-        events = atomic_swap_uint32(&vm->pending_events, 0);
-
-        if (events & EXT_EVENT_TIMER) {
-            vm->csr.ip |= (1U << INTERRUPT_MTIMER);
-        }
+        uint32_t events = atomic_swap_uint32(&vm->pending_events, 0);
 
         if ((vm->csr.ip & (1U << INTERRUPT_MTIMER)) && !rvtimer_pending(&vm->timer)) {
             riscv_interrupt_clear(vm, INTERRUPT_MTIMER);
         }
 
-        if (events & EXT_EVENT_PAUSE) {
-            rvvm_info("Hart %p stopped", vm);
-            return;
+        if (unlikely(events)) {
+            if (events & EXT_EVENT_PAUSE) {
+                rvvm_info("Hart %p stopped", vm);
+                return;
+            } else if (events & EXT_EVENT_PREEMPT) {
+                sleep_ms(atomic_swap_uint32(&vm->preempt_ms, 0));
+            }
         }
 
         riscv_handle_irqs(vm, false);
@@ -350,8 +349,17 @@ void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
 
 void riscv_hart_check_timer(rvvm_hart_t* vm)
 {
-    atomic_or_uint32(&vm->pending_events, EXT_EVENT_TIMER);
-    riscv_hart_notify(vm);
+    // The hard thread checks if the timer is actually pending
+    atomic_or_uint32(&vm->pending_irqs, 1U << INTERRUPT_MTIMER);
+    atomic_store_uint32(&vm->wait_event, HART_STOPPED);
+}
+
+void riscv_hart_preempt(rvvm_hart_t* vm, uint32_t preempt_ms)
+{
+    if (!preempt_ms) return;
+    atomic_store_uint32(&vm->preempt_ms, preempt_ms);
+    atomic_or_uint32(&vm->pending_events, EXT_EVENT_PREEMPT);
+    atomic_store_uint32(&vm->wait_event, HART_STOPPED);
 }
 
 void riscv_hart_pause(rvvm_hart_t* vm)

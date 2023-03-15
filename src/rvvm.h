@@ -113,8 +113,8 @@ enum
 #define INTERRUPT_MEXTERNAL    0xB
 
 // Internal events delivered to the hart
-#define EXT_EVENT_TIMER        0x1 // Check timecmp for irq
-#define EXT_EVENT_PAUSE        0x2 // Pause the hart in a consistent state
+#define EXT_EVENT_PAUSE        0x1 // Pause the hart in a consistent state
+#define EXT_EVENT_PREEMPT      0x2 // Preempt the hart
 
 #define TRAP_INSTR_MISALIGN    0x0
 #define TRAP_INSTR_FETCH       0x1
@@ -142,7 +142,7 @@ typedef struct {
     riscv_inst_c_t opcodes_c[32];
 } rvvm_decoder_t;
 
-/* 
+/*
  * Address translation cache
  * In future, it would be nice to verify if cache-line alignment
  * gives any profit (entries scattered between cachelines waste L1)
@@ -201,7 +201,7 @@ struct rvvm_hart_t {
 #ifdef USE_FPU
     double fpu_registers[FPU_REGISTERS_MAX];
 #endif
-    
+
     // We want short offsets from vmptr to tlb
     rvvm_tlb_entry_t tlb[TLB_SIZE];
 #ifdef USE_JIT
@@ -215,12 +215,12 @@ struct rvvm_hart_t {
     uint8_t priv_mode;
     bool rv64;
     bool trap;
-    
+
     bool user_traps;
-    
+
     bool lrsc;
     maxlen_t lrsc_cas;
-    
+
     struct {
         maxlen_t hartid;
         maxlen_t isa;
@@ -248,6 +248,7 @@ struct rvvm_hart_t {
     rvtimer_t timer;
     uint32_t pending_irqs;
     uint32_t pending_events;
+    uint32_t preempt_ms;
 #ifdef USE_SJLJ
     jmp_buf unwind;
 #endif
@@ -267,12 +268,12 @@ struct rvvm_machine_t {
     rvfile_t* bootrom_file;
     rvfile_t* kernel_file;
     rvfile_t* dtb_file;
-    
+
     rvvm_reset_handler_t on_reset;
     void* reset_data;
-    
+
     paddr_t dtb_addr;
-    
+
     plic_ctx_t* plic;
     pci_bus_t*  pci_bus;
     i2c_bus_t*  i2c_bus;
