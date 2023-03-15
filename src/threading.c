@@ -22,6 +22,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdlib.h>
 #include <string.h>
 
+#define COND_FLAG_SIGNALED 0x1
+#define COND_FLAG_LOCKED   0x2
+
 #ifdef _WIN32
 #include <windows.h>
 
@@ -32,7 +35,8 @@ struct thread_ctx {
 struct cond_var {
     uint32_t flag;
     uint32_t waiters;
-    HANDLE handles[2]; // 0 is Event, 1 is WaitableTimer
+    HANDLE event;
+    HANDLE timer;
 };
 
 #else
@@ -106,9 +110,9 @@ cond_var_t* condvar_create()
     cond_var_t* cond = safe_new_obj(cond_var_t);
     atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
-    cond->handles[0] = CreateEventW(NULL, FALSE, FALSE, NULL);
-    cond->handles[1] = CreateWaitableTimerW(NULL, TRUE, NULL);
-    if (cond->handles[0] && cond->handles[1]) return cond;
+    cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    cond->timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+    if (cond->event && cond->timer) return cond;
 #elif defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
     pthread_condattr_t cond_attr;
     if (pthread_condattr_init(&cond_attr) == 0
@@ -139,24 +143,33 @@ bool condvar_wait(cond_var_t* cond, uint64_t timeout_ms)
 bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 {
     bool ret = false;
+    uint32_t flag = 0;
     if (!cond || !timeout_ns) return false;
-    if (atomic_swap_uint32(&cond->flag, 0)) return true;
-    atomic_add_uint32(&cond->waiters, 1);
+    do {
+        flag = atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
+    } while (flag & COND_FLAG_LOCKED);
+    if (flag & COND_FLAG_SIGNALED) return true;
+    uint32_t waiters = atomic_add_uint32(&cond->waiters, 1);
+    UNUSED(waiters);
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
-        ret = WaitForSingleObject(cond->handles[0], INFINITE) == WAIT_OBJECT_0;
+        ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
     } else if ((timeout_ns % 1000000) == 0) {
         // Millisecond precision timeout
         timeBeginPeriod(1);
-        ret = WaitForSingleObject(cond->handles[0], timeout_ns / 1000000) == WAIT_OBJECT_0;
+        ret = WaitForSingleObject(cond->event, timeout_ns / 1000000) == WAIT_OBJECT_0;
         timeEndPeriod(1);
     } else {
         // Nanosecond precision timeout
         LARGE_INTEGER delay = { .QuadPart = -(timeout_ns / 100ULL), };
+        HANDLE handles[2] = { cond->event, cond->timer };
+        // If there are other waiters, create a separate timer
+        if (waiters) handles[1] = CreateWaitableTimerW(NULL, TRUE, NULL);
         timeBeginPeriod(1);
-        SetWaitableTimer(cond->handles[1], &delay, 0, NULL, NULL, false);
-        ret = WaitForMultipleObjects(2, cond->handles, FALSE, INFINITE) == WAIT_OBJECT_0;
+        SetWaitableTimer(handles[1], &delay, 0, NULL, NULL, false);
+        ret = WaitForMultipleObjects(2, handles, FALSE, INFINITE) == WAIT_OBJECT_0;
         timeEndPeriod(1);
+        if (waiters) CloseHandle(handles[1]);
     }
 #else
     pthread_mutex_lock(&cond->lock);
@@ -181,6 +194,7 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
     }
     pthread_mutex_unlock(&cond->lock);
 #endif
+    atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
     atomic_sub_uint32(&cond->waiters, 1);
     return ret;
 }
@@ -188,10 +202,10 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 bool condvar_wake(cond_var_t* cond)
 {
     if (!cond) return false;
-    atomic_store_uint32(&cond->flag, 1);
+    atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
     if (!atomic_load_uint32(&cond->waiters)) return false;
 #ifdef _WIN32
-    SetEvent(cond->handles[0]);
+    SetEvent(cond->event);
 #else
     pthread_mutex_lock(&cond->lock);
     pthread_cond_signal(&cond->cond);
@@ -203,10 +217,13 @@ bool condvar_wake(cond_var_t* cond)
 bool condvar_wake_all(cond_var_t* cond)
 {
     if (!cond) return false;
-    atomic_store_uint32(&cond->flag, 1);
-    if (!atomic_load_uint32(&cond->waiters)) return false;
+    atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
+    uint32_t waiters = atomic_load_uint32(&cond->waiters);
+    if (!waiters) return false;
 #ifdef _WIN32
-    SetEvent(cond->handles[0]);
+    atomic_or_uint32(&cond->flag, COND_FLAG_LOCKED);
+    for (uint32_t i=0; i<waiters; ++i) SetEvent(cond->event);
+    atomic_and_uint32(&cond->flag, ~COND_FLAG_LOCKED);
 #else
     pthread_mutex_lock(&cond->lock);
     pthread_cond_broadcast(&cond->cond);
@@ -227,8 +244,8 @@ void condvar_free(cond_var_t* cond)
     uint32_t waiters = condvar_waiters(cond);
     if (waiters) rvvm_warn("Destroying a condvar with %u waiters!", waiters);
 #ifdef _WIN32
-    CloseHandle(cond->handles[0]);
-    CloseHandle(cond->handles[1]);
+    CloseHandle(cond->event);
+    CloseHandle(cond->timer);
 #else
     pthread_cond_destroy(&cond->cond);
     pthread_mutex_destroy(&cond->lock);
