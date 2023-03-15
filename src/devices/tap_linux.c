@@ -33,11 +33,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <linux/if_tun.h>
 
 struct tap_dev {
-    tap_net_dev_t   net;
-    thread_handle_t thread;
-    int             fd;
-    int             shut[2];
-    char            name[IFNAMSIZ];
+    tap_net_dev_t net;
+    thread_ctx_t* thread;
+    int           fd;
+    int           shut[2];
+    char          name[IFNAMSIZ];
 };
 
 static void* tap_thread(void* arg)
