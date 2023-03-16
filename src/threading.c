@@ -58,6 +58,19 @@ struct cond_var {
     pthread_mutex_t lock;
 };
 
+static void condvar_fill_timespec(struct timespec* ts)
+{
+#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
+    clock_gettime(CLOCK_MONOTONIC, ts);
+#else
+    // Some targets lack clock_gettime(), use gettimeofday()
+    struct timeval tv = {0};
+    gettimeofday(&tv, NULL);
+    ts->tv_sec  = tv.tv_sec;
+    ts->tv_nsec = tv.tv_usec * 1000;
+#endif
+}
+
 #endif
 
 thread_ctx_t* thread_create(thread_func_t func, void *arg)
@@ -142,15 +155,23 @@ bool condvar_wait(cond_var_t* cond, uint64_t timeout_ms)
 
 bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 {
+    if (!cond || !timeout_ns) return false;
     bool ret = false;
     uint32_t flag = 0;
-    if (!cond || !timeout_ns) return false;
+    // Mark that a thread is waiting here first of all, otherwise wake may set signal
+    // too late be consumed, but not see any waiters and so a wakeup event may be lost.
+    uint32_t waiters = atomic_add_uint32(&cond->waiters, 1);
+    // Sometimes it's also useful to know there are other waiters
+    UNUSED(waiters);
     do {
+        // Try consuming a signal in userspace, and spin here if locked
         flag = atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
     } while (flag & COND_FLAG_LOCKED);
-    if (flag & COND_FLAG_SIGNALED) return true;
-    uint32_t waiters = atomic_add_uint32(&cond->waiters, 1);
-    UNUSED(waiters);
+    // Check if the condition is already signaled
+    if (flag & COND_FLAG_SIGNALED) {
+        atomic_sub_uint32(&cond->waiters, 1);
+        return true;
+    }
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
         ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
@@ -173,24 +194,18 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
     }
 #else
     pthread_mutex_lock(&cond->lock);
-    if (timeout_ns == CONDVAR_INFINITE) {
-        ret = pthread_cond_wait(&cond->cond, &cond->lock) == 0;
-    } else {
-        struct timespec ts = {0};
-#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-#else
-        // Some targets lack clock_gettime(), use gettimeofday()
-        struct timeval tv = {0};
-        gettimeofday(&tv, NULL);
-        ts.tv_sec  = tv.tv_sec;
-        ts.tv_nsec = tv.tv_usec * 1000;
-#endif
-        // Properly handle timespec addition without an overflow
-        timeout_ns += ts.tv_nsec;
-        ts.tv_sec += timeout_ns / 1000000000;
-        ts.tv_nsec = timeout_ns % 1000000000;
-        ret = pthread_cond_timedwait(&cond->cond, &cond->lock, &ts) == 0;
+    if (!(atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED) & COND_FLAG_SIGNALED)) {
+        if (timeout_ns == CONDVAR_INFINITE) {
+            ret = pthread_cond_wait(&cond->cond, &cond->lock) == 0;
+        } else {
+            struct timespec ts = {0};
+            condvar_fill_timespec(&ts);
+            // Properly handle timespec addition without an overflow
+            timeout_ns += ts.tv_nsec;
+            ts.tv_sec += timeout_ns / 1000000000;
+            ts.tv_nsec = timeout_ns % 1000000000;
+            ret = pthread_cond_timedwait(&cond->cond, &cond->lock, &ts) == 0;
+        }
     }
     pthread_mutex_unlock(&cond->lock);
 #endif
@@ -202,7 +217,9 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 bool condvar_wake(cond_var_t* cond)
 {
     if (!cond) return false;
+    // Signal the condition
     atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
+    // Omit syscall if there are no waiters
     if (!atomic_load_uint32(&cond->waiters)) return false;
 #ifdef _WIN32
     SetEvent(cond->event);
@@ -217,14 +234,14 @@ bool condvar_wake(cond_var_t* cond)
 bool condvar_wake_all(cond_var_t* cond)
 {
     if (!cond) return false;
-    atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
-    uint32_t waiters = atomic_load_uint32(&cond->waiters);
-    if (!waiters) return false;
 #ifdef _WIN32
-    atomic_or_uint32(&cond->flag, COND_FLAG_LOCKED);
-    for (uint32_t i=0; i<waiters; ++i) SetEvent(cond->event);
+    // Wake old waiters, lock others
+    atomic_or_uint32(&cond->flag, COND_FLAG_LOCKED | COND_FLAG_SIGNALED);
+    for (uint32_t i=atomic_load_uint32(&cond->waiters); i--;) SetEvent(cond->event);
     atomic_and_uint32(&cond->flag, ~COND_FLAG_LOCKED);
 #else
+    atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
+    if (!atomic_load_uint32(&cond->waiters)) return false;
     pthread_mutex_lock(&cond->lock);
     pthread_cond_broadcast(&cond->cond);
     pthread_mutex_unlock(&cond->lock);
