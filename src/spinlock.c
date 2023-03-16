@@ -20,12 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "threading.h"
 #include "rvtimer.h"
 #include "utils.h"
-#include "rvvmlib.h" // For RVVM_VERSION
 
 // Maximum allowed lock time, warns and recovers the lock upon expiration
 #define SPINLOCK_MAX_MS 5000
 
-// Attemts to claim the lock before sleep throttle
+// Attemts to claim the lock before blocking in the kernel
 #define SPINLOCK_RETRIES 60
 
 static cond_var_t* global_cond;
@@ -56,7 +55,7 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
             if (spin_try_lock(lock)) return;
         }
     }
-    
+
     spin_cond_init();
 
     rvtimer_t timer;
@@ -74,7 +73,7 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
             return;
         }
         // Wait upon wakeup from lock owner
-        bool woken = condvar_wait(global_cond, 1);
+        bool woken = condvar_wait(global_cond, 10);
         if (woken || flag != 2) {
             // Reset deadlock timer upon noticing any forward progress
             rvtimer_init(&timer, 1000);
@@ -85,7 +84,9 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
 #ifdef USE_SPINLOCK_DEBUG
     rvvm_warn("The lock was previously held at %s", lock->location ? lock->location : "[nowhere?]");
 #endif
+#ifdef RVVM_VERSION
     rvvm_warn("Version: RVVM v"RVVM_VERSION);
+#endif
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
 }
 
