@@ -224,8 +224,10 @@ bool condvar_wake(cond_var_t* cond)
     SetEvent(cond->event);
 #else
     pthread_mutex_lock(&cond->lock);
-    pthread_cond_signal(&cond->cond);
     pthread_mutex_unlock(&cond->lock);
+    // We aren't required to signal under the lock, but it should be taken anyways
+    // to prevent lost wakeup between cond->flag check and waiting on pthread_cond
+    pthread_cond_signal(&cond->cond);
 #endif
     return true;
 }
@@ -242,8 +244,8 @@ bool condvar_wake_all(cond_var_t* cond)
     atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
     if (!atomic_load_uint32(&cond->waiters)) return false;
     pthread_mutex_lock(&cond->lock);
-    pthread_cond_broadcast(&cond->cond);
     pthread_mutex_unlock(&cond->lock);
+    pthread_cond_broadcast(&cond->cond);
 #endif
     return true;
 }
@@ -271,7 +273,7 @@ void condvar_free(cond_var_t* cond)
 
 // Threadpool task offloading
 
-#define THREAD_MAX_WORKERS 4
+#define THREAD_MAX_WORKERS 16
 
 #if (defined(_WIN32) && defined(UNDER_CE)) || defined(__EMSCRIPTEN__)
 #define THREAD_MAX_WORKER_IDLE CONDVAR_INFINITE
