@@ -155,7 +155,7 @@ bool condvar_wait(cond_var_t* cond, uint64_t timeout_ms)
 
 bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 {
-    if (!cond || !timeout_ns) return false;
+    if (!cond) return false;
     bool ret = false;
     uint32_t flag = 0;
     // Mark that a thread is waiting here first of all, otherwise wake may set signal
@@ -167,24 +167,23 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
         // Try consuming a signal in userspace, and spin here if locked
         flag = atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
     } while (flag & COND_FLAG_LOCKED);
-    // Check if the condition is already signaled
-    if (flag & COND_FLAG_SIGNALED) {
+    // Check if the condition is already signaled or timeout is zero
+    if ((flag & COND_FLAG_SIGNALED) || !timeout_ns) {
         atomic_sub_uint32(&cond->waiters, 1);
-        return true;
+        return !!(flag & COND_FLAG_SIGNALED);
     }
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
         ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
-    } else if ((timeout_ns % 1000000) == 0) {
-        // Millisecond precision timeout
-        timeBeginPeriod(1);
+    } else if (timeout_ns >= 1000000) {
+        // Coarse ms precision timeout
         ret = WaitForSingleObject(cond->event, timeout_ns / 1000000) == WAIT_OBJECT_0;
-        timeEndPeriod(1);
     } else {
-        // Nanosecond precision timeout
+        // Nanosecond precision timeout using timeBeginPeriod() + WaitableTimer
+        // Expensive and still somewhat imprecise on actual Windows machines
         LARGE_INTEGER delay = { .QuadPart = -(timeout_ns / 100ULL), };
         HANDLE handles[2] = { cond->event, cond->timer };
-        // If there are other waiters, create a separate timer
+        // If there are other waiters, create a separate WaitableTimer
         if (waiters) handles[1] = CreateWaitableTimerW(NULL, TRUE, NULL);
         timeBeginPeriod(1);
         SetWaitableTimer(handles[1], &delay, 0, NULL, NULL, false);
