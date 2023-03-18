@@ -121,8 +121,8 @@ cond_var_t* condvar_create()
     atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
 #ifndef UNDER_CE
-    static HANDLE (*create_WTExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
-    static NTSTATUS (*nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
+    static HANDLE (__stdcall *create_WTExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
+    static NTSTATUS (__stdcall *nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
     DO_ONCE ({
         create_WTExW = (void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateWaitableTimerExW");
         nt_setTR = (void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetTimerResolution");
