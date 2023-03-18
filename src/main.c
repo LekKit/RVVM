@@ -234,7 +234,10 @@ static int rvvm_main(int argc, const char** argv)
         } else if (cmp_arg(arg_name, "k") || cmp_arg(arg_name, "kernel")) {
             success = success && rvvm_load_kernel(machine, arg_val);
         } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image")) {
-            success = success && nvme_init_auto(machine, arg_val, true);
+            if (success && !nvme_init_auto(machine, arg_val, true)) {
+                rvvm_error("Failed to attach image \"%s\"", arg_val);
+                success = false;
+            }
         } else if (cmp_arg(arg_name, "cmdline")) {
             rvvm_cmdline_set(machine, arg_val);
         } else if (cmp_arg(arg_name, "append")) {
