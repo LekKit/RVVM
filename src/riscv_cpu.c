@@ -1,7 +1,6 @@
 /*
 riscv_cpu.c - RISC-V CPU Emulation
 Copyright (C) 2021  LekKit <github.com/LekKit>
-                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -84,16 +83,11 @@ static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, rvjit_func_
 
 NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
 {
-    /*
-     * Translate virtual address into physical.
-     * We are tracing address already fetched from,
-     * thus a pagefault isn't possible
-     */
+    // Translate virtual PC into physical, JIT operates on phys_pc
     vaddr_t virt_pc = vm->registers[REGISTER_PC];
-    vmptr_t ptr = riscv_vma_translate_e(vm, virt_pc);
-    // Lookup in the hashmap, cache in JTLB
-    if (ptr) {
-        paddr_t phys_pc = (size_t)(ptr - vm->mem.data) + vm->mem.begin;
+    paddr_t phys_pc = 0;
+    // Lookup in the hashmap, cache virt_pc->block in JTLB
+    if (riscv_virt_translate_e(vm, virt_pc, &phys_pc)) {
         rvjit_func_t block = rvjit_block_lookup(&vm->jit, phys_pc);
         if (block) {
             riscv_jit_tlb_put(vm, virt_pc, block);
@@ -101,16 +95,14 @@ NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
             return true;
         }
 
-        /*
-         * No valid block compiled for this location,
-         * make a new one and enable compiler
-         */
+        // No valid block compiled for this location,
+        // init a new one and enable JIT compiler
         rvjit_block_init(&vm->jit);
         vm->jit.pc_off = 0;
         vm->jit.virt_pc = virt_pc;
         vm->jit.phys_pc = phys_pc;
 
-        // Flush JTLB upon hiting a dirty block
+        // Von Neumann icache: Flush JTLB upon hiting a dirty block
         riscv_jit_tlb_flush(vm);
 
         vm->jit_compiling = true;
@@ -149,10 +141,8 @@ static inline void riscv_emulate(rvvm_hart_t *vm, uint32_t instruction)
 {
 #ifdef USE_JIT
     if (unlikely(vm->jit_compiling)) {
-        /*
-         * If we hit non-compilable instruction or cross page boundaries,
-         * the block is finalized.
-         */
+        // If we hit non-compilable instruction or cross page boundaries,
+        // the block is finalized.
         if (vm->block_ends
         || (vm->jit.virt_pc >> PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
             riscv_jit_finalize(vm);
@@ -250,11 +240,12 @@ TSAN_SUPPRESS void riscv_run_till_event(rvvm_hart_t* vm)
         else
 #endif
         if (likely(riscv_fetch_inst(vm, inst_addr, &instruction))) {
-            // Update pointer to the current page in real memory
-            inst_ptr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].ptr;
-            // If we are executing code from MMIO, direct memory fetch fails
-            page_addr = vm->tlb[(inst_addr >> PAGE_SHIFT) & TLB_MASK].e << PAGE_SHIFT;
             riscv_emulate(vm, instruction);
+            // Update pointer to the current page in real memory
+            // If we are executing code from MMIO, direct memory fetch fails
+            vaddr_t vpn = vm->registers[REGISTER_PC] >> 12;
+            inst_ptr = vm->tlb[vpn & TLB_MASK].ptr;
+            page_addr = vm->tlb[vpn & TLB_MASK].e << 12;
         } else break;
     }
 }

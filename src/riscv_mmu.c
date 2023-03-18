@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SV48_LEVELS       4
 #define SV57_LEVELS       5
 
-#ifdef __unix__
+#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
 #include <sys/mman.h>
 #endif
 
@@ -50,7 +50,7 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
         rvvm_error("Memory boundaries misaligned: 0x%08"PRIxXLEN" - 0x%08"PRIxXLEN, begin, begin+size);
         return false;
     }
-#ifdef __unix__
+#if defined(MAP_PRIVATE) && defined(MAP_ANONYMOUS)
     vmptr_t data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (data != MAP_FAILED) {
 #ifdef __linux__
@@ -130,7 +130,7 @@ static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t o
 {
     vaddr_t vpn = vaddr >> PAGE_SHIFT;
     rvvm_tlb_entry_t* entry = &vm->tlb[vpn & TLB_MASK];
-    
+
     /*
     * Add only requested access bits for correct access/dirty flags
     * implementation. Assume the software does not clear A/D bits without
@@ -232,7 +232,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
     paddr_t pte, pgt_off;
     vmptr_t pte_addr;
     bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + PAGE_SHIFT - SV64_VPN_BITS;
-    
+
     if (unlikely(vaddr != (vaddr_t)sign_extend(vaddr, bit_off+SV64_VPN_BITS)))
         return false;
 
@@ -285,7 +285,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
 #endif
 
 // Translate virtual address to physical with respect to current CPU mode
-static inline bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access)
+bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access)
 {
     uint8_t priv = vm->priv_mode;
     // If MPRV is enabled, and we aren't fetching an instruction,
@@ -371,9 +371,9 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
     rvvm_mmio_dev_t* dev;
     rvvm_mmio_handler_t rwfunc;
     size_t offset;
-    
+
     //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
-    
+
     vector_foreach(vm->machine->mmio, i) {
         dev = &vector_at(vm->machine->mmio, i);
         if (paddr >= dev->addr && (paddr + size) <= (dev->addr + dev->size)) {
@@ -385,7 +385,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
             } else {
                 rwfunc = dev->read;
             }
-            
+
             if (rwfunc == NULL) {
                 // Missing handler, this is a direct memory region
                 // Copy the data, cache translation in TLB if possible
@@ -399,7 +399,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
                 }
                 return true;
             }
-            
+
             if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (size - 1)))) {
                 // Misaligned or poorly sized operation, attempt fixup
                 //rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
@@ -408,7 +408,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void*
             return rwfunc(dev, dest, offset, size);
         }
     }
-    
+
     return false;
 }
 
@@ -520,13 +520,13 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size
  * call MMIO handlers if needed.
  */
 
-vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
+vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size, uint8_t access)
 {
     //rvvm_info("Hart %p vma tlb miss at 0x%08"PRIxXLEN, vm, addr);
     paddr_t paddr;
     vmptr_t ptr;
     uint32_t trap_cause;
-    
+
     if (riscv_mmu_translate(vm, addr, &paddr, access)) {
         ptr = riscv_phys_translate(vm, paddr);
         if (ptr) {
@@ -537,6 +537,10 @@ vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
             // Physical address in main memory, cache address translation
             riscv_tlb_put(vm, addr, ptr, access);
             return ptr;
+        }
+        // Physical address not in memory region, check MMIO
+        if (buff && riscv_mmio_scan(vm, addr, paddr, buff, size, MMU_READ)) {
+            return buff;
         }
         // Physical memory access fault (bad physical address)
         switch (access) {
@@ -577,6 +581,14 @@ vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access)
     return NULL;
 }
 
+void riscv_mmu_vma_mmio_write(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size)
+{
+    paddr_t paddr = 0;
+    if (riscv_mmu_translate(vm, addr, &paddr, MMU_WRITE)) {
+        riscv_mmio_scan(vm, addr, paddr, buff, size, MMU_WRITE);
+    }
+}
+
 bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
 {
     uint8_t buff[4] = {0};
@@ -590,7 +602,7 @@ bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
         *inst = read_uint32_le_m(buff);
         return true;
     }
-    
+
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_EXEC)) {
         *inst = read_uint32_le_m(buff);
         return true;
@@ -655,8 +667,6 @@ void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-
-
 void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {
     uint8_t buff[8];
@@ -685,8 +695,6 @@ void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     riscv_mmu_op(vm, addr, buff, 1, MMU_WRITE);
 }
 
-
-
 #ifdef USE_FPU
 
 void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
@@ -706,8 +714,6 @@ void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
         fpu_set_fs(vm, FS_DIRTY);
     }
 }
-
-
 
 void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {

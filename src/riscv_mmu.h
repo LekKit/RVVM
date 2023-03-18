@@ -60,8 +60,12 @@ void riscv_jit_tlb_flush(rvvm_hart_t* vm);
  * call MMIO handlers if needed.
  */
 
-// Translate virtual address into VM pointer (only for physical memory)
-vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, uint8_t access);
+// Translate virtual address to physical with respect to current CPU mode
+bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access);
+// Translate virtual address into VM pointer OR buff in case of RMW MMIO operation
+vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size, uint8_t access);
+// Commit changes back to MMIO
+void riscv_mmu_vma_mmio_write(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size);
 
 // Fetch instruction from virtual address
 bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst);
@@ -131,33 +135,62 @@ static inline bool riscv_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* ins
 }
 
 // VM Address translation (translated within single page bounds)
-// May transparently swap pages to persistent storage
 
-static inline vmptr_t riscv_vma_translate_r(rvvm_hart_t* vm, vaddr_t addr)
+static inline bool riscv_virt_translate_r(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr)
+{
+    vaddr_t vpn = vaddr >> PAGE_SHIFT;
+    if (likely(vm->tlb[vpn & TLB_MASK].r == vpn)) {
+        *paddr = vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(vaddr) - (size_t)vm->mem.data + vm->mem.begin;
+        return true;
+    }
+    return riscv_mmu_translate(vm, vaddr, paddr, MMU_READ);
+}
+
+static inline bool riscv_virt_translate_w(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr)
+{
+    vaddr_t vpn = vaddr >> PAGE_SHIFT;
+    if (likely(vm->tlb[vpn & TLB_MASK].w == vpn)) {
+        *paddr = vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(vaddr) - (size_t)vm->mem.data + vm->mem.begin;
+        return true;
+    }
+    return riscv_mmu_translate(vm, vaddr, paddr, MMU_WRITE);
+}
+
+static inline bool riscv_virt_translate_e(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr)
+{
+    vaddr_t vpn = vaddr >> PAGE_SHIFT;
+    if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
+        *paddr = vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(vaddr) - (size_t)vm->mem.data + vm->mem.begin;
+        return true;
+    }
+    return riscv_mmu_translate(vm, vaddr, paddr, MMU_EXEC);
+}
+
+static inline vmptr_t riscv_vma_translate_r(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size)
 {
     vaddr_t vpn = addr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].r == vpn)) {
         return (vmptr_t)(size_t)(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
     }
-    return riscv_mmu_vma_translate(vm, addr, MMU_READ);
+    return riscv_mmu_vma_translate(vm, addr, buff, size, MMU_READ);
 }
 
-static inline vmptr_t riscv_vma_translate_w(rvvm_hart_t* vm, vaddr_t addr)
+static inline vmptr_t riscv_vma_translate_w(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size)
 {
     vaddr_t vpn = addr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].w == vpn)) {
         return (vmptr_t)(size_t)(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
     }
-    return riscv_mmu_vma_translate(vm, addr, MMU_WRITE);
+    return riscv_mmu_vma_translate(vm, addr, buff, size, MMU_WRITE);
 }
 
-static inline vmptr_t riscv_vma_translate_e(rvvm_hart_t* vm, vaddr_t addr)
+static inline vmptr_t riscv_vma_translate_e(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size)
 {
     vaddr_t vpn = addr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
         return (vmptr_t)(size_t)(vm->tlb[vpn & TLB_MASK].ptr + TLB_VADDR(addr));
     }
-    return riscv_mmu_vma_translate(vm, addr, MMU_EXEC);
+    return riscv_mmu_vma_translate(vm, addr, buff, size, MMU_EXEC);
 }
 
 #ifdef USE_VMSWAP
@@ -286,9 +319,9 @@ static inline void riscv_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     riscv_mmu_store_u8(vm, addr, reg);
 }
 
-// FPU load operations
-
 #ifdef USE_FPU
+
+// FPU load operations
 
 static inline void riscv_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 {

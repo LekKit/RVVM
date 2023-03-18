@@ -1,7 +1,6 @@
 /*
 riscv_a.c - RISC-V A Decoder, Interpreter
 Copyright (C) 2021  LekKit <github.com/LekKit>
-                    Mr0maks <mr.maks0443@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -44,62 +43,66 @@ static void riscv_a_atomic_w(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t op = bit_cut(instruction, 27, 5);
     xaddr_t addr = riscv_read_register(vm, rs1);
     uint32_t val = riscv_read_register(vm, rs2);
+    uint8_t buff[4]; // MMIO atomics bounce buffer
 
     if (unlikely(addr & 3)) {
         riscv_trap(vm, TRAP_STORE_MISALIGN, 0);
         return;
     }
-    
-    uint32_t* ptr = (uint32_t*)riscv_vma_translate_w(vm, addr);
-    
+
+    void* ptr = riscv_vma_translate_w(vm, addr, buff, sizeof(buff));
     if (unlikely(ptr == NULL)) {
         return;
     }
-    
+
     switch (op) {
-    case AMO_LR:
-        vm->lrsc = true;
-        vm->lrsc_cas = atomic_load_uint32_le(ptr);
-        riscv_write_register(vm, rds, (int32_t)vm->lrsc_cas);
-        break;
-    case AMO_SC:
-        if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
-            vm->lrsc = false;
-            riscv_write_register(vm, rds, 0);
-        } else {
-            riscv_write_register(vm, rds, 1);
-        }
-        break;
-    case AMO_SWAP:
-        riscv_write_register(vm, rds, (int32_t)atomic_swap_uint32_le(ptr, val));
-        break;
-    case AMO_ADD:
-        riscv_write_register(vm, rds, (int32_t)atomic_add_uint32_le(ptr, val));
-        break;
-    case AMO_XOR:
-        riscv_write_register(vm, rds, (int32_t)atomic_xor_uint32_le(ptr, val));
-        break;
-    case AMO_AND:
-        riscv_write_register(vm, rds, (int32_t)atomic_and_uint32_le(ptr, val));
-        break;
-    case AMO_OR:
-        riscv_write_register(vm, rds, (int32_t)atomic_or_uint32_le(ptr, val));
-        break;
-    case AMO_MIN:
-        riscv_write_register(vm, rds, (int32_t)atomic_min_int32_le(ptr, val));
-        break;
-    case AMO_MAX:
-        riscv_write_register(vm, rds, (int32_t)atomic_max_int32_le(ptr, val));
-        break;
-    case AMO_MINU:
-        riscv_write_register(vm, rds, (int32_t)atomic_minu_uint32_le(ptr, val));
-        break;
-    case AMO_MAXU:
-        riscv_write_register(vm, rds, (int32_t)atomic_maxu_uint32_le(ptr, val));
-        break;
-    default:
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-        break;
+        case AMO_LR:
+            vm->lrsc = true;
+            vm->lrsc_cas = atomic_load_uint32_le(ptr);
+            riscv_write_register(vm, rds, (int32_t)vm->lrsc_cas);
+            break;
+        case AMO_SC:
+            if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
+                vm->lrsc = false;
+                riscv_write_register(vm, rds, 0);
+            } else {
+                riscv_write_register(vm, rds, 1);
+            }
+            break;
+        case AMO_SWAP:
+            riscv_write_register(vm, rds, (int32_t)atomic_swap_uint32_le(ptr, val));
+            break;
+        case AMO_ADD:
+            riscv_write_register(vm, rds, (int32_t)atomic_add_uint32_le(ptr, val));
+            break;
+        case AMO_XOR:
+            riscv_write_register(vm, rds, (int32_t)atomic_xor_uint32_le(ptr, val));
+            break;
+        case AMO_AND:
+            riscv_write_register(vm, rds, (int32_t)atomic_and_uint32_le(ptr, val));
+            break;
+        case AMO_OR:
+            riscv_write_register(vm, rds, (int32_t)atomic_or_uint32_le(ptr, val));
+            break;
+        case AMO_MIN:
+            riscv_write_register(vm, rds, (int32_t)atomic_min_int32_le(ptr, val));
+            break;
+        case AMO_MAX:
+            riscv_write_register(vm, rds, (int32_t)atomic_max_int32_le(ptr, val));
+            break;
+        case AMO_MINU:
+            riscv_write_register(vm, rds, (int32_t)atomic_minu_uint32_le(ptr, val));
+            break;
+        case AMO_MAXU:
+            riscv_write_register(vm, rds, (int32_t)atomic_maxu_uint32_le(ptr, val));
+            break;
+        default:
+            riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+            break;
+    }
+
+    if (unlikely(ptr == buff)) {
+        riscv_mmu_vma_mmio_write(vm, addr, buff, sizeof(buff));
     }
 }
 
@@ -112,62 +115,66 @@ static void riscv_a_atomic_d(rvvm_hart_t *vm, const uint32_t instruction)
     uint8_t op = bit_cut(instruction, 27, 5);
     xaddr_t addr = riscv_read_register(vm, rs1);
     uint64_t val = riscv_read_register(vm, rs2);
+    uint8_t buff[8]; // MMIO atomics bounce buffer
 
     if (unlikely(addr & 7)) {
         riscv_trap(vm, TRAP_STORE_MISALIGN, 0);
         return;
     }
-    
-    uint64_t* ptr = (uint64_t*)riscv_vma_translate_w(vm, addr);
-    
+
+    void* ptr = riscv_vma_translate_w(vm, addr, buff, sizeof(buff));
     if (unlikely(ptr == NULL)) {
         return;
     }
-    
+
     switch (op) {
-    case AMO_LR:
-        vm->lrsc = true;
-        vm->lrsc_cas = atomic_load_uint64_le(ptr);
-        vm->registers[rds] = vm->lrsc_cas;
-        break;
-    case AMO_SC:
-        if (vm->lrsc && atomic_cas_uint64_le(ptr, vm->lrsc_cas, val)) {
-            vm->lrsc = false;
-            riscv_write_register(vm, rds, 0);
-        } else {
-            riscv_write_register(vm, rds, 1);
-        }
-        break;
-    case AMO_SWAP:
-        vm->registers[rds] = atomic_swap_uint64_le(ptr, val);
-        break;
-    case AMO_ADD:
-        vm->registers[rds] = atomic_add_uint64_le(ptr, val);
-        break;
-    case AMO_XOR:
-        vm->registers[rds] = atomic_xor_uint64_le(ptr, val);
-        break;
-    case AMO_AND:
-        vm->registers[rds] = atomic_and_uint64_le(ptr, val);
-        break;
-    case AMO_OR:
-        vm->registers[rds] = atomic_or_uint64_le(ptr, val);
-        break;
-    case AMO_MIN:
-        vm->registers[rds] = atomic_min_int64_le(ptr, val);
-        break;
-    case AMO_MAX:
-        vm->registers[rds] = atomic_max_int64_le(ptr, val);
-        break;
-    case AMO_MINU:
-        vm->registers[rds] = atomic_minu_uint64_le(ptr, val);
-        break;
-    case AMO_MAXU:
-        vm->registers[rds] = atomic_maxu_uint64_le(ptr, val);
-        break;
-    default:
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-        break;
+        case AMO_LR:
+            vm->lrsc = true;
+            vm->lrsc_cas = atomic_load_uint64_le(ptr);
+            vm->registers[rds] = vm->lrsc_cas;
+            break;
+        case AMO_SC:
+            if (vm->lrsc && atomic_cas_uint64_le(ptr, vm->lrsc_cas, val)) {
+                vm->lrsc = false;
+                riscv_write_register(vm, rds, 0);
+            } else {
+                riscv_write_register(vm, rds, 1);
+            }
+            break;
+        case AMO_SWAP:
+            vm->registers[rds] = atomic_swap_uint64_le(ptr, val);
+            break;
+        case AMO_ADD:
+            vm->registers[rds] = atomic_add_uint64_le(ptr, val);
+            break;
+        case AMO_XOR:
+            vm->registers[rds] = atomic_xor_uint64_le(ptr, val);
+            break;
+        case AMO_AND:
+            vm->registers[rds] = atomic_and_uint64_le(ptr, val);
+            break;
+        case AMO_OR:
+            vm->registers[rds] = atomic_or_uint64_le(ptr, val);
+            break;
+        case AMO_MIN:
+            vm->registers[rds] = atomic_min_int64_le(ptr, val);
+            break;
+        case AMO_MAX:
+            vm->registers[rds] = atomic_max_int64_le(ptr, val);
+            break;
+        case AMO_MINU:
+            vm->registers[rds] = atomic_minu_uint64_le(ptr, val);
+            break;
+        case AMO_MAXU:
+            vm->registers[rds] = atomic_maxu_uint64_le(ptr, val);
+            break;
+        default:
+            riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+            break;
+    }
+
+    if (unlikely(ptr == buff)) {
+        riscv_mmu_vma_mmio_write(vm, addr, buff, sizeof(buff));
     }
 }
 #endif
