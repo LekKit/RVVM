@@ -28,35 +28,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 
-struct thread_ctx {
-    HANDLE handle;
-};
-
-struct cond_var {
-    uint32_t flag;
-    uint32_t waiters;
-    HANDLE event;
-    HANDLE timer;
-};
-
 #else
-
 #include <time.h>
 #if !defined(CLOCK_MONOTONIC) || defined(__APPLE__)
 #include <sys/time.h>
 #endif
 #include <pthread.h>
-
-struct thread_ctx {
-    pthread_t pthread;
-};
-
-struct cond_var {
-    uint32_t flag;
-    uint32_t waiters;
-    pthread_cond_t cond;
-    pthread_mutex_t lock;
-};
 
 static void condvar_fill_timespec(struct timespec* ts)
 {
@@ -72,6 +49,26 @@ static void condvar_fill_timespec(struct timespec* ts)
 }
 
 #endif
+
+struct thread_ctx {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    pthread_t pthread;
+#endif
+};
+
+struct cond_var {
+    uint32_t flag;
+    uint32_t waiters;
+#ifdef _WIN32
+    HANDLE event;
+    HANDLE timer;
+#else
+    pthread_cond_t cond;
+    pthread_mutex_t lock;
+#endif
+};
 
 thread_ctx_t* thread_create(thread_func_t func, void *arg)
 {
@@ -123,9 +120,31 @@ cond_var_t* condvar_create()
     cond_var_t* cond = safe_new_obj(cond_var_t);
     atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
+#ifndef UNDER_CE
+    static HANDLE (*create_WTExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
+    static NTSTATUS (*nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
+    DO_ONCE ({
+        create_WTExW = (void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateWaitableTimerExW");
+        nt_setTR = (void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetTimerResolution");
+    });
+    if (nt_setTR) {
+        // Set system clock resolution to 500us
+        ULONG cur;
+        nt_setTR(5000, TRUE, &cur);
+        nt_setTR = NULL;
+    }
+    if (create_WTExW) {
+        // Create a high resolution, manual reset waitable timer (Win10 1803+)
+        cond->timer = create_WTExW(NULL, NULL, 0x3, TIMER_ALL_ACCESS);
+        if (cond->timer == NULL) create_WTExW = NULL;
+    }
+    if (cond->timer == NULL) {
+        // Fallback to generic waitable timer
+        cond->timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+    }
+#endif
     cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    cond->timer = CreateWaitableTimerW(NULL, TRUE, NULL);
-    if (cond->event && cond->timer) return cond;
+    if (cond->event) return cond;
 #elif defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
     pthread_condattr_t cond_attr;
     if (pthread_condattr_init(&cond_attr) == 0
@@ -175,21 +194,17 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
         ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
-    } else if (timeout_ns >= 1000000) {
-        // Coarse ms precision timeout
-        ret = WaitForSingleObject(cond->event, timeout_ns / 1000000) == WAIT_OBJECT_0;
-    } else {
-        // Nanosecond precision timeout using timeBeginPeriod() + WaitableTimer
-        // Expensive and still somewhat imprecise on actual Windows machines
+#ifndef UNDER_CE
+    } else if (timeout_ns < 15000000 && cond->timer && !waiters) {
+        // Nanosecond precision timeout using WaitableTimer
         LARGE_INTEGER delay = { .QuadPart = -(timeout_ns / 100ULL), };
         HANDLE handles[2] = { cond->event, cond->timer };
-        // If there are other waiters, create a separate WaitableTimer
-        if (waiters) handles[1] = CreateWaitableTimerW(NULL, TRUE, NULL);
-        timeBeginPeriod(1);
         SetWaitableTimer(handles[1], &delay, 0, NULL, NULL, false);
         ret = WaitForMultipleObjects(2, handles, FALSE, INFINITE) == WAIT_OBJECT_0;
-        timeEndPeriod(1);
-        if (waiters) CloseHandle(handles[1]);
+#endif
+    } else {
+        // Coarse ms precision timeout
+        ret = WaitForSingleObject(cond->event, EVAL_MAX(timeout_ns / 1000000, 1)) == WAIT_OBJECT_0;
     }
 #else
     pthread_mutex_lock(&cond->lock);
@@ -262,8 +277,8 @@ void condvar_free(cond_var_t* cond)
     uint32_t waiters = condvar_waiters(cond);
     if (waiters) rvvm_warn("Destroying a condvar with %u waiters!", waiters);
 #ifdef _WIN32
-    CloseHandle(cond->event);
-    CloseHandle(cond->timer);
+    if (cond->event) CloseHandle(cond->event);
+    if (cond->timer) CloseHandle(cond->timer);
 #else
     pthread_cond_destroy(&cond->cond);
     pthread_mutex_destroy(&cond->lock);
