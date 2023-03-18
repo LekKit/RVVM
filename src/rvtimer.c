@@ -27,32 +27,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <windows.h>
 #include "atomics.h"
 
-static uint32_t qpc_crit = 0, qpc_warn = 0;
-static uint64_t qpc_prev = 0, qpc_freq = 0;
+static uint32_t qpc_crit = 0;
+static uint64_t qpc_last = 0, qpc_freq = 0;
 
 uint64_t rvtimer_clocksource(uint64_t freq)
 {
-    LARGE_INTEGER qpc = {0};
-    while (atomic_swap_uint32_ex(&qpc_crit, 1, ATOMIC_ACQUIRE));
-    if (qpc_freq == 0) {
-        QueryPerformanceFrequency(&qpc);
-        qpc_freq = qpc.QuadPart;
-        if (qpc_freq == 0) rvvm_fatal("QueryPerformanceFrequency() failed!");
-    }
-    
-    QueryPerformanceCounter(&qpc);
-    uint64_t qpc_val = qpc.QuadPart;
-    if (qpc_val < qpc_prev) {
-        qpc_val = qpc_prev;
-        if (!qpc_warn) {
-            qpc_warn = true;
-            rvvm_warn("Unstable clocksource (backward drift observed)");
+    // Read the latest cached timer value from userspace
+    uint64_t qpc_val = atomic_load_uint64_ex(&qpc_last, ATOMIC_ACQUIRE);
+    if (!atomic_swap_uint32_ex(&qpc_crit, 1, ATOMIC_ACQUIRE)) {
+        // Claimed the QPC lock, actually query the timer
+        LARGE_INTEGER qpc = {0};
+        if (qpc_freq == 0) {
+            QueryPerformanceFrequency(&qpc);
+            qpc_freq = qpc.QuadPart;
+            if (qpc_freq == 0) rvvm_fatal("QueryPerformanceFrequency() failed!");
         }
-    } else qpc_prev = qpc_val;
-    atomic_store_uint32_ex(&qpc_crit, 0, ATOMIC_RELEASE);
-    
-    uint64_t qpc_rem = qpc_val % qpc_freq;
-    return (qpc_val / qpc_freq * freq) + (qpc_rem * freq / qpc_freq);
+        QueryPerformanceCounter(&qpc);
+        if ((uint64_t)qpc.QuadPart < qpc_val) {
+            DO_ONCE(rvvm_warn("Unstable clocksource (backward drift observed)"));
+        } else {
+            qpc_val = qpc.QuadPart;
+            atomic_store_uint64_ex(&qpc_last, qpc_val, ATOMIC_RELEASE);
+        }
+        atomic_store_uint32_ex(&qpc_crit, 0, ATOMIC_RELEASE);
+    }
+
+    return rvtimer_convert_freq(qpc_val, qpc_freq, freq);
 }
 
 #elif defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)

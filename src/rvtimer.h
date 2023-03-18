@@ -28,7 +28,14 @@ typedef struct {
     uint64_t timecmp;
 } rvtimer_t;
 
-// Get system clocksource
+// Convert between frequencies without overflow
+static inline uint64_t rvtimer_convert_freq(uint64_t clk, uint64_t src_freq, uint64_t dst_freq)
+{
+    uint64_t freq_rem = clk % src_freq;
+    return (clk / src_freq * dst_freq) + (freq_rem * dst_freq / src_freq);
+}
+
+// Get global clocksource with the specified frequency
 uint64_t rvtimer_clocksource(uint64_t freq);
 
 // Initialize the timer and the clocksource
