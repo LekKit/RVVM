@@ -126,9 +126,18 @@ bool rvtimer_pending(rvtimer_t* timer)
 void sleep_ms(uint32_t ms)
 {
 #ifdef _WIN32
-    timeBeginPeriod(1);
+#ifndef UNDER_CE
+    static NTSTATUS (__stdcall *nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
+    DO_ONCE ({
+        nt_setTR = (void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetTimerResolution");
+    });
+    if (nt_setTR) {
+        ULONG cur;
+        nt_setTR(5000, TRUE, &cur); // Set system clock resolution to 500us
+        nt_setTR = NULL;
+    }
+#endif
     Sleep(ms);
-    timeEndPeriod(1);
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
     struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000, };
     while (nanosleep(&ts, &ts) < 0);
