@@ -38,7 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ETHOC_IPGR2         0x14
 #define ETHOC_PACKETLEN     0x18 // Min/Max Packet Length
 #define ETHOC_COLLCONF      0x1C // Collision & Retry Configuration
-#define ETHOC_RX_BD_NUM     0x20 // RX BD Number
+#define ETHOC_TX_BD_NUM     0x20 // Number of TX BD (Max 0x80)
 #define ETHOC_CTRLMODER     0x24 // Control Module Mode
 #define ETHOC_MIIMODER      0x28 // MII Mode
 #define ETHOC_MIICOMMAND    0x2C // MII Command
@@ -166,7 +166,7 @@ struct ethoc_dev
     uint32_t int_mask;
     uint32_t packetlen;
     uint32_t collconf;
-    uint32_t rx_bd_num;
+    uint32_t tx_bd_num;
     uint32_t ctrlmoder;
     uint32_t miimoder;
     uint32_t miiaddress;
@@ -215,7 +215,7 @@ static void ethoc_process_tx(struct ethoc_dev *eth)
             ethoc_interrupt(eth, ETHOC_INT_TXE);
         }
 
-        if (txbd->data & ETHOC_BD_WRAP || eth->cur_txbd == eth->rx_bd_num) {
+        if (txbd->data & ETHOC_BD_WRAP || eth->cur_txbd == eth->tx_bd_num) {
             eth->cur_txbd = 0;
         } else {
             eth->cur_txbd++;
@@ -256,7 +256,7 @@ static bool ethoc_feed_rx(void* net_dev, const void* data, size_t size)
     atomic_store_uint32(&rxbd->data, (f_size & 0xFFFF) << 16 | (flags & 0xFFFF));
 
     if ((flags & ETHOC_BD_WRAP) || eth->cur_rxbd == ETHOC_BD_COUNT) {
-        eth->cur_rxbd = eth->rx_bd_num;
+        eth->cur_rxbd = eth->tx_bd_num;
     } else {
         eth->cur_rxbd++;
     }
@@ -294,8 +294,8 @@ static bool ethoc_data_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset
         case ETHOC_COLLCONF:
             write_uint32_le_m(data, eth->collconf);
             break;
-        case ETHOC_RX_BD_NUM:
-            write_uint32_le_m(data, eth->rx_bd_num);
+        case ETHOC_TX_BD_NUM:
+            write_uint32_le_m(data, eth->tx_bd_num);
             break;
         case ETHOC_CTRLMODER:
             write_uint32_le_m(data, eth->ctrlmoder);
@@ -362,15 +362,18 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
     spin_lock(&eth->lock);
     switch (offset) {
         case ETHOC_MODER: {
-                uint32_t prev_moder = atomic_swap_uint32(&eth->moder, read_uint32_le_m(data));
-                if ((prev_moder ^ read_uint32_le_m(data)) & ETHOC_MODER_RXEN) {
+                uint32_t new_moder = read_uint32_le_m(data);
+                if (eth->tx_bd_num == 0) new_moder &= ~ETHOC_MODER_TXEN;
+                if (eth->tx_bd_num >= ETHOC_BD_COUNT) new_moder &= ~ETHOC_MODER_RXEN;
+                uint32_t prev_moder = atomic_swap_uint32(&eth->moder, new_moder);
+                if ((prev_moder ^ new_moder) & ETHOC_MODER_RXEN) {
                     // Toggled RX
                     spin_lock(&eth->rx_lock);
-                    eth->cur_rxbd = eth->rx_bd_num;
+                    eth->cur_rxbd = eth->tx_bd_num;
                     spin_unlock(&eth->rx_lock);
                 }
 
-                if ((prev_moder ^ read_uint32_le_m(data)) & ETHOC_MODER_TXEN) {
+                if ((prev_moder ^ new_moder) & ETHOC_MODER_TXEN) {
                     // Toggled TX
                     eth->cur_txbd = 0;
                     ethoc_process_tx(eth);
@@ -399,8 +402,8 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
         case ETHOC_COLLCONF:
             eth->collconf = read_uint32_le_m(data);
             break;
-        case ETHOC_RX_BD_NUM:
-            eth->rx_bd_num = read_uint32_le_m(data);
+        case ETHOC_TX_BD_NUM:
+            eth->tx_bd_num = EVAL_MIN(read_uint32_le_m(data), ETHOC_BD_COUNT);
             break;
         case ETHOC_CTRLMODER:
             eth->ctrlmoder = read_uint32_le_m(data);
@@ -459,7 +462,7 @@ static bool ethoc_data_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offse
                 }
 
                 // TX BD might be modified
-                if (bdid < eth->rx_bd_num) {
+                if (bdid < eth->tx_bd_num) {
                     ethoc_process_tx(eth);
                 }
             }
@@ -480,7 +483,7 @@ static void ethoc_reset(rvvm_mmio_dev_t* dev)
     eth->int_mask = 0;
     eth->packetlen = 0x3C0600;
     eth->collconf = 0xf003f;
-    eth->rx_bd_num = 0x40;
+    eth->tx_bd_num = 0x40;
     eth->ctrlmoder = 0;
     eth->miimoder = 0x64;
     eth->miiaddress = 0;
@@ -514,11 +517,11 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
         .net_dev = eth,
         .feed_rx = ethoc_feed_rx,
     };
-    
+
     eth->plic = plic;
     eth->irq = irq;
     eth->machine = machine;
-    
+
     eth->tap = tap_open(&tap_net);
     if (eth->tap == NULL) {
         rvvm_error("Failed to create TAP device!");
