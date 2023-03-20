@@ -130,10 +130,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HOST_64BIT 1
 #endif
 
+// Unwrap a token or a token value into a string literal
 #define MACRO_MKSTRING(x) #x
 #define MACRO_TOSTRING(x) MACRO_MKSTRING(x)
 
-// Unwraps to src/example.c@128
-#define SOURCE_LINE __FILE__ "@" MACRO_TOSTRING(__LINE__)
+// GNU extension that omits file path, use if available
+#ifndef __FILE_NAME__
+#define __FILE_NAME__ __FILE__
+#endif
+
+// Unwraps to example.c@128
+#define SOURCE_LINE __FILE_NAME__ "@" MACRO_TOSTRING(__LINE__)
+
+#define MACRO_ASSERT_NAMED(cond, name) typedef char static_assert_at_line_##name[(cond) ? 1 : -1]
+#define MACRO_ASSERT_UNWRAP(cond, tok) MACRO_ASSERT_NAMED(cond, tok)
+
+// Static build-time assertions
+#ifdef IGNORE_STATIC_ASSERTS
+#define BUILD_ASSERT(cond)
+#elif __STDC_VERSION__ >= 201112LL
+#define BUILD_ASSERT(cond) _Static_assert(cond, MACRO_TOSTRING(cond))
+#else
+#define BUILD_ASSERT(cond) MACRO_ASSERT_UNWRAP(cond, __LINE__)
+#endif
 
 #endif
