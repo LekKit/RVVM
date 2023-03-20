@@ -80,7 +80,7 @@ static forceinline void spin_lock_slow_real(spinlock_t* lock, const char* locati
 #define spin_lock(lock) spin_lock_real(lock, SOURCE_LINE)
 #define spin_lock_slow(lock) spin_lock_slow_real(lock, SOURCE_LINE)
 #else
-#define spin_lock(lock) spin_lock_real(lock, "[no debug]")
+#define spin_lock(lock) spin_lock_real(lock, NULL)
 #define spin_lock_slow(lock) spin_lock_slow_real(lock, NULL)
 #endif
 
