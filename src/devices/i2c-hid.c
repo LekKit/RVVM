@@ -77,7 +77,6 @@ typedef struct {
     // IRQ data
     plic_ctx_t* plic;
     uint32_t irq;
-    bool int_pending;
 
     struct report_id_queue report_id_queue;
 
@@ -144,9 +143,8 @@ static void i2c_hid_reset(i2c_hid_t* i2c_hid, bool is_init)
 
     if (i2c_hid->hid_dev->reset) i2c_hid->hid_dev->reset(i2c_hid->hid_dev->dev);
 
-    i2c_hid->int_pending = !is_init;
     if (!is_init)
-        plic_send_irq(i2c_hid->plic, i2c_hid->irq);
+        plic_raise_irq(i2c_hid->plic, i2c_hid->irq);
 }
 
 static void i2c_hid_input_available(void* host, uint8_t report_id)
@@ -155,10 +153,7 @@ static void i2c_hid_input_available(void* host, uint8_t report_id)
     spin_lock(&i2c_hid->lock);
     if (!i2c_hid->is_reset) {
         report_id_queue_insert(&i2c_hid->report_id_queue, report_id);
-        if (!i2c_hid->int_pending) {
-            i2c_hid->int_pending = true;
-            plic_send_irq(i2c_hid->plic, i2c_hid->irq);
-        }
+        plic_raise_irq(i2c_hid->plic, i2c_hid->irq);
     }
     spin_unlock(&i2c_hid->lock);
 }
@@ -180,9 +175,9 @@ static void i2c_hid_read_report(i2c_hid_t* i2c_hid, uint8_t report_type, uint8_t
     if (report_type == REPORT_TYPE_INPUT && offset >= 1 && offset == (uint32_t)(i2c_hid->data_size > 2 ? i2c_hid->data_size - 1 : 1)) {
         report_id_queue_remove_at(&i2c_hid->report_id_queue, report_id);
         if (report_id_queue_get(&i2c_hid->report_id_queue) >= 0)
-            plic_send_irq(i2c_hid->plic, i2c_hid->irq);
+            plic_raise_irq(i2c_hid->plic, i2c_hid->irq);
         else
-            i2c_hid->int_pending = false;
+            plic_lower_irq(i2c_hid->plic, i2c_hid->irq);
     }
 }
 
@@ -224,7 +219,7 @@ static uint8_t i2c_hid_read_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offse
     case I2C_HID_INPUT_REG: {
         int16_t report_id = report_id_queue_get(&i2c_hid->report_id_queue);
         if (report_id < 0) {
-            i2c_hid->int_pending = false;
+            plic_lower_irq(i2c_hid->plic, i2c_hid->irq);
             return 0;
         }
         uint8_t val = 0;
@@ -309,7 +304,7 @@ static bool i2c_hid_write_reg(i2c_hid_t* i2c_hid, uint16_t reg, uint32_t offset,
             if (!i2c_hid_read_data_size(i2c_hid, offset, val))
                 return false;
             if (offset/2 == 1)
-                i2c_hid->data_val = bit_replace(i2c_hid->data_val, offset*8, 8, val);           
+                i2c_hid->data_val = bit_replace(i2c_hid->data_val, offset*8, 8, val);
             return true;
         }
         break;
