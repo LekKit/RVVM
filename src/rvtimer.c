@@ -100,6 +100,10 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 
 #endif
 
+#ifdef _POSIX_PRIORITY_SCHEDULING
+#include <sched.h> // For sched_yield()
+#endif
+
 void rvtimer_init(rvtimer_t* timer, uint64_t freq)
 {
     timer->freq = freq;
@@ -139,8 +143,15 @@ void sleep_ms(uint32_t ms)
 #endif
     Sleep(ms);
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
-    struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000, };
-    while (nanosleep(&ts, &ts) < 0);
+    if (ms) {
+        struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000, };
+        while (nanosleep(&ts, &ts) < 0);
+        return;
+    }
+#ifdef _POSIX_PRIORITY_SCHEDULING
+    // Yield this thread time slice, as does Win32 Sleep(0)
+    sched_yield();
+#endif
 #else
     UNUSED(ms);
 #endif
