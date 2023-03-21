@@ -146,12 +146,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MACRO_ASSERT_UNWRAP(cond, tok) MACRO_ASSERT_NAMED(cond, tok)
 
 // Static build-time assertions
-#ifdef IGNORE_STATIC_ASSERTS
+#ifdef IGNORE_BUILD_ASSERTS
 #define BUILD_ASSERT(cond)
 #elif __STDC_VERSION__ >= 201112LL
 #define BUILD_ASSERT(cond) _Static_assert(cond, MACRO_TOSTRING(cond))
 #else
 #define BUILD_ASSERT(cond) MACRO_ASSERT_UNWRAP(cond, __LINE__)
+#endif
+
+// Same as BUILD_ASSERT, but produces an expression with value 0
+#ifdef IGNORE_BUILD_ASSERTS
+#define BUILD_ASSERT_EXPR(cond) 0
+#else
+#define BUILD_ASSERT_EXPR(cond) (sizeof(char[(cond) ? 1 : -1]) - 1)
 #endif
 
 #endif
