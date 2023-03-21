@@ -87,19 +87,6 @@ static inline void riscv_jit_flush_cache(rvvm_hart_t* vm)
 #endif
 }
 
-static inline void riscv_jit_init_memtracking(rvvm_machine_t* machine) {
-#ifdef USE_JIT
-    if (!rvvm_has_arg("rvjit_harward")) {
-        vector_foreach(machine->harts, i) {
-            rvvm_hart_t* vm = vector_at(machine->harts, i);
-            if (vm->jit_enabled) rvjit_init_memtracking(&vm->jit, machine->mem.size);
-        }
-    }
-#else
-    UNUSED(machine);
-#endif
-}
-
 #ifdef USE_JIT
 void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
 #else

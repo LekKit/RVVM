@@ -281,8 +281,6 @@ PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint
 
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
-    rvvm_machine_t* machine;
-    rvvm_hart_t* vm;
 #ifndef USE_RV64
     if (rv64) {
         rvvm_error("RV64 is disabled in this RVVM build");
@@ -303,36 +301,36 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
         mem_size = 1U << 30;
     }
 
-    machine = safe_new_obj(rvvm_machine_t);
+    rvvm_machine_t* machine = safe_new_obj(rvvm_machine_t);
+    machine->rv64 = rv64;
     if (!riscv_init_ram(&machine->mem, mem_base, mem_size)) {
         free(machine);
         return NULL;
     }
-    vector_init(machine->harts);
-    vector_init(machine->mmio);
 
     // Default options
-    rvvm_set_opt(machine, RVVM_OPT_JIT, 1);
-    rvvm_set_opt(machine, RVVM_OPT_JITCACHE, 16 << 20); // Default 16M JIT cache per hart
+#ifdef USE_JIT
+    rvvm_set_opt(machine, RVVM_OPT_JIT, !rvvm_has_arg("nojit"));
+    rvvm_set_opt(machine, RVVM_OPT_JIT_HARWARD, rvvm_has_arg("rvjit_harward"));
     if (rvvm_getarg_size("jitcache")) {
-        rvvm_set_opt(machine, RVVM_OPT_JITCACHE, rvvm_getarg_size("jitcache"));
+        rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, rvvm_getarg_size("jitcache"));
+    } else {
+        size_t jit_cache = 16 << 20;
+        if (mem_size >= (512U << 20)) jit_cache = 32 << 20;
+        if (mem_size >= (1U << 30))   jit_cache = 64 << 20;
+        // Default 16M-64M JIT cache per hart (depends on RAM)
+        rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, jit_cache);
     }
+#endif
     rvvm_set_opt(machine, RVVM_OPT_MAX_CPU_CENT, 100);
     rvvm_set_opt(machine, RVVM_OPT_RESET_PC, mem_base);
 
     for (size_t i=0; i<hart_count; ++i) {
-        vm = safe_new_obj(rvvm_hart_t);
-        vector_push_back(machine->harts, vm);
-        riscv_hart_init(vm, rv64);
-        vm->machine = machine;
-        vm->mem = machine->mem;
+        vector_push_back(machine->harts, riscv_hart_init(machine));
     }
-    machine->power_state = RVVM_POWER_OFF;
-    machine->rv64 = rv64;
 #ifdef USE_FDT
     rvvm_init_fdt(machine);
 #endif
-    riscv_jit_init_memtracking(machine);
     return machine;
 }
 
@@ -615,7 +613,6 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 
     vector_foreach(machine->harts, i) {
         riscv_hart_free(vector_at(machine->harts, i));
-        free(vector_at(machine->harts, i));
     }
 
     vector_free(machine->harts);
@@ -757,15 +754,11 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
 
 PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
 {
-    rvvm_hart_t* vm = safe_new_obj(rvvm_hart_t);
-    riscv_hart_init(vm, machine->rv64);
-    vm->machine = machine;
-    vm->mem = machine->mem;
-    riscv_switch_priv(vm, PRIVILEGE_MACHINE);
+    rvvm_hart_t* vm = riscv_hart_init(machine);
 #ifdef USE_FPU
     // Initialize FPU by writing to status CSR
-    maxlen_t mstatus = 0xA00000000 + (FS_INITIAL << 13);
-    riscv_csr_op(vm, 0x300, &mstatus, CSR_SWAP);
+    maxlen_t mstatus = (FS_INITIAL << 13);
+    riscv_csr_op(vm, 0x300, &mstatus, CSR_SETBITS);
 #endif
     riscv_switch_priv(vm, PRIVILEGE_USER);
     spin_lock_slow(&global_lock);
@@ -782,7 +775,6 @@ PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
         if (vector_at(vm->machine->harts, i) == vm) {
             vector_erase(vm->machine->harts, i);
             riscv_hart_free(vm);
-            free(vm);
             spin_unlock(&global_lock);
             return;
         }

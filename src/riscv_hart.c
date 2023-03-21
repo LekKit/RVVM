@@ -25,61 +25,47 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "atomics.h"
 #include "bit_ops.h"
 
-void riscv_hart_init(rvvm_hart_t* vm, bool rv64)
+rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine)
 {
-    memset(vm, 0, sizeof(rvvm_hart_t));
-    riscv_tlb_flush(vm);
+    rvvm_hart_t* vm = safe_new_obj(rvvm_hart_t);
+    vm->wfi_cond = condvar_create();
+    vm->machine = machine;
+    vm->mem = machine->mem;
+    vm->rv64 = machine->rv64;
     vm->priv_mode = PRIVILEGE_MACHINE;
     // Delegate exceptions from M to S
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
-    // Initialize decoder to illegal instructions
+    // Initialize decoder for illegal instructions
     for (size_t i=0; i<512; ++i) vm->decoder.opcodes[i] = riscv_illegal_insn;
     for (size_t i=0; i<32; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
 
-#ifdef USE_JIT
-    vm->jit_enabled = !rvvm_has_arg("nojit");
-    if (vm->jit_enabled) {
-        size_t jit_cache = rvvm_getarg_size("jitcache");
-        if (!jit_cache) jit_cache = 16 << 20; // 16M JIT cache per hart
-        vm->jit_enabled = rvjit_ctx_init(&vm->jit, jit_cache);
-
-        if (!vm->jit_enabled) rvvm_warn("RVJIT failed to initialize, falling back to interpreter");
-    }
-#endif
-
+    if (vm->rv64) {
 #ifdef USE_RV64
-    vm->rv64 = rv64;
-    if (rv64) {
         // 0x2A00000000 for H-mode
         vm->csr.status = 0xA00000000;
         vm->csr.isa = CSR_MISA_RV64;
         riscv_decoder_init_rv64(vm);
+#else
+        rvvm_warn("Requested RV64 in RV32-only build");
+#endif
     } else {
         vm->csr.isa = CSR_MISA_RV32;
         riscv_decoder_init_rv32(vm);
     }
-#ifdef USE_JIT
-    rvjit_set_rv64(&vm->jit, rv64);
-#endif
-#else
-    if (rv64) rvvm_error("Requested RV64 in RV32-only build");
-    vm->csr.isa = CSR_MISA_RV32;
-    riscv_decoder_init_rv32(vm);
-#endif
 
+    riscv_tlb_flush(vm);
     riscv_priv_init(vm);
-    vm->wfi_cond = condvar_create();
+    return vm;
 }
 
 void riscv_hart_free(rvvm_hart_t* vm)
 {
 #ifdef USE_JIT
     if (vm->jit_enabled) rvjit_ctx_free(&vm->jit);
-#else
-    UNUSED(vm);
 #endif
     condvar_free(vm->wfi_cond);
+    free(vm);
 }
 
 void riscv_hart_run(rvvm_hart_t* vm)
@@ -318,6 +304,21 @@ static void* riscv_hart_run_wrap(void* ptr)
 
 void riscv_hart_spawn(rvvm_hart_t *vm)
 {
+#ifdef USE_JIT
+    if (!vm->jit_enabled && rvvm_get_opt(vm->machine, RVVM_OPT_JIT)) {
+        vm->jit_enabled = rvjit_ctx_init(&vm->jit, rvvm_get_opt(vm->machine, RVVM_OPT_JIT_CACHE));
+
+        if (vm->jit_enabled) {
+            rvjit_set_rv64(&vm->jit, vm->rv64);
+            if (!rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
+                rvjit_init_memtracking(&vm->jit, vm->mem.size);
+            }
+        } else {
+            rvvm_set_opt(vm->machine, RVVM_OPT_JIT, false);
+            rvvm_warn("RVJIT failed to initialize, falling back to interpreter");
+        }
+    }
+#endif
     atomic_store_uint32(&vm->pending_events, 0);
     vm->thread = thread_create(riscv_hart_run_wrap, (void*)vm);
 }

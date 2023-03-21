@@ -133,7 +133,7 @@ static void riscv_i_zifence(rvvm_hart_t* vm, const uint32_t instruction)
 {
     UNUSED(instruction);
 #ifdef USE_JIT
-    if (rvvm_has_arg("rvjit_harward")) {
+    if (rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
         riscv_jit_flush_cache(vm);
     } else {
         // This eliminates possible dangling dirty blocks in JTLB

@@ -47,13 +47,14 @@ extern "C" {
 
 #define RVVM_OPT_NONE           0
 #define RVVM_OPT_JIT            1 // Enable JIT
-#define RVVM_OPT_JITCACHE       2 // Amount of per-core JIT cache (In bytes)
-#define RVVM_OPT_VERBOSITY      3 // Verbosity level of internal logic
-#define RVVM_OPT_HW_IMITATE     4 // Imitate traits or identity of physical hardware
-#define RVVM_OPT_MAX_CPU_CENT   5 // Max CPU load % per guest/host CPUs
-#define RVVM_OPT_RESET_PC       6 // Physical jump address at reset, defaults to mem_base
-#define RVVM_OPT_DTB_ADDR       7 // Pass DTB address if non-zero, omits FDT generation
-#define RVVM_MAX_OPTS           8
+#define RVVM_OPT_JIT_CACHE      2 // Amount of per-core JIT cache (In bytes)
+#define RVVM_OPT_JIT_HARWARD    3 // No dirty code tracking, explicit ifence, slower
+#define RVVM_OPT_VERBOSITY      4 // Verbosity level of internal logic
+#define RVVM_OPT_HW_IMITATE     5 // Imitate traits or identity of physical hardware
+#define RVVM_OPT_MAX_CPU_CENT   6 // Max CPU load % per guest/host CPUs
+#define RVVM_OPT_RESET_PC       7 // Physical jump address at reset, defaults to mem_base
+#define RVVM_OPT_DTB_ADDR       8 // Pass DTB address if non-zero, omits FDT generation
+#define RVVM_MAX_OPTS           9
 
 typedef struct rvvm_machine_t rvvm_machine_t;
 
