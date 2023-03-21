@@ -61,6 +61,7 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 
 // Safe object allocation with type checking & zeroing
 #define safe_new_obj(type) ((type*)safe_calloc(sizeof(type), 1))
+#define safe_new_arr(type, size) ((type*)safe_calloc(sizeof(type), size))
 
 // Run a function only once upon reaching this, for lazy init, etc
 #define DO_ONCE(expr) \
