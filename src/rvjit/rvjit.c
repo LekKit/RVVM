@@ -265,8 +265,8 @@ static void rvjit_flush_icache(const void* addr, size_t size)
 
 bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
 {
-    block->heap.data = NULL;
-    block->heap.code = NULL;
+    // Assume it's already inited
+    if (block->heap.data) return true;
 
     if (rvvm_has_arg("rvjit_disable_rwx")) {
         rvvm_info("RWX disabled, allocating W^X multi-mmap RVJIT heap");
