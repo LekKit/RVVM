@@ -79,6 +79,9 @@ do { \
 #define EVAL_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define EVAL_MIN(a, b) ((a) < (b) ? (a) : (b))
 
+// Compute length of a static array
+#define STATIC_ARRAY_SIZE(arr) (sizeof(arr) / sizeof(*(arr)))
+
 // Portable itoa/atoi replacement
 size_t int_to_str_dec(char* str, size_t size, int val);
 int str_to_int_dec(const char* str);
