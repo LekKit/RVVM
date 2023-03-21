@@ -272,8 +272,6 @@ struct rvvm_machine_t {
     rvvm_reset_handler_t on_reset;
     void* reset_data;
 
-    paddr_t dtb_addr;
-
     plic_ctx_t* plic;
     pci_bus_t*  pci_bus;
     i2c_bus_t*  i2c_bus;

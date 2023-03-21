@@ -76,5 +76,5 @@ PUBLIC void framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x28000000, framebuffer_size(fb));
     framebuffer_init(machine, addr, fb);
-    rvvm_cmdline_append(machine, "console=tty0");
+    rvvm_append_cmdline(machine, "console=tty0");
 }

@@ -173,7 +173,7 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
                         "\nI hope you aren't running QEMU U-Boot, are you?");
         }
     }
-    rvvm_addr_t dtb_addr = machine->dtb_addr;
+    rvvm_addr_t dtb_addr = rvvm_get_opt(machine, RVVM_OPT_DTB_ADDR);
     if (machine->dtb_file) {
         size_t dtb_size = rvfilesize(machine->dtb_file);
         size_t dtb_offset = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
@@ -196,8 +196,8 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
         vm->registers[REGISTER_X10] = i;
         // a1 register contains FDT address
         vm->registers[REGISTER_X11] = dtb_addr;
-        // Boot from ram base addr by default
-        vm->registers[REGISTER_PC] = vm->mem.begin;
+        // Jump to RESET_PC
+        vm->registers[REGISTER_PC] = rvvm_get_opt(machine, RVVM_OPT_RESET_PC);
         riscv_switch_priv(vm, PRIVILEGE_MACHINE);
         riscv_jit_flush_cache(vm);
     }
@@ -311,12 +311,14 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
     vector_init(machine->harts);
     vector_init(machine->mmio);
 
-    // Default opts setup
-    machine->opts[RVVM_OPT_JIT] = 1;
-    machine->opts[RVVM_OPT_JITCACHE] = rvvm_getarg_size("jitcache");
-    machine->opts[RVVM_OPT_MAX_CPU_CENT] = 100;
-
-    if (!machine->opts[RVVM_OPT_JITCACHE]) machine->opts[RVVM_OPT_JITCACHE] = 16 << 20; // Default 16M JIT cache per hart
+    // Default options
+    rvvm_set_opt(machine, RVVM_OPT_JIT, 1);
+    rvvm_set_opt(machine, RVVM_OPT_JITCACHE, 16 << 20); // Default 16M JIT cache per hart
+    if (rvvm_getarg_size("jitcache")) {
+        rvvm_set_opt(machine, RVVM_OPT_JITCACHE, rvvm_getarg_size("jitcache"));
+    }
+    rvvm_set_opt(machine, RVVM_OPT_MAX_CPU_CENT, 100);
+    rvvm_set_opt(machine, RVVM_OPT_RESET_PC, mem_base);
 
     for (size_t i=0; i<hart_count; ++i) {
         vm = safe_new_obj(rvvm_hart_t);
@@ -422,43 +424,19 @@ PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine)
 #endif
 }
 
-PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr)
-{
-    machine->dtb_addr = dtb_addr;
-}
-
-PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str)
+PUBLIC void rvvm_set_cmdline(rvvm_machine_t* machine, const char* str)
 {
 #ifdef USE_FDT
     free(machine->cmdline);
     machine->cmdline = NULL;
-    rvvm_cmdline_append(machine, str);
+    rvvm_append_cmdline(machine, str);
 #else
     UNUSED(machine);
     UNUSED(str);
 #endif
 }
 
-PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt)
-{
-    if (opt >= RVVM_MAX_OPTS) {
-        return 0;
-    } else {
-        return machine->opts[opt];
-    }
-}
-
-PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t value)
-{
-    if (opt >= RVVM_MAX_OPTS) {
-        return false;
-    } else {
-        machine->opts[opt] = value;
-        return true;
-    }
-}
-
-PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str)
+PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str)
 {
 #ifdef USE_FDT
     size_t cmd_len = machine->cmdline ? strlen(machine->cmdline) : 0;
@@ -474,6 +452,19 @@ PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str)
     UNUSED(machine);
     UNUSED(str);
 #endif
+}
+
+PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt)
+{
+    if (opt >= RVVM_MAX_OPTS) return 0;
+    return atomic_load_uint64_ex(&machine->opts[opt], ATOMIC_RELAXED);
+}
+
+PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val)
+{
+    if (opt >= RVVM_MAX_OPTS) return false;
+    atomic_store_uint64_ex(&machine->opts[opt], val, ATOMIC_RELAXED);
+    return true;
 }
 
 PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data)
@@ -548,7 +539,7 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
 
     spin_lock_slow(&global_lock);
 
-    if (!rvvm_machine_powered_on(machine)) {
+    if (!rvvm_machine_powered(machine)) {
         rvvm_reset_machine_state(machine);
     }
     vector_foreach(machine->harts, i) {
@@ -597,7 +588,7 @@ PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
     condvar_wake(builtin_eventloop_cond);
 }
 
-PUBLIC bool rvvm_machine_powered_on(rvvm_machine_t* machine)
+PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine)
 {
     return atomic_load_uint32(&machine->power_state) != RVVM_POWER_OFF;
 }

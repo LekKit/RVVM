@@ -157,10 +157,10 @@ static int rvvm_main(int argc, const char** argv)
     size_t fb_x = 640;
     size_t fb_y = 480;
     bool   gui = true;
-    
+
     // Set up global argparser
     rvvm_set_args(argc, argv);
-    
+
     // Parse machine options
     for (int i=1; i<argc; i+=arg_size) {
         arg_size = get_arg(argv + i, &arg_name, &arg_val);
@@ -216,16 +216,16 @@ static int rvvm_main(int argc, const char** argv)
     ns16550a_init_auto(machine);
     rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
-    
+
     bool success = rvvm_load_bootrom(machine, bootrom);
-    rvvm_cmdline_append(machine, "root=/dev/nvme0n1 rootflags=discard rw");
-    
+    rvvm_append_cmdline(machine, "root=/dev/nvme0n1 rootflags=discard rw");
+
     if (gui) fb_window_init_auto(machine, fb_x, fb_y);
-    
+
 #ifdef USE_NET
     rtl8169_init_auto(machine);
 #endif
-    
+
     // Post-creation setup
     for (int i=1; i<argc; i+=arg_size) {
         arg_size = get_arg(argv + i, &arg_name, &arg_val);
@@ -239,9 +239,9 @@ static int rvvm_main(int argc, const char** argv)
                 success = false;
             }
         } else if (cmp_arg(arg_name, "cmdline")) {
-            rvvm_cmdline_set(machine, arg_val);
+            rvvm_set_cmdline(machine, arg_val);
         } else if (cmp_arg(arg_name, "append")) {
-            rvvm_cmdline_append(machine, arg_val);
+            rvvm_append_cmdline(machine, arg_val);
         } else if (cmp_arg(arg_name, "dumpdtb")) {
             rvvm_dump_dtb(machine, arg_val);
         }

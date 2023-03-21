@@ -321,7 +321,7 @@ PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine)
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
     if (addr == NS16550A_DEFAULT_MMIO) {
-        rvvm_cmdline_append(machine, "console=ttyS");
+        rvvm_append_cmdline(machine, "console=ttyS");
 #ifdef USE_FDT
         struct fdt_node* chosen = fdt_node_find(rvvm_get_fdt_root(machine), "chosen");
         fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");

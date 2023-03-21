@@ -40,19 +40,20 @@ extern "C" {
 #endif
 
 #ifndef RVVM_VERSION
-#define RVVM_VERSION "0.5"
+#define RVVM_VERSION "0.5-unknown"
 #endif
-#define RVVM_ABI_VERSION     3
+#define RVVM_ABI_VERSION     4
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
 #define RVVM_OPT_NONE           0
-#define RVVM_OPT_JIT            1
-#define RVVM_OPT_JITCACHE       2
-#define RVVM_OPT_VERBOSE        3
-#define RVVM_OPT_DEBUG          4
-#define RVVM_OPT_HW_IMITATE     5
-#define RVVM_OPT_MAX_CPU_CENT   6
-#define RVVM_MAX_OPTS           7
+#define RVVM_OPT_JIT            1 // Enable JIT
+#define RVVM_OPT_JITCACHE       2 // Amount of per-core JIT cache (In bytes)
+#define RVVM_OPT_VERBOSITY      3 // Verbosity level of internal logic
+#define RVVM_OPT_HW_IMITATE     4 // Imitate traits or identity of physical hardware
+#define RVVM_OPT_MAX_CPU_CENT   5 // Max CPU load % per guest/host CPUs
+#define RVVM_OPT_RESET_PC       6 // Physical jump address at reset, defaults to mem_base
+#define RVVM_OPT_DTB_ADDR       7 // Pass DTB address if non-zero, omits FDT generation
+#define RVVM_MAX_OPTS           8
 
 typedef struct rvvm_machine_t rvvm_machine_t;
 
@@ -101,9 +102,9 @@ struct rvvm_mmio_dev_t {
     rvvm_mmio_handler_t read;
     rvvm_mmio_handler_t write;
 
-    // MMIO operations attributes (Alignment & min op size, max op size), always power of 2
+    // MMIO operations attributes (min/max op size), always power of 2
     // Any non-conforming operation is fixed on the fly before the handlers are invoked.
-    uint8_t min_op_size; // Dictates alignment as well
+    uint8_t min_op_size;
     uint8_t max_op_size;
 };
 
@@ -137,17 +138,13 @@ PUBLIC void        rvvm_set_i2c_bus(rvvm_machine_t* machine, i2c_bus_t* i2c_bus)
 PUBLIC struct fdt_node* rvvm_get_fdt_root(rvvm_machine_t* machine);
 PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine);
 
-// Pass physical address of Device Tree Binary (Skips FDT generation)
-// To revert this, pass dtb_addr = 0
-PUBLIC void rvvm_set_dtb_addr(rvvm_machine_t* machine, rvvm_addr_t dtb_addr);
-
 // Manipulate cmdline passed to guest kernel in FDT prop /chosen/bootargs
-PUBLIC void rvvm_cmdline_set(rvvm_machine_t* machine, const char* str);
-PUBLIC void rvvm_cmdline_append(rvvm_machine_t* machine, const char* str);
+PUBLIC void rvvm_set_cmdline(rvvm_machine_t* machine, const char* str);
+PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str);
 
 // Machine configuration
 PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt);
-PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t value);
+PUBLIC bool        rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val);
 
 // Set up handler & userdata to be called when the VM performs reset/shutdown
 // Returning false from handler cancels reset
@@ -173,7 +170,7 @@ PUBLIC bool rvvm_pause_machine(rvvm_machine_t* machine);
 PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
 
 // Returns true if the machine is powered on (Even when it's paused)
-PUBLIC bool rvvm_machine_powered_on(rvvm_machine_t* machine);
+PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine);
 
 // Complete cleanup (Frees memory, devices data, VM structures)
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
