@@ -63,6 +63,15 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 #define safe_new_obj(type) ((type*)safe_calloc(sizeof(type), 1))
 #define safe_new_arr(type, size) ((type*)safe_calloc(sizeof(type), size))
 
+#define default_free(ptr) free(ptr)
+
+// Implicitly NULL freed pointer to prevent use-after-free
+#define free(ptr) \
+do { \
+    default_free(ptr); \
+    ptr = NULL; \
+} while(0)
+
 // Run a function only once upon reaching this, for lazy init, etc
 #define DO_ONCE(expr) \
 do { \
