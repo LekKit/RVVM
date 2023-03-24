@@ -33,6 +33,7 @@ typedef int net_addrlen_t;
 
 #else
 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/in.h>
@@ -201,27 +202,6 @@ static void net_init()
 }
 
 // Wrappers for generic operations on socket handles
-static net_handle_t net_create_handle(int type, const net_addr_t* addr)
-{
-    net_handle_t fd = NET_HANDLE_INVALID;
-    net_init();
-    if (addr == NULL || addr->type == NET_TYPE_IPV4) {
-        fd = socket(AF_INET, type, 0);
-#if defined(IPV6_NET_IMPL)
-    } else if (addr->type == NET_TYPE_IPV6) {
-        fd = socket(AF_INET6, type, 0);
-#endif
-    }
-#if defined(IPPROTO_TCP) && defined(TCP_NODELAY)
-    if (type == SOCK_STREAM && fd != NET_HANDLE_INVALID) {
-        // Disable transmit buffering to improve latency
-        int nodelay = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void*)&nodelay, sizeof(nodelay));
-    }
-#endif
-    return fd;
-}
-
 static void net_close_handle(net_handle_t fd)
 {
 #ifdef _WIN32
@@ -236,7 +216,7 @@ static bool net_handle_set_blocking(net_handle_t fd, bool block)
 #ifdef _WIN32
     u_long blocking = block ? 0 : 1;
     return ioctlsocket(fd, FIONBIO, &blocking) == 0;
-#elif defined(O_NONBLOCK)
+#elif defined(F_SETFL) && defined(O_NONBLOCK)
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) return false;
     flags = block ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
@@ -246,6 +226,57 @@ static bool net_handle_set_blocking(net_handle_t fd, bool block)
     if (!block) rvvm_warn("Non-blocking sockets are not supported on this OS");
     return false;
 #endif
+}
+
+static void net_handle_set_cloexec(net_handle_t fd)
+{
+#ifdef _WIN32
+    SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
+#elif defined(F_SETFD) && defined(FD_CLOEXEC)
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+#else
+    UNUSED(fd);
+#endif
+}
+
+// Set CLOEXEC flag on created handles to prevent handle leaking
+// Optimize nonblocking connects on modern Linux and *BSD
+static net_handle_t net_socket_create_ex(int domain, int type, bool nonblock)
+{
+    net_handle_t fd = NET_HANDLE_INVALID;
+#ifdef _WIN32
+    fd = WSASocketW(domain, type, 0, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+#elif defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+    fd = socket(domain, type | SOCK_CLOEXEC | (nonblock ? SOCK_NONBLOCK : 0), 0);
+    if (fd != NET_HANDLE_INVALID) return fd;
+#endif
+    if (fd == NET_HANDLE_INVALID) {
+        fd = socket(domain, type, 0);
+        net_handle_set_cloexec(fd);
+    }
+    if (nonblock && fd != NET_HANDLE_INVALID) net_handle_set_blocking(fd, false);
+    return fd;
+}
+
+static net_handle_t net_create_handle(int type, const net_addr_t* addr, bool nonblock)
+{
+    net_handle_t fd = NET_HANDLE_INVALID;
+    net_init();
+    if (addr == NULL || addr->type == NET_TYPE_IPV4) {
+        fd = net_socket_create_ex(AF_INET, type, nonblock);
+#if defined(IPV6_NET_IMPL)
+    } else if (addr->type == NET_TYPE_IPV6) {
+        fd = net_socket_create_ex(AF_INET6, type, nonblock);
+#endif
+    }
+#if defined(IPPROTO_TCP) && defined(TCP_NODELAY)
+    if (type == SOCK_STREAM && fd != NET_HANDLE_INVALID) {
+        // Disable transmit buffering to improve latency, inherited in accept()
+        int nodelay = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void*)&nodelay, sizeof(nodelay));
+    }
+#endif
+    return fd;
 }
 
 static bool net_bind_handle(net_handle_t fd, const net_addr_t* addr)
@@ -333,7 +364,7 @@ static net_sock_t* net_init_localaddr(net_sock_t* sock, const net_addr_t* addr)
 
 net_sock_t* net_tcp_listen(const net_addr_t* addr)
 {
-    net_handle_t fd = net_create_handle(SOCK_STREAM, addr);
+    net_handle_t fd = net_create_handle(SOCK_STREAM, addr, false);
     if (fd == NET_HANDLE_INVALID) return NULL;
 #if defined(SOL_SOCKET) && defined(SO_REUSEADDR)
     // Prevent bind errors due to TIME_WAIT
@@ -350,31 +381,30 @@ net_sock_t* net_tcp_listen(const net_addr_t* addr)
 
 net_sock_t* net_tcp_accept(net_sock_t* listener)
 {
+    net_sock_t* sock = NULL;
     if (listener == NULL) return NULL;
-    net_handle_t fd = NET_HANDLE_INVALID;
-    net_addr_t addr = {0};
     if (listener->addr.type == NET_TYPE_IPV4) {
         struct sockaddr_in sock_addr = {0};
         net_addrlen_t addr_len = sizeof(struct sockaddr_in);
-        fd = accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len);
-        net_addr_from_sockaddr(&addr, &sock_addr);
+        sock = net_wrap_handle(accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len));
+        if (sock) net_addr_from_sockaddr(&sock->addr, &sock_addr);
 #if defined(IPV6_NET_IMPL)
     } else if (listener->addr.type == NET_TYPE_IPV6) {
         struct sockaddr_in6 sock_addr = {0};
         net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
-        fd = accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len);
-        net_addr_from_sockaddr6(&addr, &sock_addr);
+        sock = net_wrap_handle(accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len));
+        if (sock) net_addr_from_sockaddr6(&sock->addr, &sock_addr);
 #endif
     }
-    net_sock_t* sock = net_wrap_handle(fd);
-    if (sock) sock->addr = addr;
+    if (sock) net_handle_set_cloexec(sock->fd);
     return sock;
 }
 
 net_sock_t* net_tcp_connect(const net_addr_t* dst, const net_addr_t* src, bool block)
 {
     if (dst == NULL) return NULL;
-    net_handle_t fd = net_create_handle(SOCK_STREAM, dst);
+    // Create a nonblocking socket if needed
+    net_handle_t fd = net_create_handle(SOCK_STREAM, dst, !block);
     if (fd == NET_HANDLE_INVALID) return NULL;
     // Bind to local address if needed
     if (src) {
@@ -398,9 +428,7 @@ net_sock_t* net_tcp_connect(const net_addr_t* dst, const net_addr_t* src, bool b
             return NULL;
         }
     }
-    // Make a non-blocking connect possible
-    if (!block) net_handle_set_blocking(fd, false);
-    
+
     if (!net_connect_handle(fd, dst)) {
         net_close_handle(fd);
         return NULL;
@@ -462,7 +490,7 @@ size_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size)
 
 net_sock_t* net_udp_bind(const net_addr_t* addr)
 {
-    net_handle_t fd = net_create_handle(SOCK_DGRAM, addr);
+    net_handle_t fd = net_create_handle(SOCK_DGRAM, addr, false);
     if (fd == NET_HANDLE_INVALID) return NULL;
 
     if (!net_bind_handle(fd, addr)) {
@@ -564,12 +592,14 @@ net_poll_t* net_poll_create()
         free(poll);
         return NULL;
     }
+    net_handle_set_cloexec(poll->fd);
 #elif defined(KQUEUE_NET_IMPL)
     poll->fd = kqueue();
     if (poll->fd < 0) {
         free(poll);
         return NULL;
     }
+    net_handle_set_cloexec(poll->fd);
 #elif defined(WSA_NET_IMPL)
     hashmap_init(&poll->events, 16);
     poll->cond = condvar_create();
