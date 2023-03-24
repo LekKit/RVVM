@@ -35,17 +35,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/file.h>
 #define POSIX_FILE_IMPL
 
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+
 #ifdef __linux__
 #include <sys/syscall.h>
 #endif
 
 static bool try_lock_fd(int fd)
 {
-    struct flock flk = {0};
-    flk.l_type = F_WRLCK;
-    flk.l_whence = SEEK_SET;
-    flk.l_start = 0;
-    flk.l_len = 0;
+    struct flock flk = {
+        .l_type = F_WRLCK,
+        .l_whence = SEEK_SET,
+    };
     return fcntl(fd, F_SETLK, &flk) == 0 || (errno != EACCES && errno != EAGAIN);
 }
 
@@ -115,7 +118,7 @@ struct blk_io_rvfile {
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
 #if defined(POSIX_FILE_IMPL)
-    int fd, open_flags = 0;
+    int fd, open_flags = O_CLOEXEC;
     if (mode & RVFILE_RW) {
         if (mode & RVFILE_TRUNC) open_flags |= O_TRUNC;
         if (mode & RVFILE_CREAT) {
