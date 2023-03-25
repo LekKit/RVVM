@@ -28,10 +28,10 @@ RISC-V CPU & System software implementation written in С
 - Generic PCI Express Bus
 - NVMe storage, image TRIM support, fast IO
 - Graphical framebuffer through X11/WinAPI/Haiku/SDL
-- I2C HID (keyboard/mouse), OpenCores I2C controller
-- OpenCores Ethernet through Linux TAP / WIP usernet
-- PS2 Altera (keyboard/mouse), *deprecated*
-- ATA hard drive (PIO / IDE PCI), *deprecated*
+- I2C HID keyboard & mouse, OpenCores I2C controller
+- Realtek RTL8169, OpenCores Ethernet NICs
+- Linux TAP / WIP socket-based networking
+- Deprecated: PS2 keyboard & mouse, ATA (IDE) drive
 
 ## 📦 Installing
 [![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
