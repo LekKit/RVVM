@@ -33,6 +33,7 @@ typedef int net_addrlen_t;
 
 #else
 
+#define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -98,8 +99,6 @@ typedef struct {
 #endif
 
 struct net_sock {
-    net_handle_t fd;
-    net_addr_t   addr;
 #if defined(WSA_NET_IMPL)
     HANDLE event;
     HANDLE wait;
@@ -107,6 +106,8 @@ struct net_sock {
 #elif defined(SELECT_NET_IMPL)
     vector_t(net_poll_t*) watchers;
 #endif
+    net_handle_t fd;
+    net_addr_t   addr;
 };
 
 struct net_poll {
@@ -230,7 +231,7 @@ static bool net_handle_set_blocking(net_handle_t fd, bool block)
 
 static void net_handle_set_cloexec(net_handle_t fd)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
     SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
 #elif defined(F_SETFD) && defined(FD_CLOEXEC)
     fcntl(fd, F_SETFD, FD_CLOEXEC);
@@ -239,12 +240,12 @@ static void net_handle_set_cloexec(net_handle_t fd)
 #endif
 }
 
-// Set CLOEXEC flag on created handles to prevent handle leaking
+// Set CLOEXEC flag on created sockets to prevent handle leaking
 // Optimize nonblocking connects on modern Linux and *BSD
 static net_handle_t net_socket_create_ex(int domain, int type, bool nonblock)
 {
     net_handle_t fd = NET_HANDLE_INVALID;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE) && defined(WSA_FLAG_NO_HANDLE_INHERIT)
     fd = WSASocketW(domain, type, 0, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
 #elif defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
     fd = socket(domain, type | SOCK_CLOEXEC | (nonblock ? SOCK_NONBLOCK : 0), 0);
@@ -255,6 +256,27 @@ static net_handle_t net_socket_create_ex(int domain, int type, bool nonblock)
         net_handle_set_cloexec(fd);
     }
     if (nonblock && fd != NET_HANDLE_INVALID) net_handle_set_blocking(fd, false);
+    return fd;
+}
+
+// Set CLOEXEC flag on accepted sockets, propagate blocking mode as on BSD stack
+static net_handle_t net_accept_ex(net_handle_t listener, void* sock_addr, net_addrlen_t* addr_len)
+{
+    net_handle_t fd = NET_HANDLE_INVALID;
+#ifdef __linux__
+    // Linux accept(2) does not inherit nonblocking flag on created socket
+    bool nonblock = !!(fcntl(listener, F_GETFL, 0) & O_NONBLOCK);
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK) && defined(__USE_GNU)
+    fd = accept4(listener, sock_addr, addr_len, SOCK_CLOEXEC | (nonblock ? SOCK_NONBLOCK : 0));
+#endif
+#endif
+    if (fd == NET_HANDLE_INVALID) {
+        fd = accept(listener, sock_addr, addr_len);
+        net_handle_set_cloexec(fd);
+#ifdef __linux__
+        if (nonblock) net_handle_set_blocking(fd, false);
+#endif
+    }
     return fd;
 }
 
@@ -386,17 +408,16 @@ net_sock_t* net_tcp_accept(net_sock_t* listener)
     if (listener->addr.type == NET_TYPE_IPV4) {
         struct sockaddr_in sock_addr = {0};
         net_addrlen_t addr_len = sizeof(struct sockaddr_in);
-        sock = net_wrap_handle(accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len));
+        sock = net_wrap_handle(net_accept_ex(listener->fd, &sock_addr, &addr_len));
         if (sock) net_addr_from_sockaddr(&sock->addr, &sock_addr);
 #if defined(IPV6_NET_IMPL)
     } else if (listener->addr.type == NET_TYPE_IPV6) {
         struct sockaddr_in6 sock_addr = {0};
         net_addrlen_t addr_len = sizeof(struct sockaddr_in6);
-        sock = net_wrap_handle(accept(listener->fd, (struct sockaddr*)&sock_addr, &addr_len));
+        sock = net_wrap_handle(net_accept_ex(listener->fd, &sock_addr, &addr_len));
         if (sock) net_addr_from_sockaddr6(&sock->addr, &sock_addr);
 #endif
     }
-    if (sock) net_handle_set_cloexec(sock->fd);
     return sock;
 }
 
