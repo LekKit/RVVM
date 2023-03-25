@@ -11,7 +11,7 @@ RISC-V CPU & System software implementation written in С
 - Working Linux, FreeBSD, OpenBSD & other cool guest OSes
 - Haiku OS guest support (WIP)
 - Tracing JIT, multicore support
-- Framebuffer graphics, mouse & keyboard, UART shell
+- Framebuffer display, mouse & keyboard, UART shell
 - NVMe storage drives
 - Networking (WIP)
 
@@ -27,7 +27,7 @@ RISC-V CPU & System software implementation written in С
 - PLIC/ACLINT, Timers, Poweroff/reset
 - Generic PCI Express Bus
 - NVMe storage, image TRIM support, fast IO
-- Graphical framebuffer through X11/WinAPI/Haiku/SDL
+- Framebuffer display, GUI for X11/WinAPI/Haiku/SDL
 - I2C HID keyboard & mouse, OpenCores I2C controller
 - Realtek RTL8169, OpenCores Ethernet NICs
 - Linux TAP / WIP socket-based networking
@@ -111,10 +111,10 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
 |                      | Achievments | Working on |
 |----------------------|-------------|------------|
-| **LekKit**           | RVVM API & codebase infrastructure <br> RV64IMAFDC interpreter, IRQ/MMU/Priv <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, ACLINT, UART, I2C, graphics <br> Rework of PCIe, Ethernet, PS/2 | Networking, Userspace emulation |
-| **cerg2010cerg2010** | Important fixes, initial RV64 work <br> PLIC, PCI bus, PS2 HID, ATA, Ethernet OC <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
-| **Mr0maks**          | Initial C/M ext interpreter, VM debugger, CSR work, basic UART <br> ARM32 mul/div JIT intrinsics | - |
-| **0xCatPKG**         | Userspace network, new argument parser <br> Extended testing & portability fixes | HD Audio |
+| **LekKit**           | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation |
+| **cerg2010cerg2010** | Important fixes, RV64 groundwork, FPU <br> Initial PLIC & PCI, PS2 HID, ATA, OC Ethernet <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
+| **Mr0maks**          | Initial C/M/Zicsr extensions, initial UART, VM debugger <br> ARM32 mul/div JIT intrinsics | - |
+| **0xCatPKG**         | Userspace network, API improvements <br> Extended testing & portability fixes | HD Audio |
 | **X547**             | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
 
 ## 🔍 TODO
