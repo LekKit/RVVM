@@ -302,7 +302,7 @@ static void* riscv_hart_run_wrap(void* ptr)
     return NULL;
 }
 
-void riscv_hart_spawn(rvvm_hart_t *vm)
+void riscv_hart_prepare(rvvm_hart_t *vm)
 {
 #ifdef USE_JIT
     if (!vm->jit_enabled && rvvm_get_opt(vm->machine, RVVM_OPT_JIT)) {
@@ -318,7 +318,13 @@ void riscv_hart_spawn(rvvm_hart_t *vm)
             rvvm_warn("RVJIT failed to initialize, falling back to interpreter");
         }
     }
+#else
+    UNUSED(vm);
 #endif
+}
+
+void riscv_hart_spawn(rvvm_hart_t *vm)
+{
     atomic_store_uint32(&vm->pending_events, 0);
     vm->thread = thread_create(riscv_hart_run_wrap, (void*)vm);
 }

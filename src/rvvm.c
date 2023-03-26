@@ -541,6 +541,9 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
         rvvm_reset_machine_state(machine);
     }
     vector_foreach(machine->harts, i) {
+        riscv_hart_prepare(vector_at(machine->harts, i));
+    }
+    vector_foreach(machine->harts, i) {
         riscv_hart_spawn(vector_at(machine->harts, i));
     }
     vector_push_back(global_machines, machine);

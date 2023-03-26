@@ -28,6 +28,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine);
 void riscv_hart_free(rvvm_hart_t* vm);
 
+// Prepare harts before spawning any of them
+void riscv_hart_prepare(rvvm_hart_t* vm);
+
 /* Hart-thread routines */
 
 // Executes the hart in a current thread
