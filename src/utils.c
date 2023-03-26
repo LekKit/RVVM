@@ -100,6 +100,8 @@ SAFE_CALLOC void* safe_calloc(size_t size, size_t n)
     if (unlikely(ret == NULL)) {
         rvvm_fatal("Out of memory!");
     }
+    // Fence zeroing of allocated memory
+    atomic_fence_ex(ATOMIC_RELEASE);
     return ret;
 }
 
