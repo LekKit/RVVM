@@ -46,6 +46,7 @@ typedef struct {
     hashmap_bucket_t* buckets;
     size_t size;
     size_t entries;
+    size_t entry_balance;
 } hashmap_t;
 
 // Hint the expected amount of entries on map creation
@@ -126,7 +127,7 @@ static inline void hashmap_remove(hashmap_t* map, size_t key)
 {
     // Treat value zero as removed key
     hashmap_put(map, key, 0);
-    if (map->entries < (map->size >> 3) && map->entries > 1024) {
+    if (map->entries < map->entry_balance && map->entries > 256) {
         hashmap_shrink(map);
     }
 }
