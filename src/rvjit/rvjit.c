@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "vector.h"
 #include "atomics.h"
+#include "bit_ops.h"
 
 #define RVJIT_MEM_EXEC 0x1
 #define RVJIT_MEM_RDWR 0x2
@@ -305,10 +306,8 @@ void rvjit_init_memtracking(rvjit_block_t* block, size_t size)
 {
     // Each dirty page is marked in atomic bitmask
     free(block->heap.dirty_pages);
-    block->heap.dirty_mask = 1;
-    while (block->heap.dirty_mask < (size >> 17)) block->heap.dirty_mask <<= 1;
-    block->heap.dirty_pages = safe_calloc(block->heap.dirty_mask, sizeof(uint32_t));
-    block->heap.dirty_mask--;
+    block->heap.dirty_mask = bit_next_pow2(size >> 17) - 1;
+    block->heap.dirty_pages = safe_new_arr(uint32_t, block->heap.dirty_mask + 1);
 }
 
 static void rvjit_linker_cleanup(rvjit_block_t* block)
