@@ -118,7 +118,6 @@ bool thread_detach(thread_ctx_t* thread)
 cond_var_t* condvar_create()
 {
     cond_var_t* cond = safe_new_obj(cond_var_t);
-    atomic_store_uint32(&cond->flag, 0);
 #ifdef _WIN32
 #ifndef UNDER_CE
     static HANDLE (__stdcall *create_WTExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
