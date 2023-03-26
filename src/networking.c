@@ -253,7 +253,7 @@ static net_handle_t net_socket_create_ex(int domain, int type, bool nonblock)
 #endif
     if (fd == NET_HANDLE_INVALID) {
         fd = socket(domain, type, 0);
-        net_handle_set_cloexec(fd);
+        if (fd != NET_HANDLE_INVALID) net_handle_set_cloexec(fd);
     }
     if (nonblock && fd != NET_HANDLE_INVALID) net_handle_set_blocking(fd, false);
     return fd;
@@ -272,10 +272,12 @@ static net_handle_t net_accept_ex(net_handle_t listener, void* sock_addr, net_ad
 #endif
     if (fd == NET_HANDLE_INVALID) {
         fd = accept(listener, sock_addr, addr_len);
-        net_handle_set_cloexec(fd);
+        if (fd != NET_HANDLE_INVALID) {
+            net_handle_set_cloexec(fd);
 #ifdef __linux__
-        if (nonblock) net_handle_set_blocking(fd, false);
+            if (nonblock) net_handle_set_blocking(fd, false);
 #endif
+        }
     }
     return fd;
 }
