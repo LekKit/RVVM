@@ -83,7 +83,7 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
 
 void riscv_free_ram(rvvm_ram_t* mem)
 {
-#ifdef __unix__
+#if defined(MAP_PRIVATE) && defined(MAP_ANONYMOUS)
     munmap(mem->data, mem->size);
 #else
     free(mem->data);
