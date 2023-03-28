@@ -25,6 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "mem_ops.h"
 #include "threading.h"
 #include "spinlock.h"
+#include "elf_load.h"
 
 static spinlock_t global_lock = SPINLOCK_INIT;
 static vector_t(rvvm_machine_t*) global_machines = {0};
@@ -158,20 +159,14 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
         if (dev->type && dev->type->reset) dev->type->reset(dev);
     }
     // Load bootrom, kernel, dtb into RAM if needed
+    bool elf = !rvvm_get_opt(machine, RVVM_OPT_HW_IMITATE);
     if (machine->bootrom_file) {
-        rvread(machine->bootrom_file, machine->mem.data, machine->mem.size, 0);
-        if (machine->mem.size >= 4 && read_uint32_le(machine->mem.data) == 0x464c457F) {
-            rvvm_error("ELF firmware images are not (yet) supported");
-        }
+        bin_objcopy(machine->bootrom_file, machine->mem.data, machine->mem.size, elf);
     }
     if (machine->kernel_file) {
         size_t kernel_offset = machine->rv64 ? 0x200000 : 0x400000;
         size_t kernel_size = machine->mem.size > kernel_offset ? machine->mem.size - kernel_offset : 0;
-        rvread(machine->kernel_file, machine->mem.data + kernel_offset, kernel_size, 0);
-        if (kernel_size >= 4 && read_uint32_le(machine->mem.data + kernel_offset) == 0x464c457F) {
-            rvvm_error("ELF kernel images are not (yet) supported."
-                        "\nI hope you aren't running QEMU U-Boot, are you?");
-        }
+        bin_objcopy(machine->kernel_file, machine->mem.data + kernel_offset, kernel_size, elf);
     }
     rvvm_addr_t dtb_addr = rvvm_get_opt(machine, RVVM_OPT_DTB_ADDR);
     if (machine->dtb_file) {
