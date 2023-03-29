@@ -747,12 +747,18 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
     machine->rv64 = rv64;
     // I don't know what time CSR frequency userspace expects...
     rvtimer_init(&machine->timer, 1000000);
+#ifdef USE_JIT
+    rvvm_set_opt(machine, RVVM_OPT_JIT, true);
+    rvvm_set_opt(machine, RVVM_OPT_JIT_HARWARD, true);
+    rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, 16 << 20);
+#endif
     return machine;
 }
 
 PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
 {
     rvvm_hart_t* vm = riscv_hart_init(machine);
+    riscv_hart_prepare(vm);
 #ifdef USE_FPU
     // Initialize FPU by writing to status CSR
     maxlen_t mstatus = (FS_INITIAL << 13);
