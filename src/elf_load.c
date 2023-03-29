@@ -132,6 +132,7 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
         }
         if (p_type == ELF_PT_INTERP && !objcopy && !elf->interp_path) {
             // Get ELF interpreter path
+            WRAP_ERR(p_fsize < 1024, "ELF interpreter path is too long");
             elf->interp_path = safe_new_arr(char, p_fsize + 1);
             WRAP_ERR(rvread(file, elf->interp_path, p_fsize, p_offset) == p_fsize, "Failed to read ELF interp_path");
         }
