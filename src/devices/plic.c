@@ -96,7 +96,7 @@ static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
     if (nirqs <= 1) {
         riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     }
-    uint32_t mask = 1 << (ret & 0x1F);
+    uint32_t mask = 1U << (ret & 0x1F);
     if (!(atomic_and_uint32(&plic->pending[ret >> 5], ~mask) & mask)) {
         return 0;
     }
@@ -328,7 +328,7 @@ PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq)
     }
 
     // Mark the IRQ pending
-    atomic_or_uint32(&plic->pending[irq >> 5], 1 << (irq & 0x1F));
+    atomic_or_uint32(&plic->pending[irq >> 5], 1U << (irq & 0x1F));
 
     // Assign & notify hart responsible for this IRQ
     for (size_t ctx=0; ctx<plic_ctx_count(plic); ++ctx) {
@@ -345,7 +345,7 @@ PUBLIC bool plic_raise_irq(plic_ctx_t* plic, uint32_t irq)
         return false;
     }
 
-    atomic_or_uint32(&plic->raised[irq >> 5], 1 << (irq & 0x1F));
+    atomic_or_uint32(&plic->raised[irq >> 5], 1U << (irq & 0x1F));
     plic_send_irq(plic, irq);
     return true;
 }
@@ -355,6 +355,6 @@ PUBLIC bool plic_lower_irq(plic_ctx_t* plic, uint32_t irq)
     if (plic == NULL || irq == 0 || irq >= PLIC_SOURCE_MAX) {
         return false;
     }
-    atomic_and_uint32(&plic->raised[irq >> 5], ~(1 << (irq & 0x1F)));
+    atomic_and_uint32(&plic->raised[irq >> 5], ~(1U << (irq & 0x1F)));
     return true;
 }
