@@ -189,7 +189,7 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
 #endif
     }
 #else
-    if (flags & (VMA_EXEC | VMA_FIXED)) return NULL;
+    if (addr || (flags & (VMA_EXEC | VMA_FIXED))) return NULL;
     void* ret = calloc(size, 1);
 #endif
     if (ret == NULL) return NULL;
