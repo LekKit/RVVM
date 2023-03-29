@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvjit.h"
 #include "mem_ops.h"
+#include "bit_ops.h"
 #include "compiler.h"
 #include "utils.h"
 
@@ -234,7 +235,7 @@ static inline void rvjit_riscv_i_op(rvjit_block_t* block, uint32_t opcode, regid
         rvjit_riscv_i_op_internal(block, opcode, rds, rs, imm);
     } else if (!riscv_is_load_op(opcode)) {
         // Immediate doesn't fit in a single instruction
-        if ((opcode == RISCV_I_ADDI || opcode == RISCV_I_ADDIW) && imm >= -4096 && imm <= 4094) {
+        if ((opcode == RISCV_I_ADDI || opcode == RISCV_I_ADDIW) && rvjit_is_valid_imm(imm >> 1)) {
             // Lower to 2 consequent addi
             rvjit_riscv_i_op_internal(block, opcode, rds, rs, imm >> 1);
             rvjit_riscv_i_op_internal(block, opcode, rds, rds, imm - (imm >> 1));
@@ -246,12 +247,13 @@ static inline void rvjit_riscv_i_op(rvjit_block_t* block, uint32_t opcode, regid
             rvjit_free_hreg(block, rtmp);
         }
     } else {
+        int32_t imm_lo = sign_extend(imm, 12);
         regid_t rtmp = rvjit_claim_hreg(block);
-        rvjit_native_setreg32s(block, rtmp, imm);
-        rvjit_riscv_r_op(block, RISCV32_R_ADD, rs, rs, rtmp);
-        rvjit_riscv_i_op_internal(block, opcode, rds, rs, 0);
+        rvjit_riscv_lui(block, rtmp, imm - imm_lo);
+        rvjit_riscv_r_op(block, RISCV_R_ADD, rs, rs, rtmp);
+        rvjit_riscv_i_op_internal(block, opcode, rds, rs, imm_lo);
         if (rds != rs) {
-            rvjit_riscv_r_op(block, RISCV32_R_SUB, rs, rs, rtmp);
+            rvjit_riscv_r_op(block, RISCV_R_SUB, rs, rs, rtmp);
         }
         rvjit_free_hreg(block, rtmp);
     }
@@ -276,11 +278,12 @@ static inline void rvjit_riscv_s_op(rvjit_block_t* block, uint32_t opcode, regid
     if (likely(rvjit_is_valid_imm(offset))) {
         rvjit_riscv_s_op_internal(block, opcode, reg, addr, offset);
     } else {
+        int32_t imm_lo = sign_extend(offset, 12);
         regid_t rtmp = rvjit_claim_hreg(block);
-        rvjit_native_setreg32s(block, rtmp, offset);
-        rvjit_riscv_r_op(block, RISCV32_R_ADD, addr, addr, rtmp);
-        rvjit_riscv_s_op_internal(block, opcode, reg, addr, 0);
-        rvjit_riscv_r_op(block, RISCV32_R_SUB, addr, addr, rtmp);
+        rvjit_riscv_lui(block, rtmp, offset - imm_lo);
+        rvjit_riscv_r_op(block, RISCV_R_ADD, addr, addr, rtmp);
+        rvjit_riscv_s_op_internal(block, opcode, reg, addr, imm_lo);
+        rvjit_riscv_r_op(block, RISCV_R_SUB, addr, addr, rtmp);
         rvjit_free_hreg(block, rtmp);
     }
 }
