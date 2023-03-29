@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "elf_load.h"
 #include "mem_ops.h"
 #include "utils.h"
+#include "vma_ops.h"
 
 #define ELF_ET_NONE 0x0
 #define ELF_ET_REL  0x1
@@ -60,6 +61,7 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
     // Parse ELF header
     bool objcopy = !!elf->base;
     bool class64 = (tmp[4] == 2);
+    uint16_t elf_type = read_uint16_le_m(tmp + 16);
     uint64_t elf_entry = class64 ? read_uint64_le_m(tmp + 24) : read_uint32_le_m(tmp + 24);
     uint64_t elf_phoff = class64 ? read_uint64_le_m(tmp + 32) : read_uint32_le_m(tmp + 28);
     //uint64_t elf_shoff = class64 ? read_uint64_le_m(tmp + 40) : read_uint32_le_m(tmp + 32);
@@ -71,13 +73,38 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
     elf->phdr = 0;
     elf->phnum = elf_phnum;
 
-    // Determine lowest virtual address for objcopy
-    uint64_t objcopy_base = -1;
-    if (objcopy) for (size_t i=0; i<elf_phnum; ++i) {
+    // Determine lowest / highest virtual address, PHDR address
+    uint64_t elf_loaddr = (uint64_t)-1;
+    uint64_t elf_hiaddr = 0;
+    for (size_t i=0; i<elf_phnum; ++i) {
         uint64_t elf_phent_off = elf_phoff + (elf_phnsz * i);
         WRAP_ERR(rvread(file, tmp, elf_phnsz, elf_phent_off) == elf_phnsz, "Failed to read ELF phent");
+        uint32_t p_type = read_uint32_le_m(tmp);
         uint64_t p_vaddr = class64 ? read_uint64_le_m(tmp + 16) : read_uint32_le_m(tmp + 8);
-        if (read_uint32_le_m(tmp) == ELF_PT_LOAD && p_vaddr < objcopy_base) objcopy_base = p_vaddr;
+        uint64_t p_memsz = class64 ? read_uint64_le_m(tmp + 40) : read_uint32_le_m(tmp + 20);
+        if (p_type == ELF_PT_LOAD || p_type == ELF_PT_PHDR) {
+            if (p_vaddr < elf_loaddr) elf_loaddr = p_vaddr;
+            if (p_vaddr + p_memsz > elf_hiaddr) elf_hiaddr = p_vaddr + p_memsz;
+        }
+        if (p_type == ELF_PT_PHDR) elf->phdr = p_vaddr;
+    }
+    if (elf_loaddr == (uint64_t)-1) elf_loaddr = 0; // No ELF segments
+
+    // Relocate pointers
+    if (objcopy) {
+        if (elf->entry) elf->entry -= elf_loaddr;
+        if (elf->phdr)  elf->phdr  -= elf_loaddr;
+    } else {
+        // Userland ELF loading
+        elf->buf_size = elf_hiaddr - elf_loaddr;
+        if (elf_type == ELF_ET_DYN) {
+            // Dynamic (PIC) ELF, relocate it
+            elf->base = vma_alloc(NULL, elf->buf_size, VMA_NONE);
+            WRAP_ERR(elf->base, "Failed to relocate dynamic ELF");
+            vma_free(elf->base, elf->buf_size);
+        }
+        if (elf->entry) elf->entry += (size_t)elf->base;
+        if (elf->phdr)  elf->phdr  += (size_t)elf->base;
     }
 
     for (size_t i=0; i<elf_phnum; ++i) {
@@ -88,31 +115,25 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
         uint64_t p_vaddr = class64 ? read_uint64_le_m(tmp + 16) : read_uint32_le_m(tmp + 8);
         uint64_t p_fsize = class64 ? read_uint64_le_m(tmp + 32) : read_uint32_le_m(tmp + 16);
         uint64_t p_memsz = class64 ? read_uint64_le_m(tmp + 40) : read_uint32_le_m(tmp + 20);
-        uint32_t p_flags = class64 ? read_uint32_le_m(tmp + 4) : read_uint32_le_m(tmp + 24);
+        //uint32_t p_flags = class64 ? read_uint32_le_m(tmp + 4) : read_uint32_le_m(tmp + 24);
 
         if (p_type == ELF_PT_LOAD || p_type == ELF_PT_PHDR) {
             // Load ELF program segment or PHDR segment
             if (objcopy) {
-                p_vaddr -= objcopy_base;
+                p_vaddr -= elf_loaddr;
                 WRAP_ERR(p_vaddr + p_memsz <= elf->buf_size, "ELF does not fit in objcopy buffer");
-            } else {
-                // TODO: Userland ELF mapping
-                void*  va_addr = ((uint8_t*)elf->base) + (p_vaddr & ~0xFFFULL);
-                size_t va_size = (p_memsz + (p_vaddr & 0xFFFULL) + 0xFFFULL) & ~0xFFFULL;
-                // mmap(va_addr, va_size, mmap_flags(p_flags), MAP_PRIVATE | MAP_ANON, -1, 0);
-                UNUSED(va_addr);
-                UNUSED(va_size);
-                UNUSED(p_flags);
+            }
+            void* vaddr = ((uint8_t*)elf->base) + p_vaddr;
+            if (!objcopy) {
+                WRAP_ERR(vma_alloc(vaddr, p_memsz, VMA_RDWR | VMA_FIXED) == vaddr, "Failed to allocate ELF VMA");
             }
 
-            void* vaddr = ((uint8_t*)elf->base) + p_vaddr;
             WRAP_ERR(rvread(file, vaddr, p_fsize, p_offset) == p_fsize, "Failed to read ELF segment");
-            if (p_type == ELF_PT_PHDR) elf->phdr = p_vaddr;
         }
         if (p_type == ELF_PT_INTERP && !objcopy && !elf->interp_path) {
             // Get ELF interpreter path
             elf->interp_path = safe_new_arr(char, p_fsize + 1);
-            WRAP_ERR(rvread(file, elf->interp_path, p_fsize, p_offset) == p_offset, "Failed to read ELF interp_path");
+            WRAP_ERR(rvread(file, elf->interp_path, p_fsize, p_offset) == p_fsize, "Failed to read ELF interp_path");
         }
     }
 
@@ -131,4 +152,3 @@ bool bin_objcopy(rvfile_t* file, void* buffer, size_t size, bool try_elf)
     }
     return rvread(file, buffer, size, 0);
 }
-
