@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "atomics.h"
 #include "utils.h"
+#include "vma_ops.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,10 +40,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SV48_LEVELS       4
 #define SV57_LEVELS       5
 
-#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
-#include <sys/mman.h>
-#endif
-
 bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
 {
     // Memory boundaries should be always aligned to page size
@@ -50,29 +47,12 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
         rvvm_error("Memory boundaries misaligned: 0x%08"PRIxXLEN" - 0x%08"PRIxXLEN, begin, begin+size);
         return false;
     }
-#if defined(MAP_PRIVATE) && defined(MAP_ANONYMOUS)
-    vmptr_t data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (data != MAP_FAILED) {
-#ifdef __linux__
-        if (!rvvm_has_arg("no_ksm")) {
-            if (madvise(data, size, MADV_MERGEABLE) == -1) {
-                rvvm_info("KSM madvise() failed");
-            }
-        }
-        if (!rvvm_has_arg("no_thp") && (size > (256 << 20))) {
-            if (madvise(data, size, MADV_HUGEPAGE) == -1) {
-                rvvm_info("THP madvise() failed");
-            } else {
-                rvvm_info("THP enabled");
-            }
-        }
-        
-#endif
-#else
-    vmptr_t data = calloc(size, 1);
-    if (data != NULL) {
-#endif
-        mem->data = data;
+
+    uint32_t flags = VMA_RDWR;
+    if (!rvvm_has_arg("no_ksm")) flags |= VMA_KSM;
+    if (!rvvm_has_arg("no_thp") && (size > (256 << 20))) flags |= VMA_THP;
+    mem->data = vma_alloc(NULL, size, flags);
+    if (mem->data) {
         mem->begin = begin;
         mem->size = size;
         return true;
@@ -83,11 +63,7 @@ bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
 
 void riscv_free_ram(rvvm_ram_t* mem)
 {
-#if defined(MAP_PRIVATE) && defined(MAP_ANONYMOUS)
-    munmap(mem->data, mem->size);
-#else
-    free(mem->data);
-#endif
+    vma_free(mem->data, mem->size);
     // Prevent accidental access
     mem->data = NULL;
     mem->begin = 0;
