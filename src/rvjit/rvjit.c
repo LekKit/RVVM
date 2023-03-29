@@ -22,212 +22,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "vector.h"
 #include "atomics.h"
 #include "bit_ops.h"
+#include "vma_ops.h"
 
-#define RVJIT_MEM_EXEC 0x1
-#define RVJIT_MEM_RDWR 0x2
-#define RVJIT_MEM_RWX  0x3
-
-static size_t page_mask();
-
-// Align block size/address to page boundaries for mmap/mprotect
-static inline size_t size_to_page(size_t size)
-{
-    return (size + page_mask()) & (~page_mask());
-}
-
-static inline void* ptr_to_page(void* ptr)
-{
-    return (void*)(size_t)(((size_t)ptr) & (~page_mask()));
-}
-
-static inline size_t ptrsize_to_page(void* ptr, size_t size)
-{
-    return (size + (((size_t)ptr) & page_mask()) + page_mask()) & (~page_mask());
-}
-
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(RVJIT_X86) && !defined(GNU_EXTS)
 #include <windows.h>
-
-static size_t page_mask()
-{
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    return info.dwPageSize - 1;
-}
-
-static inline DWORD rvjit_virt_flags(uint8_t flags)
-{
-    switch (flags) {
-        case RVJIT_MEM_EXEC: return PAGE_EXECUTE_READ;
-        case RVJIT_MEM_RDWR: return PAGE_READWRITE;
-        case RVJIT_MEM_RWX:  return PAGE_EXECUTE_READWRITE;
-    }
-    return PAGE_NOACCESS;
-}
-
-void* rvjit_mmap(size_t size, uint8_t flags)
-{
-    return VirtualAlloc(NULL, size_to_page(size), MEM_COMMIT, rvjit_virt_flags(flags));
-}
-
-bool rvjit_multi_mmap(void** rw, void** ex, size_t size)
-{
-    // No multi-mmap support for Win32
-    UNUSED(rw);
-    UNUSED(ex);
-    UNUSED(size);
-    return false;
-}
-
-void rvjit_munmap(void* addr, size_t size)
-{
-    VirtualFree(addr, size_to_page(size), MEM_DECOMMIT);
-}
-
-void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
-{
-    DWORD old;
-    VirtualProtect(ptr_to_page(addr), ptrsize_to_page(addr, size), rvjit_virt_flags(flags), &old);
-}
-
-#else
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-
-#ifndef MAP_ANON
-#define MAP_ANON MAP_ANONYMOUS
 #endif
 
-#ifdef __linux__
-// For memfd()
-#include <sys/syscall.h>
-#include <signal.h>
-#endif
-
-#if defined(__APPLE__) && defined(MAP_JIT)
-#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
+#if defined(__APPLE__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
 void sys_icache_invalidate(void* start, size_t len);
 #include <pthread.h>
 #define RVJIT_APPLE_SILICON
-#endif
-#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 101400
-#define MAP_RVJIT (MAP_PRIVATE | MAP_ANON | MAP_JIT)
-#endif
-#endif
-
-#ifndef MAP_RVJIT
-#define MAP_RVJIT (MAP_PRIVATE | MAP_ANON)
-#endif
-
-static size_t page_mask()
-{
-    return sysconf(_SC_PAGESIZE) - 1;
-}
-
-static inline int rvjit_virt_flags(uint8_t flags)
-{
-    switch (flags) {
-        case RVJIT_MEM_EXEC: return PROT_READ | PROT_EXEC;
-        case RVJIT_MEM_RDWR: return PROT_READ | PROT_WRITE;
-        case RVJIT_MEM_RWX:  return PROT_READ | PROT_WRITE | PROT_EXEC;
-    }
-    return PROT_NONE;
-}
-
-void* rvjit_mmap(size_t size, uint8_t flags)
-{
-    void* tmp = mmap(NULL, size_to_page(size), rvjit_virt_flags(flags), MAP_RVJIT, -1, 0);
-    if (tmp == MAP_FAILED) tmp = NULL;
-    return tmp;
-}
-
-static int rvjit_anon_memfd()
-{
-#if defined(__NR_memfd_create)
-    // If we are running on older kernel, should return -ENOSYS
-    signal(SIGSYS, SIG_IGN);
-    int memfd = syscall(__NR_memfd_create, "rvjit_heap", 1);
-#elif defined(__FreeBSD__)
-    int memfd = shm_open(SHM_ANON, O_RDWR, 0);
-#elif defined(__OpenBSD__)
-    char shm_temp_file[] = "/tmp/tmpXXXXXXXXXX_rvjit";
-    int memfd = shm_mkstemp(shm_temp_file);
-    if (shm_unlink(shm_temp_file) == -1) {
-        close(memfd);
-        memfd = -1;
-    }
-#else
-    int memfd = -1;
-    rvvm_info("No RVJIT memfd support for this platform");
-#endif
-
-#if defined(ANDROID) || defined(__ANDROID__) || defined(__serenity__)
-    if (memfd < 0) rvvm_warn("No RVJIT shmem support for this platform");
-#else
-    if (memfd < 0) {
-        rvvm_info("Falling back to RVJIT shmem");
-        char shm_file[] = "/shm-rvjit";
-        memfd = shm_open(shm_file, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (shm_unlink(shm_file) < 0) {
-            close(memfd);
-            memfd = -1;
-        }
-    }
-#endif
-
-    if (memfd < 0) {
-        rvvm_warn("Falling back to RVJIT file mapping");
-        const char* filename = "/var/tmp/rvjit_heap";
-        memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (memfd < 0) {
-            filename = "/tmp/rvjit_heap";
-            memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        }
-        if (unlink(filename) < 0) {
-            close(memfd);
-            memfd = -1;
-        }
-    }
-    return memfd;
-}
-
-bool rvjit_multi_mmap(void** rw, void** exec, size_t size)
-{
-    // Try creating anonymous memfd and mapping onto different virtual mappings
-    int memfd = rvjit_anon_memfd();
-    if (memfd == -1 || ftruncate(memfd, size_to_page(size))) {
-        rvvm_warn("RVJIT memfd creation failed");
-        if (memfd != -1) close(memfd);
-        return false;
-    }
-    *rw = mmap(NULL, size_to_page(size), PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    if (*rw != MAP_FAILED) {
-        *exec = mmap(NULL, size_to_page(size), PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0);
-        if (*exec == MAP_FAILED) {
-            munmap(*rw, size_to_page(size));
-            *exec = NULL;
-        }
-    } else {
-        *rw = NULL;
-        *exec = NULL;
-    }
-    close(memfd);
-
-    return *exec != NULL;
-}
-
-void rvjit_munmap(void* addr, size_t size)
-{
-    munmap(addr, size_to_page(size));
-}
-
-void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
-{
-    mprotect(ptr_to_page(addr), ptrsize_to_page(addr, size), rvjit_virt_flags(flags));
-}
-
 #endif
 
 #if defined(RVJIT_RISCV) && defined(__linux__)
@@ -237,6 +41,7 @@ void rvjit_memprotect(void* addr, size_t size, uint8_t flags)
  * (RVVM is also affected, heh), hence we make a direct syscall
  */
 #include <sys/syscall.h>
+#include <unistd.h>
 #ifndef __NR_riscv_flush_icache
 #define __NR_riscv_flush_icache 259
 #endif
@@ -272,14 +77,14 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
     if (rvvm_has_arg("rvjit_disable_rwx")) {
         rvvm_info("RWX disabled, allocating W^X multi-mmap RVJIT heap");
     } else {
-        block->heap.data = rvjit_mmap(size, RVJIT_MEM_RWX);
+        block->heap.data = vma_alloc(NULL, size, VMA_RWX);
 
         // Possible on Linux PaX (hardened) or OpenBSD
         if (block->heap.data == NULL) rvvm_info("Failed to allocate RWX RVJIT heap, falling back to W^X multi-mmap");
     }
 
     if (block->heap.data == NULL) {
-        if (!rvjit_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
+        if (!vma_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
             rvvm_warn("Failed to allocate W^X RVJIT heap!");
             return false;
         }
@@ -291,7 +96,7 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
     block->space = 1024;
     block->code = safe_malloc(block->space);
 
-    block->heap.size = size_to_page(size);
+    block->heap.size = size;
     block->heap.curr = 0;
 
     block->rv64 = false;
@@ -324,9 +129,9 @@ static void rvjit_linker_cleanup(rvjit_block_t* block)
 
 void rvjit_ctx_free(rvjit_block_t* block)
 {
-    rvjit_munmap(block->heap.data, block->heap.size);
+    vma_free(block->heap.data, block->heap.size);
     if (block->heap.code) {
-        rvjit_munmap((void*)block->heap.code, block->heap.size);
+        vma_free((void*)block->heap.code, block->heap.size);
     }
     rvjit_linker_cleanup(block);
     hashmap_destroy(&block->heap.blocks);
@@ -454,14 +259,11 @@ void rvjit_flush_cache(rvjit_block_t* block)
 {
     if (block->heap.code) {
         rvjit_flush_icache(block->heap.code, block->heap.curr);
-    }
-#if defined(__unix__) && defined(MAP_FIXED)
-    else if (block->heap.curr > 0x10000) {
+    } else if (block->heap.curr > 0x10000) {
         // Deallocate the physical memory used for RWX JIT cache
         // This reduces average memory usage since the cache is never full
-        mmap(block->heap.data, block->heap.size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_RVJIT, -1, 0);
+        vma_clean(block->heap.data, block->heap.size, true);
     }
-#endif
     rvjit_flush_icache(block->heap.data, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
