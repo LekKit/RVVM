@@ -270,8 +270,8 @@ bool vma_clean(void* addr, size_t size, bool lazy)
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
 #if defined(VMA_WIN32_IMPL)
-    if (lazy && VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS)) return true;
-    if (VirtualFree(addr, size, MEM_DECOMMIT)) return true;
+    if (VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS) && lazy) return true;
+    VirtualUnlock(addr, size);
 #elif defined(VMA_MMAP_IMPL)
 #ifdef MADV_FREE
     if (lazy && madvise(addr, size, MADV_FREE) == 0) return true;
