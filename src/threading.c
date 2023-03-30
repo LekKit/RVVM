@@ -70,11 +70,29 @@ struct cond_var {
 #endif
 };
 
+#if defined(_WIN32) && (defined(__i386__) || defined(_M_IX86))
+// Wrap our function call to hide calling convention details
+typedef struct { thread_func_t func; void* arg; } thread_win32_wrap_t;
+static __stdcall DWORD thread_win32_wrap(void* arg)
+{
+    thread_win32_wrap_t wrap = *(thread_win32_wrap_t*)arg;
+    free(arg);
+    return (DWORD)(size_t)wrap.func(wrap.arg);
+}
+#endif
+
 thread_ctx_t* thread_create(thread_func_t func, void *arg)
 {
     thread_ctx_t* thread = safe_new_obj(thread_ctx_t);
 #ifdef _WIN32
-    thread->handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(const void*)func, arg, 0, NULL);
+#if defined(__i386__) || defined(_M_IX86)
+    thread_win32_wrap_t* wrap = safe_new_obj(thread_win32_wrap_t);
+    wrap->func = func;
+    wrap->arg = arg;
+    thread->handle = CreateThread(NULL, 0, thread_win32_wrap, wrap, 0, NULL);
+#else
+    thread->handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(void*)func, arg, 0, NULL);
+#endif
     if (thread->handle) return thread;
 #else
     if (pthread_create(&thread->pthread, NULL, func, arg) == 0) {
