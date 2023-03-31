@@ -20,7 +20,7 @@ RISC-V CPU & System software implementation written in С
 - Multicore support (SMP), SV32/SV39/SV48/SV57 MMU
 - Tracing RVJIT with x86_64, ARM64, RISC-V, i386, ARM backends
   (faster than QEMU, yay!)
-- Bootrom, Kernel Image loading
+- Bootrom, Kernel Image loading, ELF support
 - Device Tree auto-generation, passing to firmware/kernel
 - RVVM Public API for VM integration
 - UART 16550a-compatible text console
@@ -67,7 +67,7 @@ cd build
 
 ## 🚀 Running
 ```
-./rvvm fw_jump.bin -k u-boot_s.bin -i drive.img -m 2G -smp 2 -res 1280x720 -jitcache 64M
+./rvvm fw_jump.bin -k u-boot.bin -i drive.img -m 2G -smp 2 -res 1280x720
 ```
 Argument explanation:
 ```
@@ -94,7 +94,7 @@ Invoke "./rvvm -h" to see extended help.
 | FreeBSD    | Works                      | X11, SDL     |
 | Haiku OS   | Works                      | Haiku, SDL   |
 | Serenity   | Broken due to W^X safety   | SDL          |
-| Windows CE | Broken                     | Win32        |
+| Windows CE | Broken (?)                 | Win32        |
 | Emscripten | -                          | SDL          |
 
 ## ⚖️ License
