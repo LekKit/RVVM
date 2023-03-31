@@ -250,11 +250,8 @@ static inline void rvjit_riscv_i_op(rvjit_block_t* block, uint32_t opcode, regid
         int32_t imm_lo = sign_extend(imm, 12);
         regid_t rtmp = rvjit_claim_hreg(block);
         rvjit_riscv_lui(block, rtmp, imm - imm_lo);
-        rvjit_riscv_r_op(block, RISCV_R_ADD, rs, rs, rtmp);
-        rvjit_riscv_i_op_internal(block, opcode, rds, rs, imm_lo);
-        if (rds != rs) {
-            rvjit_riscv_r_op(block, RISCV_R_SUB, rs, rs, rtmp);
-        }
+        rvjit_riscv_r_op(block, RISCV_R_ADD, rtmp, rtmp, rs);
+        rvjit_riscv_i_op_internal(block, opcode, rds, rtmp, imm_lo);
         rvjit_free_hreg(block, rtmp);
     }
 }
@@ -281,9 +278,8 @@ static inline void rvjit_riscv_s_op(rvjit_block_t* block, uint32_t opcode, regid
         int32_t imm_lo = sign_extend(offset, 12);
         regid_t rtmp = rvjit_claim_hreg(block);
         rvjit_riscv_lui(block, rtmp, offset - imm_lo);
-        rvjit_riscv_r_op(block, RISCV_R_ADD, addr, addr, rtmp);
-        rvjit_riscv_s_op_internal(block, opcode, reg, addr, imm_lo);
-        rvjit_riscv_r_op(block, RISCV_R_SUB, addr, addr, rtmp);
+        rvjit_riscv_r_op(block, RISCV_R_ADD, rtmp, rtmp, addr);
+        rvjit_riscv_s_op_internal(block, opcode, reg, rtmp, imm_lo);
         rvjit_free_hreg(block, rtmp);
     }
 }
