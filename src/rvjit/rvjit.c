@@ -111,7 +111,7 @@ void rvjit_init_memtracking(rvjit_block_t* block, size_t size)
 {
     // Each dirty page is marked in atomic bitmask
     free(block->heap.dirty_pages);
-    block->heap.dirty_mask = bit_next_pow2(size >> 17) - 1;
+    block->heap.dirty_mask = bit_next_pow2((size + 0x1FFFF) >> 17) - 1;
     block->heap.dirty_pages = safe_new_arr(uint32_t, block->heap.dirty_mask + 1);
 }
 
