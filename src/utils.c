@@ -88,6 +88,7 @@ void rvvm_fatal(const char* str)
 SAFE_MALLOC void* safe_malloc(size_t size)
 {
     void* ret = malloc(size);
+    if (unlikely(!size)) rvvm_warn("Suspicious 0-byte allocation");
     if (unlikely(ret == NULL)) {
         rvvm_fatal("Out of memory!");
     }
@@ -97,6 +98,7 @@ SAFE_MALLOC void* safe_malloc(size_t size)
 SAFE_CALLOC void* safe_calloc(size_t size, size_t n)
 {
     void* ret = calloc(size, n);
+    if (unlikely(!size || !n)) rvvm_warn("Suspicious 0-byte allocation");
     if (unlikely(ret == NULL)) {
         rvvm_fatal("Out of memory!");
     }
@@ -108,6 +110,7 @@ SAFE_CALLOC void* safe_calloc(size_t size, size_t n)
 SAFE_REALLOC void* safe_realloc(void* ptr, size_t size)
 {
     void* ret = realloc(ptr, size);
+    if (unlikely(!size)) rvvm_warn("Suspicious 0-byte allocation");
     if (unlikely(ret == NULL)) {
         rvvm_fatal("Out of memory!");
     }
