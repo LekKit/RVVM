@@ -71,7 +71,7 @@ static void print_help()
            "This is free software: you are free to change and redistribute it.\n"
            "There is NO WARRANTY, to the extent permitted by law.\n"
            "\n"
-           "Usage: rvvm [bootrom] [-m 256M] [-s 1] [-k kernel] ...\n"
+           "Usage: rvvm [bootrom] [-m 256M] [-k kernel] [-i drive.img] ...\n"
            "\n"
            "    [bootrom]        Machine bootrom (OpenSBI, BBL, etc)\n"
            "    -m, -mem 1G      Memory amount, default: 256M\n"
@@ -198,7 +198,7 @@ static int rvvm_main(int argc, const char** argv)
         }
     }
     if (bootrom == NULL) {
-        printf("Usage: rvvm [bootrom] [-mem 256M] [-rv64] [-help] ...\n");
+        printf("Usage: rvvm [bootrom] [-mem 256M] [-k kernel] [-help] ...\n");
         return -1;
     }
 
