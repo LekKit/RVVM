@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 static inline int64_t sign_extend(uint64_t val, bitcnt_t bits)
 {
-    return ((int64_t)(val << (MAX_XLEN - bits))) >> (MAX_XLEN - bits);
+    return ((int64_t)(val << (64 - bits))) >> (64 - bits);
 }
 
 // Generate bitmask of given size
@@ -71,6 +71,16 @@ static inline uint64_t bit_next_pow2(uint64_t val)
     val |= (val >> 16);
     val |= (val >> 32);
     return val + 1;
+}
+
+static inline uint32_t bit_rotl32(uint32_t val, bitcnt_t bits)
+{
+    return (val << bits) | (val >> (32 - bits));
+}
+
+static inline uint64_t bit_rotl64(uint64_t val, bitcnt_t bits)
+{
+    return (val << bits) | (val >> (64 - bits));
 }
 
 // Reverse bits in val (from lower bit), remaining bits are zero
