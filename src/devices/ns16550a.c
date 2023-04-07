@@ -77,7 +77,7 @@ struct ns16550a_data {
 
 #define NS16550A_LCR_DLAB    0x80
 
-#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
+#if (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(__EMSCRIPTEN__)
 #include <unistd.h>
 #include <termios.h>
 #include <sys/time.h>
@@ -229,7 +229,9 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size
                 regs->dll = value;
             } else {
                 putc(value, stdout);
+#ifndef __EMSCRIPTEN__
                 fflush(stdout);
+#endif
             }
             break;
         case NS16550A_REG_IER_DLM:
