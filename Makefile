@@ -152,6 +152,10 @@ endif
 ifeq ($(OS),serenityos)
 USE_SDL ?= 1
 endif
+ifeq ($(OS),openbsd)
+override CFLAGS += -I/usr/X11R6/include -D_POSIX_C_SOURCE=200809L
+override LDFLAGS += -L/usr/X11R6/lib
+endif
 
 endif
 
