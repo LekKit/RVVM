@@ -270,10 +270,6 @@ static void ns16550a_update(rvvm_mmio_dev_t* device)
         regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
         if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
             plic_send_irq(regs->plic, regs->irq);
-        } else if (regs->ier & (NS16550A_IER_THR | NS16550A_IER_LSR)) {
-            // This fixes OpenBSD tty(?), doesn't work from mmio handlers
-            // Might as well be related to PLIC, lets disable it for now
-            //plic_send_irq(regs->plic, regs->irq);
         }
         spin_unlock(&regs->lock);
     }

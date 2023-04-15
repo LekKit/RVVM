@@ -199,6 +199,7 @@ static bool plic_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uin
                 plic_scan_irqs(plic, ctx);
             } else if (flag == PLIC_CTXFLAG_THRESHOLD) {
                 atomic_store_uint32(&plic->threshold[ctx], read_uint32_le(data));
+                plic_scan_irqs(plic, ctx);
             }
         }
     }
