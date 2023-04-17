@@ -85,7 +85,7 @@ Argument explanation:
 ```
 Invoke "./rvvm -h" to see extended help.
 
-## Tested environments
+## Tested environments (Likely works elsewhere as well)
 | OS         | JIT                        | GUI          |
 |------------|----------------------------|--------------|
 | Linux      | Works                      | X11, SDL     |
@@ -93,7 +93,7 @@ Invoke "./rvvm -h" to see extended help.
 | MacOS X    | Works, need signing for M1 | SDL, XQuartz |
 | FreeBSD    | Works                      | X11, SDL     |
 | Haiku OS   | Works                      | Haiku, SDL   |
-| Serenity   | Broken due to W^X safety   | SDL          |
+| Serenity   | Works                      | SDL          |
 | Windows CE | Broken (?)                 | Win32        |
 | Emscripten | -                          | SDL          |
 
