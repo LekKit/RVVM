@@ -445,10 +445,6 @@ ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
-ifneq (,$(findstring lib,$(MAKECMDGOALS)))
-override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
-endif
-
 # Rules for object files from sources
 OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 OBJ_CXX := $(SRC_CXX:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
@@ -471,6 +467,11 @@ ifeq ($(HOST_POSIX),1)
 $(shell mkdir -p $(DIRS))
 else
 $(shell mkdir $(subst /,\\, $(DIRS)) $(NULL_STDERR))
+endif
+
+# Do not pass lib-related flags for dev builds (Faster)
+ifneq (,$(MAKECMDGOALS))
+override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
 endif
 
 # Check previous buildflags
@@ -611,6 +612,34 @@ else
 	@-rm -r $(OBJDIR) $(NULL_STDERR) ||:
 	@-del $(subst /,\\, $(BINARY) $(SHARED)) $(NULL_STDERR) ||:
 	@-rmdir /S /Q $(subst /,\\, $(OBJDIR)) $(NULL_STDERR) ||:
+endif
+
+# System-wide install
+DESTDIR ?=
+PREFIX  ?= /usr/local
+# Handle all the weird GNU-style variables
+prefix      ?= $(PREFIX)
+exec_prefix ?= $(prefix)
+bindir      ?= $(exec_prefix)/bin
+libdir      ?= $(exec_prefix)/lib
+includedir  ?= $(prefix)/include
+datarootdir ?= $(prefix)/share
+datadir     ?= $(datarootdir)
+
+.PHONY: install
+install: all lib
+ifeq ($(HOST_POSIX),1)
+	@echo "[$(YELLOW)INFO$(RESET)] Installing to prefix $(DESTDIR)$(prefix)"
+	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
+	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
+	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm.a
+	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
+	@install -d                           $(DESTDIR)$(includedir)/rvvm/devices
+	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/devices/
+	@install -d                           $(DESTDIR)$(datadir)/licenses/rvvm/
+	@install -Dm644 LICENSE*              $(DESTDIR)$(datadir)/licenses/rvvm/
+else
+	@echo "[$(RED)WARN$(RESET)] Unsupported on non-POSIX!"
 endif
 
 sinclude $(DEPS)
