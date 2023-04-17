@@ -47,9 +47,13 @@ static inline DWORD vma_native_flags(uint32_t flags)
 #include <unistd.h>
 #include <fcntl.h>
 #ifdef __linux__
-// For memfd()
+// For memfd_create()
 #include <sys/syscall.h>
 #include <signal.h>
+#endif
+#ifdef __serenity__
+// For anon_create()
+#include <serenity.h>
 #endif
 #ifndef MAP_ANON
 #define MAP_ANON MAP_ANONYMOUS
@@ -82,7 +86,7 @@ static inline int vma_native_flags(uint32_t flags)
 }
 
 // TODO: CreateFileMapping
-static int vma_anon_memfd()
+static int vma_anon_memfd(size_t size)
 {
     int memfd = -1;
 #if defined(__NR_memfd_create)
@@ -94,10 +98,13 @@ static int vma_anon_memfd()
 #elif defined(__OpenBSD__)
     char shm_temp_file[] = "/tmp/tmpXXXXXXXXXX_vma_anon";
     memfd = shm_mkstemp(shm_temp_file);
-    if (shm_unlink(shm_temp_file) == -1) {
+    if (shm_unlink(shm_temp_file) < 0) {
         close(memfd);
         memfd = -1;
     }
+#elif defined(__serenity__)
+    memfd = anon_create(size, O_CLOEXEC);
+    if (memfd >= 0) return memfd;
 #else
     rvvm_info("No VMA memfd support for this platform");
 #endif
@@ -122,10 +129,14 @@ static int vma_anon_memfd()
             filename = "/tmp/vma_anon";
             memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
         }
-        if (memfd > 0 && unlink(filename) < 0) {
+        if (memfd >= 0 && unlink(filename) < 0) {
             close(memfd);
             memfd = -1;
         }
+    }
+    if (memfd >= 0 && ftruncate(memfd, size) < 0) {
+        close(memfd);
+        memfd = -1;
     }
     return memfd;
 }
@@ -198,18 +209,18 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
 
 bool vma_multi_mmap(void** rw, void** exec, size_t size)
 {
+    size = size_to_page(size);
 #ifdef VMA_MMAP_IMPL
-    int memfd = vma_anon_memfd();
-    if (memfd == -1 || ftruncate(memfd, size_to_page(size))) {
+    int memfd = vma_anon_memfd(size);
+    if (memfd < 0) {
         rvvm_warn("VMA memfd creation failed");
-        if (memfd != -1) close(memfd);
         return false;
     }
-    *rw = mmap(NULL, size_to_page(size), PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+    *rw = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
     if (*rw != MAP_FAILED) {
-        *exec = mmap(NULL, size_to_page(size), PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0);
+        *exec = mmap(NULL, size, PROT_READ | PROT_EXEC, MAP_SHARED, memfd, 0);
         if (*exec == MAP_FAILED) {
-            munmap(*rw, size_to_page(size));
+            munmap(*rw, size);
             *exec = NULL;
         }
     } else {
