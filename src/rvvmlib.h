@@ -29,20 +29,21 @@ extern "C" {
 #include <stddef.h>
 #include <stdbool.h>
 
-#if defined(USE_LIB) && defined(_WIN32)
-#define PUBLIC __declspec(dllexport)
-#elif defined(RVVM_DLL) && defined(_WIN32)
+#if defined(_WIN32) && defined(RVVMLIB_SHARED)
 #define PUBLIC __declspec(dllimport)
-#elif defined(USE_LIB) && defined(__GNUC__)
+#elif defined(_WIN32) && defined(USE_LIB)
+#define PUBLIC __declspec(dllexport)
+#elif __GNUC__ >= 4 && (defined(RVVMLIB_SHARED) || defined(USE_LIB))
 #define PUBLIC __attribute__((visibility("default")))
 #else
+// It's a static lib or rvvm-cli
 #define PUBLIC
 #endif
 
 #ifndef RVVM_VERSION
-#define RVVM_VERSION "0.5-unknown"
+#define RVVM_VERSION "0.5"
 #endif
-#define RVVM_ABI_VERSION     4
+#define RVVM_ABI_VERSION     5
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
 #define RVVM_OPT_NONE           0
