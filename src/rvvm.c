@@ -225,10 +225,9 @@ static void* rvvm_eventloop(void* arg)
 
     // The eventloop runs while its enabled/ran manually,
     // and there are any running machines
-    while (builtin_eventloop_enabled || arg) {
+    while (true) {
         spin_lock_slow(&global_lock);
-        if (vector_size(global_machines) == 0) {
-            rvvm_eventloop_cleanup();
+        if (vector_size(global_machines) == 0 || builtin_eventloop_enabled == !!arg) {
             spin_unlock(&global_lock);
             break;
         }
@@ -280,6 +279,7 @@ static void* rvvm_eventloop(void* arg)
         spin_unlock(&global_lock);
         condvar_wait(builtin_eventloop_cond, 10);
     }
+    rvvm_eventloop_cleanup();
 
     return arg;
 }
