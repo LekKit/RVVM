@@ -40,8 +40,13 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     machine->fdt = fdt_node_create(NULL);
     fdt_node_add_prop_u32(machine->fdt, "#address-cells", 2);
     fdt_node_add_prop_u32(machine->fdt, "#size-cells", 2);
-    fdt_node_add_prop_str(machine->fdt, "compatible", "RVVM v"RVVM_VERSION);
-    fdt_node_add_prop_str(machine->fdt, "model", "RVVM v"RVVM_VERSION);
+    if (rvvm_get_opt(machine, RVVM_OPT_HW_IMITATE)) {
+        fdt_node_add_prop_str(machine->fdt, "model", "PlasmaArc Five");
+        fdt_node_add_prop_str(machine->fdt, "compatible", "lekkit,arc5xx");
+    } else {
+        fdt_node_add_prop_str(machine->fdt, "model", "RVVM v"RVVM_VERSION);
+        fdt_node_add_prop(machine->fdt, "compatible", "lekkit,rvvm\0riscv-virtio\0", 25);
+    }
 
     struct fdt_node* chosen = fdt_node_create("chosen");
     uint8_t rng_buffer[64] = {0};
@@ -70,7 +75,11 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
 
         fdt_node_add_prop_str(cpu, "device_type", "cpu");
         fdt_node_add_prop_u32(cpu, "reg", i);
-        fdt_node_add_prop(cpu, "compatible", "rvvm\0riscv\0", 11);
+        if (rvvm_get_opt(machine, RVVM_OPT_HW_IMITATE)) {
+            fdt_node_add_prop(cpu, "compatible", "lekkit,arc5xx\0riscv\0", 20);
+        } else {
+            fdt_node_add_prop(cpu, "compatible", "lekkit,rvvm\0riscv\0", 18);
+        }
         fdt_node_add_prop_u32(cpu, "clock-frequency", 3000000000);
 #ifdef USE_RV64
         if (vector_at(machine->harts, i)->rv64) {
