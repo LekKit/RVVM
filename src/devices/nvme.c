@@ -111,7 +111,7 @@ typedef struct {
     uint32_t threads;
     uint32_t conf;
     uint32_t irq_mask;
-    uint16_t cntlid;
+    char serial[12];
     nvme_queue_t queues[NVME_MAXQ];
 } nvme_dev_t;
 
@@ -286,18 +286,19 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
                 case IDENT_CTRL:
                     write_uint16_le(ptr,     0x144d);        // PCI Vendor ID
                     write_uint16_le(ptr + 2, 0x144d);
-                    strcpy((char*)ptr + 4,  "DEADBEEF");     // Serial Number
-                    strcpy((char*)ptr + 24, "Virtual NVMe"); // Model Number
-                    strcpy((char*)ptr + 64, "RVVM");         // Firmware Revision
-                    ptr[76] = 0x3;                           // Controller Multipath
-                    write_uint16_le(ptr + 78, nvme->cntlid); // Controller ID
+                    // Serial Number
+                    memcpy(ptr + 4,  nvme->serial, sizeof(nvme->serial));
+                    strcpy((char*)ptr + 24, "NVMe Storage"); // Model Number
+                    strcpy((char*)ptr + 64, "R947");         // Firmware Revision
                     write_uint32_le(ptr + 80, NVME_V);       // Version
                     ptr[111] = 1;    // Controller Type: I/O Controller
                     ptr[512] = 0x66; // Submission Queue Max/Cur Entry Size
                     ptr[513] = 0x44; // Completion Queue Max/Cur Entry Size
                     ptr[516] = 1;    // Number of Namespaces
                     ptr[520] = 0xC;  // Supports Write Zeroes, Dataset Management
-                    strcpy((char*)ptr + 768, "nqn.2022.04.lekkit:nvme.rvvm"); // NVMe Qualified Name
+                    // NVMe Qualified Name (Includes serial to distinguish targets)
+                    strcpy((char*)ptr + 768, "nqn.2022-04.lekkit:nvme:");
+                    memcpy(ptr + 792,  nvme->serial, sizeof(nvme->serial));
                     break;
                 case IDENT_NSLS:
                     write_uint32_le(ptr, 0x1); // Namespace #1
@@ -449,7 +450,7 @@ static void* nvme_worker(void** data)
             cmd.prp.cur = 0;
             cmd.prp.prp2_dma = 0;
             cmd.prp.prp2_off = 0;
-            
+
             if (queue_id == ADMIN_SUBQ) {
                 nvme_admin_cmd(nvme, &cmd);
             } else {
@@ -589,10 +590,9 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
 
 PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev)
 {
-    static uint16_t cntlid = 0;
     nvme_dev_t* nvme = safe_new_obj(nvme_dev_t);
     nvme->blk = blk_dev;
-    nvme->cntlid = cntlid++;
+    rvvm_randomserial(nvme->serial, sizeof(nvme->serial));
 
     pci_dev_desc_t nvme_desc = {
         .func[0] = {
