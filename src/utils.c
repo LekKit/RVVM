@@ -260,3 +260,13 @@ void rvvm_randombytes(void* buffer, size_t size)
     seed ^= (seed >> 49);
     memcpy(bytes + size, &seed, size_rem);
 }
+
+void rvvm_randomserial(char* serial, size_t size)
+{
+    rvvm_randombytes(serial, size);
+    for (size_t i=0; i<size; ++i) {
+        size_t c = ((uint8_t*)serial)[i] % ('Z' - 'A' + 10);
+        if (c <= 9) serial[i] = '0' + c;
+        else serial[i] = 'A' + c - 10;
+    }
+}

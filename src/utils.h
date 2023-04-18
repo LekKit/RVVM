@@ -124,4 +124,7 @@ static inline size_t mem_suffix_shift(char suffix)
 // Generate random bytes
 void rvvm_randombytes(void* buffer, size_t size);
 
+// Generate random serial number (0-9, A-Z)
+void rvvm_randomserial(char* serial, size_t size);
+
 #endif
