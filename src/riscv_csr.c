@@ -29,8 +29,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 riscv_csr_handler_t riscv_csr_list[4096];
 
-#define CSR_MARCHID 0x5256564D // 'RVVM'
-
 // no N extension, U_x bits are hardwired to 0
 #define CSR_MSTATUS_MASK 0x7E79AA
 #define CSR_SSTATUS_MASK 0x0C6122
@@ -190,7 +188,33 @@ static bool riscv_csr_marchid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(vm);
     UNUSED(op);
-    *dest = CSR_MARCHID;
+    *dest = 0x5256564D; // 'RVVM'
+    return true;
+}
+
+static bool riscv_csr_mimpid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+{
+    const char* str = RVVM_VERSION;
+    uint32_t tmp = 0;
+    UNUSED(vm);
+    UNUSED(op);
+    for (size_t i=0; str[i]; ++i) if (str[i] == '-') {
+        for (size_t j = i + 1; str[j] && str[j] != '-'; ++j) {
+            tmp <<= 4;
+            if (str[j] >= '0' && str[j] <= '9') {
+                tmp |= str[j] - '0';
+            } else if (str[j] >= 'a' && str[j] <= 'f') {
+                tmp |= str[j] - 'a' + 0xA;
+            } else if (str[j] >= 'A' && str[j] <= 'F') {
+                tmp |= str[j] - 'A' + 0xA;
+            } else {
+                if (str[j] != '-') tmp = 0;
+                break;
+            }
+        }
+        break;
+    }
+    *dest = tmp;
     return true;
 }
 
@@ -517,7 +541,7 @@ void riscv_csr_global_init()
     // Machine Information Registers
     riscv_csr_list[0xF11] = riscv_csr_zero;     // mvendorid
     riscv_csr_list[0xF12] = riscv_csr_marchid;  // marchid
-    riscv_csr_list[0xF13] = riscv_csr_marchid;  // mimpid
+    riscv_csr_list[0xF13] = riscv_csr_mimpid;   // mimpid
     riscv_csr_list[0xF14] = riscv_csr_mhartid;  // mhartid
 
     // Machine Trap Setup
