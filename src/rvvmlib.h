@@ -189,7 +189,7 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 
 // Detach MMIO device from the machine, optionally freeing the device state
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup);
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle, bool cleanup);
 
 // Manipulate attached MMIO device by handle, may be done on a running VM
 // Returns:
@@ -197,10 +197,10 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, boo
 // - Invalid handle: NULL pointer
 PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
 
-// Allows to disable the internal eventloop thread and offload it somewhere
+// Re-enable internal event thread after offload, or disable altogether (DANGEROUS)
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
 
-// Returns when all machines are stopped
+// Offload eventloop into current thread, returns when any machine stops
 // For self-contained VMs this should be used in main thread
 PUBLIC void rvvm_run_eventloop();
 

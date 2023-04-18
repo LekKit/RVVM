@@ -208,7 +208,16 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
     return true;
 }
 
-static void* builtin_eventloop(void* arg)
+static void rvvm_eventloop_cleanup()
+{
+    thread_detach(builtin_eventloop_thread);
+    builtin_eventloop_thread = NULL;
+    condvar_free(builtin_eventloop_cond);
+    builtin_eventloop_cond = NULL;
+    if (vector_size(global_machines) == 0) vector_free(global_machines);
+}
+
+static void* rvvm_eventloop(void* arg)
 {
     rvvm_machine_t* machine;
     rvvm_mmio_dev_t* dev;
@@ -219,11 +228,7 @@ static void* builtin_eventloop(void* arg)
     while (builtin_eventloop_enabled || arg) {
         spin_lock_slow(&global_lock);
         if (vector_size(global_machines) == 0) {
-            thread_detach(builtin_eventloop_thread);
-            builtin_eventloop_thread = NULL;
-            condvar_free(builtin_eventloop_cond);
-            builtin_eventloop_cond = NULL;
-            vector_free(global_machines);
+            rvvm_eventloop_cleanup();
             spin_unlock(&global_lock);
             break;
         }
@@ -248,7 +253,11 @@ static void* builtin_eventloop(void* arg)
                     rvvm_info("Machine %p shutting down", machine);
                     atomic_store_uint32(&machine->running, false);
                     vector_erase(global_machines, m);
-                    break;
+                    if (arg) {
+                        rvvm_eventloop_cleanup();
+                        spin_unlock(&global_lock);
+                        return arg;
+                    } else break;
                 }
             }
 
@@ -553,7 +562,7 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
     vector_push_back(global_machines, machine);
     if (builtin_eventloop_enabled && builtin_eventloop_thread == NULL) {
         builtin_eventloop_cond = condvar_create();
-        builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
+        builtin_eventloop_thread = thread_create(rvvm_eventloop, NULL);
     }
     spin_unlock(&global_lock);
     return true;
@@ -696,20 +705,22 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
     return ret;
 }
 
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_addr_t mmio_addr, bool cleanup)
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle, bool cleanup)
 {
-    bool was_running = rvvm_pause_machine(machine);
-    vector_foreach(machine->mmio, i) {
-        struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
-        if (mmio_addr >= dev->addr
-         && mmio_addr < (dev->addr + dev->size)) {
-            /* do not remove the machine from vector so that the handles
-             * remain valid */
-            dev->size = 0;
-            if (cleanup) rvvm_cleanup_mmio(dev);
-        }
+    if (handle >= 0 && (size_t)handle < vector_size(machine->mmio)) {
+        bool was_running = rvvm_pause_machine(machine);
+        struct rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, handle);
+        // Keep the placeholder device in vector so that the handles remain valid
+        if (cleanup) rvvm_cleanup_mmio(dev);
+        dev->data = NULL;
+        dev->type = NULL;
+        dev->read = rvvm_mmio_none;
+        dev->write = rvvm_mmio_none;
+        // Tearing the device from running machine leaves a dummy range
+        // Experimentally confirmed this actually happens on real boards
+        if (!rvvm_machine_powered(machine)) dev->size = 0;
+        if (was_running) rvvm_start_machine(machine);
     }
-    if (was_running) rvvm_start_machine(machine);
 }
 
 PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
@@ -722,23 +733,21 @@ PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
             condvar_wake(builtin_eventloop_cond);
             stop_thread = builtin_eventloop_thread;
             builtin_eventloop_thread = NULL;
-        } else if (builtin_eventloop_thread == NULL) {
+        } else if (vector_size(global_machines)) {
             builtin_eventloop_cond = condvar_create();
-            builtin_eventloop_thread = thread_create(builtin_eventloop, NULL);
+            builtin_eventloop_thread = thread_create(rvvm_eventloop, NULL);
         }
     }
     spin_unlock(&global_lock);
 
-    if (stop_thread) {
-        thread_join(stop_thread);
-    }
+    if (stop_thread) thread_join(stop_thread);
 }
 
 PUBLIC void rvvm_run_eventloop()
 {
     rvvm_enable_builtin_eventloop(false);
     builtin_eventloop_cond = condvar_create();
-    builtin_eventloop((void*)(size_t)1);
+    rvvm_eventloop((void*)(size_t)1);
 }
 
 //
