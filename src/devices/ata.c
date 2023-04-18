@@ -192,9 +192,9 @@ static void ata_cmd_identify(struct ata_dev *ata)
     // Serial Number
     ata_copy_id_string(id_buf + 20, "DEADBEEF            ");
     // Firmware Revision
-    ata_copy_id_string(id_buf + 46, "RVVM    ");
+    ata_copy_id_string(id_buf + 46, "R948    ");
     // Model Number
-    ata_copy_id_string(id_buf + 54, "IDE Virtual HDD                         ");
+    ata_copy_id_string(id_buf + 54, "IDE HDD                                 ");
 
     memcpy(ata->drive[ata->curdrive].buf, id_buf, sizeof(id_buf));
     ata->drive[ata->curdrive].bytes_to_rw = sizeof(id_buf);
