@@ -78,10 +78,10 @@ struct ns16550a_data {
 #define NS16550A_LCR_DLAB    0x80
 
 #if (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(__EMSCRIPTEN__)
-#include <unistd.h>
-#include <termios.h>
-#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/select.h>
+#include <termios.h>
+#include <unistd.h>
 
 static struct termios orig_term_opts;
 
