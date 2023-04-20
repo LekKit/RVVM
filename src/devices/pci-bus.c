@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PCI_REG_BAR4          0x20
 #define PCI_REG_BAR5          0x24
 
-#define PCI_REG_SSID_SVID  0x2C
+#define PCI_REG_SSID_SVID     0x2C
 
 #define PCI_REG_EXPANSION_ROM 0x30
 #define PCI_REG_CAP_PTR       0x34
@@ -429,4 +429,18 @@ PUBLIC void* pci_get_dma_ptr(pci_dev_t* dev, rvvm_addr_t addr, size_t size)
 {
     if (dev == NULL) return NULL;
     return rvvm_get_dma_ptr(dev->bus->machine, addr, size);
+}
+
+PUBLIC void pci_remove_device(pci_dev_t* dev)
+{
+    if (dev == NULL) return;
+    bool was_running = rvvm_pause_machine(dev->bus->machine);
+    dev->bus->dev[dev->dev_id] = NULL;
+    for (size_t func=0; func<PCI_DEV_FUNCS; ++func) {
+        for (size_t bar=0; bar<PCI_FUNC_BARS; ++bar) {
+            rvvm_detach_mmio(dev->bus->machine, dev->func[func].bar_handle[bar], true);
+        }
+    }
+    if (was_running) rvvm_start_machine(dev->bus->machine);
+    free(dev);
 }

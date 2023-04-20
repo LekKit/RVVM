@@ -60,7 +60,8 @@ typedef struct {
 typedef struct pci_device pci_dev_t;
 
 // Passing irq = 0 implies auto-allocation of 4 IRQ lanes
-PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t* plic, uint32_t irq, bool ecam,
+PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t *machine, plic_ctx_t* plic,
+                               uint32_t irq, bool ecam,
                                rvvm_addr_t base_addr, size_t bus_count,
                                rvvm_addr_t io_addr, size_t io_len,
                                rvvm_addr_t mem_addr, size_t mem_len);
@@ -76,5 +77,7 @@ PUBLIC void       pci_clear_irq(pci_dev_t* dev, uint32_t func_id);
 
 // Directly access physical memory of the device bus host (returns non-NULL on success)
 PUBLIC void*      pci_get_dma_ptr(pci_dev_t* dev, rvvm_addr_t addr, size_t size);
+
+PUBLIC void       pci_remove_device(pci_dev_t* dev);
 
 #endif
