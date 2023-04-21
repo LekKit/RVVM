@@ -41,7 +41,7 @@ extern "C" {
 #endif
 
 #ifndef RVVM_VERSION
-#define RVVM_VERSION "0.5"
+#define RVVM_VERSION "0.6-git"
 #endif
 #define RVVM_ABI_VERSION     5
 #define RVVM_DEFAULT_MEMBASE 0x80000000

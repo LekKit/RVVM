@@ -1,7 +1,7 @@
 # Makefile :)
 NAME    := rvvm
 SRCDIR  := src
-VERSION := 0.5
+VERSION := 0.6
 
 # Detect host features
 ifeq ($(OS),Windows_NT)
