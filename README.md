@@ -1,5 +1,5 @@
 # RVVM - The RISC-V Virtual Machine
-[![version](https://img.shields.io/badge/version-0.5--rc-brightgreen?style=for-the-badge)](#-installing) [![](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)](https://github.com/LekKit/RVVM/graphs/contributors) [![Build](https://img.shields.io/github/actions/workflow/status/LekKit/RVVM/build.yml?branch=staging&style=for-the-badge)](https://github.com/LekKit/RVVM/actions/workflows/build.yml) [![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)](https://app.codacy.com/gh/LekKit/RVVM/dashboard)
+[![version](https://img.shields.io/badge/version-0.5-brightgreen?style=for-the-badge)](#-installing) [![](https://img.shields.io/tokei/lines/github.com/LekKit/RVVM?style=for-the-badge)](https://github.com/LekKit/RVVM/graphs/contributors) [![Build](https://img.shields.io/github/actions/workflow/status/LekKit/RVVM/build.yml?branch=staging&style=for-the-badge)](https://github.com/LekKit/RVVM/actions/workflows/build.yml) [![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)](https://app.codacy.com/gh/LekKit/RVVM/dashboard)
 ![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
 RISC-V CPU & System software implementation written in С
@@ -8,8 +8,7 @@ RISC-V CPU & System software implementation written in С
 [![Demo](https://img.shields.io/badge/Check%20it%20out-WASM%20Demo-red?style=for-the-badge)](https://lekkit.github.io/test/index.html)
 - Passes RISC-V compliance/torture tests for both RV64 & RV32
 - OpenSBI, U-Boot, custom firmwares boot and execute properly
-- Working Linux, FreeBSD, OpenBSD & other cool guest OSes
-- Haiku OS guest support (WIP)
+- Working Linux, FreeBSD, OpenBSD, Haiku OS & other cool OSes
 - Tracing JIT, multicore support
 - Framebuffer display, mouse & keyboard, UART shell
 - NVMe storage drives
