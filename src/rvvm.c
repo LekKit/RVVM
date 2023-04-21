@@ -266,6 +266,10 @@ static void* rvvm_eventloop(void* arg)
                 if ((vm->csr.ie & INTERRUPT_MTIMER) && rvtimer_pending(&vm->timer)) {
                     riscv_hart_check_timer(vector_at(machine->harts, i));
                 }
+                if (rvvm_get_opt(machine, RVVM_OPT_MAX_CPU_CENT) < 100) {
+                    uint32_t preempt = 10 - ((10 * rvvm_get_opt(machine, RVVM_OPT_MAX_CPU_CENT) + 9) / 100);
+                    riscv_hart_preempt(vm, preempt);
+                }
             }
 
             vector_foreach(machine->mmio, i) {
