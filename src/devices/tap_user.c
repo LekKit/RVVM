@@ -122,12 +122,14 @@ static bool eth_send(tap_dev_t* tap, const void* buffer, size_t size)
     return tap->net.feed_rx(tap->net.net_dev, buffer, size);
 }
 
+#if 0
 static inline uint16_t ip_checksum_combine(uint16_t csum1, uint16_t csum2)
 {
     uint32_t sum = ((~csum1) & 0xFFFF) + ((~csum2) & 0xFFFF);
     sum = (sum >> 16) + (sum & 0xFFFF);
     return ~sum;
 }
+#endif
 
 static uint16_t ip_checksum(const void* data, size_t size, uint16_t initial)
 {
