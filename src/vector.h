@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VECTOR_H
 
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 #include "utils.h"
 
@@ -33,8 +32,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Grow factor: 1.5 (Better memory reusage), initial capacity: 2
 #define VECTOR_GROW(vec) \
     if ((vec).count >= (vec).size) { \
-        if ((vec).size < 2) (vec).size = 2; \
-        else (vec).size += (vec).size >> 1; \
+        (vec).size += (vec).size >> 1; \
+        if ((vec).size == 0) (vec).size = 2; \
         (vec).data = safe_realloc((vec).data, (vec).size * sizeof(*(vec).data)); \
     }
 
