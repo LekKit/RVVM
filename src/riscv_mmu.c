@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "atomics.h"
 #include "utils.h"
 #include "vma_ops.h"
-#include <stdlib.h>
 #include <string.h>
 
 #define SV32_VPN_BITS     10
