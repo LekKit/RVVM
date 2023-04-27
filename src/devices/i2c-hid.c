@@ -375,7 +375,7 @@ static void i2c_hid_stop(void* dev)
 static void i2c_hid_remove(void* dev)
 {
     i2c_hid_t* i2c_hid = (i2c_hid_t*)dev;
-    i2c_hid->hid_dev->remove(i2c_hid->hid_dev->dev);
+    if (i2c_hid->hid_dev->remove) i2c_hid->hid_dev->remove(i2c_hid->hid_dev->dev);
     free(i2c_hid);
 }
 
