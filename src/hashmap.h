@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef HASHMAP_H
 #define HASHMAP_H
 
-#include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 
 /*
  * This is the worst-case scenario lookup complexity,
