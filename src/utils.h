@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "atomics.h"
 #include <stddef.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
