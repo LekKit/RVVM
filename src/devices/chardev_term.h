@@ -1,7 +1,8 @@
 /*
-ns16550a.h - NS16550A UART
+chardev_term.h - Terminal backend for UART
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     Mr0maks <mr.maks0443@gmail.com>
+Copyright (C) 2023  宋文武 <iyzsong@envs.net>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,17 +18,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef NS16550A_H
-#define NS16550A_H
+#ifndef CHARDEV_TERM_H
+#define CHARDEV_TERM_H
 
-#include "rvvmlib.h"
-#include "plic.h"
 #include "chardev.h"
 
-#define NS16550A_DEFAULT_MMIO 0x10000000
+PUBLIC chardev_t* chardev_term_create(void);
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* backend,
-                          rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* backend);
-
-#endif // NS16550A_H
+#endif

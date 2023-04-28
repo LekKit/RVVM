@@ -20,13 +20,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "ns16550a.h"
 #include "spinlock.h"
 #include "utils.h"
+#include "chardev.h"
 
 #ifdef USE_FDT
 #include "fdtlib.h"
 #endif
 
-#include <stdio.h>
-#include <stdlib.h>
 
 #define NS16550A_REG_SIZE 0x8
 
@@ -42,8 +41,10 @@ struct ns16550a_data {
     uint8_t dll;
     uint8_t dlm;
 
-    uint8_t buf;
-    uint8_t len;
+    bool recv;
+    bool thre;
+
+    chardev_t* backend;
 };
 
 // Read
@@ -77,88 +78,28 @@ struct ns16550a_data {
 
 #define NS16550A_LCR_DLAB    0x80
 
-#if (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(__EMSCRIPTEN__)
-#include <sys/types.h>
-#include <sys/select.h>
-#include <termios.h>
-#include <unistd.h>
 
-static struct termios orig_term_opts;
-
-static void terminal_origmode()
+static void ns16550a_on_input_available(chardev_t* dev, void* watcher_data)
 {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term_opts);
+    UNUSED(dev);
+    struct ns16550a_data* regs = (struct ns16550a_data*)watcher_data;
+    spin_lock(&regs->lock);
+    regs->recv = true;
+    if (regs->ier & NS16550A_IER_RECV)
+        plic_send_irq(regs->plic, regs->irq);
+    spin_unlock(&regs->lock);
 }
 
-static void terminal_rawmode()
+static void ns16550a_on_output_available(chardev_t* dev, void* watcher_data)
 {
-    static bool once = true;
-    if (once) {
-        tcgetattr(STDIN_FILENO, &orig_term_opts);
-        atexit(terminal_origmode);
-        struct termios term_opts = orig_term_opts;
-        term_opts.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-        term_opts.c_iflag &= ~(IXON | ICRNL);
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_opts);
-        once = false;
-    }
+    UNUSED(dev);
+    struct ns16550a_data* regs = (struct ns16550a_data*)watcher_data;
+    spin_lock(&regs->lock);
+    regs->thre = true;
+    if (regs->ier & NS16550A_IER_THR)
+        plic_send_irq(regs->plic, regs->irq);
+    spin_unlock(&regs->lock);
 }
-
-static uint8_t terminal_readchar(void* addr)
-{
-    fd_set rfds;
-    struct timeval timeout = {0};
-    FD_ZERO(&rfds);
-    FD_SET(0, &rfds);
-    if (select(1, &rfds, NULL, NULL, &timeout) > 0) {
-        return read(0, addr, 1) == 1;
-    }
-    return 0;
-}
-
-#elif defined(_WIN32) && !defined(UNDER_CE)
-#include <windows.h>
-#include <conio.h>
-
-static void terminal_rawmode()
-{
-    //AttachConsole(ATTACH_PARENT_PROCESS);
-    SetConsoleOutputCP(CP_UTF8);
-    // ENABLE_VIRTUAL_TERMINAL_INPUT
-    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0x200);
-    // ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), 0x5);
-}
-
-static uint8_t terminal_readchar(void* addr)
-{
-    static char t_buff[32];
-    static size_t t_head = 0, t_tail = 0;
-    if (t_head == t_tail && _kbhit()) {
-        wchar_t w_buff[8];
-        DWORD w_chars;
-        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buff, STATIC_ARRAY_SIZE(w_buff), &w_chars, NULL);
-        t_head = WideCharToMultiByte(CP_UTF8, 0, w_buff, w_chars, t_buff, sizeof(t_buff), NULL, NULL);
-        t_tail = 0;
-    }
-    if (t_head != t_tail) {
-        *(uint8_t*)addr = t_buff[t_tail++];
-        return 1;
-    } else return 0;
-}
-
-#else
-#warning No UART input support!
-static void terminal_rawmode()
-{
-}
-
-static uint8_t terminal_readchar(void* addr)
-{
-    UNUSED(addr);
-    return 0;
-}
-#endif
 
 static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
 {
@@ -166,16 +107,14 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_
     uint8_t *value = (uint8_t*)memory_data;
     UNUSED(size);
     spin_lock(&regs->lock);
-    // Read char from stdin
-    if (!regs->len) regs->len = terminal_readchar(&regs->buf);
     switch (offset) {
         case NS16550A_REG_RBR_DLL:
             if (regs->lcr & NS16550A_LCR_DLAB) {
                 *value = regs->dll;
             } else {
-                *value = regs->buf;
-                regs->len = 0;
-                regs->buf = 0;
+                if (regs->recv)
+                    chardev_read(regs->backend, value, 1);
+                regs->recv = false;
             }
             break;
         case NS16550A_REG_IER_DLM:
@@ -186,9 +125,9 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_
             }
             break;
         case NS16550A_REG_IIR:
-            if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
+            if (regs->recv && (regs->ier & NS16550A_IER_RECV)) {
                 *value = NS16550A_IIR_RECV | NS16550A_IIR_FIFO;
-            } else if (regs->ier & NS16550A_IER_THR) {
+            } else if (regs->thre && (regs->ier & NS16550A_IER_THR)) {
                 *value = NS16550A_IIR_THR | NS16550A_IIR_FIFO;
             } else {
                 *value = NS16550A_IIR_NONE | NS16550A_IIR_FIFO;
@@ -201,7 +140,7 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_
             *value = regs->mcr;
             break;
         case NS16550A_REG_LSR:
-            *value = NS16550A_LSR_THR | (regs->len ? NS16550A_LSR_RECV : 0);
+            *value = NS16550A_LSR_THR | (regs->recv ? NS16550A_LSR_RECV : 0);
             break;
         case NS16550A_REG_MSR:
             *value = 0xF0;
@@ -228,18 +167,24 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size
             if (regs->lcr & NS16550A_LCR_DLAB) {
                 regs->dll = value;
             } else {
-                putc(value, stdout);
-#ifndef __EMSCRIPTEN__
-                fflush(stdout);
-#endif
+                chardev_write(regs->backend, &value, 1);
+                regs->thre = false;
             }
             break;
         case NS16550A_REG_IER_DLM:
             if (regs->lcr & NS16550A_LCR_DLAB) {
                 regs->dlm = value;
             } else {
+                // Only enable the chardev output callback when needed.
+                if ((regs->ier & NS16550A_IER_THR) != (value & NS16550A_IER_THR)) {
+                    bool watch_output = value & NS16550A_IER_THR;
+                    chardev_watch(regs->backend,
+                                  ns16550a_on_input_available,
+                                  watch_output ? ns16550a_on_output_available : NULL,
+                                  regs);
+                }
                 regs->ier = value;
-                if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
+                if (regs->recv && (regs->ier & NS16550A_IER_RECV)) {
                     plic_send_irq(regs->plic, regs->irq);
                 } else if (regs->ier & (NS16550A_IER_THR | NS16550A_IER_LSR)) {
                     plic_send_irq(regs->plic, regs->irq);
@@ -262,29 +207,22 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size
     return true;
 }
 
-static void ns16550a_update(rvvm_mmio_dev_t* device)
+static void ns16550a_remove(rvvm_mmio_dev_t* device)
 {
     struct ns16550a_data* regs = (struct ns16550a_data*)device->data;
-    if (regs->plic) {
-        spin_lock(&regs->lock);
-        regs->len = regs->len ? 1 : terminal_readchar(&regs->buf);
-        if (regs->len && (regs->ier & NS16550A_IER_RECV)) {
-            plic_send_irq(regs->plic, regs->irq);
-        }
-        spin_unlock(&regs->lock);
-    }
+    chardev_destroy(regs->backend);
 }
 
 static rvvm_mmio_type_t ns16550a_dev_type = {
     .name = "ns16550a",
-    .update = ns16550a_update,
+    .remove = ns16550a_remove,
 };
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* backend,
+                          rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
-    terminal_rawmode();
-
     struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
+    ptr->backend = backend;
     ptr->plic = plic;
     ptr->irq = irq;
     spin_init(&ptr->lock);
@@ -312,9 +250,10 @@ PUBLIC void ns16550a_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_c
     }
     fdt_node_add_child(rvvm_get_fdt_soc(machine), uart);
 #endif
+    chardev_watch(backend, ns16550a_on_input_available, NULL, ptr);
 }
 
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine)
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* backend)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
@@ -325,5 +264,5 @@ PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine)
         fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
 #endif
     }
-    ns16550a_init(machine, addr, plic, plic_alloc_irq(plic));
+    ns16550a_init(machine, backend, addr, plic, plic_alloc_irq(plic));
 }
