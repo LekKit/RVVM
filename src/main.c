@@ -25,7 +25,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/ns16550a.h"
-#include "devices/chardev_term.h"
 #include "devices/fb_window.h"
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
@@ -214,8 +213,7 @@ static int rvvm_main(int argc, const char** argv)
     pci_bus_init_auto(machine);
     i2c_oc_init_auto(machine);
 
-    chardev_t* ns16550a_backend = chardev_term_create();
-    ns16550a_init_auto(machine, ns16550a_backend);
+    ns16550a_init_term_auto(machine);
     rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
 
