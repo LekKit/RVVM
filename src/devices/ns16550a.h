@@ -26,8 +26,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define NS16550A_DEFAULT_MMIO 0x10000000
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* backend,
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* backend);
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev);
+PUBLIC void ns16550a_init_term_auto(rvvm_machine_t* machine);
 
 #endif // NS16550A_H

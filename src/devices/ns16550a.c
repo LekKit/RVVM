@@ -18,18 +18,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ns16550a.h"
+#include "chardev.h"
 #include "spinlock.h"
 #include "utils.h"
-#include "chardev.h"
+#include "mem_ops.h"
 
 #ifdef USE_FDT
 #include "fdtlib.h"
 #endif
 
+#define NS16550A_MMIO_SIZE 0x8
 
-#define NS16550A_REG_SIZE 0x8
-
-struct ns16550a_data {
+typedef struct {
+    chardev_t* chardev;
     plic_ctx_t* plic;
     uint32_t irq;
     spinlock_t lock;
@@ -40,12 +41,7 @@ struct ns16550a_data {
     uint8_t scr;
     uint8_t dll;
     uint8_t dlm;
-
-    bool recv;
-    bool thre;
-
-    chardev_t* backend;
-};
+} ns16550a_dev_t;
 
 // Read
 #define NS16550A_REG_RBR_DLL 0x0
@@ -78,185 +74,172 @@ struct ns16550a_data {
 
 #define NS16550A_LCR_DLAB    0x80
 
-
-static void ns16550a_on_input_available(chardev_t* dev, void* watcher_data)
+static void ns16550a_notify(void* io_dev, uint32_t flags)
 {
-    UNUSED(dev);
-    struct ns16550a_data* regs = (struct ns16550a_data*)watcher_data;
-    spin_lock(&regs->lock);
-    regs->recv = true;
-    if (regs->ier & NS16550A_IER_RECV)
-        plic_send_irq(regs->plic, regs->irq);
-    spin_unlock(&regs->lock);
+    ns16550a_dev_t* uart = io_dev;
+    if (((flags & CHARDEV_RX) && (uart->ier & NS16550A_IER_RECV))
+     || ((flags & CHARDEV_TX) && (uart->ier & NS16550A_IER_THR))) {
+        plic_send_irq(uart->plic, uart->irq);
+    }
 }
 
-static void ns16550a_on_output_available(chardev_t* dev, void* watcher_data)
+static bool ns16550a_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
-    UNUSED(dev);
-    struct ns16550a_data* regs = (struct ns16550a_data*)watcher_data;
-    spin_lock(&regs->lock);
-    regs->thre = true;
-    if (regs->ier & NS16550A_IER_THR)
-        plic_send_irq(regs->plic, regs->irq);
-    spin_unlock(&regs->lock);
-}
+    ns16550a_dev_t* uart = dev->data;
+    memset(data, 0, size);
 
-static bool ns16550a_mmio_read(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
-{
-    struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
-    uint8_t *value = (uint8_t*)memory_data;
-    UNUSED(size);
-    spin_lock(&regs->lock);
+    spin_lock(&uart->lock);
     switch (offset) {
         case NS16550A_REG_RBR_DLL:
-            if (regs->lcr & NS16550A_LCR_DLAB) {
-                *value = regs->dll;
-            } else {
-                if (regs->recv)
-                    chardev_read(regs->backend, value, 1);
-                regs->recv = false;
+            if (uart->lcr & NS16550A_LCR_DLAB) {
+                write_uint8(data, uart->dll);
+            } else if (chardev_poll(uart->chardev) & CHARDEV_RX) {
+                chardev_read(uart->chardev, data, 1);
             }
             break;
         case NS16550A_REG_IER_DLM:
-            if (regs->lcr & NS16550A_LCR_DLAB) {
-                *value = regs->dlm;
+            if (uart->lcr & NS16550A_LCR_DLAB) {
+                write_uint8(data, uart->dlm);
             } else {
-                *value = regs->ier;
+                write_uint8(data, uart->ier);
             }
             break;
-        case NS16550A_REG_IIR:
-            if (regs->recv && (regs->ier & NS16550A_IER_RECV)) {
-                *value = NS16550A_IIR_RECV | NS16550A_IIR_FIFO;
-            } else if (regs->thre && (regs->ier & NS16550A_IER_THR)) {
-                *value = NS16550A_IIR_THR | NS16550A_IIR_FIFO;
+        case NS16550A_REG_IIR: {
+            uint32_t flags = chardev_poll(uart->chardev);
+            if ((flags & CHARDEV_RX) && (uart->ier & NS16550A_IER_RECV)) {
+                write_uint8(data, NS16550A_IIR_RECV | NS16550A_IIR_FIFO);
+            } else if ((flags & CHARDEV_TX) && (uart->ier & NS16550A_IER_THR)) {
+                write_uint8(data, NS16550A_IIR_THR | NS16550A_IIR_FIFO);
             } else {
-                *value = NS16550A_IIR_NONE | NS16550A_IIR_FIFO;
+                write_uint8(data, NS16550A_IIR_NONE | NS16550A_IIR_FIFO);
             }
             break;
+        }
         case NS16550A_REG_LCR:
-            *value = regs->lcr;
+            write_uint8(data, uart->lcr);
             break;
         case NS16550A_REG_MCR:
-            *value = regs->mcr;
+            write_uint8(data, uart->mcr);
             break;
-        case NS16550A_REG_LSR:
-            *value = NS16550A_LSR_THR | (regs->recv ? NS16550A_LSR_RECV : 0);
+        case NS16550A_REG_LSR: {
+            uint32_t flags = chardev_poll(uart->chardev);
+            write_uint8(data, ((flags & CHARDEV_RX) ? NS16550A_LSR_RECV : 0)
+                            | ((flags & CHARDEV_TX) ? NS16550A_LSR_THR : 0));
             break;
+        }
         case NS16550A_REG_MSR:
-            *value = 0xF0;
+            write_uint8(data, 0xF0);
             break;
         case NS16550A_REG_SCR:
-            *value = regs->scr;
+            write_uint8(data, uart->scr);
             break;
         default:
-            *value = 0;
+            write_uint8(data, 0);
             break;
     }
-    spin_unlock(&regs->lock);
+    spin_unlock(&uart->lock);
     return true;
 }
 
-static bool ns16550a_mmio_write(rvvm_mmio_dev_t* device, void* memory_data, size_t offset, uint8_t size)
+static bool ns16550a_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
-    struct ns16550a_data *regs = (struct ns16550a_data *)device->data;
-    uint8_t value = *(uint8_t*)memory_data;
+    ns16550a_dev_t* uart = dev->data;
     UNUSED(size);
-    spin_lock(&regs->lock);
+
+    spin_lock(&uart->lock);
     switch (offset) {
         case NS16550A_REG_THR_DLL:
-            if (regs->lcr & NS16550A_LCR_DLAB) {
-                regs->dll = value;
+            if (uart->lcr & NS16550A_LCR_DLAB) {
+                uart->dll = read_uint8(data);
             } else {
-                chardev_write(regs->backend, &value, 1);
-                regs->thre = false;
+                chardev_write(uart->chardev, data, 1);
             }
             break;
         case NS16550A_REG_IER_DLM:
-            if (regs->lcr & NS16550A_LCR_DLAB) {
-                regs->dlm = value;
+            if (uart->lcr & NS16550A_LCR_DLAB) {
+                uart->dlm = read_uint8(data);
             } else {
-                // Only enable the chardev output callback when needed.
-                if ((regs->ier & NS16550A_IER_THR) != (value & NS16550A_IER_THR)) {
-                    bool watch_output = value & NS16550A_IER_THR;
-                    chardev_watch(regs->backend,
-                                  ns16550a_on_input_available,
-                                  watch_output ? ns16550a_on_output_available : NULL,
-                                  regs);
-                }
-                regs->ier = value;
-                if (regs->recv && (regs->ier & NS16550A_IER_RECV)) {
-                    plic_send_irq(regs->plic, regs->irq);
-                } else if (regs->ier & (NS16550A_IER_THR | NS16550A_IER_LSR)) {
-                    plic_send_irq(regs->plic, regs->irq);
-                }
+                uart->ier = read_uint8(data);
+                // Trigger re-enabled interrupts, if any
+                ns16550a_notify(uart, chardev_poll(uart->chardev));
             }
             break;
         case NS16550A_REG_LCR:
-            regs->lcr = value;
+            uart->lcr = read_uint8(data);
             break;
         case NS16550A_REG_MCR:
-            regs->mcr = value;
+            uart->mcr = read_uint8(data);
             break;
         case NS16550A_REG_SCR:
-            regs->scr = value;
+            uart->scr = read_uint8(data);
             break;
         default:
             break;
     }
-    spin_unlock(&regs->lock);
+    spin_unlock(&uart->lock);
     return true;
 }
 
-static void ns16550a_remove(rvvm_mmio_dev_t* device)
+static void ns16550a_update(rvvm_mmio_dev_t* dev)
 {
-    struct ns16550a_data* regs = (struct ns16550a_data*)device->data;
-    chardev_destroy(regs->backend);
+    ns16550a_dev_t* uart = dev->data;
+    chardev_update(uart->chardev);
+}
+
+static void ns16550a_remove(rvvm_mmio_dev_t* dev)
+{
+    ns16550a_dev_t* uart = dev->data;
+    chardev_free(uart->chardev);
+    free(uart);
 }
 
 static rvvm_mmio_type_t ns16550a_dev_type = {
     .name = "ns16550a",
+    .update = ns16550a_update,
     .remove = ns16550a_remove,
 };
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* backend,
+PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
-    struct ns16550a_data* ptr = safe_calloc(sizeof(struct ns16550a_data), 1);
-    ptr->backend = backend;
-    ptr->plic = plic;
-    ptr->irq = irq;
-    spin_init(&ptr->lock);
+    ns16550a_dev_t* uart = safe_new_obj(ns16550a_dev_t);
+    uart->chardev = chardev;
+    uart->plic = plic;
+    uart->irq = irq;
 
-    rvvm_mmio_dev_t ns16550a = {0};
-    ns16550a.min_op_size = 1;
-    ns16550a.max_op_size = 1;
-    ns16550a.read = ns16550a_mmio_read;
-    ns16550a.write = ns16550a_mmio_write;
-    ns16550a.type = &ns16550a_dev_type;
-    ns16550a.addr = base_addr;
-    ns16550a.size = NS16550A_REG_SIZE;
-    ns16550a.data = ptr;
+    chardev->io_dev = uart;
+    chardev->notify = ns16550a_notify;
+
+    rvvm_mmio_dev_t ns16550a = {
+        .addr = base_addr,
+        .size = NS16550A_MMIO_SIZE,
+        .min_op_size = 1,
+        .max_op_size = 1,
+        .read = ns16550a_mmio_read,
+        .write = ns16550a_mmio_write,
+        .data = uart,
+        .type = &ns16550a_dev_type,
+    };
     rvvm_attach_mmio(machine, &ns16550a);
 #ifdef USE_FDT
-    struct fdt_node* uart = fdt_node_create_reg("uart", base_addr);
-    fdt_node_add_prop_reg(uart, "reg", base_addr, NS16550A_REG_SIZE);
-    fdt_node_add_prop_str(uart, "compatible", "ns16550a");
-    fdt_node_add_prop_u32(uart, "clock-frequency", 0x2625a00);
-    fdt_node_add_prop_u32(uart, "fifo-size", 16);
-    fdt_node_add_prop_str(uart, "status", "okay");
+    struct fdt_node* uart_fdt = fdt_node_create_reg("uart", ns16550a.addr);
+    fdt_node_add_prop_reg(uart_fdt, "reg", ns16550a.addr, ns16550a.size);
+    fdt_node_add_prop_str(uart_fdt, "compatible", "ns16550a");
+    fdt_node_add_prop_u32(uart_fdt, "clock-frequency", 0x2625a00);
+    fdt_node_add_prop_u32(uart_fdt, "fifo-size", 16);
+    fdt_node_add_prop_str(uart_fdt, "status", "okay");
     if (plic) {
-        fdt_node_add_prop_u32(uart, "interrupt-parent", plic_get_phandle(plic));
-        fdt_node_add_prop_u32(uart, "interrupts", irq);
+        fdt_node_add_prop_u32(uart_fdt, "interrupt-parent", plic_get_phandle(plic));
+        fdt_node_add_prop_u32(uart_fdt, "interrupts", irq);
     }
-    fdt_node_add_child(rvvm_get_fdt_soc(machine), uart);
+    fdt_node_add_child(rvvm_get_fdt_soc(machine), uart_fdt);
 #endif
-    chardev_watch(backend, ns16550a_on_input_available, NULL, ptr);
 }
 
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* backend)
+PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
-    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_REG_SIZE);
+    rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_MMIO_SIZE);
     if (addr == NS16550A_DEFAULT_MMIO) {
         rvvm_append_cmdline(machine, "console=ttyS");
 #ifdef USE_FDT
@@ -264,5 +247,10 @@ PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* backend)
         fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
 #endif
     }
-    ns16550a_init(machine, backend, addr, plic, plic_alloc_irq(plic));
+    ns16550a_init(machine, chardev, addr, plic, plic_alloc_irq(plic));
+}
+
+PUBLIC void ns16550a_init_term_auto(rvvm_machine_t* machine)
+{
+    ns16550a_init_auto(machine, chardev_term_create());
 }
