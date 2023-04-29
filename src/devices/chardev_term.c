@@ -174,6 +174,13 @@ static size_t term_read(chardev_t* dev, void* buf, size_t nbytes)
     size_t ret = 0;
     spin_lock(&term->lock);
     ret = ringbuf_read(&term->rx, buf, nbytes);
+    if (!ringbuf_avail(&term->rx) && spin_try_lock(&term->io_lock)) {
+        char buffer[256] = {0};
+        size_t rx_size = sizeof(buffer);
+        term_push_io(term, buffer, &rx_size, NULL);
+        ringbuf_write(&term->rx, buffer, rx_size);
+        spin_unlock(&term->io_lock);
+    }
     term_update_flags(term);
     spin_unlock(&term->lock);
     return ret;
@@ -183,10 +190,10 @@ static size_t term_write(chardev_t* dev, const void* buf, size_t nbytes)
 {
     chardev_term_t* term = dev->data;
     size_t ret = 0;
-    char buffer[257] = {0};
     spin_lock(&term->lock);
     ret = ringbuf_write(&term->tx, buf, nbytes);
     if (!ringbuf_space(&term->tx) && spin_try_lock(&term->io_lock)) {
+        char buffer[257] = {0};
         size_t tx_size = ringbuf_peek(&term->tx, buffer, 256);
         term_push_io(term, buffer, NULL, &tx_size);
         ringbuf_skip(&term->tx, tx_size);
@@ -258,5 +265,4 @@ PUBLIC chardev_t* chardev_pty_create(const char* path)
     rvvm_error("No PTY chardev support on non-POSIX");
 #endif
     return NULL;
-
 }
