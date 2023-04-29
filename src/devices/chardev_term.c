@@ -78,6 +78,7 @@ typedef struct {
     uint32_t tx_size;
     char rx_buf[256];
     char tx_buf[256];
+    int rfd, wfd;
 } chardev_term_t;
 
 static uint32_t term_update_flags(chardev_term_t* term)
@@ -100,16 +101,17 @@ static void term_update(chardev_t* dev)
     struct timeval timeout = {0};
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
-    FD_SET(0, &rfds);
-    FD_SET(1, &wfds);
-    if (select(2, &rfds, &wfds, NULL, &timeout) > 0) {
+    FD_SET(term->rfd, &rfds);
+    FD_SET(term->wfd, &wfds);
+    int nfds = 1 + (term->rfd > term->wfd ? term->rfd : term->wfd);
+    if (select(nfds, &rfds, &wfds, NULL, &timeout) > 0) {
         spin_lock(&term->lock);
-        if (FD_ISSET(0, &rfds) && term->rx_cur == term->rx_size) {
-            int tmp = read(0, term->rx_buf, sizeof(term->rx_buf));
+        if (FD_ISSET(term->rfd, &rfds) && term->rx_cur == term->rx_size) {
+            int tmp = read(term->rfd, term->rx_buf, sizeof(term->rx_buf));
             term->rx_size = tmp > 0 ? tmp : 0;
             term->rx_cur = 0;
         }
-        if (FD_ISSET(1, &wfds) && term->tx_size) {
+        if (FD_ISSET(term->wfd, &wfds) && term->tx_size) {
             buf_size = term->tx_size;
             memcpy(buffer, term->tx_buf, term->tx_size);
             term->tx_size = 0;
@@ -117,7 +119,7 @@ static void term_update(chardev_t* dev)
         flags = term_update_flags(term);
         spin_unlock(&term->lock);
     }
-    if (buf_size) while (write(1, buffer, buf_size) < 0);
+    if (buf_size) while (write(term->wfd, buffer, buf_size) < 0);
 #elif defined(WIN32_TERM_IMPL)
     spin_lock(&term->lock);
     if (term->rx_cur == term->rx_size && _kbhit()) {
@@ -188,13 +190,19 @@ static uint32_t term_poll(chardev_t* dev)
 
 PUBLIC chardev_t* chardev_term_create(void)
 {
+    DO_ONCE(term_rawmode());
+    return chardev_term_fd_create(0, 1);
+}
+
+PUBLIC chardev_t* chardev_term_fd_create(int rfd, int wfd)
+{
     chardev_term_t* term = safe_new_obj(chardev_term_t);
     term->chardev.data = term;
     term->chardev.read = term_read;
     term->chardev.write = term_write;
     term->chardev.poll = term_poll;
     term->chardev.update = term_update;
-
-    DO_ONCE(term_rawmode());
+    term->rfd = rfd;
+    term->wfd = wfd;
     return &term->chardev;
 }
