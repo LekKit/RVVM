@@ -117,7 +117,7 @@ static void term_update(chardev_t* dev)
         flags = term_update_flags(term);
         spin_unlock(&term->lock);
     }
-    if (buf_size) write(1, buffer, buf_size);
+    if (buf_size) while (write(1, buffer, buf_size) < 0);
 #elif defined(WIN32_TERM_IMPL)
     spin_lock(&term->lock);
     if (term->rx_cur == term->rx_size && _kbhit()) {
