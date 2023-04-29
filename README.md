@@ -115,7 +115,8 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 | [**Mr0maks**](https://github.com/Mr0maks)                   | Initial C/M/Zicsr extensions, initial UART, VM debugger <br> ARM32 mul/div JIT intrinsics | - |
 | [**0xCatPKG**](https://github.com/0xCatPKG)                 | Userspace network, API improvements <br> Extended testing & portability fixes | HD Audio |
 | [**X547**](https://github.com/X547)                         | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
-| [**iyzsong**](https://github.com/iyzsong)                   | OpenBSD, PLIC fixes | UART consoles handling |
+| [**iyzsong**](https://github.com/iyzsong)                   | OpenBSD & PLIC fixes, Chardev API | |
+| [**nebulka1**](https://github.com/nebulka1)                 | Relative input mode | |
 
 ## 🔍 TODO
 - TCP buffering & NAT in userspace networking
