@@ -29,6 +29,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
+#include <fcntl.h>
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 
 #define POSIX_TERM_IMPL
 
@@ -240,4 +244,18 @@ PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd)
     term->wfd = wfd;
 
     return &term->chardev;
+}
+
+PUBLIC chardev_t* chardev_pty_create(const char* path)
+{
+#ifdef POSIX_TERM_IMPL
+    int fd = open(path, O_RDWR | O_CLOEXEC);
+    if (fd >= 0) return chardev_fd_create(fd, fd);
+    rvvm_error("Could not open PTY %s", path);
+#else
+    UNUSED(path);
+    rvvm_error("No PTY chardev support on non-POSIX");
+#endif
+    return NULL;
+
 }

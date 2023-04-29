@@ -64,7 +64,7 @@ static inline size_t chardev_write(chardev_t* dev, const void* buf, size_t nbyte
 static inline uint32_t chardev_poll(chardev_t* dev)
 {
     if (dev) return dev->poll(dev);
-    return 0;
+    return CHARDEV_TX;
 }
 
 static inline void chardev_free(chardev_t* dev)
@@ -86,5 +86,6 @@ static inline void chardev_notify(chardev_t* dev, uint32_t flags)
 
 PUBLIC chardev_t* chardev_term_create(void); // stdio
 PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd); // POSIX fd
+PUBLIC chardev_t* chardev_pty_create(const char* path); // POSIX pipe/pty
 
 #endif
