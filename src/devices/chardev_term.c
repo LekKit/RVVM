@@ -211,7 +211,7 @@ static void term_remove(chardev_t* dev)
     ringbuf_destroy(&term->tx);
 #ifdef POSIX_TERM_IMPL
     if (term->rfd != 0) close(term->rfd);
-    if (term->wfd != 1) close(term->wfd);
+    if (term->wfd != 1 && term->wfd != term->rfd) close(term->wfd);
 #endif
     free(term);
 }
@@ -248,6 +248,7 @@ PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd)
 
 PUBLIC chardev_t* chardev_pty_create(const char* path)
 {
+    if (rvvm_strcmp(path, "stdout")) return chardev_term_create();
 #ifdef POSIX_TERM_IMPL
     int fd = open(path, O_RDWR | O_CLOEXEC);
     if (fd >= 0) return chardev_fd_create(fd, fd);
