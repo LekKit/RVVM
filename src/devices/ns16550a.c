@@ -33,14 +33,13 @@ typedef struct {
     chardev_t* chardev;
     plic_ctx_t* plic;
     uint32_t irq;
-    spinlock_t lock;
 
-    uint8_t ier;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t scr;
-    uint8_t dll;
-    uint8_t dlm;
+    uint32_t ier;
+    uint32_t lcr;
+    uint32_t mcr;
+    uint32_t scr;
+    uint32_t dll;
+    uint32_t dlm;
 } ns16550a_dev_t;
 
 // Read
@@ -77,8 +76,9 @@ typedef struct {
 static void ns16550a_notify(void* io_dev, uint32_t flags)
 {
     ns16550a_dev_t* uart = io_dev;
-    if (((flags & CHARDEV_RX) && (uart->ier & NS16550A_IER_RECV))
-     || ((flags & CHARDEV_TX) && (uart->ier & NS16550A_IER_THR))) {
+    uint32_t ier = atomic_load_uint32(&uart->ier);
+    if (((flags & CHARDEV_RX) && (ier & NS16550A_IER_RECV))
+     || ((flags & CHARDEV_TX) && (ier & NS16550A_IER_THR))) {
         plic_send_irq(uart->plic, uart->irq);
     }
 }
@@ -88,27 +88,27 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, 
     ns16550a_dev_t* uart = dev->data;
     memset(data, 0, size);
 
-    spin_lock(&uart->lock);
     switch (offset) {
         case NS16550A_REG_RBR_DLL:
-            if (uart->lcr & NS16550A_LCR_DLAB) {
-                write_uint8(data, uart->dll);
+            if (atomic_load_uint32(&uart->lcr) & NS16550A_LCR_DLAB) {
+                write_uint8(data, atomic_load_uint32(&uart->dll));
             } else if (chardev_poll(uart->chardev) & CHARDEV_RX) {
                 chardev_read(uart->chardev, data, 1);
             }
             break;
         case NS16550A_REG_IER_DLM:
-            if (uart->lcr & NS16550A_LCR_DLAB) {
-                write_uint8(data, uart->dlm);
+            if (atomic_load_uint32(&uart->lcr) & NS16550A_LCR_DLAB) {
+                write_uint8(data, atomic_load_uint32(&uart->dlm));
             } else {
-                write_uint8(data, uart->ier);
+                write_uint8(data, atomic_load_uint32(&uart->ier));
             }
             break;
         case NS16550A_REG_IIR: {
             uint32_t flags = chardev_poll(uart->chardev);
-            if ((flags & CHARDEV_RX) && (uart->ier & NS16550A_IER_RECV)) {
+            uint32_t ier = atomic_load_uint32(&uart->ier);
+            if ((flags & CHARDEV_RX) && (ier & NS16550A_IER_RECV)) {
                 write_uint8(data, NS16550A_IIR_RECV | NS16550A_IIR_FIFO);
-            } else if ((flags & CHARDEV_TX) && (uart->ier & NS16550A_IER_THR)) {
+            } else if ((flags & CHARDEV_TX) && (ier & NS16550A_IER_THR)) {
                 write_uint8(data, NS16550A_IIR_THR | NS16550A_IIR_FIFO);
             } else {
                 write_uint8(data, NS16550A_IIR_NONE | NS16550A_IIR_FIFO);
@@ -116,10 +116,10 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, 
             break;
         }
         case NS16550A_REG_LCR:
-            write_uint8(data, uart->lcr);
+            write_uint8(data, atomic_load_uint32(&uart->lcr));
             break;
         case NS16550A_REG_MCR:
-            write_uint8(data, uart->mcr);
+            write_uint8(data, atomic_load_uint32(&uart->mcr));
             break;
         case NS16550A_REG_LSR: {
             uint32_t flags = chardev_poll(uart->chardev);
@@ -131,13 +131,12 @@ static bool ns16550a_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, 
             write_uint8(data, 0xF0);
             break;
         case NS16550A_REG_SCR:
-            write_uint8(data, uart->scr);
+            write_uint8(data, atomic_load_uint32(&uart->scr));
             break;
         default:
             write_uint8(data, 0);
             break;
     }
-    spin_unlock(&uart->lock);
     return true;
 }
 
@@ -146,37 +145,35 @@ static bool ns16550a_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset,
     ns16550a_dev_t* uart = dev->data;
     UNUSED(size);
 
-    spin_lock(&uart->lock);
     switch (offset) {
         case NS16550A_REG_THR_DLL:
-            if (uart->lcr & NS16550A_LCR_DLAB) {
-                uart->dll = read_uint8(data);
+            if (atomic_load_uint32(&uart->lcr) & NS16550A_LCR_DLAB) {
+                atomic_store_uint32(&uart->dll, read_uint8(data));
             } else {
                 chardev_write(uart->chardev, data, 1);
             }
             break;
         case NS16550A_REG_IER_DLM:
-            if (uart->lcr & NS16550A_LCR_DLAB) {
-                uart->dlm = read_uint8(data);
+            if (atomic_load_uint32(&uart->lcr) & NS16550A_LCR_DLAB) {
+                atomic_store_uint32(&uart->dlm, read_uint8(data));
             } else {
-                uart->ier = read_uint8(data);
+                atomic_store_uint32(&uart->ier, read_uint8(data));
                 // Trigger re-enabled interrupts, if any
                 ns16550a_notify(uart, chardev_poll(uart->chardev));
             }
             break;
         case NS16550A_REG_LCR:
-            uart->lcr = read_uint8(data);
+            atomic_store_uint32(&uart->lcr, read_uint8(data));
             break;
         case NS16550A_REG_MCR:
-            uart->mcr = read_uint8(data);
+            atomic_store_uint32(&uart->mcr, read_uint8(data));
             break;
         case NS16550A_REG_SCR:
-            uart->scr = read_uint8(data);
+            atomic_store_uint32(&uart->scr, read_uint8(data));
             break;
         default:
             break;
     }
-    spin_unlock(&uart->lock);
     return true;
 }
 
