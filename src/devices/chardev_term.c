@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "chardev.h"
 #include "spinlock.h"
 #include "rvtimer.h"
+#include "ringbuf.h"
 #include "utils.h"
 #include "mem_ops.h"
 
@@ -68,88 +69,92 @@ static void term_rawmode()
 #include <stdio.h>
 #warning No UART input support!
 
+static void term_rawmode() {}
+
 #endif
 
 typedef struct {
     chardev_t chardev;
     spinlock_t lock;
+    spinlock_t io_lock;
     uint32_t flags;
-    uint32_t rx_size, rx_cur;
-    uint32_t tx_size;
-    char rx_buf[256];
-    char tx_buf[256];
     int rfd, wfd;
+    ringbuf_t rx, tx;
 } chardev_term_t;
 
 static uint32_t term_update_flags(chardev_term_t* term)
 {
     uint32_t flags = 0;
-    if (term->rx_cur < term->rx_size) flags |= CHARDEV_RX;
-    if (term->tx_size < sizeof(term->tx_buf)) flags |= CHARDEV_TX;
+    if (ringbuf_avail(&term->rx)) flags |= CHARDEV_RX;
+    if (ringbuf_space(&term->tx)) flags |= CHARDEV_TX;
 
     return flags & ~atomic_swap_uint32(&term->flags, flags);
+}
+
+static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, size_t* tx_size)
+{
+    size_t to_read = rx_size ? *rx_size : 0;
+    if (rx_size) *rx_size = 0;
+    UNUSED(term);
+#if defined(POSIX_TERM_IMPL)
+    fd_set rfds, wfds;
+    struct timeval timeout = {0};
+    int nfds = EVAL_MAX(term->rfd, term->wfd) + 1;
+    FD_ZERO(&rfds);
+    FD_ZERO(&wfds);
+    FD_SET(term->rfd, &rfds);
+    FD_SET(term->wfd, &wfds);
+    if (select(nfds, &rfds, &wfds, NULL, &timeout) > 0) {
+        if (FD_ISSET(term->wfd, &wfds) && *tx_size) {
+            int tmp = write(term->wfd, buffer, *tx_size);
+            *tx_size = tmp > 0 ? tmp : 0;
+        }
+        if (FD_ISSET(term->rfd, &rfds) && to_read) {
+            int tmp = read(term->rfd, buffer, to_read);
+            *rx_size = tmp > 0 ? tmp : 0;
+        }
+    }
+#elif defined(WIN32_TERM_IMPL)
+    if (*tx_size) {
+        DWORD count = 0;
+        WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buffer, *tx_size, &count, NULL);
+        *tx_size = count;
+    }
+    if (to_read && _kbhit()) {
+        wchar_t w_buf[64] = {0};
+        size_t count = EVAL_MIN(to_read / 6, STATIC_ARRAY_SIZE(w_buf));
+        DWORD w_chars = 0;
+        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buf, count, &w_chars, NULL);
+        *rx_size = WideCharToMultiByte(CP_UTF8, 0,
+            w_buf, w_chars, buffer, to_read, NULL, NULL);
+    }
+#else
+    UNUSED(to_read);
+    if (*tx_size) printf("%s", buffer);
+#endif
 }
 
 static void term_update(chardev_t* dev)
 {
     chardev_term_t* term = dev->data;
     uint32_t flags = 0;
-    size_t buf_size = 0;
-    char buffer[257] = {0}; // For unlocked write
-#if defined(POSIX_TERM_IMPL)
-    fd_set rfds, wfds;
-    struct timeval timeout = {0};
-    FD_ZERO(&rfds);
-    FD_ZERO(&wfds);
-    FD_SET(term->rfd, &rfds);
-    FD_SET(term->wfd, &wfds);
-    int nfds = 1 + (term->rfd > term->wfd ? term->rfd : term->wfd);
-    if (select(nfds, &rfds, &wfds, NULL, &timeout) > 0) {
-        spin_lock(&term->lock);
-        if (FD_ISSET(term->rfd, &rfds) && term->rx_cur == term->rx_size) {
-            int tmp = read(term->rfd, term->rx_buf, sizeof(term->rx_buf));
-            term->rx_size = tmp > 0 ? tmp : 0;
-            term->rx_cur = 0;
-        }
-        if (FD_ISSET(term->wfd, &wfds) && term->tx_size) {
-            buf_size = term->tx_size;
-            memcpy(buffer, term->tx_buf, term->tx_size);
-            term->tx_size = 0;
-        }
-        flags = term_update_flags(term);
-        spin_unlock(&term->lock);
-    }
-    if (buf_size) while (write(term->wfd, buffer, buf_size) < 0);
-#elif defined(WIN32_TERM_IMPL)
+    char buffer[257] = {0};
+    size_t rx_size = 0, tx_size = 0;
+
+    spin_lock(&term->io_lock);
     spin_lock(&term->lock);
-    if (term->rx_cur == term->rx_size && _kbhit()) {
-        wchar_t w_buf[64] = {0};
-        DWORD w_chars = 0;
-        ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), w_buf, STATIC_ARRAY_SIZE(w_buf), &w_chars, NULL);
-        term->rx_size = WideCharToMultiByte(CP_UTF8, 0,
-            w_buf, w_chars, term->rx_buf, sizeof(term->rx_buf), NULL, NULL);
-        term->rx_cur = 0;
-    }
-    if (term->tx_size) {
-        buf_size = term->tx_size;
-        memcpy(buffer, term->tx_buf, term->tx_size);
-        term->tx_size = 0;
-    }
+    rx_size = EVAL_MIN(ringbuf_space(&term->rx), sizeof(buffer));
+    tx_size = ringbuf_peek(&term->tx, buffer, 256);
+    spin_unlock(&term->lock);
+
+    term_push_io(term, buffer, &rx_size, &tx_size);
+
+    spin_lock(&term->lock);
+    ringbuf_write(&term->rx, buffer, rx_size);
+    ringbuf_skip(&term->tx, tx_size);
     flags = term_update_flags(term);
     spin_unlock(&term->lock);
-    if (buf_size) {
-        WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buffer, buf_size, NULL, NULL);
-    }
-#else
-    spin_lock(&term->lock);
-    if (term->tx_size) {
-        memcpy(buffer, term->tx_buf, term->tx_size);
-        term->tx_size = 0;
-    }
-    flags = term_update_flags(term);
-    spin_unlock(&term->lock);
-    if (buf_size) printf("%s", buffer);
-#endif
+    spin_unlock(&term->io_lock);
 
     if (flags) chardev_notify(&term->chardev, flags);
 }
@@ -157,29 +162,30 @@ static void term_update(chardev_t* dev)
 static size_t term_read(chardev_t* dev, void* buf, size_t nbytes)
 {
     chardev_term_t* term = dev->data;
+    size_t ret = 0;
     spin_lock(&term->lock);
-    size_t len = term->rx_size - term->rx_cur;
-    if (len > nbytes) len = nbytes;
-    memcpy(buf, term->rx_buf + term->rx_cur, len);
-    term->rx_cur += len;
-    bool push = term->rx_cur == term->rx_size;
+    ret = ringbuf_read(&term->rx, buf, nbytes);
+    term_update_flags(term);
     spin_unlock(&term->lock);
-    if (push) term_update(dev);
-    return len;
+    return ret;
 }
 
 static size_t term_write(chardev_t* dev, const void* buf, size_t nbytes)
 {
     chardev_term_t* term = dev->data;
+    size_t ret = 0;
+    char buffer[257] = {0};
     spin_lock(&term->lock);
-    size_t len = sizeof(term->tx_buf) - term->tx_size;
-    if (len > nbytes) len = nbytes;
-    memcpy(term->tx_buf + term->tx_size, buf, len);
-    term->tx_size += len;
-    bool push = term->tx_size == sizeof(term->tx_buf);
+    ret = ringbuf_write(&term->tx, buf, nbytes);
+    if (!ringbuf_space(&term->tx) && spin_try_lock(&term->io_lock)) {
+        size_t tx_size = ringbuf_peek(&term->tx, buffer, 256);
+        term_push_io(term, buffer, NULL, &tx_size);
+        ringbuf_skip(&term->tx, tx_size);
+        spin_unlock(&term->io_lock);
+    }
+    term_update_flags(term);
     spin_unlock(&term->lock);
-    if (push) term_update(dev);
-    return len;
+    return ret;
 }
 
 static uint32_t term_poll(chardev_t* dev)
@@ -188,21 +194,45 @@ static uint32_t term_poll(chardev_t* dev)
     return atomic_load_uint32(&term->flags);
 }
 
+static void term_remove(chardev_t* dev)
+{
+    chardev_term_t* term = dev->data;
+    term_update(dev);
+    ringbuf_destroy(&term->rx);
+    ringbuf_destroy(&term->tx);
+#ifdef POSIX_TERM_IMPL
+    if (term->rfd != 0) close(term->rfd);
+    if (term->wfd != 1) close(term->wfd);
+#endif
+    free(term);
+}
+
 PUBLIC chardev_t* chardev_term_create(void)
 {
     DO_ONCE(term_rawmode());
-    return chardev_term_fd_create(0, 1);
+    return chardev_fd_create(0, 1);
 }
 
-PUBLIC chardev_t* chardev_term_fd_create(int rfd, int wfd)
+PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd)
 {
+#ifndef POSIX_TERM_IMPL
+    if (rfd != 0 || wfd != 1) {
+        rvvm_error("No FD chardev support on non-POSIX");
+        return NULL;
+    }
+#endif
+
     chardev_term_t* term = safe_new_obj(chardev_term_t);
+    ringbuf_create(&term->rx, 256);
+    ringbuf_create(&term->tx, 256);
     term->chardev.data = term;
     term->chardev.read = term_read;
     term->chardev.write = term_write;
     term->chardev.poll = term_poll;
     term->chardev.update = term_update;
+    term->chardev.remove = term_remove;
     term->rfd = rfd;
     term->wfd = wfd;
+
     return &term->chardev;
 }

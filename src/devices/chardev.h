@@ -51,27 +51,30 @@ struct rvvm_chardev {
 
 static inline size_t chardev_read(chardev_t* dev, void* buf, size_t nbytes)
 {
-    return dev->read(dev, buf, nbytes);
+    if (dev) return dev->read(dev, buf, nbytes);
+    return 0;
 }
 
 static inline size_t chardev_write(chardev_t* dev, const void* buf, size_t nbytes)
 {
-    return dev->write(dev, buf, nbytes);
+    if (dev) return dev->write(dev, buf, nbytes);
+    return 0;
 }
 
 static inline uint32_t chardev_poll(chardev_t* dev)
 {
-    return dev->poll(dev);
+    if (dev) return dev->poll(dev);
+    return 0;
 }
 
 static inline void chardev_free(chardev_t* dev)
 {
-    if (dev->remove) dev->remove(dev);
+    if (dev && dev->remove) dev->remove(dev);
 }
 
 static inline void chardev_update(chardev_t* dev)
 {
-    if (dev->update) dev->update(dev);
+    if (dev && dev->update) dev->update(dev);
 }
 
 static inline void chardev_notify(chardev_t* dev, uint32_t flags)
@@ -82,6 +85,6 @@ static inline void chardev_notify(chardev_t* dev, uint32_t flags)
 // Built-in chardev implementations
 
 PUBLIC chardev_t* chardev_term_create(void); // stdio
-PUBLIC chardev_t* chardev_term_fd_create(int rfd, int wfd); // POSIX fd
+PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd); // POSIX fd
 
 #endif
