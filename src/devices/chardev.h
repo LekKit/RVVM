@@ -81,6 +81,7 @@ static inline void chardev_notify(chardev_t* dev, uint32_t flags)
 
 // Built-in chardev implementations
 
-PUBLIC chardev_t* chardev_term_create(void);
+PUBLIC chardev_t* chardev_term_create(void); // stdio
+PUBLIC chardev_t* chardev_term_fd_create(int rfd, int wfd); // POSIX fd
 
 #endif
