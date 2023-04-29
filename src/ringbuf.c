@@ -1,5 +1,5 @@
 /*
-ringbuf.с - FIFO ringbuf
+ringbuf.с - FIFO Ring buffer
 Copyright (C) 2021  cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     LekKit <github.com/LekKit>
 
@@ -19,91 +19,100 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "ringbuf.h"
 #include "utils.h"
-#include <string.h>
+#include "mem_ops.h"
 
-void ringbuf_create(struct ringbuf *rb, size_t size)
+void ringbuf_create(ringbuf_t* rb, size_t size)
 {
-	rb->size = size;
-	rb->data = safe_malloc(size);
-	rb->start = 0;
-	rb->consumed = 0;
+    rb->data = safe_new_arr(uint8_t, size);
+    rb->size = size;
+    rb->start = 0;
+    rb->consumed = 0;
 }
 
-void ringbuf_destroy(struct ringbuf *rb)
+void ringbuf_destroy(ringbuf_t* rb)
 {
-	free(rb->data);
+    rb->size = 0;
+    rb->start = 0;
+    rb->consumed = 0;
+    free(rb->data);
 }
 
-size_t ringbuf_get_free_spc(struct ringbuf *rb)
+size_t ringbuf_space(ringbuf_t* rb)
 {
-	return rb->size - rb->consumed;
+    return rb->size - rb->consumed;
 }
 
-bool ringbuf_is_empty(struct ringbuf *rb)
+size_t ringbuf_avail(ringbuf_t* rb)
 {
-    return rb->consumed == 0;
+    return rb->consumed;
 }
 
-bool ringbuf_put(struct ringbuf *rb, const void *data, size_t len)
+size_t ringbuf_skip(ringbuf_t* rb, size_t len)
 {
-	if (ringbuf_get_free_spc(rb) < len) {
-		rvvm_warn("Overflow in ringbuf %p! size=%u, consumed=%u, len=%u", rb, (uint32_t)rb->size, (uint32_t)rb->consumed, (uint32_t)len);
-		return false;
-	}
-
-	size_t first_chunk_len = rb->size - rb->start;
-	if (first_chunk_len > len) {
-		memcpy((uint8_t*)rb->data + rb->start, data, len);
-		rb->start += len;
-		rb->consumed += len;
-		return true;
-	}
-
-	memcpy((uint8_t*)rb->data + rb->start, data, first_chunk_len);
-
-	size_t second_chunk_len = len - first_chunk_len;
-	memcpy(rb->data, ((const uint8_t*)data) + first_chunk_len, second_chunk_len);
-
-	rb->start = second_chunk_len;
-	rb->consumed += len;
-	return true;
+    size_t skip = EVAL_MIN(len, rb->consumed);
+    rb->consumed -= skip;
+    return skip;
 }
 
-static inline size_t ringbuf_get_read_start(struct ringbuf *rb)
+static inline size_t ringbuf_get_read_start(ringbuf_t* rb)
 {
-	return rb->consumed > rb->start
-		? rb->size - rb->consumed + rb->start
-		: rb->start - rb->consumed;
+    return rb->consumed > rb->start
+        ? (rb->size - rb->consumed + rb->start)
+        : (rb->start - rb->consumed);
 }
 
-bool ringbuf_get(struct ringbuf *rb, void *data, size_t len)
+size_t ringbuf_peek(ringbuf_t* rb, void* data, size_t len)
 {
-	if (rb->consumed < len) {
-		return false;
-	}
-
-	size_t first_chunk_len = rb->size - ringbuf_get_read_start(rb);
-	if (first_chunk_len > len) {
-		memcpy(data, (uint8_t*)rb->data + rb->size - first_chunk_len, len);
-		rb->consumed -= len;
-		return true;
-	}
-
-	memcpy(data, (uint8_t*)rb->data + rb->size - first_chunk_len, first_chunk_len);
-
-	size_t second_chunk_len = len - first_chunk_len;
-	memcpy(((uint8_t*)data) + first_chunk_len, rb->data, second_chunk_len);
-
-	rb->consumed -= len;
-	return true;
-}
-
-bool ringbuf_skip(struct ringbuf *rb, size_t len)
-{
-    if (rb->consumed < len) {
-        return false;
+    size_t start = ringbuf_get_read_start(rb);
+    size_t ret = EVAL_MIN(rb->consumed, len);
+    size_t lhalf_len = EVAL_MIN(rb->size - start, ret);
+    memcpy(data, ((uint8_t*)rb->data) + start, lhalf_len);
+    if (ret > lhalf_len) {
+        size_t rhalf_len = ret - lhalf_len;
+        memcpy(((uint8_t*)data) + lhalf_len, rb->data, rhalf_len);
     }
+    return ret;
+}
 
-    rb->consumed -= len;
-    return true;
+size_t ringbuf_read(ringbuf_t* rb, void* data, size_t len)
+{
+    size_t ret = ringbuf_peek(rb, data, len);
+    ringbuf_skip(rb, ret);
+    return ret;
+}
+
+size_t ringbuf_write(ringbuf_t* rb, const void* data, size_t len)
+{
+    size_t ret = EVAL_MIN(rb->size - rb->consumed, len);
+    size_t lhalf_len = EVAL_MIN(rb->size - rb->start, ret);
+    memcpy(((uint8_t*)rb->data) + rb->start, data, lhalf_len);
+    if (ret > lhalf_len) {
+        size_t rhalf_len = ret - lhalf_len;
+        memcpy(rb->data, ((const uint8_t*)data) + lhalf_len, rhalf_len);
+        rb->start = rhalf_len;
+    } else {
+        rb->start += ret;
+    }
+    rb->consumed += ret;
+    return ret;
+}
+
+bool ringbuf_get(ringbuf_t* rb, void* data, size_t len)
+{
+    if (len <= ringbuf_avail(rb)) {
+        ringbuf_read(rb, data, len);
+        return true;
+    }
+    return false;
+}
+
+bool ringbuf_put(ringbuf_t* rb, const void* data, size_t len)
+{
+    if (len <= ringbuf_space(rb)) {
+        ringbuf_write(rb, data, len);
+        return true;
+    }
+    rvvm_warn("Overflow in ring %p! (size: %u, consumed: %u, len: %u)",
+              (void*)rb, (uint32_t)rb->size, (uint32_t)rb->consumed, (uint32_t)len);
+    return false;
 }
