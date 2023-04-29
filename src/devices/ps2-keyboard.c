@@ -60,7 +60,7 @@ struct hid_keyboard {
     // Used in IRQ handling for typematic (repeated) input
     rvtimer_t sample_timer;
     
-    struct ringbuf cmdbuf;
+    ringbuf_t cmdbuf;
 };
 
 static const uint8_t hid_to_ps2_byte_map[] = {
@@ -258,7 +258,7 @@ static uint16_t ps2_keyboard_op(struct ps2_device *ps2dev, uint8_t *val, bool is
         altps2_interrupt_unlocked(ps2dev);
         return true;
     } else {
-        size_t avail = kb->cmdbuf.consumed;
+        size_t avail = ringbuf_avail(&kb->cmdbuf);
         if (avail) {
             ringbuf_get_u8(&kb->cmdbuf, val);
         } else {

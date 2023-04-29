@@ -77,7 +77,7 @@ struct hid_mouse {
     uint8_t whl_detect; // Stage of detecting an Intellimouse extension
     bool reporting;     // Data reporting enabled; needed for STATUS command
 
-    struct ringbuf cmdbuf;
+    ringbuf_t cmdbuf;
 };
 
 static void ps2_mouse_defaults(hid_mouse_t* mice)
@@ -247,7 +247,7 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
         altps2_interrupt_unlocked(ps2dev);
         return true;
     } else {
-        size_t avail = mice->cmdbuf.consumed;
+        size_t avail = ringbuf_avail(&mice->cmdbuf);
         if (avail) {
             ringbuf_get_u8(&mice->cmdbuf, val);
         } else {
