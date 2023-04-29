@@ -94,7 +94,9 @@ static uint32_t term_update_flags(chardev_term_t* term)
 static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, size_t* tx_size)
 {
     size_t to_read = rx_size ? *rx_size : 0;
+    size_t to_write = tx_size ? *tx_size : 0;
     if (rx_size) *rx_size = 0;
+    if (tx_size) *tx_size = 0;
     UNUSED(term);
 #if defined(POSIX_TERM_IMPL)
     fd_set rfds, wfds;
@@ -105,8 +107,8 @@ static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, si
     FD_SET(term->rfd, &rfds);
     FD_SET(term->wfd, &wfds);
     if (select(nfds, &rfds, &wfds, NULL, &timeout) > 0) {
-        if (FD_ISSET(term->wfd, &wfds) && *tx_size) {
-            int tmp = write(term->wfd, buffer, *tx_size);
+        if (FD_ISSET(term->wfd, &wfds) && to_write) {
+            int tmp = write(term->wfd, buffer, to_write);
             *tx_size = tmp > 0 ? tmp : 0;
         }
         if (FD_ISSET(term->rfd, &rfds) && to_read) {
@@ -115,9 +117,9 @@ static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, si
         }
     }
 #elif defined(WIN32_TERM_IMPL)
-    if (*tx_size) {
+    if (to_write) {
         DWORD count = 0;
-        WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buffer, *tx_size, &count, NULL);
+        WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buffer, to_write, &count, NULL);
         *tx_size = count;
     }
     if (to_read && _kbhit()) {
@@ -130,7 +132,10 @@ static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, si
     }
 #else
     UNUSED(to_read);
-    if (*tx_size) printf("%s", buffer);
+    if (to_write) {
+        printf("%s", buffer);
+        *tx_size = to_write;
+    }
 #endif
 }
 
