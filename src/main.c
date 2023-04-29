@@ -213,7 +213,7 @@ static int rvvm_main(int argc, const char** argv)
     pci_bus_init_auto(machine);
     i2c_oc_init_auto(machine);
 
-    ns16550a_init_term_auto(machine);
+    if (!rvvm_has_arg("serial")) ns16550a_init_term_auto(machine);
     rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
 
@@ -244,6 +244,9 @@ static int rvvm_main(int argc, const char** argv)
             rvvm_append_cmdline(machine, arg_val);
         } else if (cmp_arg(arg_name, "dumpdtb")) {
             rvvm_dump_dtb(machine, arg_val);
+        } else if (cmp_arg(arg_name, "serial")) {
+            chardev_t* chardev = chardev_pty_create(arg_val);
+            if (chardev) ns16550a_init_auto(machine, chardev);
         }
     }
     if (success) {
