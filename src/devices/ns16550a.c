@@ -204,8 +204,10 @@ PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
     uart->plic = plic;
     uart->irq = irq;
 
-    chardev->io_dev = uart;
-    chardev->notify = ns16550a_notify;
+    if (chardev) {
+        chardev->io_dev = uart;
+        chardev->notify = ns16550a_notify;
+    }
 
     rvvm_mmio_dev_t ns16550a = {
         .addr = base_addr,
