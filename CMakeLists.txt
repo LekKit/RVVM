@@ -20,6 +20,9 @@ option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
 option(RVVM_USE_PCI "Use ATA over PCI, PIO mode is used otherwise" ON)
 option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking" OFF)
+option(BUILD_LIBRETRO "Build a libretro core" OFF)
+option(LIBRETRO_STATIC "Statically link the libretro core" OFF)
+
 
 if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
@@ -180,7 +183,7 @@ list(REMOVE_ITEM RVVM_DEVICES_SRC
 	${RVVM_TAP_LINUX_SRC}
 	${RVVM_TAP_USER_SRC})
 
-if (RVVM_USE_FB)
+if (RVVM_USE_FB AND (NOT BUILD_LIBRETRO))
 	if (RVVM_USE_SDL OR APPLE)
 		find_library(RVVM_SDL_LIB SDL REQUIRED)
 		list(APPEND RVVM_DEVICES_SRC ${RVVM_SDL_SRC})
@@ -263,11 +266,32 @@ if (RVVM_USE_JIT)
 	target_link_libraries(rvvm PRIVATE rvjit)
 endif()
 
-# Main executable
-add_executable(rvvm_bin ${RVVM_MAIN_SRC})
-target_link_libraries(rvvm_bin PUBLIC rvvm)
-target_link_libraries(rvvm_bin PRIVATE rvvm_common)
-set_target_properties(rvvm_bin PROPERTIES OUTPUT_NAME rvvm)
+if (NOT BUILD_LIBRETRO)
+	# Main executable
+	add_executable(rvvm_bin ${RVVM_MAIN_SRC})
+	target_link_libraries(rvvm_bin PUBLIC rvvm)
+	target_link_libraries(rvvm_bin PRIVATE rvvm_common)
+	set_target_properties(rvvm_bin PROPERTIES OUTPUT_NAME rvvm)
+else()
+	# libretro core
+	set(RVVM_LIBRETRO_SRC "${RVVM_SRC_DIR}/libretro/libretro.c")
+	if (LIBRETRO_STATIC)
+		add_library(rvvm_libretro STATIC ${RVVM_LIBRETRO_SRC})
+	else()
+		add_library(rvvm_libretro SHARED ${RVVM_LIBRETRO_SRC})
+	endif()
+	target_link_libraries(rvvm_libretro PRIVATE rvvm rvvm_common)
+
+	# Follow naming conventions for libretro cores
+	set_target_properties(rvvm_libretro PROPERTIES PREFIX "")
+	if (ANDROID)
+		set_target_properties(rvvm_libretro PROPERTIES SUFFIX "_android.so")
+	elseif (EMSCRIPTEN)
+		set_target_properties(rvvm_libretro PROPERTIES SUFFIX "${LIBRETRO_SUFFIX}.bc")
+	elseif (LIBRETRO_STATIC)
+		set_target_properties(rvvm_libretro PROPERTIES SUFFIX "${LIBRETRO_SUFFIX}.a")
+	endif ()
+endif()
 
 # Restore IPO setting
 if (RVVM_LTO)
