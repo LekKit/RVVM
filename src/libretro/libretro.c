@@ -71,7 +71,7 @@ static struct {
     .bootrom = {0},
     .kernel = {0},
     .nvme = {{0}},
-    .cmdline = "root=/dev/nvme0n1 rootflags=discard rw",
+    .cmdline = "root=/dev/nvme0n1 rootflags=discard rw console=tty0",
     .fb_width = 640,
     .fb_height = 480,
 };
