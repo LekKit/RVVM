@@ -53,14 +53,14 @@ static thread_ctx_t *vm_thread;
 static fb_ctx_t vm_fb;
 static hid_keyboard_t *vm_keyboard;
 static hid_mouse_t *vm_mouse;
+#define NVME_MAX 4
 static struct {
     size_t smp;
     size_t mem;
     bool rv64;
     char bootrom[PATH_MAX];
     char kernel[PATH_MAX];
-    char nvme1[PATH_MAX];
-    char nvme2[PATH_MAX];
+    char nvme[NVME_MAX][PATH_MAX];
     char cmdline[1024];
     uint32_t fb_width;
     uint32_t fb_height;
@@ -70,8 +70,7 @@ static struct {
     .rv64 = true,
     .bootrom = {0},
     .kernel = {0},
-    .nvme1 = {0},
-    .nvme2 = {0},
+    .nvme = {{0}},
     .cmdline = "root=/dev/nvme0n1 rootflags=discard rw",
     .fb_width = 640,
     .fb_height = 480,
@@ -303,10 +302,12 @@ static void *vm_run(void *arg)
         log_cb(RETRO_LOG_ERROR, "Faild to load kernel: %s\n", machine_opts.kernel);
     }
     rvvm_set_cmdline(machine, machine_opts.cmdline);
-    if (strlen(machine_opts.nvme1)) {
-        nvme_init_auto(machine, machine_opts.nvme1, true);
-        if (strlen(machine_opts.nvme2)) {
-            nvme_init_auto(machine, machine_opts.nvme2, true);
+    for (int i = 0; i < NVME_MAX; ++i) {
+        if (strlen(machine_opts.nvme[i])) {
+            log_cb(RETRO_LOG_INFO, "Mount nvme%d: %s\n", i, machine_opts.nvme[i]);
+            nvme_init_auto(machine, machine_opts.nvme[i], true);
+        } else {
+            break;
         }
     }
     int *wait = arg;
@@ -330,6 +331,7 @@ bool retro_load_game(const struct retro_game_info *game)
         return false;
     }
 
+    int nvme_idx = 0;
     char *line = NULL;
     size_t linesize = 0;
     ssize_t linelen;
@@ -342,7 +344,9 @@ bool retro_load_game(const struct retro_game_info *game)
             machine_opts.rv64 = false;
             continue;
         }
-
+        if (strcmp(line, "\n") == 0) {
+            continue;
+        }
         char *k = strtok(line, "=");
         if (k == NULL) {
             log_cb(RETRO_LOG_ERROR, "Invalid option: %s\n", line);
@@ -373,16 +377,15 @@ bool retro_load_game(const struct retro_game_info *game)
             memcpy(machine_opts.kernel, v, strnlen(v, len-1));
             continue;
         }
-        if (strcmp(k, "nvme1") == 0) {
-            size_t len = sizeof(machine_opts.nvme1);
-            memset(machine_opts.nvme1, 0, len);
-            memcpy(machine_opts.nvme1, v, strnlen(v, len-1));
-            continue;
-        }
-        if (strcmp(k, "nvme2") == 0) {
-            size_t len = sizeof(machine_opts.nvme2);
-            memset(machine_opts.nvme2, 0, len);
-            memcpy(machine_opts.nvme2, v, strnlen(v, len-1));
+        if (strcmp(k, "nvme") == 0) {
+            size_t len = sizeof(machine_opts.nvme[0]);
+            if (nvme_idx == NVME_MAX) {
+                log_cb(RETRO_LOG_ERROR, "Failed to mount %s as nvme, only %d devices are allowed\n", v, NVME_MAX);
+                continue;
+            }
+            char *nvme = machine_opts.nvme[nvme_idx++];
+            memset(nvme, 0, len);
+            memcpy(nvme, v, strnlen(v, len-1));
             continue;
         }
         if (strcmp(k, "cmdline") == 0) {
