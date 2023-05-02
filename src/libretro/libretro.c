@@ -40,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/hid_api.h"
 #include "devices/ns16550a.h"
 #include "devices/chardev.h"
+#include "devices/rtl8169.h"
 
 
 static void fallback_log(enum retro_log_level level, const char *fmt, ...);
@@ -292,6 +293,9 @@ static void *vm_run(void *arg)
     syscon_init_auto(machine);
     framebuffer_init_auto(machine, &vm_fb);
     ns16550a_init_auto(machine, NULL);
+#ifdef USE_NET
+    rtl8169_init_auto(machine);
+#endif
     vm_keyboard = hid_keyboard_init_auto(machine);
     vm_mouse = hid_mouse_init_auto(machine);
     hid_mouse_resolution(vm_mouse, vm_fb.width, vm_fb.height);

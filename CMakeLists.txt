@@ -281,6 +281,9 @@ else()
 		add_library(rvvm_libretro SHARED ${RVVM_LIBRETRO_SRC})
 	endif()
 	target_link_libraries(rvvm_libretro PRIVATE rvvm rvvm_common)
+	if (RVVM_USE_NET)
+		target_compile_definitions(rvvm_libretro PRIVATE USE_NET)
+	endif()
 
 	# Follow naming conventions for libretro cores
 	set_target_properties(rvvm_libretro PROPERTIES PREFIX "")
