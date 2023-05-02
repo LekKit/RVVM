@@ -86,6 +86,15 @@ static void fallback_log(enum retro_log_level level, const char *fmt, ...)
   va_end(va);
 }
 
+static void error_msg(const char *msg)
+{
+    struct retro_message x = {
+        .msg = msg,
+        .frames = 180,
+    };
+    environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &x);
+}
+
 unsigned retro_api_version(void)
 {
     return RETRO_API_VERSION;
@@ -299,17 +308,23 @@ static void *vm_run(void *arg)
     vm_keyboard = hid_keyboard_init_auto(machine);
     vm_mouse = hid_mouse_init_auto(machine);
     hid_mouse_resolution(vm_mouse, vm_fb.width, vm_fb.height);
-    if (strlen(machine_opts.bootrom) && !rvvm_load_bootrom(machine, machine_opts.bootrom)) {
-        log_cb(RETRO_LOG_ERROR, "Faild to load bootrom: %s\n", machine_opts.bootrom);
+    if (strlen(machine_opts.bootrom)) {
+        if (!rvvm_load_bootrom(machine, machine_opts.bootrom)) {
+            error_msg("RVVM: failed to load bootrom");
+        }
+    } else {
+        error_msg("RVVM: No bootrom");
     }
     if (strlen(machine_opts.kernel) && !rvvm_load_kernel(machine, machine_opts.kernel)) {
-        log_cb(RETRO_LOG_ERROR, "Faild to load kernel: %s\n", machine_opts.kernel);
+        error_msg("RVVM: failed to load kernel");
     }
     rvvm_set_cmdline(machine, machine_opts.cmdline);
     for (int i = 0; i < NVME_MAX; ++i) {
         if (strlen(machine_opts.nvme[i])) {
             log_cb(RETRO_LOG_INFO, "Mount nvme%d: %s\n", i, machine_opts.nvme[i]);
-            nvme_init_auto(machine, machine_opts.nvme[i], true);
+            if (!nvme_init_auto(machine, machine_opts.nvme[i], true)) {
+                error_msg("RVVM: failed to mount nvme");
+            }
         } else {
             break;
         }
