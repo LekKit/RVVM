@@ -57,6 +57,11 @@ extern "C" {
 #define RVVM_OPT_DTB_ADDR       8 // Pass DTB address if non-zero, omits FDT generation
 #define RVVM_MAX_OPTS           9
 
+// Readonly/special options
+#define RVVM_OPT_MEM_BASE       0x80000001U // Physical RAM base address
+#define RVVM_OPT_MEM_SIZE       0x80000002U // Physical RAM size
+#define RVVM_OPT_HART_COUNT     0x80000003U // Amount of harts
+
 typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;

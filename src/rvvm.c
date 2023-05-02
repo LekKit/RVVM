@@ -471,8 +471,15 @@ PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str)
 
 PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt)
 {
-    if (opt >= RVVM_MAX_OPTS) return 0;
-    return atomic_load_uint64_ex(&machine->opts[opt], ATOMIC_RELAXED);
+    if (opt < RVVM_MAX_OPTS) {
+        return atomic_load_uint64_ex(&machine->opts[opt], ATOMIC_RELAXED);
+    }
+    switch (opt) {
+        case RVVM_OPT_MEM_BASE: return machine->mem.begin;
+        case RVVM_OPT_MEM_SIZE: return machine->mem.size;
+        case RVVM_OPT_HART_COUNT: return vector_size(machine->harts);
+    }
+    return 0;
 }
 
 PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val)
