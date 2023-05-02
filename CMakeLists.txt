@@ -274,7 +274,7 @@ if (NOT BUILD_LIBRETRO)
 	set_target_properties(rvvm_bin PROPERTIES OUTPUT_NAME rvvm)
 else()
 	# libretro core
-	set(RVVM_LIBRETRO_SRC "${RVVM_SRC_DIR}/libretro/libretro.c")
+	set(RVVM_LIBRETRO_SRC "${RVVM_SRC_DIR}/bindings/libretro/libretro.c")
 	if (LIBRETRO_STATIC)
 		add_library(rvvm_libretro STATIC ${RVVM_LIBRETRO_SRC})
 	else()
