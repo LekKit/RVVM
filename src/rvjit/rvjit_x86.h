@@ -145,7 +145,7 @@ static inline size_t rvjit_native_abireclaim_hregmask()
 
 static inline bool x86_is_byte_imm(int32_t imm)
 {
-    return imm > -129 && imm < 128;
+    return imm == (int32_t)(int8_t)imm;
 }
 
 static inline void rvjit_native_push(rvjit_block_t* block, regid_t reg)
@@ -290,7 +290,7 @@ static bool x86_byte_reg_usable(regid_t reg)
 // Emit memory-addressing part of the instruction
 static inline void rvjit_x86_memory_ref(rvjit_block_t* block, regid_t dest, regid_t addr, int32_t off)
 {
-    uint8_t code[6];
+    uint8_t code[6] = {0};
     uint8_t inst_size = 1;
     code[0] = (addr & 0x7) | ((dest & 0x7) << 3);
     if (addr == X64_R12) {
