@@ -93,17 +93,35 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define TCP_FLAG_PSH    0x8
 #define TCP_FLAG_ACK    0x10
 
+typedef struct tcp_segment tcp_segment_t;
+struct tcp_segment {
+    tcp_segment_t* next;
+    size_t size;
+    uint8_t buffer[TAP_FRAME_SIZE];
+};
+
 typedef struct {
+    tcp_segment_t* head;
+    tcp_segment_t* tail;
     uint32_t seq;
     uint32_t ack;
-    uint32_t seq_acked;
+    uint32_t seq_ack;
     uint16_t window;
+    uint16_t state;
 } tcp_ctx_t;
+
+#define TCP_WRAP_SIZE (ETH2_HDR_SIZE + IPv4_HDR_SIZE + TCP_HDR_SIZE)
+#define TCP_STATE_SYN  0x1 // Unacked SYN (TAP -> Guest connection)
+#define TCP_STATE_SACK 0x2 // SYN+ACK (Guest -> TAP connection)
+#define TCP_STATE_RST  0x4 // Connection was reset
+#define TCP_STATE_FULL 0x8 // Window is full
+#define BOUND_INF 0xFFFF // No UDP timeout
 
 typedef struct {
     net_sock_t* sock;
-    net_addr_t  addr; // Guest-side address
     tcp_ctx_t*  tcp;  // If NULL, this is a UDP socket
+    net_addr_t  addr; // Guest-side address
+    uint32_t    timeout;
 } tap_sock_t;
 
 struct tap_dev {
@@ -373,13 +391,15 @@ static void handle_udp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
             ts->sock = sock;
             ts->addr = *src;
             hashmap_put(&tap->udp_ports, src->port, (size_t)ts);
-            net_event_t event = {
-                .data = ts,
-                .flags = NET_POLL_RECV,
-            };
+            net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
             net_poll_add(tap->poll, ts->sock, &event);
+        } else {
+            // Couldn't bind UDP port
+            spin_unlock(&tap->lock);
+            return;
         }
     }
+    if (ts->timeout != BOUND_INF) ts->timeout = 0;
     spin_unlock(&tap->lock);
     net_udp_send(ts->sock, udb_buff, udp_size, dst);
 }
@@ -393,7 +413,7 @@ static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
     size_t opt_size = (flags & TCP_FLAG_SYN) ? 4 : 0;
     uint8_t* tcp = create_ipv4_frame(ipv4, TCP_HDR_SIZE + opt_size, IP_PROTO_TCP, dst->ip, src->ip);
     uint8_t* opt = create_tcp_segment(tcp, flags, ts->tcp->seq, ts->tcp->ack, dst->port, src->port);
-    if (opt_size) {
+    if (flags & TCP_FLAG_SYN) {
         // Change MSS to 1460
         tcp[12] = 0x60;
         opt[0] = 2;
@@ -402,7 +422,17 @@ static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
     }
     tcp_ipv4_checksum(ipv4, opt_size);
     eth_send(tap, frame, ETH2_HDR_SIZE + IPv4_HDR_SIZE + TCP_HDR_SIZE + opt_size);
-    if (flags & (TCP_FLAG_SYN | TCP_FLAG_FIN)) ts->tcp->seq++;
+}
+
+static inline bool tcp_window_avail(tcp_ctx_t* tcp)
+{
+    return tcp->seq - tcp->seq_ack < tcp->window;
+}
+
+static inline size_t tcp_ack_amount(tcp_ctx_t* tcp, uint32_t ack)
+{
+    size_t ret = ack - tcp->seq_ack;
+    return (ret < 0x80000000) ? ret : 0; // Care for wraparound
 }
 
 static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_addr_t* dst, net_addr_t* src)
@@ -418,22 +448,44 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
     spin_lock(&tap->lock);
     tap_sock_t* ts = (tap_sock_t*)hashmap_get(&tap->tcp_socks, src->port);
     if (ts) {
-        ts->tcp->window = window;
-        if (flags & TCP_FLAG_ACK) ts->tcp->seq_acked = ack;
-        if (flags & (TCP_FLAG_RST | TCP_FLAG_FIN)) {
-            // Send FIN
-            net_tcp_shutdown(ts->sock);
-        } else if (data_off >= TCP_HDR_SIZE && data_off < size) {
-            size_t send_len = size - data_off;
-            if (send_len) {
-                if (seq == ts->tcp->ack) {
-                    // Acknowledge the bytes actually sent
-                    ts->tcp->ack += net_tcp_send(ts->sock, buffer + data_off, send_len);
+        tcp_ctx_t* tcp = ts->tcp;
+        tcp->window = window; // Scale the window
+        if (flags & TCP_FLAG_ACK) {
+            while (tcp->head && tcp_ack_amount(tcp, ack) >= tcp->head->size) {
+                // Free ACKed segments
+                tcp_segment_t* seg = tcp->head;
+                tcp->seq_ack += seg->size;
+                tcp->head = seg->next;
+                free(seg);
+                ts->timeout = 0;
+            }
+            if (((tcp->state & TCP_STATE_FULL) && tcp_window_avail(tcp))
+             || ((tcp->state & TCP_STATE_SACK) && ack == tcp->seq + 1)) {
+                // Rearm the socket to the eventloop
+                net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
+                if (net_poll_add(tap->poll, ts->sock, &event)) {
+                    if (tcp->state & TCP_STATE_SACK) tcp->seq++;
+                    tcp->state &= ~(TCP_STATE_FULL | TCP_STATE_SACK);
                 }
             }
         }
-        tap_tcp_segment(tap, ts, TCP_FLAG_ACK);
+        if (flags & (TCP_FLAG_RST | TCP_FLAG_FIN)) {
+            // Send FIN, mark the connection on reset
+            net_tcp_shutdown(ts->sock);
+            if (flags & TCP_FLAG_RST) tcp->state |= TCP_STATE_RST;
+        } else if (data_off >= TCP_HDR_SIZE && data_off < size) {
+            // Send data segment
+            size_t send_len = size - data_off;
+            if (send_len > (tcp->ack - seq)) {
+                size_t seq_off = tcp->ack - seq;
+                ts->tcp->ack += net_tcp_send(ts->sock, buffer + data_off + seq_off, send_len - seq_off);
+            }
+            // Acknowledge the bytes actually sent
+            // TODO: Reduce amount of response ACKs
+            tap_tcp_segment(tap, ts, TCP_FLAG_ACK);
+        }
     } else if (flags == TCP_FLAG_SYN) {
+        // Initiate new connection
         net_sock_t* sock = net_tcp_connect(dst, NULL, false);
         if (sock) {
             ts = safe_new_obj(tap_sock_t);
@@ -443,12 +495,10 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
             ts->tcp->ack = seq + 1;
             ts->tcp->window = window;
             rvvm_randombytes(&ts->tcp->seq, sizeof(ts->tcp->seq));
-            
+            ts->tcp->seq_ack = ts->tcp->seq;
+
             hashmap_put(&tap->tcp_socks, src->port, (size_t)ts);
-            net_event_t event = {
-                .data = ts,
-                .flags = NET_POLL_SEND,
-            };
+            net_event_t event = { .data = ts, .flags = NET_POLL_SEND, };
             net_poll_add(tap->poll, ts->sock, &event);
         }
     }
@@ -570,17 +620,13 @@ bool tap_set_mac(tap_dev_t* tap, const uint8_t mac[6])
 
 static void bind_udp_port(tap_dev_t* tap, uint16_t external, uint16_t internal)
 {
-    net_addr_t addr = {
-        .port = external,
-    };
+    net_addr_t addr = { .port = external, };
     tap_sock_t* ts = safe_new_obj(tap_sock_t);
-    net_event_t event = {
-        .data = ts,
-        .flags = NET_POLL_RECV,
-    };
+    net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
+    ts->timeout = BOUND_INF;
     ts->sock = net_udp_bind(&addr);
     if (ts->sock == NULL) {
-        rvvm_warn("Failed to create UDP socket!");
+        rvvm_warn("Failed to bind UDP port!");
         free(ts);
         return;
     }
@@ -596,7 +642,8 @@ static void tap_udp_recv(tap_dev_t* tap, tap_sock_t* ts)
     net_addr_t addr;
     size_t offset = ETH2_HDR_SIZE + IPv4_HDR_SIZE + UDP_HDR_SIZE;
     size_t size = sizeof(buffer) - offset;
-    
+
+    if (ts->timeout != BOUND_INF) ts->timeout = 0;
     size = net_udp_recv(ts->sock, buffer + offset, size, &addr);
     if (size) {
         uint8_t* ipv4 = create_eth_frame(tap, buffer, ETH2_IPv4);
@@ -607,40 +654,101 @@ static void tap_udp_recv(tap_dev_t* tap, tap_sock_t* ts)
     }
 }
 
+static void tap_tcp_close(tap_sock_t* ts)
+{
+    net_sock_close(ts->sock);
+    while (ts->tcp && ts->tcp->head) {
+        tcp_segment_t* seg = ts->tcp->head;
+        ts->tcp->head = seg->next;
+        free(seg);
+    }
+    free(ts->tcp);
+    free(ts);
+}
+
 static void tap_tcp_recv(tap_dev_t* tap, tap_sock_t* ts)
 {
-    uint8_t buffer[TAP_FRAME_SIZE];
-    size_t offset = ETH2_HDR_SIZE + IPv4_HDR_SIZE + TCP_HDR_SIZE;
-    size_t size = sizeof(buffer) - offset;
-    
-    size = net_tcp_recv(ts->sock, buffer + offset, size);
-    if (size) {
-        uint8_t* ipv4 = create_eth_frame(tap, buffer, ETH2_IPv4);
-        uint8_t* tcp  = create_ipv4_frame(ipv4, size + TCP_HDR_SIZE, IP_PROTO_TCP, ts->addr.ip, net_sock_addr(ts->sock)->ip);
-        create_tcp_segment(tcp, TCP_FLAG_PSH | TCP_FLAG_ACK, ts->tcp->seq, ts->tcp->ack, ts->addr.port, net_sock_addr(ts->sock)->port);
-        tcp_ipv4_checksum(ipv4, size);
-        eth_send(tap, buffer, size + TCP_HDR_SIZE + IPv4_HDR_SIZE + ETH2_HDR_SIZE);
+    if (!tcp_window_avail(ts->tcp)) {
+        // The window is full, back off and wait for ACK
+        net_poll_remove(tap->poll, ts->sock);
+        ts->tcp->state |= TCP_STATE_FULL;
+        return;
+    }
 
-        ts->tcp->seq += size;
+    tcp_segment_t* seg = safe_new_obj(tcp_segment_t);
+    size_t size = sizeof(seg->buffer) - TCP_WRAP_SIZE;
+    seg->size = net_tcp_recv(ts->sock, seg->buffer + TCP_WRAP_SIZE, size);
+    if (seg->size) {
+        // Push a segment and buffer it for retransmit
+        uint8_t* ipv4 = create_eth_frame(tap, seg->buffer, ETH2_IPv4);
+        uint8_t* tcp  = create_ipv4_frame(ipv4, seg->size + TCP_HDR_SIZE, IP_PROTO_TCP, ts->addr.ip, net_sock_addr(ts->sock)->ip);
+        create_tcp_segment(tcp, TCP_FLAG_PSH | TCP_FLAG_ACK, ts->tcp->seq, ts->tcp->ack, ts->addr.port, net_sock_addr(ts->sock)->port);
+        tcp_ipv4_checksum(ipv4, seg->size);
+
+        ts->tcp->seq += seg->size;
+
+        if (!ts->tcp->head) {
+            ts->tcp->head = seg;
+            ts->tcp->tail = seg;
+        } else {
+            ts->tcp->tail->next = seg;
+            ts->tcp->tail = seg;
+        }
+        eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
     } else {
+        // Connection closed
         tap_tcp_segment(tap, ts, TCP_FLAG_RST);
 
-        net_poll_remove(tap->poll, ts->sock);
         hashmap_remove(&tap->tcp_socks, ts->addr.port);
-        net_sock_close(ts->sock);
-        free(ts->tcp);
-        free(ts);
+        tap_tcp_close(ts);
+        free(seg);
+    }
+}
+
+static void tap_net_periodic(tap_dev_t* tap)
+{
+    hashmap_foreach(&tap->tcp_socks, port, ts_val) {
+        tap_sock_t* ts = (tap_sock_t*)ts_val;
+        tcp_ctx_t* tcp = ts->tcp;
+        if (tcp->state & TCP_STATE_RST) {
+            hashmap_remove(&tap->tcp_socks, port);
+            tap_tcp_close(ts);
+            break;
+        } else if (tcp->state & TCP_STATE_SACK) {
+            // Retry SYN+ACK
+            tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
+        } else if (ts->timeout++) {
+            // Upon ACK timeout, retransmit the whole window
+            tcp_segment_t* seg = tcp->head;
+            uint32_t seq = tcp->seq_ack;
+            while (seg && seq - tcp->seq_ack < tcp->window) {
+                eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
+                seq += seg->size;
+                seg = seg->next;
+            }
+        }
+    }
+    hashmap_foreach(&tap->udp_ports, port, ts_val) {
+        tap_sock_t* ts = (tap_sock_t*)ts_val;
+        if (ts->timeout != BOUND_INF && ts->timeout++ >= 300) {
+            // UDP timeouts after 60 seconds
+            hashmap_remove(&tap->udp_ports, port);
+            net_sock_close(ts->sock);
+            free(ts);
+            break;
+        }
     }
 }
 
 static void* tap_thread(void* arg)
 {
     tap_dev_t* tap = arg;
+    rvtimer_t timer;
 
     net_event_t events[64];
+    rvtimer_init(&timer, 1000);
     while (true) {
-        size_t size = net_poll_wait(tap->poll, events, 64, NET_POLL_INF);
-        bool tcp = false;
+        size_t size = net_poll_wait(tap->poll, events, 64, 200);
         spin_lock(&tap->lock);
         for (size_t i=0; i<size; ++i) {
             if (events[i].data == NULL) {
@@ -651,23 +759,16 @@ static void* tap_thread(void* arg)
             tap_sock_t* ts = events[i].data;
             if (ts->tcp) {
                 // TCP socket
-                tcp = true;
                 if (events[i].flags & NET_POLL_SEND) {
                     if (net_tcp_status(ts->sock)) {
                         // Connection succeeded
-                        net_event_t ev = {
-                            .flags = NET_POLL_RECV,
-                            .data = ts,
-                        };
-                        net_poll_mod(tap->poll, ts->sock, &ev);
+                        net_poll_remove(tap->poll, ts->sock);
+                        ts->tcp->state |= TCP_STATE_SACK;
                         tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
                     } else {
                         // Connection refused or timeout
-                        //tap_tcp_segment(tap, ts, TCP_FLAG_RST);
                         hashmap_remove(&tap->tcp_socks, ts->addr.port);
-                        net_sock_close(ts->sock);
-                        free(ts->tcp);
-                        free(ts);
+                        tap_tcp_close(ts);
                     }
                 } else {
                     tap_tcp_recv(tap, ts);
@@ -677,8 +778,12 @@ static void* tap_thread(void* arg)
                 tap_udp_recv(tap, ts);
             }
         }
+
+        if (rvtimer_get(&timer) >= 200) {
+            tap_net_periodic(tap);
+            rvtimer_init(&timer, 1000);
+        }
         spin_unlock(&tap->lock);
-        if (tcp) sleep_ms(1);
     }
     return NULL;
 }
@@ -719,9 +824,7 @@ void tap_close(tap_dev_t* tap)
     hashmap_foreach(&tap->tcp_socks, port, ts_val) {
         UNUSED(port);
         tap_sock_t* ts = (tap_sock_t*)ts_val;
-        net_sock_close(ts->sock);
-        free(ts->tcp);
-        free(ts);
+        tap_tcp_close(ts);
     }
     hashmap_foreach(&tap->udp_ports, port, ts_val) {
         UNUSED(port);
