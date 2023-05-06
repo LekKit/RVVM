@@ -119,6 +119,7 @@ override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
 BIN_EXT := .html
 LIB_EXT := .so
 USE_SDL ?= 1
+USE_NET ?= 0
 else
 
 ifeq ($(OS),windows)
@@ -286,7 +287,7 @@ USE_JIT ?= 1
 USE_FB ?= 1
 USE_SDL ?= 0
 USE_XSHM ?= 1
-USE_NET ?= 0
+USE_NET ?= 1
 USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
 USE_PCI ?= 1
