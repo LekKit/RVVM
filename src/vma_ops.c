@@ -16,6 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "vma_ops.h"
 #include "utils.h"
+#include <string.h>
 
 #ifdef _WIN32
 #define VMA_WIN32_IMPL
@@ -61,6 +62,9 @@ static inline DWORD vma_native_flags(uint32_t flags)
 #ifndef O_NOFOLLOW
 #define O_NOFOLLOW 0
 #endif
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 #define MAP_VMA_ANON (MAP_PRIVATE | MAP_ANON)
 
 #if defined(MAP_JIT) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 101400
@@ -94,7 +98,7 @@ static int vma_anon_memfd(size_t size)
     signal(SIGSYS, SIG_IGN);
     memfd = syscall(__NR_memfd_create, "vma_anon", 1);
 #elif defined(__FreeBSD__)
-    memfd = shm_open(SHM_ANON, O_RDWR, 0);
+    memfd = shm_open(SHM_ANON, O_RDWR | O_CLOEXEC, 0);
 #elif defined(__OpenBSD__)
     char shm_temp_file[] = "/tmp/tmpXXXXXXXXXX_vma_anon";
     memfd = shm_mkstemp(shm_temp_file);
@@ -111,10 +115,11 @@ static int vma_anon_memfd(size_t size)
 
 #if !defined(ANDROID) && !defined(__ANDROID__) && !defined(__serenity__)
     if (memfd < 0) {
+        char shm_file[] = "/shm-vma-anon-XXXXXXXX";
+        rvvm_randomserial(shm_file + 14, 8);
         rvvm_info("Falling back to VMA shmem");
-        char shm_file[] = "/shm-vma-anon";
-        memfd = shm_open(shm_file, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (shm_unlink(shm_file) < 0) {
+        memfd = shm_open(shm_file, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (memfd >= 0 && shm_unlink(shm_file) < 0) {
             close(memfd);
             memfd = -1;
         }
@@ -122,18 +127,32 @@ static int vma_anon_memfd(size_t size)
 #endif
 
     if (memfd < 0) {
-        rvvm_warn("Falling back to VMA file mapping");
-        const char* filename = "/var/tmp/vma_anon";
-        memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (memfd < 0) {
-            filename = "/tmp/vma_anon";
-            memfd = open(filename, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        char path[256] = {0};
+        const char* xdg = getenv("XDG_RUNTIME_DIR");
+        size_t xdg_len = xdg ? strlen(xdg) : 0;
+        rvvm_info("Falling back to VMA file mapping, may lower perf");
+        if (xdg_len && xdg_len + 19 < sizeof(path)) {
+            strcpy(path, xdg);
+            strcpy(path + xdg_len, "/vma-anon-XXXXXXXX");
+            rvvm_randomserial(path + xdg_len + 10, 8);
+            memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         }
-        if (memfd >= 0 && unlink(filename) < 0) {
+        if (memfd < 0) {
+            strcpy(path, "/var/tmp/vma-anon-XXXXXXXX");
+            rvvm_randomserial(path + 18, 8);
+            memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        }
+        if (memfd < 0) {
+            strcpy(path, "/tmp/vma-anon-XXXXXXXX");
+            rvvm_randomserial(path + 14, 8);
+            memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        }
+        if (memfd >= 0 && unlink(path) < 0) {
             close(memfd);
             memfd = -1;
         }
     }
+    // Resize anon FD
     if (memfd >= 0 && ftruncate(memfd, size) < 0) {
         close(memfd);
         memfd = -1;
