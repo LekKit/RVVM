@@ -450,6 +450,7 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
     if (ts) {
         tcp_ctx_t* tcp = ts->tcp;
         tcp->window = window; // Scale the window
+        bool keepalive = !!(flags & TCP_FLAG_ACK) && tcp->seq == tcp->seq_ack;
         if (flags & TCP_FLAG_ACK) {
             while (tcp->head && tcp_ack_amount(tcp, ack) >= tcp->head->size) {
                 // Free ACKed segments
@@ -464,8 +465,15 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
                 // Rearm the socket to the eventloop
                 net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
                 if (net_poll_add(tap->poll, ts->sock, &event)) {
-                    if (tcp->state & TCP_STATE_SACK) tcp->seq++;
+                    if (tcp->state & TCP_STATE_SACK) {
+                        // Increment seq by 1 after SYN+ACK
+                        tcp->seq++;
+                        tcp->seq_ack++;
+                    }
                     tcp->state &= ~(TCP_STATE_FULL | TCP_STATE_SACK);
+                } else {
+                    DO_ONCE(rvvm_warn("net_poll_add() failed!"));
+                    tcp->state |= TCP_STATE_RST;
                 }
             }
         }
@@ -482,6 +490,9 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
             }
             // Acknowledge the bytes actually sent
             // TODO: Reduce amount of response ACKs
+            tap_tcp_segment(tap, ts, TCP_FLAG_ACK);
+        } else if (keepalive) {
+            // Handle idle keepalive ACKs
             tap_tcp_segment(tap, ts, TCP_FLAG_ACK);
         }
     } else if (flags == TCP_FLAG_SYN) {
