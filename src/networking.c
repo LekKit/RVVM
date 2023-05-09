@@ -673,7 +673,7 @@ bool net_poll_add(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
     struct kevent ev[2];
     EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
-    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
 #elif defined(WSA_NET_IMPL)
     net_watch_t watch = {
         .poll = poll,
@@ -741,7 +741,7 @@ bool net_poll_mod(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
     struct kevent ev[2];
     EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
-    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
 #elif defined(WSA_NET_IMPL)
     vector_foreach(sock->watchers, i) {
         net_watch_t* watch = &vector_at(sock->watchers, i);
@@ -784,7 +784,7 @@ bool net_poll_remove(net_poll_t* poll, net_sock_t* sock)
     struct kevent ev[2];
     EV_SET(&ev[0], sock->fd, EVFILT_READ,  EV_DELETE, 0, 0, NULL);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
-    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1;
+    return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
 #elif defined(WSA_NET_IMPL)
     vector_foreach(sock->watchers, i) {
         net_watch_t* watch = &vector_at(sock->watchers, i);
@@ -849,7 +849,7 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
     int ret = kevent(poll->fd, NULL, 0, ev, size, wait);
     if (ret < 0) ret = 0;
     for (int i=0; i<ret; ++i) {
-        events[i].data = ev[i].udata;
+        events[i].data = (void*)ev[i].udata;
         events[i].flags = ((ev[i].filter == EVFILT_READ) ? NET_POLL_RECV : 0)
                         | ((ev[i].filter == EVFILT_WRITE) ? NET_POLL_SEND : 0);
     }
