@@ -839,19 +839,30 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
                         | ((ev[i].events & EPOLLOUT) ? NET_POLL_SEND : 0);
     }
 #elif defined(KQUEUE_NET_IMPL)
+    size_t ret = 0;
     struct kevent ev[NET_POLL_MAX_EVENTS];
     struct timespec ts = {
         .tv_sec = wait_ms / 1000,
         .tv_nsec = (wait_ms % 1000) * 1000000,
     };
-    struct timespec* wait = (wait_ms == NET_POLL_INF) ? NULL : &ts;
     if (size > NET_POLL_MAX_EVENTS) size = NET_POLL_MAX_EVENTS;
-    int ret = kevent(poll->fd, NULL, 0, ev, size, wait);
-    if (ret < 0) ret = 0;
-    for (int i=0; i<ret; ++i) {
-        events[i].data = (void*)ev[i].udata;
-        events[i].flags = ((ev[i].filter == EVFILT_READ) ? NET_POLL_RECV : 0)
-                        | ((ev[i].filter == EVFILT_WRITE) ? NET_POLL_SEND : 0);
+    int cnt = kevent(poll->fd, NULL, 0, ev, size, (wait_ms == NET_POLL_INF) ? NULL : &ts);
+    for (int i=0; i<cnt; ++i) if (ev[i].filter == EVFILT_READ) {
+        events[ret].data = (void*)ev[i].udata;
+        events[ret++].flags = NET_POLL_RECV;
+    }
+    // Coalesce NET_POLL_SEND flags onto associated event entry
+    for (int i=0; i<cnt; ++i) if (ev[i].filter == EVFILT_WRITE) {
+        bool coalesce = false;
+        for (size_t j=0; j<ret; ++j) if (events[j].data == (void*)ev[i].udata) {
+            events[j].flags |= NET_POLL_SEND;
+            coalesce = true;
+            break;
+        }
+        if (!coalesce) {
+            events[ret].data = (void*)ev[i].udata;
+            events[ret++].flags = NET_POLL_SEND;
+        }
     }
 #elif defined(WSA_NET_IMPL)
     size_t ret = 0;
