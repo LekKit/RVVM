@@ -45,7 +45,7 @@ $(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █�
 $(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
 $(info $(SPACE) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
 $(info $(SPACE) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
-$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ ▐░     ░ ▐░  ░ ▒░   ░  ░)
+$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ █░     ░ █░  ░ ▒░   ░  ░)
 $(info $(SPACE)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
 $(info $(SPACE)   ░░   ░      ░░       ░░  ░      ░   )
 $(info $(SPACE)    ░           ░        ░         ░   )
@@ -115,7 +115,7 @@ override OS := $(call tolower,$(OS))
 # Set up OS options
 ifeq ($(OS),emscripten)
 override CFLAGS += -pthread
-override LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s PROXY_TO_PTHREAD
+override LDFLAGS += -s TOTAL_MEMORY=512MB -s PROXY_TO_PTHREAD
 BIN_EXT := .html
 LIB_EXT := .so
 USE_SDL ?= 1
@@ -148,7 +148,7 @@ override LDFLAGS += -lrt
 endif
 
 ifeq ($(OS),darwin)
-USE_SDL ?= 1
+USE_SDL ?= 2
 endif
 ifeq ($(OS),serenityos)
 USE_SDL ?= 1
@@ -331,17 +331,29 @@ endif
 
 ifeq ($(USE_FB),1)
 # SDL Window
-ifeq ($(USE_SDL),1)
+ifeq ($(USE_SDL),2)
+ifeq ($(OS),emscripten)
+SDL_CFLAGS := -DUSE_SDL=2 -s USE_SDL=2
+else
+SDL_LDFLAGS := -lSDL2
+SDL_CFLAGS := -DUSE_SDL=2
+endif
+else
+SDL_LDFLAGS := -lSDL
+SDL_CFLAGS := -DUSE_SDL
+endif
+
+ifneq ($(USE_SDL),0)
 ifneq ($(OS),emscripten)
-ifeq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lSDL 2>&1)))
+ifeq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) $(SDL_LDFLAGS) 2>&1)))
 $(info [$(RED)WARN$(RESET)] SDL not found, ignoring USE_FB)
 override USE_SDL = 0
 endif
 endif
-ifeq ($(USE_SDL),1)
+ifneq ($(USE_SDL),0)
 SRC += $(SRCDIR)/devices/sdl_window.c
-override CFLAGS += -DUSE_FB -DUSE_SDL
-override LDFLAGS += -lSDL
+override CFLAGS += -DUSE_FB $(SDL_CFLAGS)
+override LDFLAGS += $(SDL_LDFLAGS)
 endif
 else
 
