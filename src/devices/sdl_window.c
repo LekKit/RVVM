@@ -290,11 +290,13 @@ bool fb_window_create(fb_window_t* win)
         return false;
     }
 #if USE_SDL == 2
-    // Prevent messing with the compositor
-    SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
-    // Force software flipping (Reduces idle CPU use, prevents issues on messy hosts)
-    SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    if (rvvm_strcmp(SDL_GetCurrentVideoDriver(), "x11")) {
+        // Prevent messing with the compositor
+        SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+        // Force software flipping (Reduces idle CPU use, prevents issues on messy hosts)
+        SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    }
     sdl_window = SDL_CreateWindow("RVVM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         win->fb.width, win->fb.height, SDL_WINDOW_SHOWN);
     if (sdl_window == NULL) return false;
