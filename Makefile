@@ -647,6 +647,7 @@ ifeq ($(HOST_POSIX),1)
 	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
 	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm.a
 	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
+	@install -Dm644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
 	@install -d                           $(DESTDIR)$(includedir)/rvvm/devices
 	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/devices/
 	@install -d                           $(DESTDIR)$(datadir)/licenses/rvvm/
