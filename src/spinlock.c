@@ -70,6 +70,9 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
         if (flag != 2 && atomic_swap_uint32(&lock->flag, 2) == 0) {
             // A datarace could result in dangling value 2 without waiters,
             // but a rare spurious wake is harmless and doesn't affect performance
+#ifdef USE_SPINLOCK_DEBUG
+            lock->location = location;
+#endif
             return;
         }
         // Wait upon wakeup from lock owner
