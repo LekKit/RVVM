@@ -52,7 +52,7 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
         // Read lock flag until there's any chance to grab it
         // Improves performance due to cacheline bouncing elimination
         if (atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE) == 0) {
-            if (spin_try_lock(lock)) return;
+            if (spin_try_lock_real(lock, location)) return;
         }
     }
 
@@ -62,18 +62,14 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
     rvtimer_init(&timer, 1000);
     do {
         uint32_t flag = atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE);
-        if (flag == 0 && spin_try_lock(lock)) {
+        if (flag == 0 && spin_try_lock_real(lock, location)) {
             // Succesfully grabbed the lock
             return;
         }
         // Someone else grabbed the lock, indicate that we are still waiting
-        if (flag != 2 && atomic_swap_uint32(&lock->flag, 2) == 0) {
-            // A datarace could result in dangling value 2 without waiters,
-            // but a rare spurious wake is harmless and doesn't affect performance
-#ifdef USE_SPINLOCK_DEBUG
-            lock->location = location;
-#endif
-            return;
+        if (flag != 2 && !atomic_cas_uint32(&lock->flag, 1, 2)) {
+            // Failed to indicate lock as waiting, retry grabbing
+            continue;
         }
         // Wait upon wakeup from lock owner
         bool woken = condvar_wait(global_cond, 10);
