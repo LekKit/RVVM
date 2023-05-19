@@ -46,40 +46,40 @@ static inline void spin_init(spinlock_t* lock)
 }
 
 // Try to claim the lock, returns true on success
-static forceinline bool spin_try_lock(spinlock_t* lock)
+static forceinline bool spin_try_lock_real(spinlock_t* lock, const char* location)
 {
-    return atomic_cas_uint32_ex(&lock->flag, 0, 1, false, ATOMIC_ACQUIRE, ATOMIC_ACQUIRE);
+    bool ret = atomic_cas_uint32_ex(&lock->flag, 0, 1, false, ATOMIC_ACQUIRE, ATOMIC_ACQUIRE);
+#ifdef USE_SPINLOCK_DEBUG
+    if (likely(ret)) lock->location = location;
+#else
+    UNUSED(location);
+#endif
+    return ret;
 }
 
 // Perform locking on small critical section
 // Reports a deadlock upon waiting for too long
 static forceinline void spin_lock_real(spinlock_t* lock, const char* location)
 {
-    if (unlikely(!spin_try_lock(lock))) {
+    if (unlikely(!spin_try_lock_real(lock, location))) {
         spin_lock_wait(lock, location);
     }
-#ifdef USE_SPINLOCK_DEBUG
-    lock->location = location;
-#endif
 }
 
 // Perform locking around heavy operation, wait indefinitely
 static forceinline void spin_lock_slow_real(spinlock_t* lock, const char* location)
 {
-    if (unlikely(!spin_try_lock(lock))) {
+    if (unlikely(!spin_try_lock_real(lock, location))) {
         spin_lock_wait(lock, NULL);
     }
-#ifdef USE_SPINLOCK_DEBUG
-    lock->location = location;
-#else
-    UNUSED(location);
-#endif
 }
 
 #ifdef USE_SPINLOCK_DEBUG
+#define spin_try_lock(lock) spin_try_lock_real(lock, SOURCE_LINE)
 #define spin_lock(lock) spin_lock_real(lock, SOURCE_LINE)
 #define spin_lock_slow(lock) spin_lock_slow_real(lock, SOURCE_LINE)
 #else
+#define spin_try_lock(lock) spin_try_lock_real(lock, NULL)
 #define spin_lock(lock) spin_lock_real(lock, NULL)
 #define spin_lock_slow(lock) spin_lock_slow_real(lock, NULL)
 #endif
