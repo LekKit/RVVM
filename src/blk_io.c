@@ -140,9 +140,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     }
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
-    struct stat file_stat = {0};
-    fstat(fd, &file_stat);
-    file->size = file_stat.st_size;
+    file->size = lseek(fd, 0, SEEK_END);
     file->pos = 0;
     file->fd = fd;
     return file;
