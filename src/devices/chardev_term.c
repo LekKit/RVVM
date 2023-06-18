@@ -108,14 +108,14 @@ static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, si
     int nfds = EVAL_MAX(term->rfd, term->wfd) + 1;
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
-    FD_SET(term->rfd, &rfds);
-    FD_SET(term->wfd, &wfds);
-    if (select(nfds, &rfds, &wfds, NULL, &timeout) > 0) {
-        if (FD_ISSET(term->wfd, &wfds) && to_write) {
+    if (to_read) FD_SET(term->rfd, &rfds);
+    if (to_write) FD_SET(term->wfd, &wfds);
+    if ((to_read || to_write) && select(nfds, to_read ? &rfds : NULL, to_write ? &wfds : NULL, NULL, &timeout) > 0) {
+        if (to_write && FD_ISSET(term->wfd, &wfds)) {
             int tmp = write(term->wfd, buffer, to_write);
             *tx_size = tmp > 0 ? tmp : 0;
         }
-        if (FD_ISSET(term->rfd, &rfds) && to_read) {
+        if (to_read && FD_ISSET(term->rfd, &rfds)) {
             int tmp = read(term->rfd, buffer, to_read);
             *rx_size = tmp > 0 ? tmp : 0;
         }
