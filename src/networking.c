@@ -47,8 +47,8 @@ typedef int net_handle_t;
 typedef socklen_t net_addrlen_t;
 #define NET_HANDLE_INVALID -1
 
-#ifdef __linux__
-// Use Linux epoll() for net_poll
+#if defined(__linux__) || defined(__illumos__)
+// Use epoll() for net_poll on Linux & Illumos
 #include <sys/epoll.h>
 #include <sys/resource.h>
 #define EPOLL_NET_IMPL
@@ -57,6 +57,7 @@ typedef socklen_t net_addrlen_t;
    || (defined(__APPLE__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1060)
 // Use BSD kqueue() for net_poll
 #include <sys/event.h>
+#include <sys/resource.h>
 #define KQUEUE_NET_IMPL
 #endif
 
@@ -132,6 +133,39 @@ const net_addr_t net_ipv4_local_addr = { .type = NET_TYPE_IPV4, .ip[0] = 127, .i
 const net_addr_t net_ipv6_any_addr   = { .type = NET_TYPE_IPV6, };
 const net_addr_t net_ipv6_local_addr = { .type = NET_TYPE_IPV6, .ip[15] = 1, };
 
+static void net_init_once()
+{
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+        rvvm_warn("Failed to initialize WinSock");
+    }
+#elif defined(SIGPIPE)
+    // Ignore SIGPIPE (Do not crash on writes to closed socket)
+    void (*handler)(int);
+    handler = signal(SIGPIPE, SIG_IGN);
+    if (handler != SIG_DFL) signal(SIGPIPE, handler);
+#endif
+#if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
+    struct rlimit rlim = {0};
+    if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+        if (rlim.rlim_cur < rlim.rlim_max && rlim.rlim_max > 1024) {
+            rlim.rlim_cur = rlim.rlim_max;
+            if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+                rvvm_info("Raising RLIMIT_NOFILE to %ld", rlim.rlim_cur);
+            }
+        }
+    }
+#endif
+}
+
+// Initialize networking automatically
+static void net_init()
+{
+    DO_ONCE(net_init_once());
+}
+
 // Address types conversion (net_addr_t <-> sockaddr_in/sockaddr_in6)
 static void net_sockaddr_from_addr(struct sockaddr_in* sock_addr, const net_addr_t* addr)
 {
@@ -168,39 +202,6 @@ static void net_addr_from_sockaddr6(net_addr_t* addr, const struct sockaddr_in6*
     memcpy(addr->ip, &sock_addr->sin6_addr.s6_addr, 16);
 }
 #endif
-
-static void net_init_once()
-{
-#ifdef _WIN32
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
-        rvvm_warn("Failed to initialize WinSock");
-    }
-#elif defined(SIGPIPE)
-    // Ignore SIGPIPE (Do not crash on writes to closed socket)
-    void (*handler)(int);
-    handler = signal(SIGPIPE, SIG_IGN);
-    if (handler != SIG_DFL) signal(SIGPIPE, handler);
-#endif
-#if defined(__linux__) && defined(EPOLL_NET_IMPL)
-    struct rlimit rlim = {0};
-    if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
-        if (rlim.rlim_cur < rlim.rlim_max && rlim.rlim_max > 1024) {
-            rlim.rlim_cur = rlim.rlim_max;
-            if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
-                rvvm_info("Raising RLIMIT_NOFILE to %ld", rlim.rlim_cur);
-            }
-        }
-    }
-#endif
-}
-
-// Initialize networking automatically
-static void net_init()
-{
-    DO_ONCE(net_init_once());
-}
 
 // Wrappers for generic operations on socket handles
 static void net_close_handle(net_handle_t fd)
