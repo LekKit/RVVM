@@ -153,7 +153,7 @@ static void net_init_once()
         if (rlim.rlim_cur < rlim.rlim_max && rlim.rlim_max > 1024) {
             rlim.rlim_cur = rlim.rlim_max;
             if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
-                rvvm_info("Raising RLIMIT_NOFILE to %ld", rlim.rlim_cur);
+                rvvm_info("Raising RLIMIT_NOFILE to %u", (uint32_t)rlim.rlim_cur);
             }
         }
     }
