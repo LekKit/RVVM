@@ -48,43 +48,48 @@ void rvvm_set_loglevel(int level)
     loglevel = level;
 }
 
+static void log_print(const char* prefix, const char* fmt, va_list args)
+{
+    char buffer[256] = {0};
+    size_t pos = rvvm_strlen(prefix);
+    int ret = vsnprintf(buffer + pos, sizeof(buffer) - (pos + 1), fmt, args);
+    memcpy(buffer, prefix, pos);
+    if (ret > 0) pos += ret;
+    buffer[pos] = '\n';
+    fputs(buffer, stderr);
+}
+
 PRINT_FORMAT void rvvm_info(const char* str, ...)
 {
     if (loglevel < LOG_INFO) return;
-    fputs("INFO: ", stdout);
-    va_list args;
+    va_list args = {0};
     va_start(args, str);
-    vprintf(str, args);
+    log_print("INFO: ", str, args);
     va_end(args);
-    putchar('\n');
 }
 
 PRINT_FORMAT void rvvm_warn(const char* str, ...)
 {
     if (loglevel < LOG_WARN) return;
-    fputs("WARN: ", stdout);
-    va_list args;
+    va_list args = {0};
     va_start(args, str);
-    vprintf(str, args);
+    log_print("WARN: ", str, args);
     va_end(args);
-    putchar('\n');
 }
 
 PRINT_FORMAT void rvvm_error(const char* str, ...)
 {
     if (loglevel < LOG_ERROR) return;
-    fputs("ERROR: ", stdout);
-    va_list args;
+    va_list args = {0};
     va_start(args, str);
-    vprintf(str, args);
+    log_print("ERROR: ", str, args);
     va_end(args);
-    putchar('\n');
 }
 
 void rvvm_fatal(const char* str)
 {
-    fputs("FATAL: ", stdout);
-    puts(str);
+    va_list args = {0};
+    log_print("FATAL: ", str, args);
     abort();
 }
 
