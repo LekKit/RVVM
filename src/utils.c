@@ -18,6 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "utils.h"
 #include "rvtimer.h"
+#include "vector.h"
+#include "spinlock.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +118,52 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size)
         rvvm_fatal("Out of memory!");
     }
     return ret;
+}
+
+typedef void (*deinit_func_t)();
+static vector_t(uint32_t*) deinit_tickets;
+static vector_t(deinit_func_t) deinit_funcs;
+static spinlock_t deinit_lock;
+
+NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed)
+{
+    if (claimed) {
+        // Register the DO_ONCE ticket for deinit
+        spin_lock(&deinit_lock);
+        vector_push_back(deinit_tickets, ticket);
+        spin_unlock(&deinit_lock);
+    } else while (atomic_load_uint32_ex(ticket, ATOMIC_ACQUIRE) != 2) {
+        sleep_ms(1);
+    }
+}
+
+void call_at_deinit(void (*function)())
+{
+    spin_lock(&deinit_lock);
+    vector_push_back(deinit_funcs, function);
+    spin_unlock(&deinit_lock);
+}
+
+#ifdef GNU_EXTS
+#define DEINIT_ATTR __attribute__((destructor))
+#else
+#define DEINIT_ATTR
+#endif
+
+DEINIT_ATTR void full_deinit()
+{
+    rvvm_info("Fully deinitializing librvvm");
+    spin_lock(&deinit_lock);
+    // Reset the DO_ONCE tickets and run destructors
+    vector_foreach_back(deinit_tickets, i) {
+        atomic_store(vector_at(deinit_tickets, i), 0);
+    }
+    vector_foreach_back(deinit_funcs, i) {
+        vector_at(deinit_funcs, i)();
+    }
+    vector_free(deinit_tickets);
+    vector_free(deinit_funcs);
+    spin_unlock(&deinit_lock);
 }
 
 size_t int_to_str_dec(char* str, size_t size, int val)

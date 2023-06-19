@@ -71,16 +71,19 @@ do { \
     ptr = NULL; \
 } while(0)
 
+NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed);
+
 // Run a function only once upon reaching this, for lazy init, etc
 #define DO_ONCE(expr) \
 do { \
     static uint32_t already_done_once = 0; \
     if (unlikely(atomic_load_uint32_ex(&already_done_once, ATOMIC_ACQUIRE) != 2)) { \
-        if (atomic_cas_uint32(&already_done_once, 0, 1)) { \
+        bool do_once_claimed = atomic_cas_uint32(&already_done_once, 0, 1); \
+        if (do_once_claimed) { \
             expr; \
             atomic_store_uint32_ex(&already_done_once, 2, ATOMIC_RELEASE); \
         } \
-        while (atomic_load_uint32_ex(&already_done_once, ATOMIC_ACQUIRE) != 2); \
+        do_once_finalize(&already_done_once, do_once_claimed); \
     } \
 } while (0)
 
@@ -90,6 +93,9 @@ do { \
 
 // Compute length of a static array
 #define STATIC_ARRAY_SIZE(arr) (sizeof(arr) / sizeof(*(arr)))
+
+void call_at_deinit(void (*function)());
+void full_deinit();
 
 // Portable itoa/atoi replacement
 size_t int_to_str_dec(char* str, size_t size, int val);
