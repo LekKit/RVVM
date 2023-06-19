@@ -46,7 +46,7 @@ static void term_origmode()
 static void term_rawmode()
 {
     tcgetattr(STDIN_FILENO, &orig_term_opts);
-    atexit(term_origmode);
+    call_at_deinit(term_origmode);
     struct termios term_opts = orig_term_opts;
     term_opts.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
     term_opts.c_iflag &= ~(IXON | ICRNL);
