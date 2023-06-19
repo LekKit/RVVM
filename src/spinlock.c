@@ -29,7 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 static cond_var_t* global_cond;
 
-static void spin_atexit()
+static void spin_deinit()
 {
     cond_var_t* cond = global_cond;
     global_cond = NULL;
@@ -42,7 +42,7 @@ static void spin_cond_init()
 {
     DO_ONCE ({
         global_cond = condvar_create();
-        atexit(spin_atexit);
+        call_at_deinit(spin_deinit);
     });
 }
 
