@@ -156,7 +156,7 @@ DEINIT_ATTR void full_deinit()
     spin_lock(&deinit_lock);
     // Reset the DO_ONCE tickets and run destructors
     vector_foreach_back(deinit_tickets, i) {
-        atomic_store(vector_at(deinit_tickets, i), 0);
+        atomic_store_uint32(vector_at(deinit_tickets, i), 0);
     }
     vector_foreach_back(deinit_funcs, i) {
         vector_at(deinit_funcs, i)();
