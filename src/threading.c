@@ -328,6 +328,7 @@ typedef struct {
     char pad2[64];
 } work_queue_t;
 
+static uint32_t      pool_run;
 static work_queue_t  pool_wq;
 static cond_var_t*   pool_cond;
 static thread_ctx_t* pool_threads[WORKER_THREADS];
@@ -410,21 +411,19 @@ static bool workqueue_submit(work_queue_t* wq, thread_func_t func, void** arg, u
 
 static void thread_workers_terminate()
 {
-    cond_var_t* cond = pool_cond;
-    pool_cond = NULL;
-    condvar_wake_all(cond);
+    atomic_store_uint32_ex(&pool_run, 0, ATOMIC_RELAXED);
+    condvar_wake_all(pool_cond);
     for (size_t i=0; i<WORKER_THREADS; ++i) {
         thread_join(pool_threads[i]);
     }
-    condvar_free(cond);
+    condvar_free(pool_cond);
 }
 
 static void* threadpool_worker(void* ptr)
 {
-    while (pool_cond) {
-        if (!workqueue_try_perform(&pool_wq)) {
-            condvar_wait(pool_cond, CONDVAR_INFINITE);
-        }
+    while (atomic_load_uint32_ex(&pool_run, ATOMIC_RELAXED)) {
+        while (workqueue_try_perform(&pool_wq));
+        condvar_wait(pool_cond, CONDVAR_INFINITE);
     }
     return ptr;
 }
@@ -433,6 +432,7 @@ static bool thread_queue_task(thread_func_t func, void** arg, unsigned arg_count
 {
     DO_ONCE ({
         call_at_deinit(thread_workers_terminate);
+        atomic_store_uint32_ex(&pool_run, 1, ATOMIC_RELAXED);
         workqueue_init(&pool_wq);
         pool_cond = condvar_create();
         for (size_t i=0; i<WORKER_THREADS; ++i) {
