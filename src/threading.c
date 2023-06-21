@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "threading.h"
 #include "atomics.h"
+#include "rvtimer.h"
 #include "utils.h"
 #include <stdlib.h>
 #include <string.h>
@@ -305,87 +306,149 @@ void condvar_free(cond_var_t* cond)
 
 // Threadpool task offloading
 
-#define THREAD_MAX_WORKERS 16
+#define WORKER_THREADS 4
+#define WORKQUEUE_SIZE 2048
+#define WORKQUEUE_MASK (WORKQUEUE_SIZE - 1)
 
-#if (defined(_WIN32) && defined(UNDER_CE)) || defined(__EMSCRIPTEN__)
-#define THREAD_MAX_WORKER_IDLE CONDVAR_INFINITE
-#else
-#define THREAD_MAX_WORKER_IDLE 5000
-#endif
+BUILD_ASSERT(!(WORKQUEUE_SIZE & WORKQUEUE_MASK));
 
 typedef struct {
-    uint32_t busy;
-    thread_ctx_t* thread;
-    cond_var_t* cond;
+    uint32_t seq;
+    uint32_t flags;
     thread_func_t func;
     void* arg[THREAD_MAX_VA_ARGS];
-    bool func_va;
+} task_item_t;
 
-} threadpool_entry_t;
+typedef struct {
+    task_item_t tasks[WORKQUEUE_SIZE];
+    char pad0[64];
+    uint32_t head;
+    char pad1[64];
+    uint32_t tail;
+    char pad2[64];
+} work_queue_t;
 
-static threadpool_entry_t threadpool[THREAD_MAX_WORKERS];
+static work_queue_t  pool_wq;
+static cond_var_t*   pool_cond;
+static thread_ctx_t* pool_threads[WORKER_THREADS];
 
-static void* threadpool_worker(void* data)
+static void workqueue_init(work_queue_t* wq)
 {
-    threadpool_entry_t* thread_ctx = (threadpool_entry_t*)data;
-    //rvvm_info("Spawned new threadpool worker %p", data);
-
-    bool busy = true;
-    while (condvar_wait(thread_ctx->cond, THREAD_MAX_WORKER_IDLE) || busy) {
-        busy = atomic_load_uint32(&thread_ctx->busy);
-        if (busy && thread_ctx->func) {
-            //rvvm_info("Threadpool worker %p woke up", data);
-            if (thread_ctx->func_va) {
-                ((thread_func_va_t)(void*)thread_ctx->func)((void**)thread_ctx->arg);
-            } else {
-                thread_ctx->func(thread_ctx->arg[0]);
-            }
-            thread_ctx->func = NULL;
-            atomic_store_uint32(&thread_ctx->busy, 0);
-        }
+    for (size_t seq = 0; seq < WORKQUEUE_SIZE; ++seq) {
+        atomic_store_uint32(&wq->tasks[seq].seq, seq);
     }
+}
 
-    condvar_free(thread_ctx->cond);
-    thread_detach(thread_ctx->thread);
-    thread_ctx->func = NULL;
-    thread_ctx->cond = NULL;
-    thread_ctx->thread = NULL;
-    atomic_store_uint32(&thread_ctx->busy, 0);
-    //rvvm_info("Threadpool worker %p exiting upon timeout", data);
-    return data;
+static bool workqueue_try_perform(work_queue_t* wq)
+{
+    uint32_t tail = atomic_load_uint32_ex(&wq->tail, ATOMIC_RELAXED);
+    while (true) {
+        task_item_t* task_ptr = &wq->tasks[tail & WORKQUEUE_MASK];
+        uint32_t seq = atomic_load_uint32_ex(&task_ptr->seq, ATOMIC_ACQUIRE);
+        int32_t diff = (int32_t)seq - (int32_t)(tail + 1);
+        if (diff == 0) {
+            // This is a filled task slot
+            if (atomic_cas_uint32_ex(&wq->tail, tail, tail + 1, true, ATOMIC_RELAXED, ATOMIC_RELAXED)) {
+                // We claimed the slot
+                task_item_t task = wq->tasks[tail & WORKQUEUE_MASK];
+
+                // Mark task slot as reusable
+                atomic_store_uint32_ex(&task_ptr->seq, tail + WORKQUEUE_MASK + 1, ATOMIC_RELEASE);
+
+                // Run the task
+                if (task.flags & 2) {
+                    ((thread_func_va_t)(void*)task.func)((void**)task.arg);
+                } else {
+                    task.func(task.arg[0]);
+                }
+                return true;
+            }
+        } else if (diff < 0) {
+            // Queue is empty
+            return false;
+        } else {
+            // Another consumer stole our task slot, reload the tail pointer
+            tail = atomic_load_uint32_ex(&wq->tail, ATOMIC_RELAXED);
+        }
+
+        // Yield this thread timeslice
+        sleep_ms(0);
+    }
+}
+
+static bool workqueue_submit(work_queue_t* wq, thread_func_t func, void** arg, unsigned arg_count, bool va)
+{
+    uint32_t head = atomic_load_uint32_ex(&wq->head, ATOMIC_RELAXED);
+    while (true) {
+        task_item_t* task_ptr = &wq->tasks[head & WORKQUEUE_MASK];
+        uint32_t seq = atomic_load_uint32_ex(&task_ptr->seq, ATOMIC_ACQUIRE);
+        int32_t diff = (int32_t)seq - (int32_t)head;
+        if (diff == 0) {
+            // This is an empty task slot
+            if (atomic_cas_uint32_ex(&wq->head, head, head + 1, true, ATOMIC_RELAXED, ATOMIC_RELAXED)) {
+                // We claimed the slot, fill it with data
+                task_ptr->func = func;
+                for (size_t i=0; i<arg_count; ++i) task_ptr->arg[i] = arg[i];
+                task_ptr->flags = (va ? 2 : 0);
+                // Mark the slot as filled
+                atomic_store_uint32_ex(&task_ptr->seq, head + 1, ATOMIC_RELEASE);
+                return true;
+            }
+        } else if (diff < 0) {
+            // Queue is full
+            return false;
+        } else {
+            // Another producer stole our task slot, reload the head pointer
+            head = atomic_load_uint32_ex(&wq->head, ATOMIC_RELAXED);
+        }
+
+        // Yield this thread timeslice
+        sleep_ms(0);
+    }
+    return false;
 }
 
 static void thread_workers_terminate()
 {
-    for (size_t i=0; i<THREAD_MAX_WORKERS; ++i) {
-        if (atomic_swap_uint32(&threadpool[i].busy, 0)) {
-            condvar_wake(threadpool[i].cond);
+    cond_var_t* cond = pool_cond;
+    pool_cond = NULL;
+    condvar_wake_all(cond);
+    for (size_t i=0; i<WORKER_THREADS; ++i) {
+        thread_join(pool_threads[i]);
+    }
+    condvar_free(cond);
+}
+
+static void* threadpool_worker(void* ptr)
+{
+    while (pool_cond) {
+        if (!workqueue_try_perform(&pool_wq)) {
+            condvar_wait(pool_cond, CONDVAR_INFINITE);
         }
     }
+    return ptr;
 }
 
 static bool thread_queue_task(thread_func_t func, void** arg, unsigned arg_count, bool va)
 {
-    DO_ONCE(call_at_deinit(thread_workers_terminate));
-
-    for (size_t i=0; i<THREAD_MAX_WORKERS; ++i) {
-        if (!atomic_swap_uint32(&threadpool[i].busy, 1)) {
-            //rvvm_info("Threadpool worker %p notified", &threadpool[i]);
-            threadpool[i].func = func;
-            threadpool[i].func_va = va;
-            for (size_t j=0; j<arg_count; ++j) threadpool[i].arg[j] = arg[j];
-            if (!threadpool[i].thread) {
-                threadpool[i].cond = condvar_create();
-                threadpool[i].thread = thread_create(threadpool_worker, &threadpool[i]);
-            }
-            condvar_wake(threadpool[i].cond);
-            return true;
+    DO_ONCE ({
+        call_at_deinit(thread_workers_terminate);
+        workqueue_init(&pool_wq);
+        pool_cond = condvar_create();
+        for (size_t i=0; i<WORKER_THREADS; ++i) {
+            pool_threads[i] = thread_create(threadpool_worker, NULL);
         }
+    });
+
+    if (workqueue_submit(&pool_wq, func, arg, arg_count, va)) {
+        //if (condvar_waiters(pool_cond) == WORKER_THREADS)
+        condvar_wake(pool_cond);
+        return true;
     }
 
     // Still not queued!
     // Assuming entire threadpool is busy, just do a blocking task
-    //rvvm_warn("Blocking on workqueue task %p", func);
+    DO_ONCE(rvvm_warn("Blocking on workqueue task %p", func));
     return false;
 }
 
