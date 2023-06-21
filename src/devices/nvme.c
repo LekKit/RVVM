@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "atomics.h"
 #include "threading.h"
 #include "blk_io.h"
+#include "rvtimer.h"
 
 #include <string.h>
 
@@ -136,7 +137,7 @@ typedef struct {
 
 static void nvme_shutdown(nvme_dev_t* nvme)
 {
-    while (atomic_load_uint32(&nvme->threads));
+    while (atomic_load_uint32(&nvme->threads)) sleep_ms(1);
     rvvm_addr_t asq = nvme->queues[ADMIN_SUBQ].addr;
     rvvm_addr_t acq = nvme->queues[ADMIN_COMQ].addr;
     uint32_t asqs = nvme->queues[ADMIN_SUBQ].size;
@@ -165,10 +166,11 @@ static void nvme_complete_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd, uint32_t sf)
 {
     nvme_queue_t* queue = cmd->queue;
     spin_lock(&queue->lock);
-    uint32_t tail = atomic_load_uint32(&queue->tail);
-    uint8_t* ptr = pci_get_dma_ptr(nvme->pci_dev, queue->addr + (tail << 4), 16);
-    if (tail++ >= queue->size) tail = 0;
-    atomic_store_uint32(&queue->tail, tail);
+    rvvm_addr_t addr = queue->addr + (queue->tail << 4);
+    if (queue->tail++ >= queue->size) queue->tail = 0;
+    spin_unlock(&queue->lock);
+
+    uint8_t* ptr = pci_get_dma_ptr(nvme->pci_dev, addr, 16);
     if (ptr) {
         uint8_t phase = (~read_uint16_le(ptr + 14)) & 1;
         write_uint32_le(ptr,      sf >> 8);                  // Command Specific
@@ -176,9 +178,9 @@ static void nvme_complete_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd, uint32_t sf)
         write_uint16_le(ptr + 8,  cmd->sq_head);             // SQ Head Pointer
         write_uint16_le(ptr + 10, cmd->sq_id);               // SQ Identifier
         write_uint16_le(ptr + 12, cmd->cmd_id);              // Command Identifier
+        atomic_fence();
         write_uint16_le(ptr + 14, (sf & 0xFF) << 1 | phase); // Phase Bit, Status Field
     }
-    spin_unlock(&queue->lock);
     if (!(nvme->irq_mask & 1)) pci_send_irq(nvme->pci_dev, 0);
 }
 
@@ -427,7 +429,7 @@ static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
     }
 }
 
-static void* nvme_worker(void** data)
+static void* nvme_cmd_worker(void** data)
 {
     nvme_dev_t* nvme = data[0];
     size_t queue_id = (size_t)data[1];
@@ -435,34 +437,23 @@ static void* nvme_worker(void** data)
     nvme_cmd_t cmd = {
         .queue = &nvme->queues[queue_id + 1],
         .sq_id = queue_id >> 1,
-        .sq_head = atomic_load_uint32(&queue->head),
+        .sq_head = (size_t)data[2],
     };
-    
-    while (cmd.sq_head != atomic_load_uint32(&queue->tail)) {
-        cmd.ptr = pci_get_dma_ptr(nvme->pci_dev, queue->addr + (cmd.sq_head << 6), 64);
-        if (cmd.ptr) {
-            // Parse & process NVMe command
-            cmd.opcode = cmd.ptr[0];
-            cmd.cmd_id = read_uint16_le(cmd.ptr + 2);
-            cmd.prp.prp1 = read_uint64_le(cmd.ptr + 24);
-            cmd.prp.prp2 = read_uint64_le(cmd.ptr + 32);
-            cmd.prp.size = (((size_t)read_uint16_le(cmd.ptr + 48)) + 1) << NVME_LBAS;
-            cmd.prp.cur = 0;
-            cmd.prp.prp2_dma = 0;
-            cmd.prp.prp2_off = 0;
+    cmd.ptr = pci_get_dma_ptr(nvme->pci_dev, queue->addr + (cmd.sq_head << 6), 64);
+    if (cmd.ptr) {
+        // Parse & process NVMe command
+        cmd.opcode = cmd.ptr[0];
+        cmd.cmd_id = read_uint16_le(cmd.ptr + 2);
+        cmd.prp.prp1 = read_uint64_le(cmd.ptr + 24);
+        cmd.prp.prp2 = read_uint64_le(cmd.ptr + 32);
+        cmd.prp.size = (((size_t)read_uint16_le(cmd.ptr + 48)) + 1) << NVME_LBAS;
 
-            if (queue_id == ADMIN_SUBQ) {
-                nvme_admin_cmd(nvme, &cmd);
-            } else {
-                nvme_io_cmd(nvme, &cmd);
-            }
+        if (queue_id == ADMIN_SUBQ) {
+            nvme_admin_cmd(nvme, &cmd);
+        } else {
+            nvme_io_cmd(nvme, &cmd);
         }
-        
-        if (cmd.sq_head++ >= queue->size) cmd.sq_head = 0;
-        atomic_store_uint32(&queue->head, cmd.sq_head);
     }
-
-    spin_unlock(&queue->lock);
     atomic_sub_uint32(&nvme->threads, 1);
     return NULL;
 }
@@ -473,25 +464,25 @@ static void nvme_doorbell(nvme_dev_t* nvme, size_t queue_id, uint16_t val)
     
     // Ignore attempts to overrun queue
     if (val > queue->size) return;
-    
+
+    spin_lock(&queue->lock);
     if (queue_id & 1) {
         // Update completion queue head
-        atomic_store_uint32(&queue->head, val);
-        if (atomic_load_uint32(&queue->tail) == val) {
+        queue->head = val;
+        if (queue->tail == val) {
             pci_clear_irq(nvme->pci_dev, 0);
         }
     } else {
-        // Update submission queue tail
-        atomic_store_uint32(&queue->tail, val);
-        if (atomic_load_uint32(&queue->head) != val) {
-            if (spin_try_lock(&queue->lock)) {
-                // Run queue worker
-                void* args[2] = {nvme, (void*)queue_id};
-                atomic_add_uint32(&nvme->threads, 1);
-                thread_create_task_va(nvme_worker, args, 2);
-            }
+        queue->tail = val;
+        while (queue->head != queue->tail) {
+            void* args[3] = {nvme, (void*)queue_id, (void*)(size_t)queue->head};
+            atomic_add_uint32(&nvme->threads, 1);
+            thread_create_task_va(nvme_cmd_worker, args, 3);
+
+            if (queue->head++ >= queue->size) queue->head = 0;
         }
     }
+    spin_unlock(&queue->lock);
 }
 
 static bool nvme_pci_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
@@ -547,6 +538,12 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
 {
     nvme_dev_t* nvme = dev->data;
     UNUSED(size);
+    if (likely(offset >= 0x1000)) {
+        // Doorbell
+        size_t queue_id = (offset - 0x1000) >> (NVME_DSTRD + 2);
+        if (queue_id < NVME_MAXQ) nvme_doorbell(nvme, queue_id, read_uint16_le(data));
+        return true;
+    }
     spin_lock(&nvme->lock);
     switch (offset) {
         case NVME_INTMS:
@@ -576,12 +573,6 @@ static bool nvme_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
             break;
         case NVME_ACQ2:
             nvme->queues[ADMIN_COMQ].addr = bit_replace(nvme->queues[ADMIN_COMQ].addr, 32, 32, read_uint32_le(data));
-            break;
-        default:
-            if (offset >= 0x1000) {
-                size_t queue_id = (offset - 0x1000) >> (NVME_DSTRD + 2);
-                if (queue_id < NVME_MAXQ) nvme_doorbell(nvme, queue_id, read_uint16_le(data));
-            }
             break;
     }
     spin_unlock(&nvme->lock);
