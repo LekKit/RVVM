@@ -134,7 +134,7 @@ NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed)
 {
     if (claimed) {
         // Register the DO_ONCE ticket for deinit
-        spin_lock(&deinit_lock);
+        while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
         vector_push_back(deinit_tickets, ticket);
         spin_unlock(&deinit_lock);
     } else while (atomic_load_uint32_ex(ticket, ATOMIC_ACQUIRE) != 2) {
@@ -144,7 +144,7 @@ NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed)
 
 void call_at_deinit(void (*function)())
 {
-    spin_lock(&deinit_lock);
+    while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
     vector_push_back(deinit_funcs, function);
     spin_unlock(&deinit_lock);
 }
@@ -160,11 +160,11 @@ DEINIT_ATTR void full_deinit()
     rvvm_info("Fully deinitializing librvvm");
     spin_lock(&deinit_lock);
     // Reset the DO_ONCE tickets and run destructors
-    vector_foreach_back(deinit_tickets, i) {
-        atomic_store_uint32(vector_at(deinit_tickets, i), 0);
-    }
     vector_foreach_back(deinit_funcs, i) {
         vector_at(deinit_funcs, i)();
+    }
+    vector_foreach_back(deinit_tickets, i) {
+        atomic_store_uint32(vector_at(deinit_tickets, i), 0);
     }
     vector_free(deinit_tickets);
     vector_free(deinit_funcs);
