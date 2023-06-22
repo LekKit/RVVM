@@ -288,6 +288,22 @@ static void* rvvm_eventloop(void* arg)
     return arg;
 }
 
+static void reap_running_machines()
+{
+    while (true) {
+        rvvm_machine_t* machine = NULL;
+        spin_lock(&global_lock);
+        vector_foreach(global_machines, m) {
+            machine = vector_at(global_machines, m);
+            break;
+        }
+        spin_unlock(&global_lock);
+        if (machine == NULL) break;
+        rvvm_warn("Reaping leftover machine %p", (void*)machine);
+        rvvm_pause_machine(machine);
+    }
+}
+
 PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
 {
     UNUSED(dev);
@@ -570,6 +586,9 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
     vector_foreach(machine->harts, i) {
         riscv_hart_spawn(vector_at(machine->harts, i));
     }
+
+    // Register the machine as running
+    DO_ONCE(call_at_deinit(reap_running_machines));
     vector_push_back(global_machines, machine);
     if (builtin_eventloop_enabled && builtin_eventloop_thread == NULL) {
         builtin_eventloop_cond = condvar_create();
