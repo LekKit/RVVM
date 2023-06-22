@@ -431,13 +431,13 @@ static void* threadpool_worker(void* ptr)
 static bool thread_queue_task(thread_func_t func, void** arg, unsigned arg_count, bool va)
 {
     DO_ONCE ({
-        call_at_deinit(thread_workers_terminate);
         atomic_store_uint32_ex(&pool_run, 1, ATOMIC_RELAXED);
         workqueue_init(&pool_wq);
         pool_cond = condvar_create();
         for (size_t i=0; i<WORKER_THREADS; ++i) {
             pool_threads[i] = thread_create(threadpool_worker, NULL);
         }
+        call_at_deinit(thread_workers_terminate);
     });
 
     if (workqueue_submit(&pool_wq, func, arg, arg_count, va)) {
