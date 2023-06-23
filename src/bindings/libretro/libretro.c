@@ -28,7 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // RVVM headers
 #include "rvvmlib.h"
 #include "utils.h"
-#include "threading.h"
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/syscon.h"
@@ -50,7 +49,6 @@ static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 static retro_environment_t environ_cb;
 static rvvm_machine_t *machine;
-static thread_ctx_t *vm_thread;
 static fb_ctx_t vm_fb;
 static hid_keyboard_t *vm_keyboard;
 static hid_mouse_t *vm_mouse;
@@ -287,7 +285,7 @@ void retro_init(void)
     environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &pixfmt);
 }
 
-static void *vm_run(void *arg)
+static void vm_init(void)
 {
     machine = rvvm_create_machine(RVVM_DEFAULT_MEMBASE, machine_opts.mem << 20, machine_opts.smp, machine_opts.rv64);
     vm_fb.width = machine_opts.fb_width;
@@ -329,13 +327,6 @@ static void *vm_run(void *arg)
             break;
         }
     }
-    int *wait = arg;
-    uint8_t ok = 1;
-    if (!rvvm_start_machine(machine))
-        ok = 0;
-    write(*wait, &ok, 1);
-    rvvm_run_eventloop();
-    return NULL;
 }
 
 bool retro_load_game(const struct retro_game_info *game)
@@ -425,17 +416,8 @@ bool retro_load_game(const struct retro_game_info *game)
     char cwd[PATH_MAX];
     strcpy(cwd, game->path);
     chdir(dirname(cwd));
-
-    // Wait and return the result of 'rvvm_start_machine'.
-    int wait[2];
-    uint8_t ok = 1;
-    pipe(wait);
-    vm_thread = thread_create(vm_run, &wait[1]);
-    if (read(wait[0], &ok, 1) != 1)
-        ok = 0;
-    close(wait[0]);
-    close(wait[1]);
-    return ok == 1;
+    vm_init();
+    return rvvm_start_machine(machine);
 }
 
 void retro_set_controller_port_device(unsigned port, unsigned device)
@@ -536,7 +518,6 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
 void retro_unload_game(void)
 {
     rvvm_reset_machine(machine, false);
-    thread_join(vm_thread);
     rvvm_free_machine(machine);
     free(vm_fb.buffer);
 }
