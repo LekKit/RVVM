@@ -230,6 +230,11 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
         if (timeout_ns == CONDVAR_INFINITE) {
             ret = pthread_cond_wait(&cond->cond, &cond->lock) == 0;
         } else {
+#if defined(__APPLE__) || defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
+            struct timespec ts = { .tv_sec = timeout_ns / 1000000000, .tv_nsec = timeout_ns % 1000000000, };
+            UNUSED(condvar_fill_timespec);
+            ret = pthread_cond_timedwait_relative_np(&cond->cond, &cond->lock, &ts) == 0;
+#else
             struct timespec ts = {0};
             condvar_fill_timespec(&ts);
             // Properly handle timespec addition without an overflow
@@ -237,6 +242,7 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
             ts.tv_sec += timeout_ns / 1000000000;
             ts.tv_nsec = timeout_ns % 1000000000;
             ret = pthread_cond_timedwait(&cond->cond, &cond->lock, &ts) == 0;
+#endif
         }
     }
     pthread_mutex_unlock(&cond->lock);
