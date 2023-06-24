@@ -605,12 +605,9 @@ PUBLIC pci_dev_t* nvme_init_blk(pci_bus_t* pci_bus, void* blk_dev)
         }
     };
 
-    nvme->pci_dev = pci_bus_add_device(pci_bus, &nvme_desc);
-    if (nvme->pci_dev == NULL) {
-        free(nvme);
-        return NULL;
-    }
-    return nvme->pci_dev;
+    pci_dev_t* pci_dev = pci_bus_add_device(pci_bus, &nvme_desc);
+    if (pci_dev) nvme->pci_dev = pci_dev;
+    return pci_dev;
 }
 
 PUBLIC pci_dev_t* nvme_init(pci_bus_t* pci_bus, const char* image_path, bool rw)
