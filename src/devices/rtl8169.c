@@ -408,8 +408,9 @@ PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus)
         }
     };
 
-    rtl8169->pci_dev = pci_bus_add_device(pci_bus, &rtl8169_desc);
-    return rtl8169->pci_dev;
+    pci_dev_t* pci_dev = pci_bus_add_device(pci_bus, &rtl8169_desc);
+    if (pci_dev) rtl8169->pci_dev = pci_dev;
+    return pci_dev;
 }
 
 PUBLIC pci_dev_t* rtl8169_init_auto(rvvm_machine_t* machine)
