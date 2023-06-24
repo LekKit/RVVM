@@ -345,8 +345,8 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
     pci_dev_t* dev = NULL;
     for (size_t i=0; i<PCI_BUS_DEVS; ++i) {
         if (bus->dev[i] == NULL) {
-            bus->dev[i] = safe_calloc(sizeof(pci_dev_t), 1);
-            dev = bus->dev[i];
+            dev = safe_new_obj(pci_dev_t);
+            dev->bus = bus;
             dev->dev_id = i;
             break;
         }
@@ -355,8 +355,6 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
         rvvm_warn("Too much devices on a single PCI bus");
         return NULL;
     }
-
-    dev->bus = bus;
 
     for (size_t fun_id = 0; fun_id < 8; ++fun_id) {
         struct pci_func *func = &dev->func[fun_id];
@@ -387,12 +385,17 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
                     bus->mem_addr = bar.addr + bar.size;
                 }
                 func->bar_handle[bar_id] = rvvm_attach_mmio(bus->machine, &bar);
+                if (func->bar_handle[bar_id] < 0) {
+                    free(dev);
+                    return NULL;
+                }
             } else {
                 func->bar_handle[bar_id] = RVVM_INVALID_MMIO;
             }
         }
     }
 
+    bus->dev[dev->dev_id] = dev;
     return dev;
 }
 
