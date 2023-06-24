@@ -817,7 +817,7 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 }
 */
 
-PUBLIC bool ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw)
+PUBLIC pci_dev_t* ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw)
 {
     struct ata_dev* ata = ata_create(image_path, rw);
     if (ata == NULL) return false;
@@ -875,12 +875,13 @@ PUBLIC bool ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw)
         }
     };
 
-    ata->pci_dev = pci_bus_add_device(pci_bus, &ata_desc);
-    return true;
+    pci_dev_t* pci_dev = pci_bus_add_device(pci_bus, &ata_desc);
+    if (pci_dev) ata->pci_dev = pci_dev;
+    return pci_dev;
 }
 
 #else
-PUBLIC bool ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw) { UNUSED(pci_bus); UNUSED(image_path); UNUSED(rw); return false; }
+PUBLIC pci_dev_t* ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw) { UNUSED(pci_bus); UNUSED(image_path); UNUSED(rw); return NULL; }
 #endif
 
 PUBLIC bool ata_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw)

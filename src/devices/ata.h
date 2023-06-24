@@ -28,7 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ATA_CTL_DEFAULT_MMIO  0x40001000
 
 PUBLIC bool ata_init_pio(rvvm_machine_t* machine, rvvm_addr_t data_base_addr, rvvm_addr_t ctl_base_addr, const char* image_path, bool rw);
-PUBLIC bool ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw);
+PUBLIC pci_dev_t* ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw);
 
 PUBLIC bool ata_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw);
 
