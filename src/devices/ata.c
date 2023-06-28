@@ -820,7 +820,7 @@ static bool ata_ctl_write_secondary(rvvm_mmio_dev_t* device, void* memory_data, 
 PUBLIC pci_dev_t* ata_init_pci(pci_bus_t* pci_bus, const char* image_path, bool rw)
 {
     struct ata_dev* ata = ata_create(image_path, rw);
-    if (ata == NULL) return false;
+    if (ata == NULL) return NULL;
 
     pci_dev_desc_t ata_desc = {
         .func[0] = {
