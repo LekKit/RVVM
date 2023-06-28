@@ -51,7 +51,7 @@ void rvvm_set_loglevel(int level);
 PRINT_FORMAT void rvvm_info(const char* str, ...);
 PRINT_FORMAT void rvvm_warn(const char* str, ...);
 PRINT_FORMAT void rvvm_error(const char* str, ...);
-void rvvm_fatal(const char* str); // Aborts the process
+PRINT_FORMAT void rvvm_fatal(const char* str, ...); // Aborts the process
 
 // These never return NULL
 SAFE_MALLOC void* safe_malloc(size_t size);

@@ -62,7 +62,7 @@ static void log_print(const char* prefix, const char* fmt, va_list args)
 PRINT_FORMAT void rvvm_info(const char* str, ...)
 {
     if (loglevel < LOG_INFO) return;
-    va_list args = {0};
+    va_list args;
     va_start(args, str);
     log_print("INFO: ", str, args);
     va_end(args);
@@ -71,7 +71,7 @@ PRINT_FORMAT void rvvm_info(const char* str, ...)
 PRINT_FORMAT void rvvm_warn(const char* str, ...)
 {
     if (loglevel < LOG_WARN) return;
-    va_list args = {0};
+    va_list args;
     va_start(args, str);
     log_print("WARN: ", str, args);
     va_end(args);
@@ -80,16 +80,18 @@ PRINT_FORMAT void rvvm_warn(const char* str, ...)
 PRINT_FORMAT void rvvm_error(const char* str, ...)
 {
     if (loglevel < LOG_ERROR) return;
-    va_list args = {0};
+    va_list args;
     va_start(args, str);
     log_print("ERROR: ", str, args);
     va_end(args);
 }
 
-void rvvm_fatal(const char* str)
+PRINT_FORMAT void rvvm_fatal(const char* str, ...)
 {
-    va_list args = {0};
+    va_list args;
+    va_start(args, str);
     log_print("FATAL: ", str, args);
+    va_end(args);
     abort();
 }
 
