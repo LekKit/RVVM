@@ -32,11 +32,11 @@ endif
 # Some eye-candy stuff
 SPACE   :=
 ifneq (,$(TERM))
-BOLD    := $(shell tput md $(NULL_STDERR) || tput bold $(NULL_STDERR))
-RESET   := $(shell tput me $(NULL_STDERR) || tput sgr0 $(NULL_STDERR))$(BOLD)
-RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR))$(BOLD)
-GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR))$(BOLD)
-YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR))$(BOLD)
+BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR) || echo -e "\033[1m" $(NULL_STDERR))
+RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR) || echo -e "\033[0m" $(NULL_STDERR))$(BOLD)
+RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || echo -e "\033[31m" $(NULL_STDERR))$(BOLD)
+GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || echo -e "\033[32m" $(NULL_STDERR))$(BOLD)
+YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || echo -e "\033[33m" $(NULL_STDERR))$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
