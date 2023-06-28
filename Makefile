@@ -32,11 +32,11 @@ endif
 # Some eye-candy stuff
 SPACE   :=
 ifneq (,$(TERM))
-RESET   := $(shell tput sgr0 $(NULL_STDERR); tput bold    $(NULL_STDERR))
-RED     := $(shell tput bold $(NULL_STDERR); tput setaf 1 $(NULL_STDERR))
-GREEN   := $(shell tput bold $(NULL_STDERR); tput setaf 2 $(NULL_STDERR))
-YELLOW  := $(shell tput bold $(NULL_STDERR); tput setaf 3 $(NULL_STDERR))
-BLUE    := $(shell tput bold $(NULL_STDERR); tput setaf 6 $(NULL_STDERR))
+BOLD    := $(shell tput md $(NULL_STDERR) || tput bold $(NULL_STDERR))
+RESET   := $(shell tput me $(NULL_STDERR) || tput sgr0 $(NULL_STDERR))$(BOLD)
+RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR))$(BOLD)
+GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR))$(BOLD)
+YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR))$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
@@ -648,8 +648,7 @@ ifeq ($(HOST_POSIX),1)
 	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm.a
 	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
 	@install -Dm644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
-	@install -d                           $(DESTDIR)$(includedir)/rvvm/devices
-	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/devices/
+	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/
 	@install -d                           $(DESTDIR)$(datadir)/licenses/rvvm/
 	@install -Dm644 LICENSE*              $(DESTDIR)$(datadir)/licenses/rvvm/
 else
