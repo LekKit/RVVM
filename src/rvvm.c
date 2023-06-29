@@ -84,17 +84,17 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
 #ifdef USE_RV64
         if (vector_at(machine->harts, i)->rv64) {
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdcsu");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdc");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imacsu");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imac");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv39");
         } else {
 #endif
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdcsu");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdc");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imacsu");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imac");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv32");
 #ifdef USE_RV64
