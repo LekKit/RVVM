@@ -79,9 +79,12 @@ PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_add
     fdt_node_add_prop_reg(mtd_fdt, "reg", mtd_mmio.addr, mtd_mmio.size);
     fdt_node_add_prop_str(mtd_fdt, "compatible", "mtd-ram");
     fdt_node_add_prop_u32(mtd_fdt, "bank-width", 0x1);
+    fdt_node_add_prop_u32(mtd_fdt, "#address-cells", 1);
+    fdt_node_add_prop_u32(mtd_fdt, "#size-cells", 1);
     {
         struct fdt_node* partition0 = fdt_node_create("partition@0");
-        fdt_node_add_prop_reg(partition0, "reg", 0, mtd_mmio.size);
+        uint32_t reg[2] = { 0, mtd_mmio.size, };
+        fdt_node_add_prop(partition0, "reg", reg, sizeof(reg));
         fdt_node_add_prop_str(partition0, "label", "firmware");
         fdt_node_add_child(mtd_fdt, partition0);
     }
