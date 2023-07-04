@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "fdtlib.h"
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 
 #ifdef FDTLIB_STANDALONE
 // cerg2010 wanted this to be usable out-of-tree
@@ -88,8 +87,9 @@ static inline uint64_t fdt_host2u64(uint64_t value)
 
 static char* str_duplicate(const char* str)
 {
-    char* buffer = safe_malloc(strlen(str) + 1);
-    strcpy(buffer, str);
+    size_t size = rvvm_strlen(str) + 1;
+    char* buffer = safe_malloc(size);
+    memcpy(buffer, str, size);
     return buffer;
 }
 
@@ -135,7 +135,7 @@ void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* 
 
 void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val)
 {
-    fdt_node_add_prop(node, name, val, strlen(val) + 1);
+    fdt_node_add_prop(node, name, val, rvvm_strlen(val) + 1);
 }
 
 void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size)
@@ -199,7 +199,7 @@ struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name)
     if (node == NULL) return NULL;
     struct fdt_node_list* list = node->nodes;
     while (list) {
-        if (strcmp(list->node->name, name) == 0) return list->node;
+        if (rvvm_strcmp(list->node->name, name)) return list->node;
         list = list->next;
     }
     return NULL;
@@ -208,7 +208,7 @@ struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name)
 struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint64_t addr)
 {
     char buffer[256];
-    fdt_name_with_addr(buffer, 256, name, addr);
+    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
     return fdt_node_find(node, buffer);
 }
 
@@ -216,12 +216,11 @@ struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name)
 {
     if (node == NULL) return NULL;
     char buffer[256] = {0};
-    strncpy(buffer, name, 254);
-    size_t len = strlen(buffer);
-    buffer[len++] = '@';
+    size_t len = rvvm_strlcpy(buffer, name, sizeof(buffer));
+    rvvm_strlcpy(buffer + len, "@", sizeof(buffer) - len);
     struct fdt_node_list* list = node->nodes;
     while (list) {
-        if (strncmp(list->node->name, buffer, len) == 0) return list->node;
+        if (rvvm_strfind(list->node->name, buffer) == list->node->name) return list->node;
         list = list->next;
     }
     return NULL;
@@ -241,7 +240,7 @@ struct fdt_node* fdt_node_create(const char *name)
 struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr)
 {
     char buffer[256];
-    fdt_name_with_addr(buffer, 256, name, addr);
+    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
     return fdt_node_create(buffer);
 }
 
@@ -281,7 +280,6 @@ void fdt_node_free(struct fdt_node *node)
     {
         entry_next = entry->next;
 
-        assert(entry->node);
         fdt_node_free(entry->node);
         free(entry);
     }
@@ -300,10 +298,10 @@ struct fdt_size_desc
 
 static void fdt_get_tree_size(struct fdt_node *node, struct fdt_size_desc *desc)
 {
-    assert(node != NULL && desc != NULL);
+    if (node == NULL || desc == NULL) rvvm_fatal("Corrupted FDT!");
 
     desc->struct_size += sizeof(uint32_t); // FDT_BEGIN_NODE
-    size_t name_len = node->name ? strlen(node->name) + 1 : 1;
+    size_t name_len = node->name ? rvvm_strlen(node->name) + 1 : 1;
     desc->struct_size += ALIGN_UP(name_len, sizeof(uint32_t));
 
     for (struct fdt_prop_list *entry = node->props;
@@ -376,7 +374,7 @@ static void fdt_serialize_name(struct fdt_serializer_ctx *ctx, const char *str)
 
 static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *node)
 {
-    assert(ctx != NULL && node != NULL);
+    if (ctx == NULL || node == NULL) rvvm_fatal("Corrupted FDT!");
 
     fdt_serialize_u32(ctx, FDT_BEGIN_NODE);
     fdt_serialize_string(ctx, node->name);
@@ -414,11 +412,11 @@ size_t fdt_size(struct fdt_node *node)
 size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid)
 {
     if (node == NULL) return 0;
-    struct fdt_size_desc size_desc = { 0 };
+    struct fdt_size_desc size_desc = {0};
     fdt_get_tree_size(node, &size_desc);
     size_desc.struct_size += sizeof(uint32_t); // FDT_END
 
-    struct fdt_serializer_ctx ctx;
+    struct fdt_serializer_ctx ctx = {0};
 
     uint32_t buf_size = 0;
     ctx.reserve_off = buf_size = ALIGN_UP(buf_size + sizeof(struct fdt_header), 8);
