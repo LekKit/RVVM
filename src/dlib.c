@@ -171,7 +171,7 @@ void dlib_close(dlib_ctx_t* handle)
         }
     }
 #elif defined(DLIB_POSIX_IMPL)
-    if ((handle->flags & DLIB_NODELETE) && (RTLD_NODELETE))
+    if ((handle->flags & DLIB_NODELETE) && !!RTLD_NODELETE)
     {
         if (dlclose(handle->library_handle))
         {
