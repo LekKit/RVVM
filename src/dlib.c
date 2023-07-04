@@ -56,10 +56,12 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     }
 
 #ifdef DLIB_WIN32_IMPL
+    // Convert library path to utf-16
     wchar_t wchar_name[128];
     memset(wchar_name, 0, 128*sizeof(wchar_t));
     MultiByteToWideChar(CP_UTF8, 0, path, rvvm_strlen(path), wchar_name, rvvm_strlen(path)+1);
 
+    // Try to get module from already loaded modules
     HMODULE win_handle = GetModuleHandleW((LPWSTR)wchar_name);
 
     if (!win_handle)
@@ -68,8 +70,10 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
         {
             oflags |= LOAD_LIBRARY_AS_DATAFILE;
         }
+
         win_handle = LoadLibraryExW((LPWSTR)wchar_name, NULL, (DWORD)oflags);
 
+        // Try to use OS' library filename convention pattern for lookup
         if (flags & DLIB_NAME_PROBE)
         {
             if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/"))
@@ -95,17 +99,18 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     }
 
 #elif defined(DLIB_POSIX_IMPL)
+    
     oflags = RTLD_LAZY;
     if (flags & DLIB_NODELETE) {
         oflags |= RTLD_NODELETE;
     }
-
     if (flags & DLIB_NOLOAD) {
         oflags |= RTLD_NOLOAD;
     }
     
     dl_handle = dlopen(path, oflags);
 
+    // Try to use OS' library filename convention pattern for lookup
     if (flags & DLIB_NAME_PROBE)
     {
         if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/"))
@@ -142,6 +147,7 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     return NULL;
 
 #endif
+
     dlib_ctx_t* handle = safe_new_obj(dlib_ctx_t);
     handle->library_handle = dl_handle;
     rvvm_strlcpy(handle->library_path, path, 128);
@@ -163,6 +169,7 @@ void dlib_close(dlib_ctx_t* handle)
     rvvm_info("dlib_close: closing %s", handle->library_path);
 
 #ifdef DLIB_WIN32_IMPL
+    // If DLIB_NODELETE specified just drop module handle as HMODULE just a pointer and looks like it's not deallocated in FreeLibrary
     if (!(handle->flags & DLIB_NODELETE))
     {
         if (!FreeLibrary((HMODULE)handle->library_handle))
@@ -171,6 +178,7 @@ void dlib_close(dlib_ctx_t* handle)
         }
     }
 #elif defined(DLIB_POSIX_IMPL)
+    // If DLIB_NODELETE is specified but OS don't support RTLD_NODELETE as valid dlopen flag do not close library for possible future use
     if ((handle->flags & DLIB_NODELETE) && !!RTLD_NODELETE)
     {
         if (dlclose(handle->library_handle))
@@ -207,7 +215,6 @@ void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
     fn_ptr = dlsym(handle->library_handle, symbol_name);
     if (!fn_ptr)
     {
-        // rvvm_error("dlib_resolve failed"); // rvvm_error("dlib_open failed: %s", dlerror());
         rvvm_error("dlib_resolve: %s", dlerror());
         return NULL;
     }
