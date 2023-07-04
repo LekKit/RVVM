@@ -43,20 +43,45 @@ bool rvvm_strcmp(const char* s1, const char* s2) {
     return s1[i] == s2[i];
 }
 
+const char* rvvm_strfind(const char* string, const char* pattern)
+{
+    while (*string) {
+        const char* tmp = string;
+        const char* pat = pattern;
+        while (*tmp && *tmp == *pat) {
+            tmp++;
+            pat++;
+        }
+        if (!(*pat)) return string;
+        string++;
+    }
+    return NULL;
+}
+
 void rvvm_set_loglevel(int level)
 {
     loglevel = level;
+}
+
+static bool log_has_colors()
+{
+    return getenv("TERM") != NULL;
 }
 
 static void log_print(const char* prefix, const char* fmt, va_list args)
 {
     char buffer[256] = {0};
     size_t pos = rvvm_strlen(prefix);
-    int ret = vsnprintf(buffer + pos, sizeof(buffer) - (pos + 1), fmt, args);
+    size_t vsp_size = sizeof(buffer) - (pos + 6);
+    int tmp = vsnprintf(buffer + pos, vsp_size, fmt, args);
     memcpy(buffer, prefix, pos);
-    if (ret > 0) pos += ret;
-    buffer[pos] = '\n';
-    fputs(buffer, stderr);
+    if (tmp > 0) {
+        pos += EVAL_MIN(vsp_size - 1, (size_t)tmp);
+        if (log_has_colors()) {
+            memcpy(buffer + pos, "\033[0m\n", 5);
+        } else buffer[pos] = '\n';
+        fputs(buffer, stderr);
+    }
 }
 
 PRINT_FORMAT void rvvm_info(const char* str, ...)
@@ -64,7 +89,7 @@ PRINT_FORMAT void rvvm_info(const char* str, ...)
     if (loglevel < LOG_INFO) return;
     va_list args;
     va_start(args, str);
-    log_print("INFO: ", str, args);
+    log_print(log_has_colors() ? "\033[33;1mINFO\033[37;1m: " : "INFO: ", str, args);
     va_end(args);
 }
 
@@ -73,7 +98,7 @@ PRINT_FORMAT void rvvm_warn(const char* str, ...)
     if (loglevel < LOG_WARN) return;
     va_list args;
     va_start(args, str);
-    log_print("WARN: ", str, args);
+    log_print(log_has_colors() ? "\033[31;1mWARN\033[37;1m: " : "WARN: ", str, args);
     va_end(args);
 }
 
@@ -82,7 +107,7 @@ PRINT_FORMAT void rvvm_error(const char* str, ...)
     if (loglevel < LOG_ERROR) return;
     va_list args;
     va_start(args, str);
-    log_print("ERROR: ", str, args);
+    log_print(log_has_colors() ? "\033[31;1mERROR\033[37;1m: " : "ERROR: ", str, args);
     va_end(args);
 }
 
@@ -90,7 +115,7 @@ PRINT_FORMAT void rvvm_fatal(const char* str, ...)
 {
     va_list args;
     va_start(args, str);
-    log_print("FATAL: ", str, args);
+    log_print(log_has_colors() ? "\033[31;1mFATAL\033[37;1m: " : "FATAL: ", str, args);
     va_end(args);
     abort();
 }

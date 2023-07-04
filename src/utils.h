@@ -110,8 +110,9 @@ int rvvm_getarg_int(const char* arg);
 uint64_t rvvm_getarg_size(const char* arg);
 
 // Portable string.h replacement
-size_t rvvm_strlen(const char* string);
-bool rvvm_strcmp(const char* s1, const char* s2);
+size_t      rvvm_strlen(const char* string);
+bool        rvvm_strcmp(const char* s1, const char* s2);
+const char* rvvm_strfind(const char* string, const char* pattern);
 
 static inline size_t mem_suffix_shift(char suffix)
 {
