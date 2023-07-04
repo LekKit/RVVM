@@ -43,6 +43,17 @@ bool rvvm_strcmp(const char* s1, const char* s2) {
     return s1[i] == s2[i];
 }
 
+size_t rvvm_strlcpy(char* dst, const char* src, size_t size)
+{
+    size_t i = 0;
+    while (i + 1 < size && src[i]) {
+        dst[i] = src[i];
+        i++;
+    }
+    if (size) dst[i] = 0;
+    return i;
+}
+
 const char* rvvm_strfind(const char* string, const char* pattern)
 {
     while (*string) {
@@ -71,17 +82,14 @@ static bool log_has_colors()
 static void log_print(const char* prefix, const char* fmt, va_list args)
 {
     char buffer[256] = {0};
-    size_t pos = rvvm_strlen(prefix);
-    size_t vsp_size = sizeof(buffer) - (pos + 6);
-    int tmp = vsnprintf(buffer + pos, vsp_size, fmt, args);
-    memcpy(buffer, prefix, pos);
-    if (tmp > 0) {
-        pos += EVAL_MIN(vsp_size - 1, (size_t)tmp);
-        if (log_has_colors()) {
-            memcpy(buffer + pos, "\033[0m\n", 5);
-        } else buffer[pos] = '\n';
-        fputs(buffer, stderr);
+    size_t pos = rvvm_strlcpy(buffer, prefix, sizeof(buffer));
+    size_t vsp_size = sizeof(buffer) - EVAL_MIN(pos + 6, sizeof(buffer));
+    if (vsp_size > 1) {
+        int tmp = vsnprintf(buffer + pos, vsp_size, fmt, args);
+        if (tmp > 0) pos += EVAL_MIN(vsp_size - 1, (size_t)tmp);
     }
+    rvvm_strlcpy(buffer + pos, log_has_colors() ? "\033[0m\n" : "\n", sizeof(buffer) - pos);
+    fputs(buffer, stderr);
 }
 
 PRINT_FORMAT void rvvm_info(const char* str, ...)
