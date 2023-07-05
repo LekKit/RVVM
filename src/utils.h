@@ -109,8 +109,9 @@ bool rvvm_getarg_bool(const char* arg);
 int rvvm_getarg_int(const char* arg);
 uint64_t rvvm_getarg_size(const char* arg);
 
-// Portable string.h replacement
+// Portable & safer string.h replacement
 size_t      rvvm_strlen(const char* string);
+size_t      rvvm_strnlen(const char* string, size_t size);
 bool        rvvm_strcmp(const char* s1, const char* s2);
 size_t      rvvm_strlcpy(char* dst, const char* src, size_t size);
 const char* rvvm_strfind(const char* string, const char* pattern);

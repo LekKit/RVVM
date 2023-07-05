@@ -31,13 +31,22 @@ static int argc = 0;
 static const char** argv = NULL;
 
 
-size_t rvvm_strlen(const char* string) {
-    size_t size = 0;
-    while (string[size]) size++;
-    return size;
+size_t rvvm_strlen(const char* string)
+{
+    size_t i = 0;
+    while (string[i]) i++;
+    return i;
 }
 
-bool rvvm_strcmp(const char* s1, const char* s2) {
+size_t rvvm_strnlen(const char* string, size_t size)
+{
+    size_t i = 0;
+    while (i < size && string[i]) i++;
+    return i;
+}
+
+bool rvvm_strcmp(const char* s1, const char* s2)
+{
     size_t i = 0;
     while (s1[i] && s1[i] == s2[i]) i++;
     return s1[i] == s2[i];
