@@ -298,8 +298,6 @@ struct fdt_size_desc
 
 static void fdt_get_tree_size(struct fdt_node *node, struct fdt_size_desc *desc)
 {
-    if (node == NULL || desc == NULL) rvvm_fatal("Corrupted FDT!");
-
     desc->struct_size += sizeof(uint32_t); // FDT_BEGIN_NODE
     size_t name_len = node->name ? rvvm_strlen(node->name) + 1 : 1;
     desc->struct_size += ALIGN_UP(name_len, sizeof(uint32_t));
@@ -374,8 +372,6 @@ static void fdt_serialize_name(struct fdt_serializer_ctx *ctx, const char *str)
 
 static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *node)
 {
-    if (ctx == NULL || node == NULL) rvvm_fatal("Corrupted FDT!");
-
     fdt_serialize_u32(ctx, FDT_BEGIN_NODE);
     fdt_serialize_string(ctx, node->name);
 
