@@ -107,7 +107,7 @@ thread_ctx_t* thread_create(thread_func_t func, void *arg)
 
 void* thread_join(thread_ctx_t* thread)
 {
-    void* ret = 0;
+    void* ret = NULL;
     if (thread == NULL) return NULL;
 #ifdef _WIN32
     DWORD ltmp = 0;
