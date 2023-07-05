@@ -38,10 +38,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef DLIB_WIN32_IMPL
 #define DLIB_POSIX_IMPL
 #include <dlfcn.h>
-#ifndef RTLD_NODELETE
-#define RTLD_NODELETE 0
 #endif
-#endif
+
+struct dlib_ctx 
+{
+    void* library_handle;
+    char library_path[128];
+    uint16_t flags;
+};
+
 
 #if !defined(DLIB_DISABLED) && (defined(DLIB_WIN32_IMPL) || defined(DLIB_POSIX_IMPL))
 
@@ -101,12 +106,6 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
 #elif defined(DLIB_POSIX_IMPL)
     
     oflags = RTLD_LAZY;
-    if (flags & DLIB_NODELETE) {
-        oflags |= RTLD_NODELETE;
-    }
-    if (flags & DLIB_NOLOAD) {
-        oflags |= RTLD_NOLOAD;
-    }
     
     dl_handle = dlopen(path, oflags);
 
@@ -170,7 +169,7 @@ void dlib_close(dlib_ctx_t* handle)
 
 #ifdef DLIB_WIN32_IMPL
     // If DLIB_NODELETE specified just drop module handle as HMODULE just a pointer and looks like it's not deallocated in FreeLibrary
-    if (!(handle->flags & DLIB_NODELETE))
+    if (handle->flags & DLIB_MAY_UNLOAD)
     {
         if (!FreeLibrary((HMODULE)handle->library_handle))
         {
@@ -179,7 +178,7 @@ void dlib_close(dlib_ctx_t* handle)
     }
 #elif defined(DLIB_POSIX_IMPL)
     // If DLIB_NODELETE is specified but OS don't support RTLD_NODELETE as valid dlopen flag do not close library for possible future use
-    if ((handle->flags & DLIB_NODELETE) && !!RTLD_NODELETE)
+    if (handle->flags & DLIB_MAY_UNLOAD)
     {
         if (dlclose(handle->library_handle))
         {
@@ -225,20 +224,6 @@ void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
     return fn_ptr;
 }
 
-dlib_ctx_t* dlib_reopen(dlib_ctx_t* handle, uint16_t flags)
-{
-    if (!handle)
-    {
-        rvvm_error("dlib_reopen: Invalid dynamic library handle");
-        return NULL;
-    }
-    char library_path[128];
-    memset(library_path, 0, 128);
-    rvvm_strlcpy(handle->library_path, library_path, 128);
-    dlib_close(handle);
-    return dlib_open(library_path, flags);
-}
-
 #else
 
 dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
@@ -246,14 +231,6 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     UNUSED(path);
     UNUSED(flags);
     rvvm_error("dlib_open: Dynamic library loading support disabled in that build");
-    return NULL;
-}
-
-dlib_ctx_t* dlib_reopen(dlib_ctx_t* handle, uint16_t flags)
-{
-    UNUSED(handle);
-    UNUSED(flags);
-    rvvm_error("dlib_reopen: Dynamic library loading support disabled in that build");
     return NULL;
 }
 

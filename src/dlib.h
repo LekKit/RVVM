@@ -21,20 +21,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "compiler.h"
 
-#define DLIB_NAME_PROBE  1 // Perform library lookup by probing multiple name patterns
-#define DLIB_NODELETE    1 << 1 // Do not really unload dynamic object in rvdlib_close, just free handle
-#define DLIB_NOLOAD      1 << 2 // Do not really load dynamic object in rvdlib_open, just check if it exists in lookup directories, rvdlib_open will return NULL if dynamic object not found
+#define DLIB_NAME_PROBE 1
+#define DLIB_MAY_UNLOAD 2
 
-typedef struct 
-{
-    void* library_handle;
-    char library_path[128];
-    uint16_t flags;
-} dlib_ctx_t;
+typedef struct dlib_ctx dlib_ctx_t;
 
 // dlib_ctx_t managment procedures
 dlib_ctx_t* dlib_open(const char* path, uint16_t flags);
-dlib_ctx_t* dlib_reopen(dlib_ctx_t* handle, uint16_t flags);
 void dlib_close(dlib_ctx_t* handle);
 
 // Symbol managment procedures
