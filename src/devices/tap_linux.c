@@ -92,12 +92,6 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
         free(tap);
         return NULL;
     }
-    if (ioctl(tap->fd, TUNSETOFFLOAD, TUN_F_CSUM | TUN_F_TSO4 | TUN_F_TSO6 | TUN_F_TSO_ECN | TUN_F_UFO) < 0) {
-        rvvm_error("ioctl(TUNSETOFFLOAD) failed: %s", strerror(errno));
-        close(tap->fd);
-        free(tap);
-        return NULL;
-    }
     // TAP may be assigned a different name
     rvvm_strlcpy(tap->name, ifr.ifr_name, sizeof(tap->name));
     
