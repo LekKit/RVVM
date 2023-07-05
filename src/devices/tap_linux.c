@@ -84,7 +84,7 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
     }
     // Assign ifname, set TAP mode
     struct ifreq ifr = {0};
-    strncpy(ifr.ifr_name, "tap0", sizeof(ifr.ifr_name));
+    rvvm_strlcpy(ifr.ifr_name, "tap0", sizeof(ifr.ifr_name));
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
     if (ioctl(tap->fd, TUNSETIFF, &ifr) < 0) {
         rvvm_error("ioctl(TUNSETIFF) failed: %s", strerror(errno));
@@ -92,8 +92,14 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
         free(tap);
         return NULL;
     }
+    if (ioctl(tap->fd, TUNSETOFFLOAD, TUN_F_CSUM | TUN_F_TSO4 | TUN_F_TSO6 | TUN_F_TSO_ECN | TUN_F_UFO) < 0) {
+        rvvm_error("ioctl(TUNSETOFFLOAD) failed: %s", strerror(errno));
+        close(tap->fd);
+        free(tap);
+        return NULL;
+    }
     // TAP may be assigned a different name
-    strncpy(tap->name, ifr.ifr_name, sizeof(tap->name));
+    rvvm_strlcpy(tap->name, ifr.ifr_name, sizeof(tap->name));
     
     // Create shutdown pipe
     if (pipe(tap->shut) < 0) {
@@ -109,7 +115,7 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
     ifr.ifr_flags |= IFF_UP;    
     ioctl(sock, SIOCSIFFLAGS, &ifr);
     close(sock);
-    
+
     // Run TAP thread
     tap->thread = thread_create(tap_thread, tap);
     
@@ -124,7 +130,7 @@ bool tap_send(tap_dev_t* tap, const void* data, size_t size)
 bool tap_get_mac(tap_dev_t* tap, uint8_t mac[6])
 {
     struct ifreq ifr = {0};
-    strncpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
+    rvvm_strlcpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
     if (ioctl(tap->fd, SIOCGIFHWADDR, &ifr) < 0) return false;
     if (ifr.ifr_hwaddr.sa_family != ARPHRD_ETHER) {
         return false;
@@ -136,7 +142,7 @@ bool tap_get_mac(tap_dev_t* tap, uint8_t mac[6])
 bool tap_set_mac(tap_dev_t* tap, const uint8_t mac[6])
 {
     struct ifreq ifr = {0};
-    strncpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
+    rvvm_strlcpy(ifr.ifr_name, tap->name, sizeof(ifr.ifr_name));
     ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
     memcpy(ifr.ifr_hwaddr.sa_data, mac, 6);
     return ioctl(tap->fd, SIOCSIFHWADDR, &ifr) >= 0;
