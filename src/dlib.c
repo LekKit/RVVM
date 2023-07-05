@@ -54,8 +54,7 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
 {
     int oflags = 0;
     void* dl_handle = NULL;
-    if (unlikely(rvvm_strlen(path) >= 127))
-    {
+    if (unlikely(rvvm_strlen(path) >= 127)) {
         rvvm_error("dlib_open failed: requested dlib name is too long (%d >= 127)", (uint32_t)rvvm_strlen(path));
         return NULL;
     }
@@ -69,25 +68,16 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     // Try to get module from already loaded modules
     HMODULE win_handle = GetModuleHandleW((LPWSTR)wchar_name);
 
-    if (!win_handle)
-    {
-        if (flags & DLIB_NOLOAD)
-        {
-            oflags |= LOAD_LIBRARY_AS_DATAFILE;
-        }
+    if (!win_handle) {
 
         win_handle = LoadLibraryExW((LPWSTR)wchar_name, NULL, (DWORD)oflags);
 
         // Try to use OS' library filename convention pattern for lookup
-        if (flags & DLIB_NAME_PROBE)
-        {
-            if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/"))
-            {
-                if (!win_handle)
-                {
+        if (flags & DLIB_NAME_PROBE) {
+            if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/")) {
+                if (!win_handle) {
                     char patterned_name[128];
-                    if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128))
-                    {
+                    if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128)) {
                         MultiByteToWideChar(CP_UTF8, 0, path, rvvm_strlen(patterned_name), wchar_name, rvvm_strlen(patterned_name)+1);
                         win_handle = LoadLibraryExW((LPWSTR)patterned_name, NULL, (DWORD)oflags);
                     }
@@ -110,23 +100,17 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
     dl_handle = dlopen(path, oflags);
 
     // Try to use OS' library filename convention pattern for lookup
-    if (flags & DLIB_NAME_PROBE)
-    {
-        if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/"))
-        {
+    if (flags & DLIB_NAME_PROBE) {
+        if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/")) {
             char patterned_name[128];
-            if (!dl_handle)
-            {
-                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128))
-                {
+            if (!dl_handle) {
+                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128)) {
                     rvvm_info("dlib_open failed: %s, trying name \"%s\"", dlerror(), patterned_name);
                     dl_handle = dlopen(patterned_name, oflags);
                 }
             }
-            if (!dl_handle)
-            {
-                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_1, path) <= 128))
-                {
+            if (!dl_handle) {
+                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_1, path) <= 128)) {
                     rvvm_info("dlib_open failed: %s, trying name \"%s\"", dlerror(), patterned_name);
                     dl_handle = dlopen(patterned_name, oflags);
                 }
@@ -159,8 +143,7 @@ dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
 
 void dlib_close(dlib_ctx_t* handle)
 {
-    if (!handle)
-    {
+    if (!handle) {
         rvvm_error("dlib_close: Invalid dynamic library handle");
         return;
     }
@@ -169,19 +152,15 @@ void dlib_close(dlib_ctx_t* handle)
 
 #ifdef DLIB_WIN32_IMPL
     // If DLIB_NODELETE specified just drop module handle as HMODULE just a pointer and looks like it's not deallocated in FreeLibrary
-    if (handle->flags & DLIB_MAY_UNLOAD)
-    {
-        if (!FreeLibrary((HMODULE)handle->library_handle))
-        {
+    if (handle->flags & DLIB_MAY_UNLOAD) {
+        if (!FreeLibrary((HMODULE)handle->library_handle)) {
             rvvm_error("dlib_close failed");
         }
     }
 #elif defined(DLIB_POSIX_IMPL)
     // If DLIB_NODELETE is specified but OS don't support RTLD_NODELETE as valid dlopen flag do not close library for possible future use
-    if (handle->flags & DLIB_MAY_UNLOAD)
-    {
-        if (dlclose(handle->library_handle))
-        {
+    if (handle->flags & DLIB_MAY_UNLOAD) {
+        if (dlclose(handle->library_handle)) {
             rvvm_error("dlib_close failed: %s", dlerror());
         }
     }
@@ -194,8 +173,7 @@ void dlib_close(dlib_ctx_t* handle)
 
 void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
 {
-    if (!handle)
-    {
+    if (!handle) {
         rvvm_error("dlib_resolve: Invalid dynamic library handle");
         return NULL;
     }
@@ -205,15 +183,13 @@ void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
 
 #ifdef DLIB_WIN32_IMPL
     fn_ptr = (void*)GetProcAddress((HMODULE)handle->library_handle, (LPSTR)symbol_name);
-    if (!fn_ptr)
-    {
+    if (!fn_ptr) {
         rvvm_error("dlib_resolve failed");
         return NULL;
     }
 #elif defined(DLIB_POSIX_IMPL)
     fn_ptr = dlsym(handle->library_handle, symbol_name);
-    if (!fn_ptr)
-    {
+    if (!fn_ptr) {
         rvvm_error("dlib_resolve: %s", dlerror());
         return NULL;
     }
