@@ -192,7 +192,7 @@ static void ata_cmd_identify(struct ata_dev *ata)
     // Serial Number
     ata_copy_id_string(id_buf + 20, "DEADBEEF            ", 20);
     // Firmware Revision
-    ata_copy_id_string(id_buf + 46, "R1056   ", 8);
+    ata_copy_id_string(id_buf + 46, "R1059   ", 8);
     // Model Number
     ata_copy_id_string(id_buf + 54, "IDE HDD                                 ", 40);
 
@@ -350,7 +350,7 @@ static void ata_handle_cmd(struct ata_dev *ata, uint8_t cmd)
         case ATA_CMD_IDLE_IMMEDIATE:
         case ATA_CMD_STANDBY:
         case ATA_CMD_STANDBY_IMMEDIATE: ata_cmd_dummy_irq(ata); break;
-        default: rvvm_info("ATA unknown cmd 0x%02x", cmd);
+        default: rvvm_info("ATA unknown cmd 0x%02x", cmd); break;
     }
 }
 
