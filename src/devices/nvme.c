@@ -26,8 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "blk_io.h"
 #include "rvtimer.h"
 
-#include <string.h>
-
 // Controller Registers
 #define NVME_CAP1  0x0   // Controller Capabilities
 #define NVME_CAP2  0x4
@@ -285,23 +283,23 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
                     ptr[130] = NVME_LBAS;
                     break;
                 }
-                case IDENT_CTRL:
-                    write_uint16_le(ptr,     0x144d);        // PCI Vendor ID
+                case IDENT_CTRL: {
+                    write_uint16_le(ptr,     0x144d); // PCI Vendor ID
                     write_uint16_le(ptr + 2, 0x144d);
-                    // Serial Number
-                    memcpy(ptr + 4,  nvme->serial, sizeof(nvme->serial));
-                    strcpy((char*)ptr + 24, "NVMe Storage"); // Model Number
-                    strcpy((char*)ptr + 64, "R947");         // Firmware Revision
-                    write_uint32_le(ptr + 80, NVME_V);       // Version
+                    memcpy(ptr + 4,  nvme->serial, sizeof(nvme->serial)); // Serial Number
+                    rvvm_strlcpy((char*)ptr + 24, "NVMe Storage", 40);    // Model Number
+                    rvvm_strlcpy((char*)ptr + 64, "R947", 8);             // Firmware Revision
+                    write_uint32_le(ptr + 80, NVME_V); // Version
                     ptr[111] = 1;    // Controller Type: I/O Controller
                     ptr[512] = 0x66; // Submission Queue Max/Cur Entry Size
                     ptr[513] = 0x44; // Completion Queue Max/Cur Entry Size
                     ptr[516] = 1;    // Number of Namespaces
                     ptr[520] = 0xC;  // Supports Write Zeroes, Dataset Management
                     // NVMe Qualified Name (Includes serial to distinguish targets)
-                    strcpy((char*)ptr + 768, "nqn.2022-04.lekkit:nvme:");
-                    memcpy(ptr + 792,  nvme->serial, sizeof(nvme->serial));
+                    size_t nqn_off = rvvm_strlcpy((char*)ptr + 768, "nqn.2022-04.lekkit:nvme:", 256);
+                    memcpy(ptr + 768 + nqn_off,  nvme->serial, sizeof(nvme->serial));
                     break;
+                }
                 case IDENT_NSLS:
                     write_uint32_le(ptr, 0x1); // Namespace #1
                     break;
