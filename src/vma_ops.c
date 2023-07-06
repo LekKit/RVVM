@@ -129,22 +129,23 @@ static int vma_anon_memfd(size_t size)
     if (memfd < 0) {
         char path[256] = {0};
         const char* xdg = getenv("XDG_RUNTIME_DIR");
-        size_t xdg_len = xdg ? strlen(xdg) : 0;
         rvvm_info("Falling back to VMA file mapping, may lower perf");
-        if (xdg_len && xdg_len + 19 < sizeof(path)) {
-            strcpy(path, xdg);
-            strcpy(path + xdg_len, "/vma-anon-XXXXXXXX");
-            rvvm_randomserial(path + xdg_len + 10, 8);
+        if (xdg) {
+            size_t off = rvvm_strlcpy(path, xdg, sizeof(path));
+            off += rvvm_strlcpy(path + off, "/vma-anon-XXXXXXXX", sizeof(path) - off);
+            rvvm_randomserial(path + off - 8, 8);
+            if (off < 250) {
+                memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+            } else rvvm_warn("XDG_RUNTIME_DIR path too long!");
+        }
+        if (memfd < 0) {
+            size_t off = rvvm_strlcpy(path, "/var/tmp/vma-anon-XXXXXXXX", sizeof(path));
+            rvvm_randomserial(path + off - 8, 8);
             memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         }
         if (memfd < 0) {
-            strcpy(path, "/var/tmp/vma-anon-XXXXXXXX");
-            rvvm_randomserial(path + 18, 8);
-            memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-        }
-        if (memfd < 0) {
-            strcpy(path, "/tmp/vma-anon-XXXXXXXX");
-            rvvm_randomserial(path + 14, 8);
+            size_t off = rvvm_strlcpy(path, "/tmp/vma-anon-XXXXXXXX", sizeof(path));
+            rvvm_randomserial(path + off - 8, 8);
             memfd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         }
         if (memfd >= 0 && unlink(path) < 0) {
