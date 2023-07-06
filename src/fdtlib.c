@@ -309,7 +309,7 @@ static void fdt_get_tree_size(struct fdt_node *node, struct fdt_size_desc *desc)
         desc->struct_size += sizeof(uint32_t); // FDT_PROP
         desc->struct_size += sizeof(uint32_t) * 2; // struct fdt_prop_desc
         desc->struct_size += ALIGN_UP(entry->prop.len, sizeof(uint32_t));
-        name_len = strlen(entry->prop.name) + 1;
+        name_len = rvvm_strlen(entry->prop.name) + 1;
         desc->strings_size += ALIGN_UP(name_len, sizeof(uint32_t));
     }
 
