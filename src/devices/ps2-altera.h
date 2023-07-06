@@ -21,30 +21,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvmlib.h"
 #include "plic.h"
-#include "spinlock.h"
+#include "chardev.h"
 
 #define ALTPS2_MMIO_SIZE 0x8
 
-struct ps2_device
-{
-    // PS/2 device R/W operation
-    // ps2dev - this struct
-    // val - actual byte to read/write from/to device
-    // is_write - true when writing to device, false otherwise
-    // on read - returns bytes available, on write - returns 0 on error
-    uint16_t (*ps2_op)(struct ps2_device *ps2dev, uint8_t *val, bool is_write);
-    
-    // Same as rvvm_mmio_dev update(), remove()
-    void (*ps2_update)(struct ps2_device *ps2dev);
-    void (*ps2_remove)(struct ps2_device *ps2dev);
-
-    void *data; // private device data
-    void *port_data; // private PS/2 port data - used to send IRQ
-    spinlock_t *lock; // PS/2 bus lock - used for external locks
-};
-
-void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq, struct ps2_device *child);
-void altps2_interrupt(struct ps2_device *dev);
-void altps2_interrupt_unlocked(struct ps2_device *dev);
+void altps2_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq, chardev_t* chardev);
 
 #endif

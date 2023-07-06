@@ -55,7 +55,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PS2_MOUSE_WHEEL   0x3
 
 struct hid_mouse {
-    struct ps2_device ps2_dev;
+    chardev_t chardev;
+    spinlock_t lock;
     hid_btns_t btns; // Pressed buttons bitmask
     bool res_init;   // Validate hid_mouse_resolution() was called
     // Absolute position
@@ -121,7 +122,7 @@ static void ps2_mouse_move_pkt(hid_mouse_t* mice)
     }
     
     ps2_mouse_flush(mice);
-    altps2_interrupt_unlocked(&mice->ps2_dev);
+    chardev_notify(&mice->chardev, CHARDEV_RX);
 }
 
 static bool ps2_mouse_cmd(hid_mouse_t* mice, uint8_t cmd)
@@ -209,16 +210,28 @@ static bool ps2_mouse_cmd(hid_mouse_t* mice, uint8_t cmd)
     }
 }
 
-static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_write)
+static size_t ps2_mouse_read(chardev_t* dev, void* buf, size_t size)
 {
-    hid_mouse_t* mice = (hid_mouse_t*)ps2dev->data;
-    if (is_write) {
+    hid_mouse_t* mice = dev->data;
+    spin_lock(&mice->lock);
+    size_t ret = ringbuf_read(&mice->cmdbuf, buf, size);
+    spin_unlock(&mice->lock);
+    return ret;
+}
+
+static size_t ps2_mouse_write(chardev_t* dev, const void* buf, size_t size)
+{
+    hid_mouse_t* mice = dev->data;
+    spin_lock(&mice->lock);
+    for (size_t i=0; i<size; ++i) {
+        uint8_t val = ((const uint8_t*)buf)[i];
+
         switch (mice->state) {
             case PS2_STATE_CMD:
-                ps2_mouse_cmd(mice, *val);
+                ps2_mouse_cmd(mice, val);
                 break;
             case PS2_STATE_SET_SAMPLE_RATE:
-                mice->rate = *val;
+                mice->rate = val;
                 // Magical sequence for detecting Intellimouse extension
                 // See https://wiki.osdev.org/PS/2_Mouse
                 if (mice->whl_detect == 0 && mice->rate == 200) {
@@ -234,32 +247,25 @@ static uint16_t ps2_mouse_op(struct ps2_device *ps2dev, uint8_t *val, bool is_wr
                 ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
                 break;
             case PS2_STATE_WRAP:
-                if (*val != PS2_CMD_RESET_WRAP_MODE && *val != PS2_CMD_RESET) {
-                    ringbuf_put_u8(&mice->cmdbuf, *val);
+                if (val != PS2_CMD_RESET_WRAP_MODE && val != PS2_CMD_RESET) {
+                    ringbuf_put_u8(&mice->cmdbuf, val);
                 }
                 break;
             case PS2_STATE_SET_RESOLUTION:
-                mice->resolution = *val;
+                mice->resolution = val;
                 mice->state = PS2_STATE_CMD;
                 ringbuf_put_u8(&mice->cmdbuf, PS2_RSP_ACK);
                 break;
         }
-        altps2_interrupt_unlocked(ps2dev);
-        return true;
-    } else {
-        size_t avail = ringbuf_avail(&mice->cmdbuf);
-        if (avail) {
-            ringbuf_get_u8(&mice->cmdbuf, val);
-        } else {
-            *val = 0;
-        }
-        return avail;
     }
+    spin_unlock(&mice->lock);
+    chardev_notify(&mice->chardev, CHARDEV_RX);
+    return size;
 }
 
-static void ps2_mouse_remove(struct ps2_device *ps2dev)
+static void ps2_mouse_remove(chardev_t* dev)
 {
-    hid_mouse_t* mice = (hid_mouse_t*)ps2dev->data;
+    hid_mouse_t* mice = dev->data;
     ringbuf_destroy(&mice->cmdbuf);
     free(mice);
 }
@@ -269,9 +275,11 @@ PUBLIC hid_mouse_t* hid_mouse_init_auto_ps2(rvvm_machine_t* machine)
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20000000, ALTPS2_MMIO_SIZE);
     hid_mouse_t* mice = safe_calloc(sizeof(hid_mouse_t), 1);
-    mice->ps2_dev.ps2_op = ps2_mouse_op;
-    mice->ps2_dev.ps2_remove = ps2_mouse_remove;
-    mice->ps2_dev.data = mice;
+
+    mice->chardev.read = ps2_mouse_read;
+    mice->chardev.write = ps2_mouse_write;
+    mice->chardev.remove = ps2_mouse_remove;
+    mice->chardev.data = mice;
     
     ps2_mouse_defaults(mice);
     
@@ -279,43 +287,43 @@ PUBLIC hid_mouse_t* hid_mouse_init_auto_ps2(rvvm_machine_t* machine)
     ringbuf_put_u8(&mice->cmdbuf, 0xAA);
     ringbuf_put_u8(&mice->cmdbuf, 0x00);
     
-    altps2_init(machine, addr, plic, plic_alloc_irq(plic), &mice->ps2_dev);
+    altps2_init(machine, addr, plic, plic_alloc_irq(plic), &mice->chardev);
     return mice;
 }
 
 PUBLIC void hid_mouse_press_ps2(hid_mouse_t* mouse, hid_btns_t btns)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     bool pressed = mouse->btns != (mouse->btns | btns);
     mouse->btns |= btns;
     if (pressed && mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
         ps2_mouse_move_pkt(mouse);
     }
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
 
 PUBLIC void hid_mouse_release_ps2(hid_mouse_t* mouse, hid_btns_t btns)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     bool released = mouse->btns != (mouse->btns & ~btns);
     mouse->btns &= ~btns;
     if (released && mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
         ps2_mouse_move_pkt(mouse);
     }
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
 
 PUBLIC void hid_mouse_scroll_ps2(hid_mouse_t* mouse, int32_t offset)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     mouse->scroll += offset;
     if (mouse->mode == PS2_MODE_STREAM && mouse->reporting) {
         ps2_mouse_move_pkt(mouse);
     }
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
 
 static void ps2_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
@@ -350,24 +358,24 @@ static void ps2_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y)
 PUBLIC void hid_mouse_resolution_ps2(hid_mouse_t* mouse, uint32_t x, uint32_t y)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     mouse->res_init = x != 0 && y != 0;
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
 
 PUBLIC void hid_mouse_move_ps2(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     ps2_mouse_move(mouse, x, y);
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
 
 PUBLIC void hid_mouse_place_ps2(hid_mouse_t* mouse, int32_t x, int32_t y)
 {
     if (mouse == NULL) return;
-    spin_lock(mouse->ps2_dev.lock);
+    spin_lock(&mouse->lock);
     if (!mouse->res_init) rvvm_warn("hid_mouse_resolution() was not called!");
     ps2_mouse_move(mouse, x - mouse->x, y - mouse->y);
-    spin_unlock(mouse->ps2_dev.lock);
+    spin_unlock(&mouse->lock);
 }
