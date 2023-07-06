@@ -478,8 +478,8 @@ PUBLIC void rvvm_set_cmdline(rvvm_machine_t* machine, const char* str)
 PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str)
 {
 #ifdef USE_FDT
-    size_t cmd_len = machine->cmdline ? strlen(machine->cmdline) : 0;
-    size_t append_len = strlen(str);
+    size_t cmd_len = machine->cmdline ? rvvm_strlen(machine->cmdline) : 0;
+    size_t append_len = rvvm_strlen(str);
     char* tmp = safe_calloc(sizeof(char), cmd_len + append_len + 2);
     if (machine->cmdline) memcpy(tmp, machine->cmdline, cmd_len);
     memcpy(tmp + cmd_len, str, append_len);
