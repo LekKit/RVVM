@@ -35,7 +35,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/i2c-oc.h"
 
 #include <stdio.h>
-#include <string.h>
 #include <inttypes.h>
 
 #ifdef _WIN32
@@ -165,11 +164,11 @@ static int rvvm_main(int argc, const char** argv)
     for (int i=1; i<argc; i+=arg_size) {
         arg_size = get_arg(argv + i, &arg_name, &arg_val);
         if (cmp_arg(arg_name, "m") || cmp_arg(arg_name, "mem")) {
-            if (strlen(arg_val)) {
-                mem = ((size_t)atoi(arg_val)) << mem_suffix_shift(arg_val[strlen(arg_val)-1]);
+            if (rvvm_strlen(arg_val)) {
+                mem = ((size_t)str_to_int_dec(arg_val)) << mem_suffix_shift(arg_val[rvvm_strlen(arg_val)-1]);
             }
         } else if (cmp_arg(arg_name, "s") || cmp_arg(arg_name, "smp")) {
-             smp = atoi(arg_val);
+             smp = str_to_int_dec(arg_val);
         } else if (cmp_arg(arg_name, "res")) {
             size_t j;
             for (j=0; arg_val[j] && arg_val[j] != 'x'; ++j);
@@ -177,8 +176,8 @@ static int rvvm_main(int argc, const char** argv)
                 rvvm_error("Invalid resoulution: %s, expects 640x480", arg_val);
                 return -1;
             }
-            fb_x = atoi(arg_val);
-            fb_y = atoi(arg_val + j + 1);
+            fb_x = str_to_int_dec(arg_val);
+            fb_y = str_to_int_dec(arg_val + j + 1);
         } else if (cmp_arg(arg_name, "rv32")) {
             rv64 = false;
             arg_size = 1;
