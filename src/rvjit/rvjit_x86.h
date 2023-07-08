@@ -121,6 +121,8 @@ static inline size_t rvjit_native_default_hregmask()
     // Pretty much useless without abireclaim
     return rvjit_hreg_mask(X86_EAX) |
            rvjit_hreg_mask(X86_EDX);
+#else
+    return 0;
 #endif
 }
 
@@ -140,6 +142,8 @@ static inline size_t rvjit_native_abireclaim_hregmask()
     return rvjit_hreg_mask(X86_EBX) |
            rvjit_hreg_mask(X86_ESI) |
            rvjit_hreg_mask(X86_EDI);
+#else
+    return 0;
 #endif
 }
 
@@ -808,7 +812,6 @@ static inline branch_t rvjit_native_jmp(rvjit_block_t* block, branch_t handle, b
 static inline branch_t rvjit_x86_branch_entry(rvjit_block_t* block, uint8_t opcode, branch_t handle)
 {
     uint8_t code[6];
-    code[0] = opcode;
     if (handle == BRANCH_NEW) {
         // Forward branch, migh relocate code after it
         branch_t tmp = block->size;
