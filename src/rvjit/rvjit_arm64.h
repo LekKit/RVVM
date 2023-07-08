@@ -506,9 +506,8 @@ static enum a64_logical_shifted rvjit_a64_logical_imm_to_shifted(enum a64_logica
         case A64_ORRI:   return A64_ORR;
         case A64_EORI:   return A64_EOR;
         case A64_ANDSI:  return A64_ANDS;
-        default: rvvm_fatal("Invalid opcode in rvjit_a64_logical_imm_to_shifted()");
+        default: rvvm_fatal("Invalid opcode in rvjit_a64_logical_imm_to_shifted()"); return 0;
     }
-    return 0; // Unreachable
 }
 
 static void rvjit_a64_native_log_op32(rvjit_block_t* block, enum a64_logical_imm opc, regid_t rd, regid_t rn, int32_t imm)
