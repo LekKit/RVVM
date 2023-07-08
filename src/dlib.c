@@ -1,5 +1,5 @@
 /*
-dlib.c - Dynamic library related stuff implementation
+dlib.c - Dynamic library loader
 Copyright (C) 2023 0xCatPKG <github.com/0xCatPKG>
 
 This program is free software: you can redistribute it and/or modify
@@ -16,212 +16,124 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <stdio.h>
-#include <string.h>
-
 #include "dlib.h"
 #include "utils.h"
 
-#ifdef _WIN32
-#define DLIB_WIN32_IMPL
+#if defined(DLIB_DISABLED)
+// Disable dynamic library loading
+#define DLIB_FILE_EXT ""
+
+#elif defined(_WIN32)
 #include <windows.h>
-#include <libloaderapi.h>
-#define DLIB_NAME_CONVENTION_PATTERN_0 "%s.dll"
-#elif defined(__APPLE__)
-#define DLIB_NAME_CONVENTION_PATTERN_1 "%s.dylib"
-#define DLIB_NAME_CONVENTION_PATTERN_0 "lib%s.dylib"
-#else
-#define DLIB_NAME_CONVENTION_PATTERN_1 "%s.so"
-#define DLIB_NAME_CONVENTION_PATTERN_0 "lib%s.so"
-#endif
+#define DLIB_WIN32_IMPL
+#define DLIB_FILE_EXT ".dll"
 
-#ifndef DLIB_WIN32_IMPL
-#define DLIB_POSIX_IMPL
+#elif defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
 #include <dlfcn.h>
+#define DLIB_POSIX_IMPL
+#ifdef __APPLE__
+#define DLIB_FILE_EXT ".dylib"
+#else
+#define DLIB_FILE_EXT ".so"
 #endif
 
-struct dlib_ctx 
-{
-    void* library_handle;
-    char library_path[128];
-    uint16_t flags;
+#endif
+
+struct dlib_ctx {
+#if defined(DLIB_WIN32_IMPL)
+    HMODULE handle;
+#elif defined(DLIB_POSIX_IMPL)
+    void* handle;
+#endif
+    uint32_t flags;
 };
 
-
-#if !defined(DLIB_DISABLED) && (defined(DLIB_WIN32_IMPL) || defined(DLIB_POSIX_IMPL))
-
-dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
+static dlib_ctx_t* dlib_open_internal(const char* path, uint32_t flags)
 {
-    int oflags = 0;
-    void* dl_handle = NULL;
-    if (unlikely(rvvm_strlen(path) >= 127)) {
-        rvvm_error("dlib_open failed: requested dlib name is too long (%d >= 127)", (uint32_t)rvvm_strlen(path));
-        return NULL;
-    }
-
-#ifdef DLIB_WIN32_IMPL
-    // Convert library path to utf-16
-    wchar_t wchar_name[128];
-    memset(wchar_name, 0, 128*sizeof(wchar_t));
-    MultiByteToWideChar(CP_UTF8, 0, path, rvvm_strlen(path), wchar_name, rvvm_strlen(path)+1);
+#if defined(DLIB_WIN32_IMPL)
+    size_t path_len = rvvm_strlen(path) + 1;
+    wchar_t* u16_path = safe_new_arr(wchar_t, path_len);
 
     // Try to get module from already loaded modules
-    HMODULE win_handle = GetModuleHandleW((LPWSTR)wchar_name);
-
-    if (!win_handle) {
-
-        win_handle = LoadLibraryExW((LPWSTR)wchar_name, NULL, (DWORD)oflags);
-
-        // Try to use OS' library filename convention pattern for lookup
-        if (flags & DLIB_NAME_PROBE) {
-            if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/")) {
-                if (!win_handle) {
-                    char patterned_name[128];
-                    if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128)) {
-                        MultiByteToWideChar(CP_UTF8, 0, path, rvvm_strlen(patterned_name), wchar_name, rvvm_strlen(patterned_name)+1);
-                        win_handle = LoadLibraryExW((LPWSTR)patterned_name, NULL, (DWORD)oflags);
-                    }
-                }
-            }
-        }
-
-        if (!win_handle) {
-            rvvm_error("dlib_open failed");
-            return NULL;
-        }
-
-        dl_handle = (void*)win_handle;
+    MultiByteToWideChar(CP_UTF8, 0, path, -1, u16_path, path_len);
+    HMODULE handle = GetModuleHandleW(u16_path);
+    if (handle) {
+        // Prevent unloading an existing module
+        flags &= ~DLIB_MAY_UNLOAD;
+    } else {
+        handle = LoadLibraryExW(u16_path, NULL, 0);
     }
-
+    free(u16_path);
+    if (handle == NULL) return NULL;
+    dlib_ctx_t* lib = safe_new_obj(dlib_ctx_t);
+    lib->handle = handle;
+    lib->flags = flags;
+    return lib;
 #elif defined(DLIB_POSIX_IMPL)
-    
-    oflags = RTLD_LAZY;
-    
-    dl_handle = dlopen(path, oflags);
-
-    // Try to use OS' library filename convention pattern for lookup
-    if (flags & DLIB_NAME_PROBE) {
-        if (!rvvm_strfind(path, ".") && !rvvm_strfind(path, "/")) {
-            char patterned_name[128];
-            if (!dl_handle) {
-                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_0, path) <= 128)) {
-                    rvvm_info("dlib_open failed: %s, trying name \"%s\"", dlerror(), patterned_name);
-                    dl_handle = dlopen(patterned_name, oflags);
-                }
-            }
-            if (!dl_handle) {
-                if (likely(snprintf(patterned_name, 128, DLIB_NAME_CONVENTION_PATTERN_1, path) <= 128)) {
-                    rvvm_info("dlib_open failed: %s, trying name \"%s\"", dlerror(), patterned_name);
-                    dl_handle = dlopen(patterned_name, oflags);
-                }
-            }
-        }
-    }
-
-    if (!dl_handle) {
-
-        rvvm_error("dlib_open failed: %s", dlerror());
-        return NULL;
-    }
-
+    void* handle = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    if (handle == NULL) return NULL;
+    dlib_ctx_t* lib = safe_new_obj(dlib_ctx_t);
+    lib->handle = handle;
+    lib->flags = flags;
+    return lib;
 #else
-
-    rvvm_error("dlib_open: dynamic library loading not supported on selected operating system");
-    return NULL;
-
-#endif
-
-    dlib_ctx_t* handle = safe_new_obj(dlib_ctx_t);
-    handle->library_handle = dl_handle;
-    rvvm_strlcpy(handle->library_path, path, 128);
-    handle->flags = flags;
-
-    rvvm_info("dlib_open: loaded %s", path);
-
-    return handle;
-}
-
-void dlib_close(dlib_ctx_t* handle)
-{
-    if (!handle) {
-        rvvm_error("dlib_close: Invalid dynamic library handle");
-        return;
-    }
-
-    rvvm_info("dlib_close: closing %s", handle->library_path);
-
-#ifdef DLIB_WIN32_IMPL
-    // If DLIB_NODELETE specified just drop module handle as HMODULE just a pointer and looks like it's not deallocated in FreeLibrary
-    if (handle->flags & DLIB_MAY_UNLOAD) {
-        if (!FreeLibrary((HMODULE)handle->library_handle)) {
-            rvvm_error("dlib_close failed");
-        }
-    }
-#elif defined(DLIB_POSIX_IMPL)
-    // If DLIB_NODELETE is specified but OS don't support RTLD_NODELETE as valid dlopen flag do not close library for possible future use
-    if (handle->flags & DLIB_MAY_UNLOAD) {
-        if (dlclose(handle->library_handle)) {
-            rvvm_error("dlib_close failed: %s", dlerror());
-        }
-    }
-#else
-    rvvm_error("dlib_close: dynamic library loading not supported on selected operating system");
-    return;
-#endif
-    free(handle);
-}
-
-void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
-{
-    if (!handle) {
-        rvvm_error("dlib_resolve: Invalid dynamic library handle");
-        return NULL;
-    }
-    void* fn_ptr = NULL;
-
-    rvvm_info("dlib_resolve: %s: symbol %s", handle->library_path, symbol_name);
-
-#ifdef DLIB_WIN32_IMPL
-    fn_ptr = (void*)GetProcAddress((HMODULE)handle->library_handle, (LPSTR)symbol_name);
-    if (!fn_ptr) {
-        rvvm_error("dlib_resolve failed");
-        return NULL;
-    }
-#elif defined(DLIB_POSIX_IMPL)
-    fn_ptr = dlsym(handle->library_handle, symbol_name);
-    if (!fn_ptr) {
-        rvvm_error("dlib_resolve: %s", dlerror());
-        return NULL;
-    }
-#else
-    rvvm_error("dlib_resolve: dynamic library loading not supported on selected operating system");
-    return NULL;
-#endif
-    return fn_ptr;
-}
-
-#else
-
-dlib_ctx_t* dlib_open(const char* path, uint16_t flags)
-{
+    DO_ONCE(rvvm_warn("Dynamic library loading is not supported"));
     UNUSED(path);
     UNUSED(flags);
-    rvvm_error("dlib_open: Dynamic library loading support disabled in that build");
     return NULL;
-}
-
-void dlib_close(dlib_ctx_t* handle)
-{
-    UNUSED(handle);
-    rvvm_error("dlib_close: Dynamic library loading support disabled in that build");
-}
-
-void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name)
-{
-    UNUSED(handle);
-    UNUSED(symbol_name);
-    rvvm_error("dlib_resolve: Dynamic library loading support disabled in that build");
-    return NULL;
-}
-
 #endif
+}
+
+
+dlib_ctx_t* dlib_open(const char* path, uint32_t flags)
+{
+    dlib_ctx_t* lib = NULL;
+    if ((flags & DLIB_NAME_PROBE) && !rvvm_strfind(path, "/")) {
+        size_t name_len = rvvm_strlen("lib") + rvvm_strlen(path) + rvvm_strlen(DLIB_FILE_EXT) + 1;
+        char* name = safe_new_arr(char, name_len);
+        size_t off = rvvm_strlcpy(name, "lib", name_len);
+        off += rvvm_strlcpy(name + off, path, name_len - off);
+        rvvm_strlcpy(name + off, DLIB_FILE_EXT, name_len - off);
+
+        lib = dlib_open_internal(name, flags);
+        if (lib == NULL) lib = dlib_open_internal(name + rvvm_strlen("lib"), flags);
+    }
+    if (lib == NULL) lib = dlib_open_internal(path, flags);
+    return lib;
+}
+
+void dlib_close(dlib_ctx_t* lib)
+{
+    // Silently ignore load error
+    if (lib == NULL) return;
+    if (lib->flags & DLIB_MAY_UNLOAD) {
+        rvvm_info("Unloading a library");
+#ifdef DLIB_WIN32_IMPL
+        FreeLibrary(lib->handle);
+#elif defined(DLIB_POSIX_IMPL)
+        dlclose(lib->handle);
+#endif
+    }
+    free(lib);
+}
+
+void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name)
+{
+    // Silently propagate load error
+    if (lib == NULL) return NULL;
+    void* ret = NULL;
+#ifdef DLIB_WIN32_IMPL
+    ret = (void*)GetProcAddress(lib->handle, symbol_name);
+#elif defined(DLIB_POSIX_IMPL)
+    ret = dlsym(lib->handle, symbol_name);
+#endif
+    if (ret == NULL) rvvm_warn("Failed to resolve symbol %s!", symbol_name);
+    return ret;
+}
+
+bool dlib_load_weak(const char* path)
+{
+    dlib_ctx_t* lib = dlib_open(path, DLIB_NAME_PROBE);
+    dlib_close(lib);
+    return lib != NULL;
+}

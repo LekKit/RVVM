@@ -1,5 +1,5 @@
 /*
-dlib.h - Dynamic library related stuff
+dlib.h - Dynamic library loader
 Copyright (C) 2023 0xCatPKG <github.com/0xCatPKG>
 
 This program is free software: you can redistribute it and/or modify
@@ -16,21 +16,27 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef DLIB_H
-#define DLIB_H
+#ifndef RVVM_DLIB_H
+#define RVVM_DLIB_H
 
-#include "compiler.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-#define DLIB_NAME_PROBE 1
-#define DLIB_MAY_UNLOAD 2
+#define DLIB_NAME_PROBE 0x1 // Probe various A.so, libA.so variations
+#define DLIB_MAY_UNLOAD 0x2 // Allow dlib_close() to actually unload the library
 
 typedef struct dlib_ctx dlib_ctx_t;
 
-// dlib_ctx_t managment procedures
-dlib_ctx_t* dlib_open(const char* path, uint16_t flags);
-void dlib_close(dlib_ctx_t* handle);
+// Load the library
+dlib_ctx_t* dlib_open(const char* path, uint32_t flags);
 
-// Symbol managment procedures
-void* dlib_resolve(dlib_ctx_t* handle, const char* symbol_name);
+// Drop the library handle. unload the library if DLIB_MAY_UNLOAD was set
+void dlib_close(dlib_ctx_t* lib);
+
+// Resolve public library symbols
+void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name);
+
+// Resolve weak symbols provided by a lib (With name probing)
+bool dlib_load_weak(const char* path);
 
 #endif
