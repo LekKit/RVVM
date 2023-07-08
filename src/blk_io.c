@@ -78,11 +78,11 @@ typedef struct {
 #include <windows.h>
 static FILE* fopen_utf8(const char* name, const char* mode)
 {
-    size_t name_len = strlen(name);
-    wchar_t* u16_name = safe_calloc(sizeof(wchar_t), name_len + 1);
+    size_t name_len = rvvm_strlen(name);
+    wchar_t* u16_name = safe_new_arr(wchar_t, name_len + 1);
     wchar_t u16_mode[16] = {0};
-    MultiByteToWideChar(CP_UTF8, 0, name, name_len, u16_name, name_len + 1);
-    MultiByteToWideChar(CP_UTF8, 0, mode, strlen(mode), u16_mode, 16);
+    MultiByteToWideChar(CP_UTF8, 0, name, -1, u16_name, name_len + 1);
+    MultiByteToWideChar(CP_UTF8, 0, mode, -1, u16_mode, STATIC_ARRAY_SIZE(u16_mode));
     FILE* file = _wfopen(u16_name, u16_mode);
     free(u16_name);
 
@@ -118,7 +118,7 @@ struct blk_io_rvfile {
 rvfile_t* rvopen(const char* filepath, uint8_t mode)
 {
 #if defined(POSIX_FILE_IMPL)
-    int fd, open_flags = O_CLOEXEC;
+    int open_flags = O_CLOEXEC;
     if (mode & RVFILE_RW) {
         if (mode & RVFILE_TRUNC) open_flags |= O_TRUNC;
         if (mode & RVFILE_CREAT) {
@@ -128,10 +128,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         open_flags |= O_RDWR;
     } else open_flags |= O_RDONLY;
 
-    fd = open(filepath, open_flags, 0644);
-    if (fd == -1) {
-        return NULL;
-    }
+    int fd = open(filepath, open_flags, 0644);
+    if (fd == -1) return NULL;
 
     if ((mode & RVFILE_EXCL) && !try_lock_fd(fd)) {
         rvvm_error("File %s is busy", filepath);
@@ -145,8 +143,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->fd = fd;
     return file;
 #elif defined(WIN32_FILE_IMPL)
-    DWORD access = GENERIC_READ;
-    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    DWORD access = GENERIC_READ | ((mode & RVFILE_RW) ? GENERIC_WRITE : 0);
+    DWORD share = (mode & RVFILE_EXCL) ? 0 : (FILE_SHARE_READ | FILE_SHARE_WRITE);
     DWORD disp = OPEN_EXISTING;
     if (mode & RVFILE_RW) {
         if (mode & RVFILE_CREAT) {
@@ -155,29 +153,28 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         } else {
             if (mode & RVFILE_TRUNC) disp = TRUNCATE_EXISTING;
         }
-
-        access |= GENERIC_WRITE;
     }
-    if (mode & RVFILE_EXCL) share = 0;
-    size_t path_len = strlen(filepath);
-    wchar_t* u16_path = safe_calloc(sizeof(wchar_t), path_len + 1);
-    MultiByteToWideChar(CP_UTF8, 0, filepath, path_len, u16_path, path_len + 1);
+
+    size_t path_len = rvvm_strlen(filepath);
+    wchar_t* u16_path = safe_new_arr(wchar_t, path_len + 1);
+    MultiByteToWideChar(CP_UTF8, 0, filepath, -1, u16_path, path_len + 1);
     HANDLE handle = CreateFileW(u16_path, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
     free(u16_path);
 
-    // Retry opening existing file using system locale (oh...)
-    if (handle == INVALID_HANDLE_VALUE && (mode & (RVFILE_CREAT | RVFILE_TRUNC)) == 0) {
-        handle = CreateFileA(filepath, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (handle != INVALID_HANDLE_VALUE) rvvm_warn("Non UTF-8 filepath passed to rvopen()");
-    }
-
     if (handle == INVALID_HANDLE_VALUE) {
-        if (GetLastError() == ERROR_SHARING_VIOLATION) rvvm_error("File %s is busy", filepath);
-        return NULL;
+        DWORD last_error = GetLastError();
+        if (last_error == ERROR_SHARING_VIOLATION) rvvm_error("File %s is busy", filepath);
+        if (last_error == ERROR_FILE_NOT_FOUND && !(mode & (RVFILE_CREAT | RVFILE_TRUNC))) {
+            // Retry opening existing file using system locale (oh...)
+            handle = CreateFileA(filepath, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (handle != INVALID_HANDLE_VALUE) rvvm_warn("Non UTF-8 filepath \"%s\"", filepath);
+        }
     }
-    DWORD sizeh;
+    if (handle == INVALID_HANDLE_VALUE) return NULL;
+
+    DWORD sizeh = 0;
     DWORD sizel = GetFileSize(handle, &sizeh);
-    DWORD tmp;
+    DWORD tmp = 0;
     DeviceIoControl(handle, DEVIOCTL_SET_SPARSE, NULL, 0, NULL, 0, &tmp, NULL);
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
@@ -186,20 +183,16 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->handle = handle;
     return file;
 #else
-    const char* open_mode;
+    const char* open_mode = "rb";
     if ((mode & RVFILE_TRUNC) && (mode & RVFILE_RW)) {
         open_mode = "wb+";
     } else if (mode & RVFILE_RW) {
         open_mode = "rb+";
-    } else {
-        open_mode = "rb";
     }
 
     FILE* fp = fopen(filepath, open_mode);
     if (!fp && (mode & RVFILE_RW) && (mode & RVFILE_CREAT)) fp = fopen(filepath, "wb+");
-    if (!fp) {
-        return NULL;
-    }
+    if (!fp) return NULL;
 
     rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
     fseek(fp, 0, SEEK_END);
@@ -512,24 +505,20 @@ static bool blk_init_raw(blkdev_t* dev, rvfile_t* file)
     return true;
 }
 
+bool blk_init_dedup(blkdev_t* dev, rvfile_t* file);
+
 blkdev_t* blk_open(const char* filename, uint8_t opts)
 {
-    uint8_t filemode = 0;
-    if (opts & RVFILE_RW) filemode |= (RVFILE_RW | RVFILE_EXCL);
+    uint8_t filemode = (opts & BLKDEV_RW) ? (RVFILE_RW | RVFILE_EXCL) : 0;
     rvfile_t* file = rvopen(filename, filemode);
     if (!file) return NULL;
 
-    blkdev_t* dev = safe_calloc(sizeof(blkdev_t), 1);
-#if 0
-    char magic_buf[4] = {0};
-    rvread(file, magic_buf, 4, 0);
-    if (memcmp(magic_buf, "RVVD", 4))
-        blk_init_rvvd(dev, file);
-    else
+    blkdev_t* dev = safe_new_obj(blkdev_t);
+#ifdef USE_BLK_DEDUP
+    if (blk_init_dedup(dev, file)) return dev;
 #endif
     blk_init_raw(dev, file);
 
-    dev->pos = 0;
     return dev;
 }
 
