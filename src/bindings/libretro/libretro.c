@@ -100,7 +100,7 @@ unsigned retro_api_version(void)
 
 static hid_key_t retrok_to_hid(unsigned keycode)
 {
-    static const hid_key_t kbmap[RETROK_LAST] = {
+    static const hid_key_t kbmap[] = {
         [RETROK_a] = HID_KEY_A,
         [RETROK_b] = HID_KEY_B,
         [RETROK_c] = HID_KEY_C,
@@ -206,7 +206,7 @@ static hid_key_t retrok_to_hid(unsigned keycode)
         [RETROK_KP_PERIOD] = HID_KEY_KPDOT,
         [RETROK_MENU] = HID_KEY_MENU,
     };
-    return kbmap[keycode];
+    return (keycode < sizeof(kbmap)) ? kbmap[keycode] : HID_KEY_NONE;
 }
 
 static void keyboard_cb(bool down, unsigned keycode,
@@ -306,19 +306,19 @@ static void vm_init(void)
     vm_keyboard = hid_keyboard_init_auto(machine);
     vm_mouse = hid_mouse_init_auto(machine);
     hid_mouse_resolution(vm_mouse, vm_fb.width, vm_fb.height);
-    if (strlen(machine_opts.bootrom)) {
+    if (rvvm_strlen(machine_opts.bootrom)) {
         if (!rvvm_load_bootrom(machine, machine_opts.bootrom)) {
             error_msg("RVVM: failed to load bootrom");
         }
     } else {
         error_msg("RVVM: No bootrom");
     }
-    if (strlen(machine_opts.kernel) && !rvvm_load_kernel(machine, machine_opts.kernel)) {
+    if (rvvm_strlen(machine_opts.kernel) && !rvvm_load_kernel(machine, machine_opts.kernel)) {
         error_msg("RVVM: failed to load kernel");
     }
     rvvm_set_cmdline(machine, machine_opts.cmdline);
     for (int i = 0; i < NVME_MAX; ++i) {
-        if (strlen(machine_opts.nvme[i])) {
+        if (rvvm_strlen(machine_opts.nvme[i])) {
             log_cb(RETRO_LOG_INFO, "Mount nvme%d: %s\n", i, machine_opts.nvme[i]);
             if (!nvme_init_auto(machine, machine_opts.nvme[i], true)) {
                 error_msg("RVVM: failed to mount nvme");
@@ -346,15 +346,15 @@ bool retro_load_game(const struct retro_game_info *game)
     size_t linesize = 0;
     ssize_t linelen;
     while ((linelen = getline(&line, &linesize, fp)) != -1) {
-        if (strcmp(line, "rv64\n") == 0) {
+        if (rvvm_strcmp(line, "rv64\n")) {
             machine_opts.rv64 = true;
             continue;
         }
-        if (strcmp(line, "rv32\n") == 0) {
+        if (rvvm_strcmp(line, "rv32\n")) {
             machine_opts.rv64 = false;
             continue;
         }
-        if (strcmp(line, "\n") == 0) {
+        if (rvvm_strcmp(line, "\n")) {
             continue;
         }
         char *k = strtok(line, "=");
@@ -367,27 +367,27 @@ bool retro_load_game(const struct retro_game_info *game)
             log_cb(RETRO_LOG_ERROR, "Invalid option: %s\n", line);
             continue;
         }
-        if (strcmp(k, "mem") == 0) {
-            machine_opts.mem = atoi(v);
+        if (rvvm_strcmp(k, "mem")) {
+            machine_opts.mem = str_to_int_dec(v);
             continue;
         }
-        if (strcmp(k, "smp") == 0) {
-            machine_opts.smp = atoi(v);
+        if (rvvm_strcmp(k, "smp")) {
+            machine_opts.smp = str_to_int_dec(v);
             continue;
         }
-        if (strcmp(k, "bootrom") == 0) {
+        if (rvvm_strcmp(k, "bootrom")) {
             size_t len = sizeof(machine_opts.bootrom);
             memset(machine_opts.bootrom, 0, len);
             memcpy(machine_opts.bootrom, v, strnlen(v, len-1));
             continue;
         }
-        if (strcmp(k, "kernel") == 0) {
+        if (rvvm_strcmp(k, "kernel")) {
             size_t len = sizeof(machine_opts.kernel);
             memset(machine_opts.kernel, 0, len);
             memcpy(machine_opts.kernel, v, strnlen(v, len-1));
             continue;
         }
-        if (strcmp(k, "nvme") == 0) {
+        if (rvvm_strcmp(k, "nvme")) {
             size_t len = sizeof(machine_opts.nvme[0]);
             if (nvme_idx == NVME_MAX) {
                 log_cb(RETRO_LOG_ERROR, "Failed to mount %s as nvme, only %d devices are allowed\n", v, NVME_MAX);
@@ -398,7 +398,7 @@ bool retro_load_game(const struct retro_game_info *game)
             memcpy(nvme, v, strnlen(v, len-1));
             continue;
         }
-        if (strcmp(k, "cmdline") == 0) {
+        if (rvvm_strcmp(k, "cmdline")) {
             size_t len = sizeof(machine_opts.cmdline);
             memset(machine_opts.cmdline, 0, len);
             memcpy(machine_opts.cmdline, v, strnlen(v, len-1));
@@ -413,8 +413,8 @@ bool retro_load_game(const struct retro_game_info *game)
     }
     fclose(fp);
 
-    char cwd[PATH_MAX];
-    strcpy(cwd, game->path);
+    char cwd[1024];
+    rvvm_strlcpy(cwd, game->path, sizeof(cwd));
     chdir(dirname(cwd));
     vm_init();
     return rvvm_start_machine(machine);
