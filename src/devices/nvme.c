@@ -374,57 +374,44 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
     uint64_t pos = read_uint64_le(cmd->ptr + 40) << NVME_LBAS;
-    uint8_t* buffer;
-    size_t   size, tmp;
 
     switch (cmd->opcode) {
         case NVM_READ:
         case NVM_WRITE:
             while (cmd->prp.cur < cmd->prp.size) {
-                buffer = nvme_get_prp_chunk(nvme, cmd, &size);
-                if (buffer == NULL) return;
-                if (cmd->opcode == NVM_WRITE) {
-                    tmp = blk_write(nvme->blk, buffer, size, pos);
-                } else {
-                    tmp = blk_read(nvme->blk, buffer, size, pos);
-                }
-                if (tmp != size) {
+                uint8_t* buffer = nvme_get_prp_chunk(nvme, cmd, &size);
+                if (!buffer || (cmd->opcode == NVM_WRITE && blk_write(nvme->blk, buffer, size, pos) != size) || (cmd->opcode == NVM_READ && blk_read(nvme->blk, buffer, size, pos) != size)) {
                     nvme_complete_cmd(nvme, cmd, SC_DT_ERR);
                     return;
                 }
                 pos += size;
             }
-            nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         case NVM_FLUSH:
             blk_sync(nvme->blk);
-            nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         case NVM_WRITEZ:
             blk_trim(nvme->blk, pos, cmd->prp.size);
-            nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         case NVM_DTSM:
             if (cmd->ptr[44] & 0x4) {
-                // Deallocate (TRIM)
                 cmd->prp.size = (((size_t)cmd->ptr[40]) + 1) << 4;
                 while (cmd->prp.cur < cmd->prp.size) {
-                    buffer = nvme_get_prp_chunk(nvme, cmd, &size);
+                    uint8_t* buffer = nvme_get_prp_chunk(nvme, cmd, &size);
                     if (!buffer) return;
-                    for (size_t i=0; i<size; i += 16) {
+                    for (size_t i = 0; i < size; i += 16) {
                         uint64_t trim_len = ((uint64_t)read_uint32_le(buffer + i + 4)) << NVME_LBAS;
                         uint64_t trim_pos = read_uint64_le(buffer + i + 8) << NVME_LBAS;
                         blk_trim(nvme->blk, trim_pos, trim_len);
                     }
                 }
             }
-            nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
             break;
         default:
-            //rvvm_info("NVMe unknown IO cmd %02x", cmd->opcode);
             nvme_complete_cmd(nvme, cmd, SC_BAD_OP);
             break;
     }
+    nvme_complete_cmd(nvme, cmd, SC_SUCCESS);
 }
 
 static void* nvme_cmd_worker(void** data)
