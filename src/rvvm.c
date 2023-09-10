@@ -357,8 +357,12 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
         rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, rvvm_getarg_size("jitcache"));
     } else {
         size_t jit_cache = 16 << 20;
-        if (mem_size >= (512U << 20)) jit_cache = 32 << 20;
-        if (mem_size >= (1U << 30))   jit_cache = 64 << 20;
+        if (mem_size >= (512U << 20)) {
+            jit_cache = 32 << 20;
+        }
+        if (mem_size >= (1U << 30)) {
+            jit_cache = 64 << 20;
+        }
         // Default 16M-64M JIT cache per hart (depends on RAM)
         rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, jit_cache);
     }
