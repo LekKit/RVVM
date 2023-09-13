@@ -120,7 +120,9 @@ void dlib_close(dlib_ctx_t* lib)
 void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name)
 {
     // Silently propagate load error
-    if (lib == NULL) return NULL;
+    if (lib == NULL) {
+        return NULL;
+    }
     void* ret = NULL;
 #ifdef DLIB_WIN32_IMPL
     ret = (void*)GetProcAddress(lib->handle, symbol_name);
