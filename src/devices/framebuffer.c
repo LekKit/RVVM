@@ -36,7 +36,7 @@ static rvvm_mmio_type_t fb_dev_type = {
 PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb)
 {
     rvvm_mmio_dev_t fb_region = {0};
-    
+
     // Map the framebuffer into physical memory
     fb_region.data = fb->buffer;
     fb_region.addr = addr;
@@ -66,7 +66,7 @@ PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb
     }
     fdt_node_add_prop_u32(fb_fdt, "width",  fb->width);
     fdt_node_add_prop_u32(fb_fdt, "height", fb->height);
-    fdt_node_add_prop_u32(fb_fdt, "stride", fb->width * rgb_format_bytes(fb->format));
+    fdt_node_add_prop_u32(fb_fdt, "stride", framebuffer_stride(fb));
 
     fdt_node_add_child(rvvm_get_fdt_soc(machine), fb_fdt);
 #endif

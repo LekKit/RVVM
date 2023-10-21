@@ -33,6 +33,7 @@ typedef struct {
     void*     buffer;
     uint32_t  width;
     uint32_t  height;
+    uint32_t  stride;
     rgb_fmt_t format;
 } fb_ctx_t;
 
@@ -64,9 +65,14 @@ static inline size_t rgb_format_from_bpp(size_t bpp)
     return RGB_FMT_INVALID;
 }
 
+static inline uint32_t framebuffer_stride(const fb_ctx_t* fb)
+{
+    return fb->stride ? fb->stride : fb->width * rgb_format_bytes(fb->format);
+}
+
 static inline size_t framebuffer_size(const fb_ctx_t* fb)
 {
-    return rgb_format_bytes(fb->format) * fb->width * fb->height;
+    return framebuffer_stride(fb) * fb->height;
 }
 
 // Attach initialized framebuffer context to the machine
