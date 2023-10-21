@@ -92,7 +92,7 @@ static void window_reset(rvvm_mmio_dev_t* device)
     // Never ask why or how this works :D
     fb_ctx_t* fb = &((fb_window_t*)device->data)->fb;
     size_t bytes = rgb_format_bytes(fb->format);
-    size_t stride = bytes * fb->width;
+    size_t stride = framebuffer_stride(fb);
     uint32_t pos_x = fb->width / 2 - 152;
     uint32_t pos_y = fb->height / 2 - 80;
     
