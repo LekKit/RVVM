@@ -108,7 +108,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 
 ## 🎉 Contributions
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
-|                      | Achievments | Working on |
+|                      | Achievements | Working on |
 |----------------------|-------------|------------|
 | [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format |
 | [**cerg2010cerg2010**](https://github.com/cerg2010cerg2010) | Important fixes, RV64 groundwork, FPU <br> Initial PLIC & PCI, PS2 HID, ATA, OC Ethernet <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
