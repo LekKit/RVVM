@@ -7,7 +7,7 @@ RISC-V CPU & System software implementation written in С
 ## What's working
 [![Demo](https://img.shields.io/badge/Check%20it%20out-WASM%20Demo-red?style=for-the-badge)](https://lekkit.github.io/test/index.html)
 - Passes RISC-V compliance/torture tests for both RV64 & RV32
-- OpenSBI, U-Boot, custom firmwares boot and execute properly
+- OpenSBI, U-Boot, custom firmware boot and execute properly
 - Working Linux, FreeBSD, OpenBSD, Haiku OS & other cool OSes
 - Tracing JIT, multicore support
 - Framebuffer display, mouse & keyboard, UART shell
@@ -23,7 +23,7 @@ RISC-V CPU & System software implementation written in С
 - Device Tree auto-generation, passing to firmware/kernel
 - RVVM Public API for VM integration
 - UART 16550a-compatible text console
-- PLIC/ACLINT, Timers, Poweroff/reset
+- PLIC/ACLINT, Timers, Power off/reset
 - Generic PCI Express Bus
 - NVMe storage, image TRIM support, fast IO
 - Framebuffer display, GUI for X11/WinAPI/Haiku/SDL
@@ -102,7 +102,7 @@ This work is dual-licensed under **GPL 3.0** OR **MPL 2.0**. You can choose betw
 If you wish to use this work as a component of a larger, non-GPL compliant project, you are free to do so in any form
 (Static linkage, binary distribution, modules) as long as you comply with the MPL 2.0 license.
 
-For any form of software distribution, changes made precisely to this work should be made public to comply with either licenses.
+For any form of software distribution, changes made precisely to this work should be made public to comply with either license.
 
 Source file headers should be gradually transitioned to reflect their reusability.
 
@@ -128,8 +128,8 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - More RVJIT optimizations, shared caches
 - FPU JIT, Vector/Bitmanip extensions (Waiting for GCC V ext support)
 - Other peripherals from real boards (SiFive GPIO, flash)
-- *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
+- *Maybe* virtual devices (For better QEMU interoperability, current devices are plenty fast)
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
 
-The RISC-V trade name is a registered trade mark of RISC-V International.
+The RISC-V trade name is a registered trademark of RISC-V International.
