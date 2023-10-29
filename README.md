@@ -97,7 +97,7 @@ Invoke "./rvvm -h" to see extended help.
 | Emscripten | -                          | SDL          |
 
 ## ⚖️ License
-This work is dual-licensed under **GPL 3.0** OR **MPL 2.0**. You can choose between one of them if you use this work.
+This work is dual-licensed under **GPL 3.0** and **MPL 2.0**. You can choose between one of them if you use this work.
 
 If you wish to use this work as a component of a larger, non-GPL compliant project, you are free to do so in any form
 (Static linkage, binary distribution, modules) as long as you comply with the MPL 2.0 license.
