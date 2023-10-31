@@ -715,7 +715,7 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
 {
     rvvm_mmio_dev_t dev = *mmio;
     dev.machine = machine;
-    if (mmio->min_op_size > mmio->max_op_size || mmio->max_op_size > 8) {
+    if (mmio->min_op_size > mmio->max_op_size || mmio->min_op_size > 8) {
         rvvm_warn("MMIO device \"%s\" has invalid op sizes: min %u, max %u",
                   mmio->type ? mmio->type->name : "null", mmio->min_op_size, mmio->max_op_size);
         rvvm_cleanup_mmio(&dev);
