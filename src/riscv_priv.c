@@ -105,7 +105,11 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
     switch (instruction & RV_PRIV_S_FENCE_MASK) {
     case RV_PRIV_S_SFENCE_VMA:
         if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
-            riscv_tlb_flush(vm);
+            if (rs1) {
+                riscv_tlb_flush_page(vm, vm->registers[rs1]);
+            } else {
+                riscv_tlb_flush(vm);
+            }
         } else {
             riscv_trap(vm, TRAP_ILL_INSTR, instruction);
         }
