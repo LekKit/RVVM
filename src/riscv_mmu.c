@@ -98,7 +98,12 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
     vm->tlb[vpn & TLB_MASK].r = vpn - 1;
     vm->tlb[vpn & TLB_MASK].w = vpn - 1;
     vm->tlb[vpn & TLB_MASK].e = vpn - 1;
-    riscv_restart_dispatch(vm);
+#ifdef USE_JIT
+    vm->jtlb[(addr >> 1) & TLB_MASK].pc = addr - 1;
+#endif
+    if (vpn == (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
+        riscv_restart_dispatch(vm);
+    }
 }
 
 static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t op)
