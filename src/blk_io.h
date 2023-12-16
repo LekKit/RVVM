@@ -175,7 +175,7 @@ static inline uint64_t blk_tell(blkdev_t* dev)
 
 static inline bool blk_trim(blkdev_t* dev, uint64_t offset, uint64_t count)
 {
-    if (!dev) return false;
+    if (!dev || !dev->type->trim) return false;
     uint64_t real_pos = (offset == RVFILE_CURPOS) ? dev->pos : offset;
     if (real_pos + count > dev->size) return false;
     return dev->type->trim(dev->data, real_pos, count);
@@ -183,7 +183,7 @@ static inline bool blk_trim(blkdev_t* dev, uint64_t offset, uint64_t count)
 
 static inline bool blk_sync(blkdev_t* dev)
 {
-    if (!dev) return false;
+    if (!dev || !dev->type->sync) return false;
     return dev->type->sync(dev->data);
 }
 
