@@ -4,6 +4,7 @@ Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
                     KotB <github.com/0xCatPKG>
+		    fish4terrisa-MSDSM <fish4terrisa@fishinix.eu.org>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
