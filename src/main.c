@@ -82,7 +82,7 @@ static void print_help()
 #endif
            "    -k, -kernel ...  Load S-mode kernel payload (Linux, U-Boot, etc)\n"
            "    -n, -nvme   ...  Attach NVMe storage image\n"
-	   "	-i, -image  ...  Attach NVMe storage image (For compatible reasons)\n"
+	   "	-i, -image  ...  Attach NVMe storage image (For compatibility reasons)\n"
 	   "	-a, -ata    ...  Attach ATA storage image (Deprecated)\n"
            "    -cmdline    ...  Override default kernel command line\n"
            "    -append     ...  Modify kernel command line\n"
