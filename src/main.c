@@ -79,7 +79,9 @@ static void print_help()
            "    -rv32            Enable 32-bit RISC-V, 64-bit by default\n"
 #endif
            "    -k, -kernel ...  Load S-mode kernel payload (Linux, U-Boot, etc)\n"
-           "    -i, -image  ...  Attach NVMe storage image\n"
+           "    -n, -nvme   ...  Attach NVMe storage image\n"
+	   "	-i, -image  ...  Attach NVMe storage image (For compatible reasons)\n"
+	   "	-a, -ata    ...  Attach ATA storage image (Deprecated)\n"
            "    -cmdline    ...  Override default kernel command line\n"
            "    -append     ...  Modify kernel command line\n"
 	   "	-serial     ...  Add more serial ports\n"
@@ -235,6 +237,16 @@ static int rvvm_main(int argc, const char** argv)
             success = success && rvvm_load_kernel(machine, arg_val);
         } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image")) {
             if (success && !nvme_init_auto(machine, arg_val, true)) {
+                rvvm_error("Failed to attach image \"%s\"", arg_val);
+                success = false;
+            }
+	} else if (cmp_arg(arg_name, "n") || cmp_arg(arg_name, "nvme")) {
+            if (success && !nvme_init_auto(machine, arg_val, true)) {
+		rvvm_error("Failed to attach image \"%s\"", arg_val);
+		success = false;
+            }
+	} else if (cmp_arg(arg_name, "a") || cmp_arg(arg_name, "ata")) {
+            if (success && !ata_init_auto(machine, arg_val, true)) {
                 rvvm_error("Failed to attach image \"%s\"", arg_val);
                 success = false;
             }
