@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
 #include "devices/nvme.h"
+#include "devices/ata.h"
 #include "devices/eth-oc.h"
 #include "devices/rtl8169.h"
 #include "devices/i2c-oc.h"
