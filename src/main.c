@@ -82,6 +82,7 @@ static void print_help()
            "    -i, -image  ...  Attach NVMe storage image\n"
            "    -cmdline    ...  Override default kernel command line\n"
            "    -append     ...  Modify kernel command line\n"
+	   "	-serial     ...  Add more serial ports\n"
 #ifdef USE_FB
            "    -res 1280x720    Change framebuffer resoulution\n"
            "    -nogui           Disable framebuffer GUI\n"
