@@ -73,8 +73,8 @@ Argument explanation:
 [fw_jump.bin]          Initial M-mode firmware, OpenSBI in this case
 -k, -kernel u-boot.bin S-mode kernel payload (Linux Image, U-Boot, etc)
 -i, -image drive.img   Attach NVMe storage image (Raw format as of now, use -nvme instead)
--n. -nvme drive.img    Attach NVMe storage image (Raw format as of now)
--a, -ata drive.img     Attach ATA storage image (Raw format as of now)
+-nvme drive.img    Attach NVMe storage image (Raw format as of now)
+-ata drive.img     Attach ATA storage image (Raw format as of now)
 -m, -mem 2G            Memory amount (may be suffixed by k/M/G), default 256M
 -s, -smp 2             Amount of cores, single-core machine by default
 -res 1280x720          Changes framebuffer & VM window resolution
