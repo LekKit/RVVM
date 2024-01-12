@@ -803,6 +803,10 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
     maxlen_t mstatus = (FS_INITIAL << 13);
     riscv_csr_op(vm, 0x300, &mstatus, CSR_SETBITS);
 #endif
+#ifdef USE_JIT
+    // Enable pointer optimization
+    rvjit_set_native_ptrs(&vm->jit, true);
+#endif
     riscv_switch_priv(vm, PRIVILEGE_USER);
     spin_lock_slow(&global_lock);
     vector_push_back(machine->harts, vm);
