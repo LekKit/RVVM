@@ -4,6 +4,7 @@ Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
                     KotB <github.com/0xCatPKG>
+		    fish4terrisa-MSDSM <fish4terrisa@fishinix.eu.org>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -30,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
 #include "devices/nvme.h"
+#include "devices/ata.h"
 #include "devices/eth-oc.h"
 #include "devices/rtl8169.h"
 #include "devices/i2c-oc.h"
@@ -79,9 +81,12 @@ static void print_help()
            "    -rv32            Enable 32-bit RISC-V, 64-bit by default\n"
 #endif
            "    -k, -kernel ...  Load S-mode kernel payload (Linux, U-Boot, etc)\n"
-           "    -i, -image  ...  Attach NVMe storage image\n"
+           "    -nvme   ...  Attach NVMe storage image\n"
+	   "	-i, -image  ...  Attach NVMe storage image (For compatibility reasons)\n"
+	   "	-ata    ...  Attach ATA storage image (Deprecated)\n"
            "    -cmdline    ...  Override default kernel command line\n"
            "    -append     ...  Modify kernel command line\n"
+	   "	-serial     ...  Add more serial ports\n"
 #ifdef USE_FB
            "    -res 1280x720    Change framebuffer resoulution\n"
            "    -nogui           Disable framebuffer GUI\n"
@@ -234,6 +239,16 @@ static int rvvm_main(int argc, const char** argv)
             success = success && rvvm_load_kernel(machine, arg_val);
         } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image")) {
             if (success && !nvme_init_auto(machine, arg_val, true)) {
+                rvvm_error("Failed to attach image \"%s\"", arg_val);
+                success = false;
+            }
+	} else if (cmp_arg(arg_name, "nvme")) {
+            if (success && !nvme_init_auto(machine, arg_val, true)) {
+		rvvm_error("Failed to attach image \"%s\"", arg_val);
+		success = false;
+            }
+	} else if (cmp_arg(arg_name, "ata")) {
+            if (success && !ata_init_auto(machine, arg_val, true)) {
                 rvvm_error("Failed to attach image \"%s\"", arg_val);
                 success = false;
             }

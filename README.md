@@ -72,11 +72,14 @@ Argument explanation:
 ```
 [fw_jump.bin]          Initial M-mode firmware, OpenSBI in this case
 -k, -kernel u-boot.bin S-mode kernel payload (Linux Image, U-Boot, etc)
--i, -image drive.img   Attach NVMe storage image (Raw format as of now)
+-i, -image drive.img   Attach NVMe storage image (Raw format as of now, use -nvme instead)
+-nvme drive.img    Attach NVMe storage image (Raw format as of now)
+-ata drive.img     Attach ATA storage image (Raw format as of now)
 -m, -mem 2G            Memory amount (may be suffixed by k/M/G), default 256M
 -s, -smp 2             Amount of cores, single-core machine by default
 -res 1280x720          Changes framebuffer & VM window resolution
 -jitcache 64M          Raise JIT cache limit (64M recommended for complex guests)
+-serial /tmp/pts1      Add more serial ports (use stdout to bring UART over terminal as usual)
  . . .
 -rv32                  Enable 32-bit RISC-V, 64-bit by default
 -cmdline, -append ...  Override/append default kernel command line
