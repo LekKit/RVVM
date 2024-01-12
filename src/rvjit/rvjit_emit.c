@@ -853,22 +853,34 @@ static void rvjit_tlb_lookup(rvjit_block_t* block, regid_t haddr, regid_t vaddr,
 #define RVJIT32_LDST(instr, align, store) \
 void rvjit32_##instr(rvjit_block_t* block, regid_t dest, regid_t vaddr, int32_t offset) \
 { \
-    regid_t haddr = rvjit_claim_hreg(block); \
-    rvjit_tlb_lookup(block, haddr, vaddr, offset, store ? VM_TLB_W : VM_TLB_R, align); \
-    regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
-    rvjit32_native_##instr(block, hdest, haddr, 0); \
-    rvjit_free_hreg(block, haddr); \
+    if (block->native_ptrs) { \
+        regid_t haddr = rvjit_map_reg(block, vaddr, REG_SRC); \
+        regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
+        rvjit32_native_##instr(block, hdest, haddr, offset); \
+    } else { \
+        regid_t haddr = rvjit_claim_hreg(block); \
+        rvjit_tlb_lookup(block, haddr, vaddr, offset, store ? VM_TLB_W : VM_TLB_R, align); \
+        regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
+        rvjit32_native_##instr(block, hdest, haddr, 0); \
+        rvjit_free_hreg(block, haddr); \
+    } \
 }
 
 #ifdef RVJIT_NATIVE_64BIT
 #define RVJIT64_LDST(instr, align, store) \
 void rvjit64_##instr(rvjit_block_t* block, regid_t dest, regid_t vaddr, int32_t offset) \
 { \
-    regid_t haddr = rvjit_claim_hreg(block); \
-    rvjit_tlb_lookup(block, haddr, vaddr, offset, store ? VM_TLB_W : VM_TLB_R, align); \
-    regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
-    rvjit64_native_##instr(block, hdest, haddr, 0); \
-    rvjit_free_hreg(block, haddr); \
+    if (block->native_ptrs) { \
+        regid_t haddr = rvjit_map_reg(block, vaddr, REG_SRC); \
+        regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
+        rvjit64_native_##instr(block, hdest, haddr, offset); \
+    } else { \
+        regid_t haddr = rvjit_claim_hreg(block); \
+        rvjit_tlb_lookup(block, haddr, vaddr, offset, store ? VM_TLB_W : VM_TLB_R, align); \
+        regid_t hdest = rvjit_map_reg(block, dest, store ? REG_SRC : REG_DST); \
+        rvjit64_native_##instr(block, hdest, haddr, 0); \
+        rvjit_free_hreg(block, haddr); \
+    } \
 }
 #else
 #define RVJIT64_LDST(instr, align, store)

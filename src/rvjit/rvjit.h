@@ -133,6 +133,7 @@ typedef struct {
     paddr_t phys_pc;
     int32_t pc_off;
     bool rv64;
+    bool native_ptrs;
     uint8_t linkage;
 } rvjit_block_t;
 
@@ -152,6 +153,11 @@ static inline void rvjit_set_rv64(rvjit_block_t* block, bool rv64)
     UNUSED(rv64);
     block->rv64 = false;
 #endif
+}
+
+static inline void rvjit_set_native_ptrs(rvjit_block_t* block, bool native_ptrs)
+{
+    block->native_ptrs = native_ptrs;
 }
 
 // Creates a new block, prepares codegen
