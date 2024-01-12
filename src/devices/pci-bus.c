@@ -45,10 +45,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define PCI_REG_CAP_PTR       0x34
 #define PCI_REG_IRQ_PIN_LINE  0x3c
 
-#define PCI_CMD_IO_SPACE      0x1 // Accessible through IO ports
-#define PCI_CMD_MEM_SPACE     0x2 // Accessible through MMIO
-#define PCI_CMD_BUS_MASTER    0x4 // May use DMA
-#define PCI_CMD_DEFAULT       0x7
+#define PCI_CMD_IO_SPACE      0x1  // Accessible through IO ports
+#define PCI_CMD_MEM_SPACE     0x2  // Accessible through MMIO
+#define PCI_CMD_BUS_MASTER    0x4  // May use DMA
+#define PCI_CMD_MWI_ENABLE    0x10 // May use Memory Write and Invalidate
+#define PCI_CMD_DEFAULT       0x17
 #define PCI_CMD_IRQ_DISABLE   0x400
 
 #define PCI_STATUS_IRQ        0x8
