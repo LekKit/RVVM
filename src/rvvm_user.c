@@ -50,6 +50,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Guard this for now
 #if defined(__linux__) && defined(RVVM_USER_TEST)
 
+#define _GNU_SOURCE
+
 #include "rvvmlib.h"
 #include "elf_load.h"
 #include "utils.h"
@@ -70,6 +72,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/times.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 // Describes the executable to be ran
 typedef struct {
@@ -224,9 +230,29 @@ void* rvvm_user_thread(void* arg)
             rvvm_addr_t a5 = rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 15);
             rvvm_addr_t a7 = rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 17);
             switch (a7) {
+                case 17: // getcwd
+                    rvvm_info("sys_getcwd(%lx, %lx)", a0, a1);
+                    a0 = errno_ret((size_t)getcwd((void*)a0, a1));
+                    break;
+                case 24: // dup3
+                    rvvm_info("sys_dup3(%ld, %ld, %lx)", a0, a1, a2);
+                    a0 = errno_ret(dup3(a0, a1, a2));
+                    break;
+                case 25: // fcntl64
+                    rvvm_info("sys_fcntl64(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(fcntl(a0, a1, a2));
+                    break;
+                case 29: // ioctl
+                    rvvm_info("sys_ioctl(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(ioctl(a0, a1, a2));
+                    break;
                 case 48: // faccessat
                     rvvm_info("sys_faccessat(%ld, %s, %lx)", a0, (const char*)a1, a2);
                     a0 = errno_ret(faccessat(a0, (const char*)a1, a2, 0));
+                    break;
+                case 49: // chdir
+                    rvvm_info("sys_chdir(%s)", (const char*)a0);
+                    a0 = errno_ret(chdir((const char*)a0));
                     break;
                 case 56: // openat
                     rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
@@ -236,6 +262,14 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_close(%ld)", a0);
                     a0 = errno_ret(close(a0));
                     break;
+                case 59: // pipe2
+                    rvvm_info("sys_pipe2(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(pipe2((void*)a0, a1));
+                    break;
+                /*case 61: // getdents64
+                    rvvm_info("sys_getdents64(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret()
+                    break;*/
                 case 62: // lseek
                     rvvm_info("sys_lseek(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(lseek(a0, a1, a2));
@@ -248,9 +282,17 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_write(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(write(a0, (const void*)a1, a2));
                     break;
+                case 65: // readv
+                    rvvm_info("sys_readv(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(readv(a0, (const struct iovec*)a1, a2));
+                    break;
                 case 66: // writev
                     rvvm_info("sys_writev(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(writev(a0, (const struct iovec*)a1, a2));
+                    break;
+                case 73: // ppoll_time32
+                    rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = ppoll((void*)a0, a1, (void*)a2, (void*)a3);
                     break;
                 case 78: // readlinkat
                     rvvm_info("sys_readlinkat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
@@ -259,6 +301,10 @@ void* rvvm_user_thread(void* arg)
                 case 79: // newfstatat
                     rvvm_info("sys_newfstatat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(fstatat(a0, (const char*)a1, (void*)a2, a3));
+                    break;
+                case 80: // newfstat
+                    rvvm_info("sys_newfstatat(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(fstat(a0, (void*)a1));
                     break;
                 case 93: // exit
                     rvvm_info("sys_exit(%ld)", a0);
@@ -278,15 +324,45 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 113: // clock_gettime
                     rvvm_info("sys_clock_gettime(%lx, %lx)", a0, a1);
-                    a0 = clock_gettime(a0, (void*)a1);
+                    a0 = errno_ret(clock_gettime(a0, (void*)a1));
                     break;
                 case 115: // clock_nanosleep
                     //rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = clock_nanosleep(a0, a1, (const void*)a2, (void*)a3);
+                    a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
+                    break;
+                case 129: // kill
+                    rvvm_info("sys_kill(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(kill(a0, a1));
+                    break;
+                case 134: // rt_sigaction
+                    // TODO: segv with this thing
+                    rvvm_info("sys_rt_sigaction(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = 0;//errno_ret(sigaction(a0, (const void*)a1, (void*)a2));
+                    break;
+                case 135: // rt_sigprocmask
+                    // TODO: ^
+                    rvvm_info("sys_rt_sigprocmask(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = 0;//errno_ret(sigprocmask(a0, (const void*)a1, (void*)a2));
+                    break;
+                case 144: // setgid
+                    rvvm_info("sys_setgid(%lx)", a0);
+                    a0 = errno_ret(setgid(a0));
+                    break;
+                case 146: // setuid
+                    rvvm_info("sys_setuid(%lx)", a0);
+                    a0 = errno_ret(setuid(a0));
                     break;
                 case 153: // times
                     rvvm_info("sys_times(%lx)", a0);
-                    a0 = times((void*)a0);
+                    a0 = errno_ret(times((void*)a0));
+                    break;
+                case 154: // setpgid
+                    rvvm_info("sys_setpgid(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(setpgid(a0, a1));
+                    break;
+                case 155: // getpgid
+                    rvvm_info("sys_getpgid(%lx)", a0);
+                    a0 = errno_ret(getpgid(a0));
                     break;
                 case 160: // newuname
                     rvvm_info("sys_newuname(%lx)", a0);
@@ -294,30 +370,50 @@ void* rvvm_user_thread(void* arg)
                         // Just lie about the host details
                         struct new_utsname name = {
                             .sysname = "Linux",
-                            .nodename = "rvvm",
-                            .release = "6.1.0",
-                            .version = "",
+                            .nodename = "rvvm-user",
+                            .release = "6.6.6",
+                            .version = "RVVM "RVVM_VERSION,
                             .machine = "riscv64",
                         };
                         memcpy((void*)a0, &name, sizeof(name));
                         a0 = 0;
                     }
                     break;
-                case 172: // getpidtimes
+                case 172: // getpid
                     rvvm_info("sys_getpid()");
-                    a0 = getpid();
+                    a0 = errno_ret(getpid());
+                    break;
+                case 173: // getppid
+                    rvvm_info("sys_getppid()");
+                    a0 = errno_ret(getppid());
+                    break;
+                case 174: // getuid
+                    rvvm_info("sys_getuid()");
+                    a0 = errno_ret(getuid());
+                    break;
+                case 175: // geteuid
+                    rvvm_info("sys_geteuid()");
+                    a0 = errno_ret(geteuid());
+                    break;
+                case 176: // getgid
+                    rvvm_info("sys_getgid()");
+                    a0 = errno_ret(getgid());
+                    break;
+                case 178: // gettid
+                    rvvm_info("sys_gettid()");
+                    a0 = errno_ret(gettid());
                     break;
                 case 194: // shmget
                     rvvm_info("sys_shmget(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = shmget(a0, a1, a2);
+                    a0 = errno_ret(shmget(a0, a1, a2));
                     break;
                 case 196: // shmat
                     rvvm_info("sys_shmat(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = (size_t)shmat(a0, (void*)a1, a2);
+                    a0 = errno_ret((size_t)shmat(a0, (void*)a1, a2));
                     break;
                 case 197: // shmdt
                     rvvm_info("sys_shmdt(%lx)", a0);
-                    a0 = shmdt((void*)a0);
+                    a0 = errno_ret(shmdt((void*)a0));
                     break;
                 case 214: // brk
                     rvvm_info("sys_brk(%lx)", a0);
@@ -325,7 +421,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 215: // munmap
                     rvvm_info("sys_munmap(%lx, %lx)", a0, a1);
-                    a0 = munmap((void*)a0, a1);
+                    a0 = errno_ret(munmap((void*)a0, a1));
                     break;
                 case 220: // clone
                     if (a0 & 0x100) {
@@ -341,17 +437,22 @@ void* rvvm_user_thread(void* arg)
                         a0 = 1;
                     } else {
                         // This should be OK(?)
+                        rvvm_warn("sys_fork()");
                         a0 = fork();
                     }
                     break;
                 case 222: // mmap
                     rvvm_info("sys_mmap(%lx, %lx, %lx, %lx, %lx, %lx)",
                             a0, a1, a2, a3, a4, a5);
-                    a0 = (size_t)mmap((void*)a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret((size_t)mmap((void*)a0, a1, a2, a3, a4, a5));
                     break;
                 case 226: // mprotect
                     rvvm_info("sys_mprotect(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = mprotect((void*)a0, a1, a2);
+                    a0 = errno_ret(mprotect((void*)a0, a1, a2));
+                    break;
+                case 260: // wait4
+                    rvvm_info("sys_wait4(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(wait4(a0, (void*)a1, a2, (void*)a3));
                     break;
                 case 261: // prlimit64
                     rvvm_info("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
@@ -359,7 +460,8 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 278: // getrandom
                     rvvm_info("sys_getrandom(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = getrandom((char*)a0, a1, a2);
+                    rvvm_randombytes((char*)a0, a1);
+                    a0 = 0;
                     break;
                 default:
                     rvvm_warn("Unknown syscall %ld!", a7);
