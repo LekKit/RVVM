@@ -125,7 +125,7 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
             }
             void* vaddr = ((uint8_t*)elf->base) + p_vaddr;
             if (!objcopy) {
-                WRAP_ERR(vma_alloc(vaddr, p_memsz, VMA_RDWR | VMA_FIXED) == vaddr, "Failed to allocate ELF VMA");
+                WRAP_ERR(vma_alloc(vaddr, p_memsz, VMA_RWX | VMA_FIXED) == vaddr, "Failed to allocate ELF VMA");
             }
 
             WRAP_ERR(rvread(file, vaddr, p_fsize, p_offset) == p_fsize, "Failed to read ELF segment");
