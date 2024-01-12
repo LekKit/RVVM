@@ -25,7 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  * Upon debugging this thing, I figured it would be a good idea to remove
  * CPU/syscall emulation out of the equation, so simply test a combination
  * of ELF loader + stack setup thingy. So there is a native x86_64 jump_start()
- * implementation to do exactly that, and it still crashes on most binaries.
+ * implementation to do exactly that
  *
  * Some helpful resources:
  *   https://jborza.com/post/2021-05-11-riscv-linux-syscalls/
@@ -385,13 +385,14 @@ void* rvvm_user_thread(void* arg)
 static void jump_start(void* entry, void* stack_top)
 {
 #ifdef RVVM_USER_TEST_X86
+    register size_t rax __asm__("rax") = (size_t) entry;
     register size_t rsp __asm__("rsp") = (size_t) stack_top;
     register size_t rdx __asm__("rdx") = (size_t) &exit; // Why do we even need to pass this?
 
     __asm__ __volatile__(
-        "jmp *%0\n"
+        "jmp *%0;"
         :
-        : "r" (entry), "r" (rsp), "r" (rdx)
+        : "r" (rax), "r" (rsp), "r" (rdx)
         :
     );
 #else
@@ -454,6 +455,7 @@ int rvvm_user(int argc, const char** argv, const char** envp)
     void* stack_buffer = safe_calloc(STACK_SIZE, 1);
     void* stack_top = (uint8_t*)stack_buffer + STACK_SIZE;
     stack_top = init_stack(stack_top, &desc);
+    rvvm_info("Stack top at %p", stack_top);
 
     if (elf.interp_path) {
         jump_start((void*)interp.entry, stack_top);
