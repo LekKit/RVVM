@@ -81,12 +81,12 @@ static void print_help()
            "    -rv32            Enable 32-bit RISC-V, 64-bit by default\n"
 #endif
            "    -k, -kernel ...  Load S-mode kernel payload (Linux, U-Boot, etc)\n"
-           "    -nvme   ...  Attach NVMe storage image\n"
-	   "	-i, -image  ...  Attach NVMe storage image (For compatibility reasons)\n"
-	   "	-ata    ...  Attach ATA storage image (Deprecated)\n"
+           "    -i, -image  ...  Attach NVMe storage image (For compatibility reasons)\n"
            "    -cmdline    ...  Override default kernel command line\n"
            "    -append     ...  Modify kernel command line\n"
-	   "	-serial     ...  Add more serial ports\n"
+           "    -nvme       ...  Explicitly attach storage image as NVMe device\n"
+           "    -ata        ...  Explicitly attach storage image as ATA (IDE) device\n"
+           "    -serial     ...  Add more serial ports\n"
 #ifdef USE_FB
            "    -res 1280x720    Change framebuffer resoulution\n"
            "    -nogui           Disable framebuffer GUI\n"
@@ -237,17 +237,12 @@ static int rvvm_main(int argc, const char** argv)
             success = success && rvvm_load_dtb(machine, arg_val);
         } else if (cmp_arg(arg_name, "k") || cmp_arg(arg_name, "kernel")) {
             success = success && rvvm_load_kernel(machine, arg_val);
-        } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image")) {
+        } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image") || cmp_arg(arg_name, "nvme")) {
             if (success && !nvme_init_auto(machine, arg_val, true)) {
                 rvvm_error("Failed to attach image \"%s\"", arg_val);
                 success = false;
             }
-	} else if (cmp_arg(arg_name, "nvme")) {
-            if (success && !nvme_init_auto(machine, arg_val, true)) {
-		rvvm_error("Failed to attach image \"%s\"", arg_val);
-		success = false;
-            }
-	} else if (cmp_arg(arg_name, "ata")) {
+        } else if (cmp_arg(arg_name, "ata")) {
             if (success && !ata_init_auto(machine, arg_val, true)) {
                 rvvm_error("Failed to attach image \"%s\"", arg_val);
                 success = false;
