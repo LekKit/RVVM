@@ -51,6 +51,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Guard this for now
 #if defined(__linux__) && defined(RVVM_USER_TEST)
 
+#define _FILE_OFFSET_BITS 64
+#define _LARGEFILE64_SOURCE
 #define _GNU_SOURCE
 
 #include "rvvmlib.h"
@@ -78,6 +80,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <sys/eventfd.h>
+#include <sys/epoll.h>
 
 // Put syscall headers here
 #include <linux/futex.h>      /* Definition of FUTEX_* constants */
@@ -228,6 +232,16 @@ static elf_desc_t interp = {
     .base = NULL,
 };
 
+static bool proc_mem_readable(const void* addr, size_t size)
+{
+    static int fd;
+    DO_ONCE({
+        fd = memfd_create("null", 0);
+        if (fd < 0) rvvm_fatal("Failed to create memfd!");
+    });
+    return write(fd, addr, size) == (ssize_t)size;
+}
+
 // Main execution loop (Run the user CPU, handle syscalls)
 void* rvvm_user_thread(void* arg)
 {
@@ -249,6 +263,26 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_getcwd(%lx, %lx)", a0, a1);
                     a0 = errno_ret((size_t)getcwd((void*)a0, a1));
                     break;
+                case 19: // eventfd2
+                    rvvm_info("sys_eventfd2(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(eventfd(a0, a1));
+                    break;
+                case 20: // epoll_create1
+                    rvvm_info("sys_epoll_create1(%lx)", a0);
+                    a0 = errno_ret(epoll_create1(a0));
+                    break;
+                case 21: // epoll_ctl
+                    rvvm_info("sys_epoll_ctl(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(epoll_ctl(a0, a1, a2, (void*)a3));
+                    break;
+                case 22: // epoll_pwait
+                    rvvm_info("sys_epoll_pwait(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret(epoll_pwait(a0, (void*)a1, a2, a3, (const void*)a4));
+                    break;
+                case 23: // dup
+                    rvvm_info("sys_dup(%ld)", a0);
+                    a0 = errno_ret(dup(a0));
+                    break;
                 case 24: // dup3
                     rvvm_info("sys_dup3(%ld, %ld, %lx)", a0, a1, a2);
                     a0 = errno_ret(dup3(a0, a1, a2));
@@ -261,6 +295,22 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_ioctl(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(ioctl(a0, a1, a2));
                     break;
+                case 32: // flock
+                    rvvm_info("sys_flock(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(flock(a0, a1));
+                    break;
+                case 45: // truncate64
+                    rvvm_info("sys_truncate64(%s, %lx)", (const char*)a0, a1);
+                    a0 = errno_ret(truncate((const char*)a0, a1));
+                    break;
+                case 46: // ftruncate64
+                    rvvm_info("sys_ftruncate64(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(ftruncate(a0, a1));
+                    break;
+                case 47: // fallocate
+                    rvvm_info("sys_fallocate(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(fallocate(a0, a1, a2, a3));
+                    break;
                 case 48: // faccessat
                     rvvm_info("sys_faccessat(%ld, %s, %lx)", a0, (const char*)a1, a2);
                     a0 = errno_ret(faccessat(a0, (const char*)a1, a2, 0));
@@ -268,6 +318,10 @@ void* rvvm_user_thread(void* arg)
                 case 49: // chdir
                     rvvm_info("sys_chdir(%s)", (const char*)a0);
                     a0 = errno_ret(chdir((const char*)a0));
+                    break;
+                case 50: // fchdir
+                    rvvm_info("sys_fchdir(%ld)", a0);
+                    a0 = errno_ret(fchdir(a0));
                     break;
                 case 56: // openat
                     rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
@@ -299,11 +353,19 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 65: // readv
                     rvvm_info("sys_readv(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(readv(a0, (const struct iovec*)a1, a2));
+                    a0 = errno_ret(readv(a0, (const void*)a1, a2));
                     break;
                 case 66: // writev
                     rvvm_info("sys_writev(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(writev(a0, (const struct iovec*)a1, a2));
+                    a0 = errno_ret(writev(a0, (const void*)a1, a2));
+                    break;
+                case 67: // pread64
+                    rvvm_info("sys_pread64(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(pread(a0, (void*)a1, a2, a3));
+                    break;
+                case 68: // pwrite64
+                    rvvm_info("sys_pwrite64(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(pwrite(a0, (const void*)a1, a2, a3));
                     break;
                 case 73: // ppoll_time32
                     rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
@@ -507,20 +569,41 @@ void* rvvm_user_thread(void* arg)
 
             rvvm_addr_t pc = rvvm_read_cpu_reg(cpu, RVVM_REGID_PC);
             rvvm_addr_t pc_al = EVAL_MAX(pc - 16, pc & ~0xFFF);
-            rvvm_warn("Instruction bytes around PC:");
-            for (size_t i=0; i<32; ++i) {
-                printf("%02x", *(uint8_t*)(pc_al + i));
-            }
-            printf("\n");
-            for (size_t i=0; i<32; ++i) {
-                printf("%s", (pc_al + i == pc) ? "^ " : "  ");
-            }
-            printf("\n");
-            if (pc >= (size_t)elf.base && pc < (size_t)elf.base + elf.buf_size) {
-                rvvm_warn("Crash inside main binary, reloc: %lx", pc - (size_t)elf.base);
-            }
-            if (pc >= (size_t)interp.base && pc < (size_t)interp.base + interp.buf_size) {
-                rvvm_warn("Crash inside interpreter, reloc: %lx", pc - (size_t)interp.base);
+
+            rvvm_warn("Backtrace:");
+            void **fp = NULL;
+            void** next_fp = (void*)rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 8);
+            do {
+                rvvm_warn(" PC %lx", pc);
+                if (pc >= (size_t)elf.base && pc < (size_t)elf.base + elf.buf_size) {
+                    rvvm_warn("  @ Main binary, reloc: %lx", pc - (size_t)elf.base);
+                }
+                if (pc >= (size_t)interp.base && pc < (size_t)interp.base + interp.buf_size) {
+                    rvvm_warn("  @ Interpreter, reloc: %lx)", pc - (size_t)interp.base);
+                }
+                if (next_fp <= fp) break;
+                if (!proc_mem_readable(fp, 8)) {
+                    rvvm_warn(" * * * Frame pointer points to inaccessible memory!");
+                    break;
+                }
+                next_fp = fp[-2];
+                rvvm_warn("Next FP: %p", next_fp);
+                pc = (size_t)fp[-1];
+                fp = next_fp;
+            } while (true);
+
+            if (proc_mem_readable((void*)pc_al, 32)) {
+                rvvm_warn("Instruction bytes around PC:");
+                for (size_t i=0; i<32; ++i) {
+                    printf("%02x", *(uint8_t*)(pc_al + i));
+                }
+                printf("\n");
+                for (size_t i=0; i<32; ++i) {
+                    printf("%s", (pc_al + i == pc) ? "^ " : "  ");
+                }
+                printf("\n");
+            } else {
+                rvvm_warn(" * * * PC points to inaccessible memory!");
             }
             break;
         }
@@ -580,8 +663,8 @@ int rvvm_user(int argc, const char** argv, const char** envp)
         rvvm_error("Failed to load ELF %s", argv[0]);
         return -1;
     }
-    rvvm_info("Loaded ELF %s at base %lx, entry %lx",
-              argv[0], (size_t)elf.base, elf.entry);
+    rvvm_info("Loaded ELF %s at base %lx, entry %lx,\n%ld PHDRs at %lx",
+              argv[0], (size_t)elf.base, elf.entry, elf.phnum, elf.phdr);
 
     if (elf.interp_path) {
         rvvm_info("ELF interpreter at %s", elf.interp_path);
@@ -592,8 +675,8 @@ int rvvm_user(int argc, const char** argv, const char** envp)
             rvvm_error("Failed to load interpreter %s", elf.interp_path);
             return -1;
         }
-        rvvm_info("Loaded interpreter %s at base %lx, entry %lx",
-                  elf.interp_path, (size_t)interp.base, interp.entry);
+        rvvm_info("Loaded interpreter %s at base %lx, entry %lx,\n%ld PHDRs at %lx",
+                  elf.interp_path, (size_t)interp.base, interp.entry, interp.phnum, interp.phdr);
     }
 
     exec_desc_t desc = {
