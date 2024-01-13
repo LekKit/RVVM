@@ -46,6 +46,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //#define RVVM_USER_TEST
 //#define RVVM_USER_TEST_X86
+//#define RVVM_USER_TEST_RISCV
 
 // Guard this for now
 #if defined(__linux__) && defined(RVVM_USER_TEST)
@@ -76,6 +77,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
+
+// Put syscall headers here
+#include <linux/futex.h>      /* Definition of FUTEX_* constants */
+#include <sys/syscall.h>      /* Definition of SYS_* constants */
+#include <unistd.h>
 
 // Describes the executable to be ran
 typedef struct {
@@ -213,6 +220,14 @@ static void* emulated_brk(void* addr)
     return brk_ptr;
 }
 
+// This is for debugging sake
+static elf_desc_t elf = {
+    .base = NULL,
+};
+static elf_desc_t interp = {
+    .base = NULL,
+};
+
 // Main execution loop (Run the user CPU, handle syscalls)
 void* rvvm_user_thread(void* arg)
 {
@@ -266,10 +281,10 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_pipe2(%lx, %lx)", a0, a1);
                     a0 = errno_ret(pipe2((void*)a0, a1));
                     break;
-                /*case 61: // getdents64
+                case 61: // getdents64
                     rvvm_info("sys_getdents64(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret()
-                    break;*/
+                    a0 = syscall(SYS_getdents64, a0, a1, a2);
+                    break;
                 case 62: // lseek
                     rvvm_info("sys_lseek(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(lseek(a0, a1, a2));
@@ -317,6 +332,10 @@ void* rvvm_user_thread(void* arg)
                 case 96: // set_tid_address
                     rvvm_warn("sys_set_tid_address(%lx)", a0);
                     a0 = -38; // ENOSYS
+                    break;
+                case 98: // futex
+                    rvvm_info("sys_futex(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = syscall(SYS_futex, a0, a1, a2, a3, a4, a5);
                     break;
                 case 99: // set_robust_list
                     rvvm_warn("sys_set_robust_list(%lx, %lx)", a0, a1);
@@ -372,12 +391,16 @@ void* rvvm_user_thread(void* arg)
                             .sysname = "Linux",
                             .nodename = "rvvm-user",
                             .release = "6.6.6",
-                            .version = "RVVM "RVVM_VERSION,
+                            .version = "RVVM " RVVM_VERSION,
                             .machine = "riscv64",
                         };
                         memcpy((void*)a0, &name, sizeof(name));
                         a0 = 0;
                     }
+                    break;
+                case 167: // prctl
+                    rvvm_info("sys_prctl(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = errno_ret(prctl(a0, a1, a2, a3, a4));
                     break;
                 case 172: // getpid
                     rvvm_info("sys_getpid()");
@@ -470,13 +493,35 @@ void* rvvm_user_thread(void* arg)
             }
             rvvm_info("  -> %lx", a0);
             rvvm_write_cpu_reg(cpu, RVVM_REGID_X0 + 10, a0);
+            rvvm_write_cpu_reg(cpu, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC) + 4);
         } else {
-            uint8_t* pc = (uint8_t*)(size_t)rvvm_read_cpu_reg(cpu, RVVM_REGID_PC);
-            rvvm_warn("Exception at PC %p", pc);
-            rvvm_warn("SP: %lx", rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 2));
-            rvvm_warn("CAUSE: %lx", rvvm_read_cpu_reg(cpu, RVVM_REGID_CAUSE));
-            rvvm_warn("TVAL: %lx", rvvm_read_cpu_reg(cpu, RVVM_REGID_TVAL));
-            rvvm_warn("insn bytes: %02x%02x%02x%02x", pc[0], pc[1], pc[2], pc[3]);
+            // Boom!
+            rvvm_warn("Exception %lx (tval %lx) at PC %lx, SP %lx",
+                      rvvm_read_cpu_reg(cpu, RVVM_REGID_CAUSE),
+                      rvvm_read_cpu_reg(cpu, RVVM_REGID_TVAL),
+                      rvvm_read_cpu_reg(cpu, RVVM_REGID_PC),
+                      rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 2));
+            for (uint32_t i=0; i<32; ++i) {
+                rvvm_warn("X%d: %016lx", i, rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + i));
+            }
+
+            rvvm_addr_t pc = rvvm_read_cpu_reg(cpu, RVVM_REGID_PC);
+            rvvm_addr_t pc_al = EVAL_MAX(pc - 16, pc & ~0xFFF);
+            rvvm_warn("Instruction bytes around PC:");
+            for (size_t i=0; i<32; ++i) {
+                printf("%02x", *(uint8_t*)(pc_al + i));
+            }
+            printf("\n");
+            for (size_t i=0; i<32; ++i) {
+                printf("%s", (pc_al + i == pc) ? "^ " : "  ");
+            }
+            printf("\n");
+            if (pc >= (size_t)elf.base && pc < (size_t)elf.base + elf.buf_size) {
+                rvvm_warn("Crash inside main binary, reloc: %lx", pc - (size_t)elf.base);
+            }
+            if (pc >= (size_t)interp.base && pc < (size_t)interp.base + interp.buf_size) {
+                rvvm_warn("Crash inside interpreter, reloc: %lx", pc - (size_t)interp.base);
+            }
             break;
         }
     }
@@ -486,7 +531,17 @@ void* rvvm_user_thread(void* arg)
 // Jump into _start after setting up the context
 static void jump_start(void* entry, void* stack_top)
 {
-#ifdef RVVM_USER_TEST_X86
+#ifdef RVVM_USER_TEST_RISCV
+    register size_t a0 __asm__("a0") = (size_t) entry;
+    register size_t sp __asm__("sp") = (size_t) stack_top;
+
+    __asm__ __volatile__(
+        "jr a0;"
+        :
+        : "r" (a0), "r" (sp)
+        :
+    );
+#elif defined(RVVM_USER_TEST_X86)
     register size_t rax __asm__("rax") = (size_t) entry;
     register size_t rsp __asm__("rsp") = (size_t) stack_top;
     register size_t rdx __asm__("rdx") = (size_t) &exit; // Why do we even need to pass this?
@@ -512,12 +567,12 @@ static void jump_start(void* entry, void* stack_top)
 
 int rvvm_user(int argc, const char** argv, const char** envp)
 {
-    elf_desc_t elf = {
+    /*elf_desc_t elf = {
         .base = NULL,
     };
     elf_desc_t interp = {
         .base = NULL,
-    };
+    };*/
     rvfile_t* file = rvopen(argv[0], 0);
     bool success = file && elf_load_file(file, &elf);
     rvclose(file);
