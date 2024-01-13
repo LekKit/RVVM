@@ -82,6 +82,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
 #include <sys/epoll.h>
+#include <sys/vfs.h>
+#include <sys/socket.h>
 
 // Put syscall headers here
 #include <linux/futex.h>      /* Definition of FUTEX_* constants */
@@ -113,12 +115,12 @@ static char *stack_put_mem(char *stack, const void *mem, size_t len)
 
 static void *stack_put_u64(char *stack, uint64_t val)
 {
-    return stack_put_mem(stack, &val, sizeof val);
+    return stack_put_mem(stack, &val, sizeof(val));
 }
 
 static char *stack_put_str(char *stack, const char *str)
 {
-    return stack_put_mem(stack, str, strlen(str) + 1);
+    return stack_put_mem(stack, str, rvvm_strlen(str) + 1);
 }
 
 static char *init_stack(char *stack, exec_desc_t* desc)
@@ -135,7 +137,7 @@ static char *init_stack(char *stack, exec_desc_t* desc)
      */
 
     // 8. null
-    stack_put_u64(stack, 0);
+    stack = stack_put_u64(stack, 0);
 
     // 7. string data: execfn
     char *execfn = stack = stack_put_str(stack, desc->argv[0]);
@@ -167,10 +169,12 @@ static char *init_stack(char *stack, exec_desc_t* desc)
     *auxp++ = /* AT_BASE */    7; *auxp++ = desc->interp_base;
     *auxp++ = /* AT_FLAGS */   8; *auxp++ = 0;
     *auxp++ = /* AT_ENTRY */   9; *auxp++ = desc->entry;
-    *auxp++ = /* AT_UID */    11; *auxp++ = 0;
+    *auxp++ = /* AT_UID */    11; *auxp++ = 1000;
     *auxp++ = /* AT_EUID */   12; *auxp++ = 0;
     *auxp++ = /* AT_GID */    13; *auxp++ = 0;
     *auxp++ = /* AT_EGID */   14; *auxp++ = 0;
+    *auxp++ = /* AT_HWCAP */  16; *auxp++ = 0x112d;
+    *auxp++ = /* AT_CLKTCK */ 17; *auxp++ = 100;
     *auxp++ = /* AT_RANDOM */ 25; *auxp++ = (size_t)random_bytes;
     *auxp++ = /* AT_EXECFN */ 31; *auxp++ = (size_t)execfn;
     *auxp++ = /* AT_NULL */    0; *auxp++ = 0;
@@ -299,6 +303,22 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_flock(%ld, %lx)", a0, a1);
                     a0 = errno_ret(flock(a0, a1));
                     break;
+                case 34: // mkdirat
+                    rvvm_info("sys_mkdirat(%ld, %s, %lx)", a0, (const char*)a1, a2);
+                    a0 = errno_ret(mkdirat(a0, (const char*)a1, a2));
+                    break;
+                case 35: // unlinkat
+                    rvvm_info("sys_unlinkat(%ld, %s, %lx)", a0, (const char*)a1, a2);
+                    a0 = errno_ret(unlinkat(a0, (const char*)a1, a2));
+                    break;
+                case 43: // statfs64
+                    rvvm_warn("sys_statfs64(%s, %lx, %lx)", (const char*)a0, a1, a2);
+                    a0 = errno_ret(statfs((const char*)a0, (void*)a2));
+                    break;
+                case 44: // fstatfs64
+                    rvvm_warn("sys_fstatfs64(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(fstatfs(a0, (void*)a2));
+                    break;
                 case 45: // truncate64
                     rvvm_info("sys_truncate64(%s, %lx)", (const char*)a0, a1);
                     a0 = errno_ret(truncate((const char*)a0, a1));
@@ -337,7 +357,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 61: // getdents64
                     rvvm_info("sys_getdents64(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = syscall(SYS_getdents64, a0, a1, a2);
+                    a0 = errno_ret(syscall(SYS_getdents64, a0, a1, a2));
                     break;
                 case 62: // lseek
                     rvvm_info("sys_lseek(%ld, %lx, %lx)", a0, a1, a2);
@@ -366,6 +386,10 @@ void* rvvm_user_thread(void* arg)
                 case 68: // pwrite64
                     rvvm_info("sys_pwrite64(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(pwrite(a0, (const void*)a1, a2, a3));
+                    break;
+                case 72: // pselect6_time32
+                    rvvm_info("sys_pselect6_time32(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = pselect(a0, (void*)a1, (void*)a2, (void*)a3, (void*)a4, (void*)a5);
                     break;
                 case 73: // ppoll_time32
                     rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
@@ -397,7 +421,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 98: // futex
                     rvvm_info("sys_futex(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = syscall(SYS_futex, a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret(syscall(SYS_futex, a0, a1, a2, a3, a4, a5));
                     break;
                 case 99: // set_robust_list
                     rvvm_warn("sys_set_robust_list(%lx, %lx)", a0, a1);
@@ -415,15 +439,19 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_kill(%lx, %lx)", a0, a1);
                     a0 = errno_ret(kill(a0, a1));
                     break;
+                case 130: // tkill
+                    rvvm_info("sys_tkill(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(tgkill(getpid(), a0, a1));
+                    break;
                 case 134: // rt_sigaction
                     // TODO: segv with this thing
                     rvvm_info("sys_rt_sigaction(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = 0;//errno_ret(sigaction(a0, (const void*)a1, (void*)a2));
+                    a0 = -38;//errno_ret(sigaction(a0, (const void*)a1, (void*)a2));
                     break;
                 case 135: // rt_sigprocmask
                     // TODO: ^
                     rvvm_info("sys_rt_sigprocmask(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = 0;//errno_ret(sigprocmask(a0, (const void*)a1, (void*)a2));
+                    a0 = -38;//errno_ret(sigprocmask(a0, (const void*)a1, (void*)a2));
                     break;
                 case 144: // setgid
                     rvvm_info("sys_setgid(%lx)", a0);
@@ -460,6 +488,10 @@ void* rvvm_user_thread(void* arg)
                         a0 = 0;
                     }
                     break;
+                case 166: // umask
+                    rvvm_info("sys_umask(%lx)", a0);
+                    a0 = errno_ret(umask(a0));
+                    break;
                 case 167: // prctl
                     rvvm_info("sys_prctl(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                     a0 = errno_ret(prctl(a0, a1, a2, a3, a4));
@@ -484,6 +516,10 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_getgid()");
                     a0 = errno_ret(getgid());
                     break;
+                case 177: // getegid
+                    rvvm_info("sys_getegid()");
+                    a0 = errno_ret(getegid());
+                    break;
                 case 178: // gettid
                     rvvm_info("sys_gettid()");
                     a0 = errno_ret(gettid());
@@ -500,6 +536,58 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_shmdt(%lx)", a0);
                     a0 = errno_ret(shmdt((void*)a0));
                     break;
+                case 198: // socket
+                    rvvm_info("sys_socket(%lx, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(socket(a0, a1, a2));
+                    break;
+                case 200: // bind
+                    rvvm_info("sys_bind(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(bind(a0, (void*)a1, a2));
+                    break;
+                case 201: // listen
+                    rvvm_info("sys_listen(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(listen(a0, a1));
+                    break;
+                case 202: // accept
+                    rvvm_info("sys_accept(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(accept(a0, (void*)a1, (void*)a2));
+                    break;
+                case 203: // connect
+                    rvvm_info("sys_connect(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(connect(a0, (void*)a1, a2));
+                    break;
+                case 204: // getsockname
+                    rvvm_info("sys_getsockname(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(getsockname(a0, (void*)a1, (void*)a2));
+                    break;
+                case 205: // getpeername
+                    rvvm_info("sys_getpeername(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(getpeername(a0, (void*)a1, (void*)a2));
+                    break;
+                case 206: // sendto
+                    rvvm_info("sys_sendto(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret(sendto(a0, (const void*)a1, a2, a3, (void*)a4, a5));
+                    break;
+                case 207: // recvfrom
+                    rvvm_info("sys_recvfrom(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret(recvfrom(a0, (void*)a1, a2, a3, (void*)a4, (void*)a5));
+                    break;
+                case 208: // setsockopt
+                    rvvm_info("sys_setsockopt(%ld, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = errno_ret(setsockopt(a0, a1, a2, (void*)a3, a4));
+                    break;
+                case 209: // getsockopt
+                    rvvm_info("sys_getsockopt(%ld, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = errno_ret(getsockopt(a0, a1, a2, (void*)a3, (void*)a4));
+                    break;
+                case 210: // shutdown
+                    rvvm_info("sys_shutdown(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(shutdown(a0, a1));
+                    break;
+                case 212: // recvmsg
+                    rvvm_info("sys_recvmsg(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(recvmsg(a0, (void*)a1, a2));
+                    break;
                 case 214: // brk
                     rvvm_info("sys_brk(%lx)", a0);
                     a0 = (size_t)emulated_brk((void*)a0);
@@ -507,6 +595,10 @@ void* rvvm_user_thread(void* arg)
                 case 215: // munmap
                     rvvm_info("sys_munmap(%lx, %lx)", a0, a1);
                     a0 = errno_ret(munmap((void*)a0, a1));
+                    break;
+                case 216: // mremap
+                    rvvm_info("sys_mremap(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = errno_ret((size_t)mremap((void*)a0, a1, a2, a3, (void*)a4));
                     break;
                 case 220: // clone
                     if (a0 & 0x100) {
@@ -523,7 +615,7 @@ void* rvvm_user_thread(void* arg)
                     } else {
                         // This should be OK(?)
                         rvvm_warn("sys_fork()");
-                        a0 = fork();
+                        a0 = errno_ret(fork());
                     }
                     break;
                 case 222: // mmap
@@ -535,18 +627,38 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_mprotect(%lx, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(mprotect((void*)a0, a1, a2));
                     break;
+                case 233: // madvise
+                    rvvm_info("sys_madvise(%lx, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(madvise((void*)a0, a1, a2));
+                    break;
+                case 242: // accept4
+                    rvvm_info("sys_accept4(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
+                    break;
                 case 260: // wait4
                     rvvm_info("sys_wait4(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(wait4(a0, (void*)a1, a2, (void*)a3));
                     break;
                 case 261: // prlimit64
-                    rvvm_info("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    rvvm_warn("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = 0;
+                    break;
+                case 276: // renameat2
+                    rvvm_info("sys_renameat2(%ld, %s, %ld, %s, %lx)", a0, (const char*)a1, a2, (const char*)a3, a4);
+                    a0 = errno_ret(renameat2(a0, (const char*)a1, a2, (const char*)a3, a4));
                     break;
                 case 278: // getrandom
                     rvvm_info("sys_getrandom(%lx, %lx, %lx)", a0, a1, a2);
                     rvvm_randombytes((char*)a0, a1);
                     a0 = 0;
+                    break;
+                case 279: // memfd_create
+                    rvvm_info("sys_memfd_create(%s, %lx)", (const char*)a0, a1);
+                    a0 = errno_ret(memfd_create((const char*)a0, a1));
+                    break;
+                case 439: // faccessat2
+                    rvvm_info("sys_faccessat2(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
+                    a0 = errno_ret(faccessat(a0, (const char*)a1, a2, a3));
                     break;
                 default:
                     rvvm_warn("Unknown syscall %ld!", a7);
