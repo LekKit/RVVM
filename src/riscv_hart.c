@@ -113,8 +113,10 @@ rvvm_addr_t riscv_hart_run_userland(rvvm_hart_t* vm)
 #ifdef USE_SJLJ
     setjmp(vm->unwind);
 #endif
-    if (atomic_load_uint32(&vm->wait_event)) {
-        riscv_run_till_event(vm);
+    riscv_run_till_event(vm);
+    if (vm->trap) {
+        vm->registers[REGISTER_PC] = vm->csr.tvec[PRIVILEGE_USER];
+        vm->trap = false;
     }
     return vm->csr.cause[PRIVILEGE_USER];
 }
@@ -205,6 +207,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
         // Defer usermode trap
         vm->csr.cause[PRIVILEGE_USER] = cause;
         vm->csr.tval[PRIVILEGE_USER] = tval;
+        vm->csr.tvec[PRIVILEGE_USER] = vm->registers[REGISTER_PC];
     } else {
         // Target privilege mode
         uint8_t priv = PRIVILEGE_MACHINE;
