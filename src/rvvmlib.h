@@ -43,7 +43,7 @@ extern "C" {
 #ifndef RVVM_VERSION
 #define RVVM_VERSION "0.6-git"
 #endif
-#define RVVM_ABI_VERSION     5
+#define RVVM_ABI_VERSION     6
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
 #define RVVM_OPT_NONE           0
@@ -233,6 +233,7 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine);
 PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu);
 
 // Run a userland thread until a trap happens. Returns trap cause.
+// PC points to faulty instruction upon return.
 PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu);
 
 PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id);
