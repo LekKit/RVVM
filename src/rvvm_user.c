@@ -190,7 +190,8 @@ static char *init_stack(char *stack, exec_desc_t* desc)
     return stack;
 }
 
-struct new_utsname {
+// RISC-V UAPI struct definitions & conversions
+struct uapi_new_utsname {
     char sysname[65];
     char nodename[65];
     char release[65];
@@ -198,6 +199,78 @@ struct new_utsname {
     char machine[65];
     char domainname[65];
 };
+
+struct uapi_stat {
+    unsigned long   dev;
+    unsigned long   ino;
+    unsigned int    mode;
+    unsigned int    nlink;
+    unsigned int    uid;
+    unsigned int    gid;
+    unsigned long   rdev;
+    unsigned long   pad1;
+    long            size;
+    int             blksize;
+    int             pad2;
+    long            blocks;
+    long            atime;
+    unsigned long   atime_nsec;
+    long            mtime;
+    unsigned long   mtime_nsec;
+    long            ctime;
+    unsigned long   ctime_nsec;
+    unsigned int    unused4;
+    unsigned int    unused5;
+};
+
+struct uapi_statfs64 {
+    size_t   type;
+    size_t   bsize;
+    uint64_t blocks;
+    uint64_t bfree;
+    uint64_t bavail;
+    uint64_t files;
+    uint64_t ffree;
+    struct {
+        int val[2];
+    } fsid;
+    size_t   namelen;
+    size_t   frsize;
+    size_t   flags;
+    size_t   spare[4];
+};
+
+static void uapi_stat_convert(struct uapi_stat* dst, const struct stat* src)
+{
+    dst->dev = src->st_dev;
+    dst->ino = src->st_ino;
+    dst->mode = src->st_mode;
+    dst->nlink = src->st_nlink;
+    dst->uid = src->st_uid;
+    dst->gid = src->st_gid;
+    dst->rdev = src->st_rdev;
+    dst->size = src->st_size;
+    dst->blksize = src->st_blksize;
+    dst->blocks = src->st_blocks;
+    dst->atime = src->st_atime;
+    dst->mtime = src->st_mtime;
+    dst->ctime = src->st_ctime;
+}
+
+static void uapi_statfs64_convert(struct uapi_statfs64* dst, const struct statfs* src)
+{
+    dst->type = src->f_type;
+    dst->bsize = src->f_bsize;
+    dst->blocks = src->f_blocks;
+    dst->bfree = src->f_bfree;
+    dst->bavail = src->f_bavail;
+    dst->files = src->f_files;
+    dst->ffree = src->f_ffree;
+    //dst->fsid = src->f_fsid;
+    dst->namelen = src->f_namelen;
+    dst->frsize = src->f_frsize;
+    dst->flags = src->f_flags;
+}
 
 static rvvm_machine_t* proc_ctx; // Emulated RVVM process context
 
@@ -265,7 +338,7 @@ void* rvvm_user_thread(void* arg)
             switch (a7) {
                 case 17: // getcwd
                     rvvm_info("sys_getcwd(%lx, %lx)", a0, a1);
-                    a0 = errno_ret((size_t)getcwd((void*)a0, a1));
+                    a0 = errno_ret((size_t)getcwd((char*)a0, a1));
                     break;
                 case 19: // eventfd2
                     rvvm_info("sys_eventfd2(%lx, %lx)", a0, a1);
@@ -276,10 +349,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(epoll_create1(a0));
                     break;
                 case 21: // epoll_ctl
+                    // TODO struct conversion
                     rvvm_info("sys_epoll_ctl(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(epoll_ctl(a0, a1, a2, (void*)a3));
                     break;
                 case 22: // epoll_pwait
+                    // TODO struct conversion
                     rvvm_info("sys_epoll_pwait(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = errno_ret(epoll_pwait(a0, (void*)a1, a2, a3, (const void*)a4));
                     break;
@@ -311,14 +386,20 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_unlinkat(%ld, %s, %lx)", a0, (const char*)a1, a2);
                     a0 = errno_ret(unlinkat(a0, (const char*)a1, a2));
                     break;
-                case 43: // statfs64
+                case 43: { // statfs64
+                    struct statfs stfs = {0};
                     rvvm_warn("sys_statfs64(%s, %lx, %lx)", (const char*)a0, a1, a2);
-                    a0 = errno_ret(statfs((const char*)a0, (void*)a2));
+                    a0 = errno_ret(statfs((const char*)a0, &stfs));
+                    uapi_statfs64_convert((struct uapi_statfs64*)a2, &stfs);
                     break;
-                case 44: // fstatfs64
+                }
+                case 44: { // fstatfs64
+                    struct statfs stfs = {0};
                     rvvm_warn("sys_fstatfs64(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(fstatfs(a0, (void*)a2));
+                    a0 = errno_ret(fstatfs(a0, &stfs));
+                    uapi_statfs64_convert((struct uapi_statfs64*)a2, &stfs);
                     break;
+                }
                 case 45: // truncate64
                     rvvm_info("sys_truncate64(%s, %lx)", (const char*)a0, a1);
                     a0 = errno_ret(truncate((const char*)a0, a1));
@@ -372,10 +453,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(write(a0, (const void*)a1, a2));
                     break;
                 case 65: // readv
+                    // TODO struct conversion
                     rvvm_info("sys_readv(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(readv(a0, (const void*)a1, a2));
                     break;
                 case 66: // writev
+                    // TODO struct conversion
                     rvvm_info("sys_writev(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(writev(a0, (const void*)a1, a2));
                     break;
@@ -388,10 +471,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(pwrite(a0, (const void*)a1, a2, a3));
                     break;
                 case 72: // pselect6_time32
+                    // TODO struct conversion(?)
                     rvvm_info("sys_pselect6_time32(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = pselect(a0, (void*)a1, (void*)a2, (void*)a3, (void*)a4, (void*)a5);
                     break;
                 case 73: // ppoll_time32
+                    // TODO struct conversion
                     rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                     a0 = ppoll((void*)a0, a1, (void*)a2, (void*)a3);
                     break;
@@ -399,14 +484,20 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_readlinkat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(readlinkat(a0, (const char*)a1, (char*)a2, a3));
                     break;
-                case 79: // newfstatat
-                    rvvm_info("sys_newfstatat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(fstatat(a0, (const char*)a1, (void*)a2, a3));
+                case 79: { // newfstatat
+                    struct stat st = {0};
+                    rvvm_info("sys_newfstatat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
+                    a0 = errno_ret(fstatat(a0, (const char*)a1, &st, a3));
+                    uapi_stat_convert((struct uapi_stat*)a2, &st);
                     break;
-                case 80: // newfstat
-                    rvvm_info("sys_newfstatat(%ld, %lx)", a0, a1);
-                    a0 = errno_ret(fstat(a0, (void*)a1));
+                }
+                case 80: { // newfstat
+                    struct stat st = {0};
+                    rvvm_info("sys_newfstat(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(fstat(a0, &st));
+                    uapi_stat_convert((struct uapi_stat*)a1, &st);
                     break;
+                }
                 case 93: // exit
                     rvvm_info("sys_exit(%ld)", a0);
                     exit(a0);
@@ -428,10 +519,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = -38; // ENOSYS
                     break;
                 case 113: // clock_gettime
+                    // TODO struct conversion
                     rvvm_info("sys_clock_gettime(%lx, %lx)", a0, a1);
                     a0 = errno_ret(clock_gettime(a0, (void*)a1));
                     break;
                 case 115: // clock_nanosleep
+                    // TODO struct conversion
                     //rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
                     break;
@@ -445,6 +538,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 134: // rt_sigaction
                     // TODO: segv with this thing
+                    // TODO struct conversion
                     rvvm_info("sys_rt_sigaction(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = -38;//errno_ret(sigaction(a0, (const void*)a1, (void*)a2));
                     break;
@@ -462,6 +556,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(setuid(a0));
                     break;
                 case 153: // times
+                    // TODO struct conversion
                     rvvm_info("sys_times(%lx)", a0);
                     a0 = errno_ret(times((void*)a0));
                     break;
@@ -477,7 +572,7 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_newuname(%lx)", a0);
                     if (a0) {
                         // Just lie about the host details
-                        struct new_utsname name = {
+                        struct uapi_new_utsname name = {
                             .sysname = "Linux",
                             .nodename = "rvvm-user",
                             .release = "6.6.6",
@@ -541,6 +636,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(socket(a0, a1, a2));
                     break;
                 case 200: // bind
+                    // TODO struct conversion
                     rvvm_info("sys_bind(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(bind(a0, (void*)a1, a2));
                     break;
@@ -549,26 +645,32 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(listen(a0, a1));
                     break;
                 case 202: // accept
+                    // TODO struct conversion
                     rvvm_info("sys_accept(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(accept(a0, (void*)a1, (void*)a2));
                     break;
                 case 203: // connect
+                    // TODO struct conversion
                     rvvm_info("sys_connect(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(connect(a0, (void*)a1, a2));
                     break;
                 case 204: // getsockname
+                    // TODO struct conversion
                     rvvm_info("sys_getsockname(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(getsockname(a0, (void*)a1, (void*)a2));
                     break;
                 case 205: // getpeername
+                    // TODO struct conversion
                     rvvm_info("sys_getpeername(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(getpeername(a0, (void*)a1, (void*)a2));
                     break;
                 case 206: // sendto
+                    // TODO struct conversion
                     rvvm_info("sys_sendto(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = errno_ret(sendto(a0, (const void*)a1, a2, a3, (void*)a4, a5));
                     break;
                 case 207: // recvfrom
+                    // TODO struct conversion
                     rvvm_info("sys_recvfrom(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = errno_ret(recvfrom(a0, (void*)a1, a2, a3, (void*)a4, (void*)a5));
                     break;
@@ -585,6 +687,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(shutdown(a0, a1));
                     break;
                 case 212: // recvmsg
+                    // TODO struct conversion
                     rvvm_info("sys_recvmsg(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(recvmsg(a0, (void*)a1, a2));
                     break;
@@ -632,14 +735,17 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(madvise((void*)a0, a1, a2));
                     break;
                 case 242: // accept4
+                    // TODO struct conversion
                     rvvm_info("sys_accept4(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
                     break;
                 case 260: // wait4
+                    // TODO struct conversion
                     rvvm_info("sys_wait4(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(wait4(a0, (void*)a1, a2, (void*)a3));
                     break;
                 case 261: // prlimit64
+                    // TODO struct conversion
                     rvvm_warn("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = 0;
                     break;
