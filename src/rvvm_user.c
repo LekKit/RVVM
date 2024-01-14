@@ -84,6 +84,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/epoll.h>
 #include <sys/vfs.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
+#include <sys/sysinfo.h>
 
 // Put syscall headers here
 #include <linux/futex.h>      /* Definition of FUTEX_* constants */
@@ -371,6 +373,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(fcntl(a0, a1, a2));
                     break;
                 case 29: // ioctl
+                    // TODO: I sure hope not many ioctl() interfaces need struct conversion...
                     rvvm_info("sys_ioctl(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(ioctl(a0, a1, a2));
                     break;
@@ -434,9 +437,10 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 59: // pipe2
                     rvvm_info("sys_pipe2(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(pipe2((void*)a0, a1));
+                    a0 = errno_ret(pipe2((int*)a0, a1));
                     break;
                 case 61: // getdents64
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_getdents64(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(syscall(SYS_getdents64, a0, a1, a2));
                     break;
@@ -453,12 +457,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(write(a0, (const void*)a1, a2));
                     break;
                 case 65: // readv
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_readv(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(readv(a0, (const void*)a1, a2));
                     break;
                 case 66: // writev
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_writev(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(writev(a0, (const void*)a1, a2));
                     break;
@@ -471,12 +475,12 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(pwrite(a0, (const void*)a1, a2, a3));
                     break;
                 case 72: // pselect6_time32
-                    // TODO struct conversion(?)
+                    // TODO: struct conversion
                     rvvm_info("sys_pselect6_time32(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = pselect(a0, (void*)a1, (void*)a2, (void*)a3, (void*)a4, (void*)a5);
                     break;
                 case 73: // ppoll_time32
-                    // TODO struct conversion
+                    // TODO: struct conversion
                     rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                     a0 = ppoll((void*)a0, a1, (void*)a2, (void*)a3);
                     break;
@@ -519,13 +523,13 @@ void* rvvm_user_thread(void* arg)
                     a0 = -38; // ENOSYS
                     break;
                 case 113: // clock_gettime
-                    // TODO struct conversion
+                    // TODO: struct conversion?
                     rvvm_info("sys_clock_gettime(%lx, %lx)", a0, a1);
                     a0 = errno_ret(clock_gettime(a0, (void*)a1));
                     break;
                 case 115: // clock_nanosleep
-                    // TODO struct conversion
-                    //rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    // TODO: struct conversion?
+                    rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
                     break;
                 case 129: // kill
@@ -538,7 +542,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 134: // rt_sigaction
                     // TODO: segv with this thing
-                    // TODO struct conversion
+                    // TODO: struct conversion
                     rvvm_info("sys_rt_sigaction(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = -38;//errno_ret(sigaction(a0, (const void*)a1, (void*)a2));
                     break;
@@ -556,7 +560,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(setuid(a0));
                     break;
                 case 153: // times
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_times(%lx)", a0);
                     a0 = errno_ret(times((void*)a0));
                     break;
@@ -619,6 +623,11 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_gettid()");
                     a0 = errno_ret(gettid());
                     break;
+                case 179: // sysinfo
+                    // TODO: struct conversion(?)
+                    rvvm_info("sys_sysinfo(%lx)", a0);
+                    a0 = errno_ret(sysinfo((void*)a0));
+                    break;
                 case 194: // shmget
                     rvvm_info("sys_shmget(%lx, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(shmget(a0, a1, a2));
@@ -635,6 +644,10 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_socket(%lx, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(socket(a0, a1, a2));
                     break;
+                case 199: // socketpair
+                    rvvm_info("sys_socketpair(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(socketpair(a0, a1, a2, (int*)a3));
+                    break;
                 case 200: // bind
                     // TODO struct conversion
                     rvvm_info("sys_bind(%ld, %lx, %lx)", a0, a1, a2);
@@ -645,32 +658,32 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(listen(a0, a1));
                     break;
                 case 202: // accept
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_accept(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(accept(a0, (void*)a1, (void*)a2));
                     break;
                 case 203: // connect
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_connect(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(connect(a0, (void*)a1, a2));
                     break;
                 case 204: // getsockname
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_getsockname(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(getsockname(a0, (void*)a1, (void*)a2));
                     break;
                 case 205: // getpeername
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_getpeername(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(getpeername(a0, (void*)a1, (void*)a2));
                     break;
                 case 206: // sendto
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_sendto(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = errno_ret(sendto(a0, (const void*)a1, a2, a3, (void*)a4, a5));
                     break;
                 case 207: // recvfrom
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_recvfrom(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
                     a0 = errno_ret(recvfrom(a0, (void*)a1, a2, a3, (void*)a4, (void*)a5));
                     break;
@@ -687,7 +700,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(shutdown(a0, a1));
                     break;
                 case 212: // recvmsg
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_recvmsg(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(recvmsg(a0, (void*)a1, a2));
                     break;
@@ -704,11 +717,11 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret((size_t)mremap((void*)a0, a1, a2, a3, (void*)a4));
                     break;
                 case 220: // clone
+                    rvvm_warn("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                     if (a0 & 0x100) {
                         // CLONE_VM (Aka fork for threads)
                         // TODO this is spectacularly broken I guess
                         rvvm_cpu_handle_t thread = rvvm_create_user_thread(proc_ctx);
-                        rvvm_warn("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                         rvvm_write_cpu_reg(thread, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC));
                         rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 2, a1); // sp
                         rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 4, a4); // tp
@@ -735,19 +748,19 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(madvise((void*)a0, a1, a2));
                     break;
                 case 242: // accept4
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_accept4(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
                     break;
                 case 260: // wait4
-                    // TODO struct conversion
+                    // TODO: struct conversion(?)
                     rvvm_info("sys_wait4(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(wait4(a0, (void*)a1, a2, (void*)a3));
                     break;
                 case 261: // prlimit64
-                    // TODO struct conversion
-                    rvvm_warn("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = 0;
+                    // TODO: struct conversion(?)
+                    rvvm_info("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
+                    a0 = errno_ret(prlimit(a0, a1, (const void*)a2, (void*)a3));
                     break;
                 case 276: // renameat2
                     rvvm_info("sys_renameat2(%ld, %s, %ld, %s, %lx)", a0, (const char*)a1, a2, (const char*)a3, a4);
