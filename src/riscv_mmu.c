@@ -99,7 +99,7 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
     vm->tlb[vpn & TLB_MASK].w = vpn - 1;
     vm->tlb[vpn & TLB_MASK].e = vpn - 1;
 #ifdef USE_JIT
-    vm->jtlb[(addr >> 1) & TLB_MASK].pc = addr - 1;
+    riscv_jit_tlb_flush(vm);
 #endif
     if (vpn == (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
         riscv_restart_dispatch(vm);
@@ -169,7 +169,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         // If we are supervisor with SUM bit set, rw operations are allowed
                         // MXR sets access to MMU_READ | MMU_EXEC
                         if (access == MMU_EXEC ||
-                            priv != PRIVILEGE_SUPERVISOR || 
+                            priv != PRIVILEGE_SUPERVISOR ||
                             (vm->csr.status & CSR_STATUS_SUM) == 0)
                             return false;
                     }
@@ -229,7 +229,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                         // If we are supervisor with SUM bit set, rw operations are allowed
                         // MXR sets access to MMU_READ | MMU_EXEC
                         if (access == MMU_EXEC ||
-                            priv != PRIVILEGE_SUPERVISOR || 
+                            priv != PRIVILEGE_SUPERVISOR ||
                             (vm->csr.status & CSR_STATUS_SUM) == 0)
                             return false;
                     }
