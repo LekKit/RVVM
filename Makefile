@@ -292,6 +292,7 @@ USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
 USE_PCI ?= 1
 USE_SPINLOCK_DEBUG ?= 1
+USE_JNI ?= 1
 
 ifeq ($(USE_RV64),1)
 override CFLAGS += -DUSE_RV64
@@ -458,6 +459,15 @@ ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
+# Do not pass lib-related flags for dev builds (Faster)
+ifneq (,$(MAKECMDGOALS))
+override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
+# Build JNI bindings inside librvvm dynlib
+ifeq ($(USE_JNI),1)
+SRC += $(SRCDIR)/bindings/jni/rvvm_jni.c
+endif
+endif
+
 # Rules for object files from sources
 OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 OBJ_CXX := $(SRC_CXX:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
@@ -480,11 +490,6 @@ ifeq ($(HOST_POSIX),1)
 $(shell mkdir -p $(DIRS))
 else
 $(shell mkdir $(subst /,\\, $(DIRS)) $(NULL_STDERR))
-endif
-
-# Do not pass lib-related flags for dev builds (Faster)
-ifneq (,$(MAKECMDGOALS))
-override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
 endif
 
 # Check previous buildflags
