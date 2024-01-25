@@ -95,6 +95,7 @@ public class RVVMNative {
 
     public static native void pci_remove_device(long dev);
 
+    public static native void hid_mouse_resolution(long mouse, int x, int y);
     public static native void hid_mouse_place(long mouse, int x, int y);
     public static native void hid_mouse_move(long mouse, int x, int y);
     public static native void hid_mouse_press(long mouse, byte btns);

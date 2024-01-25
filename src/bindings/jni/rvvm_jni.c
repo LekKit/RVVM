@@ -283,6 +283,12 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_pci_1remove_1device(JNIEnv* e
     pci_remove_device((pci_dev_t*)(size_t)pci_dev);
 }
 
+JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1mouse_1resolution(JNIEnv* env, jclass class, jlong mice, jint x, jint y)
+{
+    UNUSED(env); UNUSED(class);
+    hid_mouse_resolution((hid_mouse_t*)(size_t)mice, x, y);
+}
+
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1mouse_1place(JNIEnv* env, jclass class, jlong mice, jint x, jint y)
 {
     UNUSED(env); UNUSED(class);
