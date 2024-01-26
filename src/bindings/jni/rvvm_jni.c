@@ -204,22 +204,19 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_i2c_1bus_1init_1auto(JNIEnv*
 JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    ns16550a_init_term_auto((rvvm_machine_t*)(size_t)machine);
-    return 0;
+    return ns16550a_init_term_auto((rvvm_machine_t*)(size_t)machine);
 }
 
 JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_rtc_1goldfish_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    rtc_goldfish_init_auto((rvvm_machine_t*)(size_t)machine);
-    return 0;
+    return rtc_goldfish_init_auto((rvvm_machine_t*)(size_t)machine);
 }
 
 JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_syscon_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    syscon_init_auto((rvvm_machine_t*)(size_t)machine);
-    return 0;
+    return syscon_init_auto((rvvm_machine_t*)(size_t)machine);
 }
 
 JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_rtl8169_1init_1auto(JNIEnv* env, jclass class, jlong machine)
@@ -257,8 +254,7 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEn
     };
     UNUSED(class);
     if (fb_ctx.buffer && framebuffer_size(&fb_ctx) == buf_size) {
-        framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
-        return 0;
+        return framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
     } else {
         rvvm_warn("Invalid ByteBuffer passed to JNI framebuffer_init_auto()");
         return RVVM_INVALID_MMIO;
