@@ -18,21 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "syscon.h"
 #include "mem_ops.h"
-
-#ifdef USE_FDT
 #include "fdtlib.h"
-#endif
 
 #define SYSCON_POWEROFF 0x5555
 #define SYSCON_RESET    0x7777
-
-static bool syscon_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
-{
-    UNUSED(dev);
-    UNUSED(offset);
-    memset(data, 0, size);
-    return true;
-}
 
 static bool syscon_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
@@ -54,17 +43,19 @@ static rvvm_mmio_type_t syscon_dev_type = {
     .name = "syscon",
 };
 
-PUBLIC void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
+PUBLIC rvvm_mmio_handle_t syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
-    rvvm_mmio_dev_t syscon = {0};
-    syscon.min_op_size = 2;
-    syscon.max_op_size = 8;
-    syscon.read = syscon_mmio_read;
-    syscon.write = syscon_mmio_write;
-    syscon.type = &syscon_dev_type;
-    syscon.addr = base_addr;
-    syscon.size = 0x1000;
-    rvvm_attach_mmio(machine, &syscon);
+    rvvm_mmio_dev_t syscon = {
+        .addr = base_addr,
+        .size = 0x1000,
+        .read = rvvm_mmio_none,
+        .write = syscon_mmio_write,
+        .min_op_size = 2,
+        .max_op_size = 2,
+        .type = &syscon_dev_type,
+    };
+    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &syscon);
+    if (handle == RVVM_INVALID_MMIO) return handle;
 #ifdef USE_FDT
     struct fdt_node* test = fdt_node_create_reg("test", base_addr);
     fdt_node_add_prop_reg(test, "reg", base_addr, 0x1000);
@@ -85,10 +76,11 @@ PUBLIC void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
     fdt_node_add_prop_u32(reboot, "regmap", fdt_node_get_phandle(test));
     fdt_node_add_child(rvvm_get_fdt_soc(machine), reboot);
 #endif
+    return handle;
 }
 
-PUBLIC void syscon_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_handle_t syscon_init_auto(rvvm_machine_t* machine)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, SYSCON_DEFAULT_MMIO, 0x1000);
-    syscon_init(machine, addr);
+    return syscon_init(machine, addr);
 }

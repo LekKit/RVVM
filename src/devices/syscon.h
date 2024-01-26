@@ -16,14 +16,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef SYSCON_H
-#define SYSCON_H
+#ifndef RVVM_SYSCON_H
+#define RVVM_SYSCON_H
 
 #include "rvvmlib.h"
 
 #define SYSCON_DEFAULT_MMIO 0x100000
 
-PUBLIC void syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
-PUBLIC void syscon_init_auto(rvvm_machine_t* machine);
+PUBLIC rvvm_mmio_handle_t syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
+PUBLIC rvvm_mmio_handle_t syscon_init_auto(rvvm_machine_t* machine);
 
 #endif
