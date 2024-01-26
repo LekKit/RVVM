@@ -17,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef NS16550A_H
-#define NS16550A_H
+#ifndef RVVM_NS16550A_H
+#define RVVM_NS16550A_H
 
 #include "rvvmlib.h"
 #include "plic.h"
@@ -26,9 +26,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define NS16550A_DEFAULT_MMIO 0x10000000
 
-PUBLIC void ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
-                          rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
-PUBLIC void ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev);
-PUBLIC void ns16550a_init_term_auto(rvvm_machine_t* machine);
+PUBLIC rvvm_mmio_handle_t ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
+                                        rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
+PUBLIC rvvm_mmio_handle_t ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev);
+PUBLIC rvvm_mmio_handle_t ns16550a_init_term_auto(rvvm_machine_t* machine);
 
 #endif // NS16550A_H
