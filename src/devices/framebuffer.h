@@ -77,7 +77,7 @@ static inline size_t framebuffer_size(const fb_ctx_t* fb)
 
 // Attach initialized framebuffer context to the machine
 // The buffer is not freed automatically
-PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb);
-PUBLIC void framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb);
+PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb);
+PUBLIC rvvm_mmio_handle_t framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb);
 
 #endif

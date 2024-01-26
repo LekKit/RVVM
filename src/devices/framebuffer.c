@@ -33,16 +33,17 @@ static rvvm_mmio_type_t fb_dev_type = {
     .remove = fb_remove,
 };
 
-PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb)
+PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb)
 {
-    rvvm_mmio_dev_t fb_region = {0};
-
     // Map the framebuffer into physical memory
-    fb_region.data = fb->buffer;
-    fb_region.addr = addr;
-    fb_region.size = framebuffer_size(fb);
-    fb_region.type = &fb_dev_type;
-    rvvm_attach_mmio(machine, &fb_region);
+    rvvm_mmio_dev_t fb_region = {
+        .data = fb->buffer,
+        .addr = addr,
+        .size = framebuffer_size(fb),
+        .type = &fb_dev_type,
+    };
+    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &fb_region);
+    if (handle == RVVM_INVALID_MMIO) return handle;
 #ifdef USE_FDT
     struct fdt_node* fb_fdt = fdt_node_create_reg("framebuffer", addr);
     fdt_node_add_prop_reg(fb_fdt, "reg", addr, fb_region.size);
@@ -70,11 +71,12 @@ PUBLIC void framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb
 
     fdt_node_add_child(rvvm_get_fdt_soc(machine), fb_fdt);
 #endif
+    return handle;
 }
 
-PUBLIC void framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb)
+PUBLIC rvvm_mmio_handle_t framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x28000000, framebuffer_size(fb));
-    framebuffer_init(machine, addr, fb);
     rvvm_append_cmdline(machine, "console=tty0");
+    return framebuffer_init(machine, addr, fb);
 }
