@@ -19,11 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rtc-goldfish.h"
 #include "mem_ops.h"
 #include "utils.h"
-#include <time.h>
-
-#ifdef USE_FDT
 #include "fdtlib.h"
-#endif
+#include <time.h>
 
 #define RTC_TIME_LOW     0x0
 #define RTC_TIME_HIGH    0x4
@@ -110,22 +107,24 @@ static rvvm_mmio_type_t rtc_goldfish_dev_type = {
     .name = "rtc_goldfish",
 };
 
-PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC rvvm_mmio_handle_t rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct rtc_goldfish_data* ptr = safe_calloc(sizeof(struct rtc_goldfish_data), 1);
     ptr->plic = plic;
     ptr->irq = irq;
-    
-    rvvm_mmio_dev_t rtc_goldfish = {0};
-    rtc_goldfish.min_op_size = 4;
-    rtc_goldfish.max_op_size = 4;
-    rtc_goldfish.read = rtc_goldfish_mmio_read;
-    rtc_goldfish.write = rtc_goldfish_mmio_write;
-    rtc_goldfish.type = &rtc_goldfish_dev_type;
-    rtc_goldfish.addr = base_addr;
-    rtc_goldfish.size = RTC_REG_SIZE;
-    rtc_goldfish.data = ptr;
-    rvvm_attach_mmio(machine, &rtc_goldfish);
+
+    rvvm_mmio_dev_t rtc_goldfish = {
+        .data = ptr,
+        .addr = base_addr,
+        .size = RTC_REG_SIZE,
+        .read = rtc_goldfish_mmio_read,
+        .write = rtc_goldfish_mmio_write,
+        .min_op_size = 4,
+        .max_op_size = 4,
+        .type = &rtc_goldfish_dev_type,
+    };
+    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &rtc_goldfish);
+    if (handle == RVVM_INVALID_MMIO) return handle;
 #ifdef USE_FDT
     struct fdt_node* rtc = fdt_node_create_reg("rtc", base_addr);
     fdt_node_add_prop_reg(rtc, "reg", base_addr, RTC_REG_SIZE);
@@ -134,11 +133,12 @@ PUBLIC void rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
     fdt_node_add_prop_u32(rtc, "interrupts", irq);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), rtc);
 #endif
+    return handle;
 }
 
-PUBLIC void rtc_goldfish_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_handle_t rtc_goldfish_init_auto(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_GOLDFISH_DEFAULT_MMIO, RTC_REG_SIZE);
-    rtc_goldfish_init(machine, addr, plic, plic_alloc_irq(plic));
+    return rtc_goldfish_init(machine, addr, plic, plic_alloc_irq(plic));
 }
