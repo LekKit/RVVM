@@ -136,15 +136,14 @@ const net_addr_t net_ipv6_local_addr = { .type = NET_TYPE_IPV6, .ip[15] = 1, };
 static void net_init_once()
 {
 #ifdef _WIN32
-    WSADATA wsaData;
+    WSADATA wsaData = {0};
     WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
         rvvm_warn("Failed to initialize WinSock");
     }
 #elif defined(SIGPIPE)
     // Ignore SIGPIPE (Do not crash on writes to closed socket)
-    void (*handler)(int);
-    handler = signal(SIGPIPE, SIG_IGN);
+    void (*handler)(int) = signal(SIGPIPE, SIG_IGN);
     if (handler != SIG_DFL) signal(SIGPIPE, handler);
 #endif
 #if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
@@ -385,6 +384,21 @@ static net_sock_t* net_init_localaddr(net_sock_t* sock, const net_addr_t* addr)
     return sock;
 }
 
+static uint32_t net_last_error()
+{
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    if (err == WSAEWOULDBLOCK || err == WSAEINTR) return NET_ERR_BLOCK;
+    if (err == WSAECONNRESET) return NET_ERR_RESET;
+    return NET_ERR_UNKNOWN;
+#else
+    int err = errno;
+    if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) return NET_ERR_BLOCK;
+    if (err == ECONNRESET) return NET_ERR_RESET;
+    return NET_ERR_UNKNOWN;
+#endif
+}
+
 // Public socket API
 
 net_sock_t* net_tcp_listen(const net_addr_t* addr)
@@ -506,9 +520,14 @@ size_t net_tcp_send(net_sock_t* sock, const void* buffer, size_t size)
     return ret > 0 ? ret : 0;
 }
 
-size_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size)
+size_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size, uint32_t* error)
 {
     int ret = sock ? recv(sock->fd, buffer, size, 0) : 0;
+    if (error) {
+        if (ret > 0) *error = NET_ERR_NONE;
+        if (ret == 0) *error = NET_ERR_DISCONNECT;
+        if (ret < 0) *error = net_last_error();
+    }
     return ret > 0 ? ret : 0;
 }
 
@@ -565,9 +584,9 @@ size_t net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* add
 
 // Generic socket operations
 
-const net_addr_t* net_sock_addr(net_sock_t* sock)
+net_addr_t* net_sock_addr(net_sock_t* sock)
 {
-    return sock ? &sock->addr : NET_IPV4_ANY;
+    return sock ? &sock->addr : NULL;
 }
 
 uint16_t net_sock_port(net_sock_t* sock)

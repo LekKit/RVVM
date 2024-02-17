@@ -51,6 +51,12 @@ extern const net_addr_t net_ipv6_local_addr;
 #define NET_IPV6_ANY   (&net_ipv6_any_addr)
 #define NET_IPV6_LOCAL (&net_ipv6_local_addr)
 
+#define NET_ERR_NONE       0x0
+#define NET_ERR_BLOCK      0x1
+#define NET_ERR_DISCONNECT 0x2
+#define NET_ERR_RESET      0x3
+#define NET_ERR_UNKNOWN    0xFFFF
+
 // TCP Sockets
 
 net_sock_t* net_tcp_listen(const net_addr_t* addr);
@@ -61,7 +67,7 @@ bool        net_tcp_status(net_sock_t* sock);   // Connected & not yet closed on
 bool        net_tcp_shutdown(net_sock_t* sock); // Send EOF (FIN), only recv() works afterwards
 
 size_t      net_tcp_send(net_sock_t* sock, const void* buffer, size_t size);
-size_t      net_tcp_recv(net_sock_t* sock, void* buffer, size_t size);
+size_t      net_tcp_recv(net_sock_t* sock, void* buffer, size_t size, uint32_t* error);
 
 // UDP Sockets
 
@@ -72,7 +78,6 @@ size_t      net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t
 
 // Generic socket operations
 
-const
 net_addr_t* net_sock_addr(net_sock_t* sock);
 uint16_t    net_sock_port(net_sock_t* sock);
 bool        net_sock_set_blocking(net_sock_t* sock, bool block);
