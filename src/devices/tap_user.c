@@ -427,6 +427,7 @@ static void handle_udp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
         }
 
         net_sock_t* sock = net_udp_bind(NET_IPV4_ANY);
+        net_sock_set_blocking(sock, false);
         if (sock) {
             ts = safe_new_obj(tap_sock_t);
             ts->sock = sock;
@@ -804,10 +805,10 @@ static void bind_port(tap_dev_t* tap, uint16_t internal, uint16_t external, bool
     net_sock_t* sock = NULL;
     if (tcp) {
         sock = net_tcp_listen(&remote);
-        net_sock_set_blocking(sock, false);
     } else {
         sock = net_udp_bind(&remote);
     }
+    net_sock_set_blocking(sock, false);
     if (sock) {
         tap_sock_t* ts = safe_new_obj(tap_sock_t);
         ts->sock = sock;
