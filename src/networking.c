@@ -37,6 +37,7 @@ typedef int net_addrlen_t;
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -217,6 +218,10 @@ static bool net_handle_set_blocking(net_handle_t fd, bool block)
 #ifdef _WIN32
     u_long blocking = block ? 0 : 1;
     return ioctlsocket(fd, FIONBIO, &blocking) == 0;
+#elif defined(FIONBIO)
+    // Use a single syscall instead of fcntl implementation
+    int nb = block;
+    return ioctl(fd, FIONBIO, &nb) == 0;
 #elif defined(F_SETFL) && defined(O_NONBLOCK)
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) return false;
