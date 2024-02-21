@@ -301,14 +301,17 @@ bool vma_clean(void* addr, size_t size, bool lazy)
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
 #if defined(VMA_WIN32_IMPL)
-    if (VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS) && lazy) return true;
-    VirtualUnlock(addr, size);
+    if (VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS)) {
+        // This undocumented feature forces page swapout thus immediately zeroing them
+        if (!lazy) return VirtualUnlock(addr, size);
+        return true;
+    } else return false;
 #elif defined(VMA_MMAP_IMPL)
 #ifdef MADV_FREE
-    if (lazy && madvise(addr, size, MADV_FREE) == 0) return true;
+    if (lazy) return madvise(addr, size, MADV_FREE) == 0;
 #endif
 #ifdef MADV_DONTNEED
-    if (madvise(addr, size, MADV_DONTNEED) == 0) return true;
+    return madvise(addr, size, MADV_DONTNEED) == 0;
 #endif
 #endif
     return addr && size && lazy;
