@@ -22,13 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_WIN32_IMPL
 #include <windows.h>
 
-static size_t vma_page_size()
-{
-    static SYSTEM_INFO info = {0};
-    if (!info.dwPageSize) GetSystemInfo(&info);
-    return info.dwPageSize;
-}
-
 static inline DWORD vma_native_flags(uint32_t flags)
 {
     switch (flags & VMA_RWX) {
@@ -72,13 +65,6 @@ static inline DWORD vma_native_flags(uint32_t flags)
 #else
 #define MAP_VMA_JIT MAP_VMA_ANON
 #endif
-
-static size_t vma_page_size()
-{
-    static size_t pagesize = 0;
-    if (!pagesize) pagesize = sysconf(_SC_PAGESIZE);
-    return pagesize;
-}
 
 static inline int vma_native_flags(uint32_t flags)
 {
@@ -165,12 +151,27 @@ static int vma_anon_memfd(size_t size)
 #include <stdlib.h>
 #warning No native VMA support!
 
-static inline size_t vma_page_size()
-{
-    return 1;
-}
-
 #endif
+
+static size_t host_pagesize = 0;
+
+size_t vma_page_size()
+{
+    if (!host_pagesize) {
+#if defined(VMA_WIN32_IMPL)
+        SYSTEM_INFO info = {0};
+        GetSystemInfo(&info);
+        host_pagesize = info.dwPageSize;
+#elif defined(VMA_MMAP_IMPL)
+        host_pagesize = sysconf(_SC_PAGESIZE);
+#endif
+        if (!host_pagesize) {
+            rvvm_info("Failed to determine page size, assuming 4kb");
+            host_pagesize = 0x1000;
+        }
+    }
+    return host_pagesize;
+}
 
 static inline size_t vma_page_mask()
 {
@@ -261,22 +262,56 @@ bool vma_multi_mmap(void** rw, void** exec, size_t size)
 // Resize VMA
 void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
 {
+    void* ret = addr;
     old_size = ptrsize_to_page(addr, old_size);
     new_size = ptrsize_to_page(addr, new_size);
     addr = ptr_to_page(addr);
-#if defined(VMA_WIN32_IMPL) || defined(VMA_MMAP_IMPL)
-    if (new_size < old_size) {
-        vma_free(((uint8_t*)addr) + new_size, old_size - new_size);
-    } else if (new_size > old_size) {
-        if (!vma_alloc(((uint8_t*)addr) + new_size, new_size - old_size, flags)) {
-            return NULL;
+#if defined(VMA_WIN32_IMPL)
+    if (flags & VMA_FIXED) {
+        // TODO
+        ret = NULL;
+    } else if (new_size != old_size) {
+        // Just copy the data into a completely new mapping
+        ret = vma_alloc(NULL, new_size, flags);
+        if (ret) {
+            memcpy(ret, addr, old_size);
+            vma_free(addr, old_size);
         }
     }
-    return addr;
+#elif defined(VMA_MMAP_IMPL)
+#if defined(__linux__) && defined(MREMAP_MAYMOVE)
+    ret = mremap(addr, old_size, new_size, (flags & VMA_FIXED) ? 0 : MREMAP_MAYMOVE);
+    if (ret == MAP_FAILED) ret = NULL;
 #else
-    if (flags & VMA_FIXED) return NULL;
-    return realloc(addr, new_size);
+    void* region_end = ((uint8_t*)addr) + new_size;
+    if (new_size < old_size) {
+        // Shrink the mapping by unmapping at the end
+        if (!vma_free(region_end, old_size - new_size)) ret = NULL;
+    } else if (new_size > old_size) {
+        // Grow the mapping by mapping additional pages at the end
+        void* tmp = vma_alloc(region_end, new_size - old_size, flags & ~VMA_FIXED);
+        if (tmp != region_end) {
+            ret = NULL;
+            if (tmp) vma_free(tmp, new_size - old_size);
+        }
+    }
+    if (ret == NULL && !(flags & VMA_FIXED)) {
+        // Just copy the data into a completely new mapping
+        ret = vma_alloc(NULL, new_size, flags);
+        if (ret) {
+            memcpy(ret, addr, old_size);
+            vma_free(addr, old_size);
+        }
+    }
 #endif
+#else
+    if (flags & VMA_FIXED) {
+        ret = NULL;
+    } else {
+        ret = realloc(addr, new_size);
+    }
+#endif
+    return ret;
 }
 
 bool vma_protect(void* addr, size_t size, uint32_t flags)
@@ -291,8 +326,7 @@ bool vma_protect(void* addr, size_t size, uint32_t flags)
 #else
     UNUSED(addr);
     UNUSED(size);
-    UNUSED(flags);
-    return false;
+    return flags == VMA_RDWR;
 #endif
 }
 
@@ -301,11 +335,17 @@ bool vma_clean(void* addr, size_t size, bool lazy)
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
 #if defined(VMA_WIN32_IMPL)
-    if (VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS)) {
-        // This undocumented feature forces page swapout thus immediately zeroing them
-        if (!lazy) return VirtualUnlock(addr, size);
+    if (lazy) {
+        return VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS);
+    } else {
+        MEMORY_BASIC_INFORMATION mbi = {0};
+        if (!VirtualQuery(addr, &mbi, sizeof(mbi))) return false;
+        if (!VirtualFree(addr, size, MEM_DECOMMIT)) return false;
+        if (!VirtualAlloc(addr, size, MEM_COMMIT, mbi.Protect)) {
+            rvvm_fatal("VirtualAlloc() failed on decommited segment");
+        }
         return true;
-    } else return false;
+    }
 #elif defined(VMA_MMAP_IMPL)
 #ifdef MADV_FREE
     if (lazy) return madvise(addr, size, MADV_FREE) == 0;

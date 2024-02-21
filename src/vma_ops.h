@@ -33,6 +33,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_THP   0x10 // Transparent hugepages
 #define VMA_KSM   0x20 // Kernel same-page merging
 
+// Get host page size
+size_t vma_page_size();
+
 // Allocate VMA, force needed address using VMA_FIXED
 void* vma_alloc(void* addr, size_t size, uint32_t flags);
 
