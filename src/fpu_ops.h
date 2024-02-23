@@ -21,9 +21,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "compiler.h"
 
-#if CLANG_CHECK_VER(12, 0)
 // Fix rounding modes even when -frounding-math is not present
+#if CLANG_CHECK_VER(12, 0)
 #pragma STDC FENV_ACCESS ON
+#elif defined(_MSC_VER)
+#pragma fenv_access (on)
 #endif
 
 #include <fenv.h>
