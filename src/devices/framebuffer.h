@@ -65,7 +65,7 @@ static inline size_t rgb_format_from_bpp(size_t bpp)
     return RGB_FMT_INVALID;
 }
 
-static inline uint32_t framebuffer_stride(const fb_ctx_t* fb)
+static inline size_t framebuffer_stride(const fb_ctx_t* fb)
 {
     return fb->stride ? fb->stride : fb->width * rgb_format_bytes(fb->format);
 }
