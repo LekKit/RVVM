@@ -305,7 +305,7 @@ void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
 #else
     if (flags & VMA_FIXED) {
         ret = NULL;
-    } else {
+    } else if (new_size != old_size) {
         ret = realloc(addr, new_size);
     }
 #endif
