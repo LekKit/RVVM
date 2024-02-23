@@ -19,6 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVVM_FPU_OPS_H
 #define RVVM_FPU_OPS_H
 
+#include "compiler.h"
+
+#if CLANG_CHECK_VER(12, 0)
+// Fix rounding modes even when -frounding-math is not present
+#pragma STDC FENV_ACCESS ON
+#endif
+
 #include <fenv.h>
 
 #ifndef FE_ALL_EXCEPT
