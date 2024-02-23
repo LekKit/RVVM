@@ -159,16 +159,14 @@ size_t vma_page_size()
 {
     if (!host_pagesize) {
 #if defined(VMA_WIN32_IMPL)
-        SYSTEM_INFO info = {0};
+        SYSTEM_INFO info = { .dwPageSize = 0x1000, };
         GetSystemInfo(&info);
         host_pagesize = info.dwPageSize;
 #elif defined(VMA_MMAP_IMPL)
         host_pagesize = sysconf(_SC_PAGESIZE);
+#else
+        host_pagesize = 0x1000;
 #endif
-        if (!host_pagesize) {
-            rvvm_info("Failed to determine page size, assuming 4kb");
-            host_pagesize = 0x1000;
-        }
     }
     return host_pagesize;
 }
