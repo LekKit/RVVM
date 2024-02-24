@@ -16,6 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Needed for pthread_condattr_setclock() when not passing -std=gnu..
+#define _POSIX_C_SOURCE 200112L
+
 #include "threading.h"
 #include "atomics.h"
 #include "rvtimer.h"
