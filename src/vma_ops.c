@@ -14,6 +14,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Needed for syscall() when not passing -std=gnu..
+#define _GNU_SOURCE
+#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
+
 #include "vma_ops.h"
 #include "utils.h"
 #include <string.h>
