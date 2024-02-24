@@ -14,8 +14,15 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Force 64-bit file offsets
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE64_SOURCE
+
+// Needed for pread()/pwrite(), syscall() when not passing -std=gnu..
+#define _XOPEN_SOURCE 500
+#define _GNU_SOURCE
+#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 
 #include "blk_io.h"
 #include "utils.h"
