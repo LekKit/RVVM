@@ -16,35 +16,27 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifdef _WIN32
+#include <windows.h>
+
+#else
 // Needed for pthread_condattr_setclock(),
 // pthread_cond_timedwait_relative_np() when not passing -std=gnu..
 #define _GNU_SOURCE
 #define _BSD_SOURCE
 #define _DEFAULT_SOURCE
 
-#include "threading.h"
-#include "atomics.h"
-#include "rvtimer.h"
-#include "utils.h"
-#include <stdlib.h>
-#include <string.h>
-
-#define COND_FLAG_SIGNALED 0x1
-#define COND_FLAG_LOCKED   0x2
-
-#ifdef _WIN32
-#include <windows.h>
-
-#else
-#include <time.h>
-#if !defined(CLOCK_MONOTONIC) || defined(__APPLE__)
-#include <sys/time.h>
-#endif
 #include <pthread.h>
+#include <time.h>
+
+#if !defined(__APPLE__) && !defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
+#ifndef CLOCK_MONOTONIC
+#include <sys/time.h> // For gettimeofday()
+#endif
 
 static void condvar_fill_timespec(struct timespec* ts)
 {
-#if defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
+#ifdef CLOCK_MONOTONIC
     clock_gettime(CLOCK_MONOTONIC, ts);
 #else
     // Some targets lack clock_gettime(), use gettimeofday()
@@ -56,6 +48,15 @@ static void condvar_fill_timespec(struct timespec* ts)
 }
 
 #endif
+#endif
+
+#include "threading.h"
+#include "atomics.h"
+#include "rvtimer.h"
+#include "utils.h"
+
+#define COND_FLAG_SIGNALED 0x1
+#define COND_FLAG_LOCKED   0x2
 
 struct thread_ctx {
 #ifdef _WIN32
@@ -238,7 +239,6 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
         } else {
 #if defined(__APPLE__) || defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
             struct timespec ts = { .tv_sec = timeout_ns / 1000000000, .tv_nsec = timeout_ns % 1000000000, };
-            UNUSED(condvar_fill_timespec);
             ret = pthread_cond_timedwait_relative_np(&cond->cond, &cond->lock, &ts) == 0;
 #else
             struct timespec ts = {0};
