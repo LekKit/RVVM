@@ -16,9 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Needed for pthread_condattr_setclock() when not passing -std=gnu..
-#define _POSIX_C_SOURCE 200112L
-// Needed for pthread_cond_timedwait_relative_np()
+// Needed for pthread_condattr_setclock(),
+// pthread_cond_timedwait_relative_np() when not passing -std=gnu..
+#define _GNU_SOURCE
 #define _BSD_SOURCE
 #define _DEFAULT_SOURCE
 
