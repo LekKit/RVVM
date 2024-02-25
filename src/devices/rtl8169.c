@@ -290,6 +290,9 @@ static void rtl8169_handle_tx(rtl8169_dev_t* rtl8169, rtl8169_ring_t* ring)
 {
     size_t tx_id = ring->index;
     bool tx_irq = false;
+    // Descriptor segmentation reassembly buffer
+    uint8_t seg_buff[TAP_FRAME_SIZE];
+    size_t seg_size = 0;
     if (rtl8169->cr & RTL8169_CR_TE) do {
         uint8_t* cmd = pci_get_dma_ptr(rtl8169->pci_dev, ring->addr + (ring->index << 4), 16);
         // FIFO DMA error
@@ -303,7 +306,23 @@ static void rtl8169_handle_tx(rtl8169_dev_t* rtl8169, rtl8169_ring_t* ring)
         size_t packet_size = flags & 0x3FFF;
         void* packet_ptr = pci_get_dma_ptr(rtl8169->pci_dev, packet_addr, packet_size);
 
-        if (packet_ptr) tap_send(rtl8169->tap, packet_ptr, packet_size);
+        if (packet_ptr) {
+            if ((flags & RTL8169_DESC_FS) && (flags & RTL8169_DESC_LS)) {
+                // This is a non-segmented packet, just send directly
+                tap_send(rtl8169->tap, packet_ptr, packet_size);
+            } else {
+                // Reassemble segmented packet from descriptors
+                if (flags & RTL8169_DESC_FS) seg_size = 0;
+                if (seg_size + packet_size <= sizeof(seg_buff)) {
+                    memcpy(seg_buff + seg_size, packet_ptr, packet_size);
+                    seg_size += packet_size;
+                    if (flags & RTL8169_DESC_LS) {
+                        tap_send(rtl8169->tap, seg_buff, seg_size);
+                        seg_size = 0;
+                    }
+                } else seg_size = -1;
+            }
+        }
 
         write_uint32_le(cmd, flags & ~RTL8169_DESC_OWN);
         ring->index++;
