@@ -204,12 +204,12 @@ static void create_arp_frame(tap_dev_t* tap, uint8_t* frame, const void* req_ip)
 
 static uint8_t* create_ipv4_frame(uint8_t* frame, size_t size, uint8_t proto, const void* dest_ip, const void* src_ip)
 {
-    frame[0] = 0x45;                  // Version 4, IHL 5
-    frame[1] = 0;                     // DSCP, ECN
+    frame[0] = 0x45; // Version 4, IHL 5
+    frame[1] = 0;    // DSCP, ECN
     write_uint16_be_m(frame + 2, size + IPv4_HDR_SIZE);
-    write_uint16_be_m(frame + 4, 0);  // Identification
-    write_uint16_be_m(frame + 6, 0);  // Flags, Fragment Offset
-    frame[8] = 64;                    // TTL
+    write_uint16_be_m(frame + 4, 0);      // Identification
+    write_uint16_be_m(frame + 6, 0x4000); // Flags, Fragment Offset
+    frame[8] = 64;                        // TTL
     frame[9] = proto;
     write_uint16_be_m(frame + 10, 0); // Initial checksum is zero
     memcpy(frame + 12, src_ip,  PLEN_IPv4);
@@ -641,7 +641,7 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
                 cleanup = true;
             }
         }
-        if (flags &  TCP_FLAG_RST) {
+        if (flags & TCP_FLAG_RST) {
             // Reset the connection
             tcp->state = TCP_STATE_CLOSED;
             resp_ack = false;
