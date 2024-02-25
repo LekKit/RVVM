@@ -91,6 +91,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RTL8169_DESC_PAM 0x04000000
 #define RTL8169_DESC_GRX 0x34000000 // Generic RX packet flags
 
+#define RTL8169_EEPROM_DOU 0x01 // EEPROM Data out
+#define RTL8169_EEPROM_DIN 0x02 // EEPROM Data in
+#define RTL8169_EEPROM_CLK 0x04 // EEPROM Clock
+#define RTL8169_EEPROM_SEL 0x08 // EEPROM Chip select
+#define RTL8169_EEMODE_PRG 0x80 // EEPROM Programming mode
+
 #define RTL8169_MAX_FIFO_SIZE 1024
 #define RTL8169_MAC_SIZE 6
 
@@ -99,9 +105,19 @@ typedef struct {
     uint32_t index;
 } rtl8169_ring_t;
 
+// 93C56 16-bit word EEPROM emulation for reading MAC
+typedef struct {
+    uint8_t  pins;
+    uint8_t  addr;
+    uint16_t word;
+    bitcnt_t cur_bit;
+    bool     addr_ok;
+} at93c56_state_t;
+
 typedef struct {
     pci_dev_t* pci_dev;
     tap_dev_t* tap;
+    at93c56_state_t eeprom;
     rtl8169_ring_t rx;
     rtl8169_ring_t tx;
     rtl8169_ring_t txp;
@@ -117,12 +133,14 @@ typedef struct {
 static void rtl8169_reset(rvvm_mmio_dev_t* dev)
 {
     rtl8169_dev_t* rtl8169 = dev->data;
+    memset(&rtl8169->eeprom, 0, sizeof(at93c56_state_t));
     memset(&rtl8169->rx, 0, sizeof(rtl8169_ring_t));
     memset(&rtl8169->tx, 0, sizeof(rtl8169_ring_t));
     memset(&rtl8169->txp, 0, sizeof(rtl8169_ring_t));
     rtl8169->isr = 0;
     rtl8169->imr = 0;
     rtl8169->cr = 0;
+    rtl8169->phyar = 0;
 }
 
 static void rtl8169_interrupt(rtl8169_dev_t* rtl8169, size_t irq)
@@ -162,6 +180,64 @@ static uint32_t rtl8169_handle_phy(uint32_t cmd)
             break;
     }
     return cmd ^ 0x80000000;
+}
+
+static void rtl8169_93c56_read_word(rtl8169_dev_t* rtl8169)
+{
+    rtl8169->eeprom.word = 0;
+    switch (rtl8169->eeprom.addr) {
+        case 0x0: // Device ID
+            rtl8169->eeprom.word = 0x8129;
+            break;
+        case 0x7: // MAC words
+        case 0x8:
+        case 0x9:
+            tap_get_mac(rtl8169->tap, rtl8169->mac);
+            rtl8169->eeprom.word = read_uint16_le_m(rtl8169->mac + ((rtl8169->eeprom.addr - 7) << 1));
+            break;
+        default: // Unknown
+            rtl8169->eeprom.word = 0;
+            break;
+    }
+}
+
+static void rtl8169_93c56_pins_write(rtl8169_dev_t* rtl8169, uint8_t pins)
+{
+    if (pins & RTL8169_EEMODE_PRG) {
+        if ((pins & RTL8169_EEPROM_CLK) && !(rtl8169->eeprom.pins & RTL8169_EEPROM_CLK)) {
+            // Clock pulled high
+            if (rtl8169->eeprom.addr_ok) {
+                // Push data bits
+                if (rtl8169->eeprom.cur_bit == 0) rtl8169_93c56_read_word(rtl8169);
+                if (rtl8169->eeprom.word & (0x8000 >> rtl8169->eeprom.cur_bit)) {
+                    pins |= RTL8169_EEPROM_DOU;
+                } else {
+                    pins &= ~RTL8169_EEPROM_DOU;
+                }
+                if (rtl8169->eeprom.cur_bit++ >= 15) {
+                    rtl8169->eeprom.cur_bit = 0;
+                    rtl8169->eeprom.addr++;
+                }
+            } else {
+                // Get starting addr, ignore command (Act as readonly eeprom)
+                if (rtl8169->eeprom.cur_bit >= 3) {
+                    rtl8169->eeprom.addr <<= 1;
+                    if (pins & RTL8169_EEPROM_DIN) rtl8169->eeprom.addr |= 1;
+                }
+                if (rtl8169->eeprom.cur_bit++ >= 11) {
+                    rtl8169->eeprom.cur_bit = 0;
+                    rtl8169->eeprom.addr_ok = true;
+                }
+            }
+        }
+        if (!(pins & RTL8169_EEPROM_SEL)) {
+            // End of transfer, request addr next time
+            rtl8169->eeprom.addr_ok = false;
+            rtl8169->eeprom.addr = 0;
+            rtl8169->eeprom.cur_bit = 0;
+        }
+    }
+    rtl8169->eeprom.pins = pins;
 }
 
 static bool rtl8169_feed_rx(void* net_dev, const void* data, size_t size)
@@ -245,23 +321,27 @@ static bool rtl8169_pci_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, ui
     rtl8169_dev_t* rtl8169 = dev->data;
     uint8_t tmp[4] = {0};
     spin_lock(&rtl8169->lock);
-    if (offset < RTL8169_MAC_SIZE) {
-        size_t size_clamp = (offset + size > RTL8169_MAC_SIZE)
-                        ? (RTL8169_MAC_SIZE - offset) : size;
-        tap_get_mac(rtl8169->tap, rtl8169->mac);
-        memcpy(tmp, rtl8169->mac + offset, size_clamp);
-    } else switch (offset) {
-        case RTL8169_REG_ISR:
-            write_uint16_le(tmp, atomic_load_uint32(&rtl8169->isr));
+    switch (offset & (~0x3)) {
+        case RTL8169_REG_IDR0:
+            tap_get_mac(rtl8169->tap, rtl8169->mac);
+            memcpy(tmp, rtl8169->mac, 4);
+            break;
+        case RTL8169_REG_IDR4:
+            tap_get_mac(rtl8169->tap, rtl8169->mac);
+            memcpy(tmp, rtl8169->mac + 4, 2);
             break;
         case RTL8169_REG_IMR:
             write_uint16_le(tmp, atomic_load_uint32(&rtl8169->imr));
+            write_uint16_le(tmp + 2, atomic_load_uint32(&rtl8169->isr));
             break;
-        case RTL8169_REG_CR:
-            write_uint8(tmp, atomic_load_uint32(&rtl8169->cr));
+        case RTL8169_REG_CR - 3:
+            write_uint8(tmp + 3, atomic_load_uint32(&rtl8169->cr));
             break;
         case RTL8169_REG_TCR:
             write_uint32_le(tmp, 0x3810700); // RTL8169S XID
+            break;
+        case RTL8169_REG_9346:
+            tmp[0] = rtl8169->eeprom.pins;
             break;
         case RTL8169_REG_PHYAR:
             write_uint32_le(tmp, rtl8169->phyar);
@@ -295,17 +375,17 @@ static bool rtl8169_pci_read(rvvm_mmio_dev_t* dev, void* data, size_t offset, ui
             break;
     }
     spin_unlock(&rtl8169->lock);
-    memcpy(data, tmp, size);
-    //rvvm_warn("rtl8169 read  %08x from %08zx", read_uint32_le(data), offset);
+    memcpy(data, tmp + (offset & 0x3), size);
+    //rvvm_warn("rtl8169 read  %08x from %08zx", read_uint32_le(tmp), offset & (~0x3));
     return true;
 }
 
 static bool rtl8169_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint8_t size)
 {
     rtl8169_dev_t* rtl8169 = dev->data;
-    UNUSED(size);
     //rvvm_warn("rtl8169 write %08x to   %08zx", read_uint32_le(data), offset);
     spin_lock(&rtl8169->lock);
+    // I don't even know how to refactor this...
     if (offset == RTL8169_REG_TPOLL) {
         uint8_t flags = read_uint8(data);
         if (flags & RTL8169_TPOLL_HPQ) rtl8169_handle_tx(rtl8169, &rtl8169->txp);
@@ -319,7 +399,8 @@ static bool rtl8169_pci_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, u
                         ? (RTL8169_MAC_SIZE - offset) : size;
         memcpy(rtl8169->mac + offset, data, size_clamp);
         tap_set_mac(rtl8169->tap, rtl8169->mac);
-    }
+    } else if (offset == RTL8169_REG_9346) rtl8169_93c56_pins_write(rtl8169, read_uint8(data));
+
     if (size >= 2) {
         switch (offset) {
             case RTL8169_REG_IMR:
