@@ -454,7 +454,8 @@ static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
     uint8_t* ipv4 = create_eth_frame(tap, frame, ETH2_IPv4);
     size_t opt_size = (flags & TCP_FLAG_SYN) ? 4 : 0;
     uint8_t* tcp = create_ipv4_frame(ipv4, TCP_HDR_SIZE + opt_size, IP_PROTO_TCP, dst->ip, src->ip);
-    uint8_t* opt = create_tcp_segment(tcp, flags, ts->tcp->seq, ts->tcp->ack, dst->port, src->port);
+    uint32_t seq = ts->tcp->seq - ((flags & (TCP_FLAG_SYN | TCP_FLAG_FIN)) ? 1 : 0);
+    uint8_t* opt = create_tcp_segment(tcp, flags, seq, ts->tcp->ack, dst->port, src->port);
     if (flags & TCP_FLAG_SYN) {
         // Change MSS to 1460
         tcp[12] = 0x60;
@@ -527,8 +528,11 @@ static void tap_tcp_remove(tap_dev_t* tap, tap_sock_t* ts)
     }
 }
 
-static void tap_tcp_close(tap_sock_t* ts)
+static void tap_tcp_close(tap_dev_t* tap, tap_sock_t* ts)
 {
+    // Unmap if tap != NULL
+    if (tap) tap_tcp_remove(tap, ts);
+
     net_sock_close(ts->sock);
     while (ts->tcp && ts->tcp->head) {
         tcp_segment_t* seg = ts->tcp->head;
@@ -546,7 +550,6 @@ static bool tap_tcp_arm_poll(tap_dev_t* tap, tap_sock_t* ts)
     if (!net_poll_add(tap->poll, ts->sock, &event)) {
         DO_ONCE(rvvm_warn("net_poll_add() failed!"));
         tap_tcp_segment(tap, ts, TCP_FLAG_RST);
-        ts->tcp->state = TCP_STATE_CLOSED;
         return false;
     }
     return true;
@@ -566,8 +569,7 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
     tap_sock_t* ts = tap_tcp_lookup(tap, dst, src);
     if (ts) {
         tcp_ctx_t* tcp = ts->tcp;
-        // Respond with ACK on keepalive
-        bool resp_ack = (flags & TCP_FLAG_ACK) && tcp->seq == tcp->seq_ack;
+        bool resp_ack = seq != tcp->ack; // Respond with ACK on keepalive
         bool cleanup = false;
         tcp->window = window; // Scale the window
         if (flags & TCP_FLAG_ACK) {
@@ -581,13 +583,12 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
             }
             if (tcp->win_full && (tcp->state & TCP_STATE_RECV_OPEN) && tcp_window_avail(tcp)) {
                 // Window became available
-                tap_tcp_arm_poll(tap, ts);
+                if (!tap_tcp_arm_poll(tap, ts)) cleanup = true;
                 tcp->win_full = false;
             }
-            if (ack == tcp->seq + 1) {
+            if (tcp->seq == tcp->seq_ack + 1 && ack == tcp->seq) {
                 if ((tcp->state & TCP_STATE_ESTABLISHED) && !(tcp->state & TCP_STATE_RECV_OPEN)) {
                     // Guest ACKed inbound FIN
-                    tcp->seq++;
                     tcp->seq_ack++;
 
                     if (tcp->state == TCP_STATE_ESTABLISHED) {
@@ -599,18 +600,17 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
                     // Guest ACKed inbound SYN ACK
                     if (tap_tcp_arm_poll(tap, ts)) {
                         tcp->state |= TCP_STATE_ESTABLISHED;
-                        tcp->seq++;
                         tcp->seq_ack++;
-                    }
+                    } else cleanup = true;
                 }
                 if (tcp->state == TCP_STATE_RECV_OPEN && (flags & TCP_FLAG_SYN)) {
                     // Guest SYN ACKed an inbound connection
                     if (tap_tcp_arm_poll(tap, ts)) {
                         tcp->state |= TCP_STATE_SEND_OPEN | TCP_STATE_ESTABLISHED;
                         tcp->ack = seq + 1;
-                        tcp->seq++;
                         tcp->seq_ack++;
-                    }
+                        resp_ack = true;
+                    } else cleanup = true;
                 }
             }
         }
@@ -619,37 +619,36 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
             if (data_off >= TCP_HDR_SIZE && data_off < size) {
                 // Send data segment
                 size_t send_len = size - data_off;
-                if (send_len > (tcp->ack - seq)) {
-                    size_t seq_off = tcp->ack - seq;
-                    ts->tcp->ack += net_tcp_send(ts->sock, buffer + data_off + seq_off, send_len - seq_off);
+                size_t seq_off = tcp->ack - seq;
+                if (send_len > seq_off) {
+                    tcp->ack += net_tcp_send(ts->sock, buffer + data_off + seq_off, send_len - seq_off);
                 }
                 // Acknowledge the bytes actually sent
                 // TODO: Reduce amount of response ACKs
                 resp_ack = true;
             }
         }
-        if (flags & TCP_FLAG_FIN) {
+        if ((flags & TCP_FLAG_FIN) && seq + (size - data_off) == tcp->ack) {
             // Close guest sending side
             if (tcp->state & TCP_STATE_SEND_OPEN) {
                 net_tcp_shutdown(ts->sock);
                 tcp->state &= ~TCP_STATE_SEND_OPEN;
                 tcp->ack++;
             }
-            resp_ack = true;
             if (tcp->state == TCP_STATE_ESTABLISHED) {
                 // Closed completely
                 cleanup = true;
             }
+            resp_ack = true;
         }
         if (flags & TCP_FLAG_RST) {
             // Reset the connection
-            tcp->state = TCP_STATE_CLOSED;
-            resp_ack = false;
-
             if ((tcp->state & TCP_STATE_ESTABLISHED) && !(tcp->state & TCP_STATE_RECV_OPEN)) {
                 // Closed completely
                 cleanup = true;
             }
+            tcp->state = TCP_STATE_CLOSED;
+            resp_ack = false;
         }
         if (resp_ack) {
             // Handle keepalive, ACKs
@@ -658,8 +657,7 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
         if (cleanup) {
             // It's safe to clean up here,
             // since net_poll can't reference tap socket anymore
-            tap_tcp_remove(tap, ts);
-            tap_tcp_close(ts);
+            tap_tcp_close(tap, ts);
         }
     } else if (flags == TCP_FLAG_SYN) {
         // Initiate new async connection
@@ -882,6 +880,7 @@ static void tap_tcp_recv(tap_dev_t* tap, tap_sock_t* ts)
         if (error == NET_ERR_DISCONNECT) {
             // Receiving side closed
             ts->tcp->state &= ~TCP_STATE_RECV_OPEN;
+            ts->tcp->seq++;
             tap_tcp_segment(tap, ts, TCP_FLAG_FIN | TCP_FLAG_ACK);
 
             net_poll_remove(tap->poll, ts->sock);
@@ -889,8 +888,7 @@ static void tap_tcp_recv(tap_dev_t* tap, tap_sock_t* ts)
             // Connection reset
             tap_tcp_segment(tap, ts, TCP_FLAG_RST);
 
-            tap_tcp_remove(tap, ts);
-            tap_tcp_close(ts);
+            tap_tcp_close(tap, ts);
         }
     }
 }
@@ -905,7 +903,7 @@ static void tap_tcp_accept(tap_dev_t* tap, tap_sock_t* listener)
         ts->addr = listener->addr;
         ts->tcp = safe_new_obj(tcp_ctx_t);
         rvvm_randombytes(&ts->tcp->seq, sizeof(ts->tcp->seq));
-        ts->tcp->seq_ack = ts->tcp->seq;
+        ts->tcp->seq_ack = ts->tcp->seq - 1;
         ts->tcp->state = TCP_STATE_RECV_OPEN;
 
         tap_tcp_register(tap, ts);
@@ -921,26 +919,27 @@ static void tap_net_periodic(tap_dev_t* tap)
         UNUSED(port);
 
         if (unlikely(tcp->state != TCP_STATE_NORMAL)) {
-            switch (tcp->state) {
-                case TCP_STATE_CLOSED:
-                    // Clean up the closed socket
-                    tap_tcp_remove(tap, ts);
-                    tap_tcp_close(ts);
-                    return;
-                    break;
-                case TCP_STATE_RECV_OPEN:
-                    // Retry SYN
-                    tap_tcp_segment(tap, ts, TCP_FLAG_SYN);
-                    break;
-                case TCP_STATE_RECV_OPEN | TCP_STATE_SEND_OPEN:
-                    // Retry SYN+ACK
-                    tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
-                    break;
-                case TCP_STATE_ESTABLISHED:
-                case TCP_STATE_ESTABLISHED | TCP_STATE_SEND_OPEN:
-                    // Retry FIN
-                    tap_tcp_segment(tap, ts, TCP_FLAG_FIN | TCP_FLAG_ACK);
-                    break;
+            if (tcp->state == TCP_STATE_CLOSED) {
+                // Clean up the closed socket
+                tap_tcp_close(tap, ts);
+                return;
+            }
+            if (tcp->seq != tcp->seq_ack) {
+                switch (tcp->state) {
+                    case TCP_STATE_RECV_OPEN:
+                        // Retry SYN
+                        tap_tcp_segment(tap, ts, TCP_FLAG_SYN);
+                        break;
+                    case TCP_STATE_RECV_OPEN | TCP_STATE_SEND_OPEN:
+                        // Retry SYN+ACK
+                        tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
+                        break;
+                    case TCP_STATE_ESTABLISHED:
+                    case TCP_STATE_ESTABLISHED | TCP_STATE_SEND_OPEN:
+                        // Retry FIN
+                        tap_tcp_segment(tap, ts, TCP_FLAG_FIN | TCP_FLAG_ACK);
+                        break;
+                }
             }
         }
 
@@ -992,11 +991,11 @@ static void* tap_thread(void* arg)
                         // Connection succeeded
                         net_poll_remove(tap->poll, ts->sock);
                         ts->tcp->state |= TCP_STATE_RECV_OPEN;
+                        ts->tcp->seq++;
                         tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
                     } else {
                         // Connection refused or timeout
-                        tap_tcp_remove(tap, ts);
-                        tap_tcp_close(ts);
+                        tap_tcp_close(tap, ts);
                     }
                 } else if (ts->tcp->state == TCP_STATE_LISTEN) {
                     tap_tcp_accept(tap, ts);
@@ -1059,7 +1058,7 @@ void tap_close(tap_dev_t* tap)
         while (node) {
             tcp_lookup_node_t* next = node->next;
             tap_sock_t* ts = node->ts;
-            tap_tcp_close(ts);
+            tap_tcp_close(NULL, ts);
             free(node);
             node = next;
         }
