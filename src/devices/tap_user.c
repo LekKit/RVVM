@@ -140,6 +140,7 @@ struct tap_dev {
     net_poll_t*   poll;
     hashmap_t     udp_ports;
     hashmap_t     tcp_map;
+    ts_vec_t      tcp_listeners;
     thread_ctx_t* thread;
     net_sock_t*   shut[2];
     uint8_t       mac[6];
@@ -443,7 +444,7 @@ static void handle_udp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
     if (tap_addr_allowed(tap, dst)) net_udp_send(ts->sock, udb_buff, udp_size, dst);
 }
 
-static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
+static void tap_tcp_segment_gen(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags, uint32_t seq_sub)
 {
     uint8_t frame[ETH2_HDR_SIZE + IPv4_HDR_SIZE + TCP_HDR_SIZE + 4];
     net_addr_t* dst = &ts->addr;
@@ -451,8 +452,7 @@ static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
     uint8_t* ipv4 = create_eth_frame(tap, frame, ETH2_IPv4);
     size_t opt_size = (flags & TCP_FLAG_SYN) ? 4 : 0;
     uint8_t* tcp = create_ipv4_frame(ipv4, TCP_HDR_SIZE + opt_size, IP_PROTO_TCP, dst->ip, src->ip);
-    uint32_t seq = ts->tcp->seq - ((flags & (TCP_FLAG_SYN | TCP_FLAG_FIN)) ? 1 : 0);
-    uint8_t* opt = create_tcp_segment(tcp, flags, seq, ts->tcp->ack, dst->port, src->port);
+    uint8_t* opt = create_tcp_segment(tcp, flags, ts->tcp->seq - seq_sub, ts->tcp->ack, dst->port, src->port);
     if (flags & TCP_FLAG_SYN) {
         // Change MSS to 1460
         tcp[12] = 0x60;
@@ -462,6 +462,11 @@ static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
     }
     tcp_ipv4_checksum(ipv4, opt_size);
     eth_send(tap, frame, ETH2_HDR_SIZE + IPv4_HDR_SIZE + TCP_HDR_SIZE + opt_size);
+}
+
+static void tap_tcp_segment(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags)
+{
+    tap_tcp_segment_gen(tap, ts, flags, (flags & (TCP_FLAG_SYN | TCP_FLAG_FIN)) ? 1 : 0);
 }
 
 static inline bool tcp_window_avail(tcp_ctx_t* tcp)
@@ -557,7 +562,6 @@ static bool tap_tcp_arm_poll(tap_dev_t* tap, tap_sock_t* ts)
     net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
     if (!net_poll_add(tap->poll, ts->sock, &event)) {
         DO_ONCE(rvvm_warn("net_poll_add() failed!"));
-        tap_tcp_segment(tap, ts, TCP_FLAG_RST);
         return false;
     }
     return true;
@@ -581,6 +585,7 @@ static void handle_tcp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
         bool resp_ack = seq != tcp->ack; // Respond with ACK on keepalive
         bool cleanup = false;
         tcp->window = window; // Scale the window
+        ts->timeout = 1; // Allow TCP retransmit, but reset keepalive
         if (flags & TCP_FLAG_ACK) {
             while (tcp->head && tcp_ack_amount(tcp, ack) >= tcp->head->size) {
                 // Free ACKed segments
@@ -829,7 +834,7 @@ static void bind_port(tap_dev_t* tap, uint16_t internal, uint16_t external, bool
         if (tcp) {
             ts->tcp = safe_new_obj(tcp_ctx_t);
             ts->tcp->state = TCP_STATE_LISTEN;
-            tap_tcp_register(tap, ts);
+            vector_push_back(tap->tcp_listeners, ts);
         } else {
             ts->timeout = BOUND_INF;
             hashmap_put(&tap->udp_ports, internal, (size_t)ts);
@@ -965,6 +970,17 @@ static void tap_tcp_periodic(tap_dev_t* tap, tap_sock_t* ts)
             seg = seg->next;
         }
     }
+    if (ts->timeout > 50) {
+        if (tcp->state & TCP_STATE_ESTABLISHED) {
+            // Each 10s, send keepalive packet (seq = last seq - 1)
+            tap_tcp_segment_gen(tap, ts, TCP_FLAG_ACK, 1);
+        }
+        if (ts->timeout > 300 || !(tcp->state & TCP_STATE_ESTABLISHED)) {
+            // Connection is assumed dead after a minute
+            // Incoming connection has 10s to be accepted
+            tap_tcp_close(tap, ts);
+        }
+    }
 }
 
 static void tap_net_periodic(tap_dev_t* tap)
@@ -1089,6 +1105,10 @@ void tap_close(tap_dev_t* tap)
         net_sock_close(ts->sock);
         free(ts);
     }
+    vector_foreach(tap->tcp_listeners, i) {
+        tap_tcp_close(NULL, vector_at(tap->tcp_listeners, i));
+    }
+    vector_free(tap->tcp_listeners);
     hashmap_destroy(&tap->udp_ports);
     hashmap_destroy(&tap->tcp_map);
     net_sock_close(tap->shut[0]);
