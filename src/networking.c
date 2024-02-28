@@ -389,7 +389,7 @@ static net_sock_t* net_init_localaddr(net_sock_t* sock, const net_addr_t* addr)
     return sock;
 }
 
-static uint32_t net_last_error()
+static int32_t net_last_error()
 {
 #ifdef _WIN32
     int err = WSAGetLastError();
@@ -519,21 +519,21 @@ bool net_tcp_shutdown(net_sock_t* sock)
     return sock && shutdown(sock->fd, 1) == 0;
 }
 
-size_t net_tcp_send(net_sock_t* sock, const void* buffer, size_t size)
+int32_t net_tcp_send(net_sock_t* sock, const void* buffer, size_t size)
 {
-    int ret = sock ? send(sock->fd, buffer, size, 0) : 0;
-    return ret > 0 ? ret : 0;
+    if (sock == NULL) return NET_ERR_RESET;
+    int ret = send(sock->fd, buffer, size, 0);
+    if (ret < 0) return net_last_error();
+    return ret;
 }
 
-size_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size, uint32_t* error)
+int32_t net_tcp_recv(net_sock_t* sock, void* buffer, size_t size)
 {
-    int ret = sock ? recv(sock->fd, buffer, size, 0) : 0;
-    if (error) {
-        if (ret > 0) *error = NET_ERR_NONE;
-        if (ret == 0) *error = NET_ERR_DISCONNECT;
-        if (ret < 0) *error = net_last_error();
-    }
-    return ret > 0 ? ret : 0;
+    if (sock == NULL) return NET_ERR_RESET;
+    int ret = recv(sock->fd, buffer, size, 0);
+    if (ret > 0) return ret;
+    if (ret == 0) return NET_ERR_DISCONNECT;
+    return net_last_error();
 }
 
 net_sock_t* net_udp_bind(const net_addr_t* addr)
@@ -567,10 +567,10 @@ size_t net_udp_send(net_sock_t* sock, const void* buffer, size_t size, const net
     return ret > 0 ? ret : 0;
 }
 
-size_t net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* addr)
+int32_t net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* addr)
 {
     int ret = 0;
-    if (sock == NULL) return 0;
+    if (sock == NULL) return NET_ERR_RESET;
     if (sock->addr.type == NET_TYPE_IPV4) {
         struct sockaddr_in sock_addr = {0};
         net_addrlen_t addr_len = sizeof(struct sockaddr_in);
@@ -584,7 +584,8 @@ size_t net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* add
         net_addr_from_sockaddr6(addr, &sock_addr);
 #endif
     }
-    return ret > 0 ? ret : 0;
+    if (ret < 0) return net_last_error();
+    return ret;
 }
 
 // Generic socket operations

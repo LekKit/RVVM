@@ -51,11 +51,11 @@ extern const net_addr_t net_ipv6_local_addr;
 #define NET_IPV6_ANY   (&net_ipv6_any_addr)
 #define NET_IPV6_LOCAL (&net_ipv6_local_addr)
 
-#define NET_ERR_NONE       0x0
-#define NET_ERR_BLOCK      0x1
-#define NET_ERR_DISCONNECT 0x2
-#define NET_ERR_RESET      0x3
-#define NET_ERR_UNKNOWN    0xFFFF
+#define NET_ERR_NONE       0
+#define NET_ERR_UNKNOWN    (-1)
+#define NET_ERR_BLOCK      (-2)
+#define NET_ERR_DISCONNECT (-3)
+#define NET_ERR_RESET      (-4)
 
 // TCP Sockets
 
@@ -66,15 +66,15 @@ bool        net_tcp_sockpair(net_sock_t* pair[2]);
 bool        net_tcp_status(net_sock_t* sock);   // Connected & not yet closed on both sides
 bool        net_tcp_shutdown(net_sock_t* sock); // Send EOF (FIN), only recv() works afterwards
 
-size_t      net_tcp_send(net_sock_t* sock, const void* buffer, size_t size);
-size_t      net_tcp_recv(net_sock_t* sock, void* buffer, size_t size, uint32_t* error);
+int32_t     net_tcp_send(net_sock_t* sock, const void* buffer, size_t size);
+int32_t     net_tcp_recv(net_sock_t* sock, void* buffer, size_t size);
 
 // UDP Sockets
 
 net_sock_t* net_udp_bind(const net_addr_t* addr);
 
 size_t      net_udp_send(net_sock_t* sock, const void* buffer, size_t size, const net_addr_t* addr);
-size_t      net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* addr);
+int32_t     net_udp_recv(net_sock_t* sock, void* buffer, size_t size, net_addr_t* addr);
 
 // Generic socket operations
 
