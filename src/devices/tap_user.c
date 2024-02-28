@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "spinlock.h"
 #include "rvtimer.h"
 #include "hashmap.h"
+#include "vector.h"
 #include "mem_ops.h"
 #include "utils.h"
 
@@ -131,11 +132,7 @@ typedef struct {
     uint32_t    timeout;
 } tap_sock_t;
 
-typedef struct tcp_lookup_node tcp_lookup_node_t;
-struct tcp_lookup_node {
-    tap_sock_t* ts;
-    tcp_lookup_node_t* next;
-};
+typedef vector_t(tap_sock_t*) ts_vec_t;
 
 struct tap_dev {
     spinlock_t    lock;
@@ -478,16 +475,29 @@ static inline size_t tcp_ack_amount(tcp_ctx_t* tcp, uint32_t ack)
     return (ret < 0x80000000) ? ret : 0; // Care for wraparound
 }
 
+static inline size_t tcp_hash_tuple(const net_addr_t* remote, const net_addr_t* local)
+{
+    // Hash distribution happens in hashmap itself
+    size_t hash = (((uint32_t)remote->port) << 16) + local->port;
+    if (remote->type == NET_TYPE_IPV6) {
+        hash += read_uint64_le_m(remote->ip) + read_uint64_le_m(local->ip);
+        hash += read_uint64_le_m(remote->ip + 8) + read_uint64_le_m(local->ip + 8);
+    } else {
+        hash += read_uint32_le_m(remote->ip) + read_uint32_le_m(local->ip);
+    }
+    return hash;
+}
+
 static tap_sock_t* tap_tcp_lookup(tap_dev_t* tap, const net_addr_t* remote, const net_addr_t* local)
 {
-    size_t hash = read_uint32_le_m(remote->ip) + read_uint32_be_m(local->ip);
-    hash = (hash ^ (hash >> 17)) + remote->port + local->port;
-    tcp_lookup_node_t* node = (void*)hashmap_get(&tap->tcp_map, hash);
-    while (node) {
-        const net_addr_t* r_addr = net_sock_addr(node->ts->sock);
-        if (!memcmp(&node->ts->addr, local, sizeof(net_addr_t))
-         && !memcmp(r_addr, remote, sizeof(net_addr_t))) return node->ts;
-        node = node->next;
+    size_t hash = tcp_hash_tuple(remote, local);
+    ts_vec_t* vec = (ts_vec_t*)hashmap_get(&tap->tcp_map, hash);
+    if (vec) {
+        vector_foreach(*vec, i) {
+            tap_sock_t* ts = vector_at(*vec, i);
+            if (!memcmp(&ts->addr,               local,  sizeof(net_addr_t))
+             && !memcmp(net_sock_addr(ts->sock), remote, sizeof(net_addr_t))) return ts;
+        }
     }
     return NULL;
 }
@@ -496,35 +506,33 @@ static void tap_tcp_register(tap_dev_t* tap, tap_sock_t* ts)
 {
     const net_addr_t* remote = net_sock_addr(ts->sock);
     const net_addr_t* local = &ts->addr;
-    size_t hash = read_uint32_le_m(remote->ip) + read_uint32_be_m(local->ip);
-    hash = (hash ^ (hash >> 17)) + remote->port + local->port;
-    tcp_lookup_node_t* node = safe_new_obj(tcp_lookup_node_t); // TODO: LEAK?
-    node->next = (void*)hashmap_get(&tap->tcp_map, hash);
-    node->ts = ts;
-    hashmap_put(&tap->tcp_map, hash, (size_t)node);
+    size_t hash = tcp_hash_tuple(remote, local);
+    ts_vec_t* vec = (ts_vec_t*)hashmap_get(&tap->tcp_map, hash);
+    if (vec == NULL) {
+        vec = safe_new_obj(ts_vec_t);
+        hashmap_put(&tap->tcp_map, hash, (size_t)vec);
+    }
+    vector_push_back(*vec, ts);
 }
 
 static void tap_tcp_remove(tap_dev_t* tap, tap_sock_t* ts)
 {
     const net_addr_t* remote = net_sock_addr(ts->sock);
     const net_addr_t* local = &ts->addr;
-    size_t hash = read_uint32_le_m(remote->ip) + read_uint32_be_m(local->ip);
-    hash = (hash ^ (hash >> 17)) + remote->port + local->port;
-    tcp_lookup_node_t* node = (void*)hashmap_get(&tap->tcp_map, hash);
-    tcp_lookup_node_t* prev = NULL;
-    while (node) {
-        if (node->ts == ts) {
-            if (prev) {
-                prev->next = node->next;
-            } else {
-                // Also removes a hash entry if node->next == NULL
-                hashmap_put(&tap->tcp_map, hash, (size_t)node->next);
+    size_t hash = tcp_hash_tuple(remote, local);
+    ts_vec_t* vec = (ts_vec_t*)hashmap_get(&tap->tcp_map, hash);
+    if (vec) {
+        vector_foreach_back(*vec, i) {
+            if (vector_at(*vec, i) == ts) {
+                vector_erase(*vec, i);
+                if (!vector_size(*vec)) {
+                    vector_free(*vec);
+                    free(vec);
+                    hashmap_remove(&tap->tcp_map, hash);
+                }
+                return;
             }
-            free(node);
-            return;
         }
-        prev = node;
-        node = node->next;
     }
 }
 
@@ -911,47 +919,54 @@ static void tap_tcp_accept(tap_dev_t* tap, tap_sock_t* listener)
     }
 }
 
-static void tap_net_periodic(tap_dev_t* tap)
+static void tap_tcp_periodic(tap_dev_t* tap, tap_sock_t* ts)
 {
-    hashmap_foreach(&tap->tcp_map, port, ts_val) for (tcp_lookup_node_t* node = (void*)ts_val; node; node = node->next) {
-        tap_sock_t* ts = node->ts;
-        tcp_ctx_t* tcp = ts->tcp;
-        UNUSED(port);
+    tcp_ctx_t* tcp = ts->tcp;
 
-        if (unlikely(tcp->state != TCP_STATE_NORMAL)) {
-            if (tcp->state == TCP_STATE_CLOSED) {
-                // Clean up the closed socket
-                tap_tcp_close(tap, ts);
-                return;
-            }
-            if (tcp->seq != tcp->seq_ack) {
-                switch (tcp->state) {
-                    case TCP_STATE_RECV_OPEN:
-                        // Retry SYN
-                        tap_tcp_segment(tap, ts, TCP_FLAG_SYN);
-                        break;
-                    case TCP_STATE_RECV_OPEN | TCP_STATE_SEND_OPEN:
-                        // Retry SYN+ACK
-                        tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
-                        break;
-                    case TCP_STATE_ESTABLISHED:
-                    case TCP_STATE_ESTABLISHED | TCP_STATE_SEND_OPEN:
-                        // Retry FIN
-                        tap_tcp_segment(tap, ts, TCP_FLAG_FIN | TCP_FLAG_ACK);
-                        break;
-                }
+    if (unlikely(tcp->state != TCP_STATE_NORMAL)) {
+        if (tcp->state == TCP_STATE_CLOSED) {
+            // Clean up the closed socket
+            tap_tcp_close(tap, ts);
+            return;
+        }
+        if (tcp->seq != tcp->seq_ack) {
+            switch (tcp->state) {
+                case TCP_STATE_RECV_OPEN:
+                    // Retry SYN
+                    tap_tcp_segment(tap, ts, TCP_FLAG_SYN);
+                    break;
+                case TCP_STATE_RECV_OPEN | TCP_STATE_SEND_OPEN:
+                    // Retry SYN+ACK
+                    tap_tcp_segment(tap, ts, TCP_FLAG_SYN | TCP_FLAG_ACK);
+                    break;
+                case TCP_STATE_ESTABLISHED:
+                case TCP_STATE_ESTABLISHED | TCP_STATE_SEND_OPEN:
+                    // Retry FIN
+                    tap_tcp_segment(tap, ts, TCP_FLAG_FIN | TCP_FLAG_ACK);
+                    break;
             }
         }
+    }
 
-        if (ts->timeout++) {
-            // Upon ACK timeout, retransmit the whole window
-            tcp_segment_t* seg = tcp->head;
-            uint32_t seq = tcp->seq_ack;
-            while (seg && seq - tcp->seq_ack < tcp->window) {
-                eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
-                seq += seg->size;
-                seg = seg->next;
-            }
+    if (ts->timeout++) {
+        // Upon ACK timeout, retransmit the whole window
+        tcp_segment_t* seg = tcp->head;
+        uint32_t seq = tcp->seq_ack;
+        while (seg && seq - tcp->seq_ack < tcp->window) {
+            eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
+            seq += seg->size;
+            seg = seg->next;
+        }
+    }
+}
+
+static void tap_net_periodic(tap_dev_t* tap)
+{
+    hashmap_foreach(&tap->tcp_map, hash, ts_val) {
+        ts_vec_t* vec = (ts_vec_t*)ts_val;
+        UNUSED(hash);
+        vector_foreach_back(*vec, i) {
+            tap_tcp_periodic(tap, vector_at(*vec, i));
         }
     }
 
@@ -1052,16 +1067,14 @@ void tap_close(tap_dev_t* tap)
     thread_join(tap->thread);
     
     // Cleanup
-    hashmap_foreach(&tap->tcp_map, port, ts_val) {
-        tcp_lookup_node_t* node = (tcp_lookup_node_t*)ts_val;
-        UNUSED(port);
-        while (node) {
-            tcp_lookup_node_t* next = node->next;
-            tap_sock_t* ts = node->ts;
-            tap_tcp_close(NULL, ts);
-            free(node);
-            node = next;
+    hashmap_foreach(&tap->tcp_map, hash, ts_val) {
+        ts_vec_t* vec = (ts_vec_t*)ts_val;
+        UNUSED(hash);
+        vector_foreach_back(*vec, i) {
+            tap_tcp_close(NULL, vector_at(*vec, i));
         }
+        vector_free(*vec);
+        free(vec);
     }
     hashmap_foreach(&tap->udp_ports, port, ts_val) {
         UNUSED(port);
