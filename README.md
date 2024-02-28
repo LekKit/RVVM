@@ -12,7 +12,7 @@ RISC-V CPU & System software implementation written in С
 - Tracing JIT, multicore support
 - Framebuffer display, mouse & keyboard, UART shell
 - NVMe storage drives
-- Networking (WIP)
+- Networking
 
 ## 💡 Tell me more...
 - Feature-complete RV64IMAFDC instruction set
@@ -29,8 +29,8 @@ RISC-V CPU & System software implementation written in С
 - Framebuffer display, GUI for X11/WinAPI/Haiku/SDL
 - I2C HID keyboard & mouse, OpenCores I2C controller
 - Realtek RTL8169, OpenCores Ethernet NICs
-- Linux TAP / WIP socket-based networking
-- Deprecated: PS2 keyboard & mouse, ATA (IDE) drive
+- Userspace networking
+- Deprecated: PS2 keyboard & mouse, ATA (IDE) drive, Linux TAP
 
 ## 📦 Installing
 [![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
@@ -113,25 +113,26 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
 |                      | Achievements | Working on |
 |----------------------|-------------|------------|
-| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format |
+| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Userspace network <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format |
 | [**cerg2010cerg2010**](https://github.com/cerg2010cerg2010) | Important fixes, RV64 groundwork, FPU <br> Initial PLIC & PCI, PS2 HID, ATA, OC Ethernet <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
 | [**Mr0maks**](https://github.com/Mr0maks)                   | Initial C/M/Zicsr extensions, initial UART, VM debugger <br> ARM32 mul/div JIT intrinsics | - |
-| [**0xCatPKG**](https://github.com/0xCatPKG)                 | Userspace network, API improvements <br> Extended testing & portability fixes | HD Audio |
+| [**0xCatPKG**](https://github.com/0xCatPKG)                 | Userspace network & API improvements <br> Extended testing & portability fixes | HD Audio |
 | [**X547**](https://github.com/X547)                         | Haiku GUI, I2C HID, Userland API assistance | Guest Haiku support, UserlandVM |
 | [**iyzsong**](https://github.com/iyzsong)                   | OpenBSD & PLIC fixes, Chardev API | |
 | [**nebulka1**](https://github.com/nebulka1)                 | Relative input mode | |
 
 ## 🔍 TODO
-- TCP buffering & NAT in userspace networking
+- Sparse block image format with compression/deduplication
 - Suspend/resume to file, VM migration
-- Sparse block image format, compression/deduplication
+- Linux userspace binary emulation (WIP)
 - Sound (HD Audio or else)
-- Linux userspace syscalls emulation, ELF loader
 - VFIO for GPU passthrough
 - More RVJIT optimizations, shared caches
-- FPU JIT, Vector/Bitmanip extensions (Waiting for GCC V ext support)
+- FPU JIT (Complicated AF to make a conformant one)
+- Vector/Bitmanip extensions
 - Other peripherals from real boards (SiFive GPIO, flash)
 - *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
+- Free page reporting via virtio-balloon
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
 
