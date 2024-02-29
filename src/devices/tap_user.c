@@ -712,6 +712,11 @@ static void handle_ipv4(tap_dev_t* tap, const uint8_t* buffer, size_t size)
     }
     size_t total_length = read_uint16_be_m(buffer + 2);
     size_t header_length = (buffer[0] & 0xF) << 2;
+    uint16_t frag_flags = read_uint16_be_m(buffer + 6);
+    if (unlikely(frag_flags & 0x3FFF)) {
+        // This is a fragmented frame
+        return;
+    }
     if (unlikely(size < total_length)) {
         // Encoded size exceeds frame size
         return;
