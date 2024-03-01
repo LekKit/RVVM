@@ -270,6 +270,7 @@ uint64_t str_to_uint_base(const char* str, size_t* len, uint8_t base)
             }
         }
     }
+    if (len) len[0] = 0;
     if (base >= 2 && base <= 36) while (digit_value(str[size]) < base) {
         val *= base;
         val += digit_value(str[size++]);
