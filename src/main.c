@@ -4,7 +4,7 @@ Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
                     KotB <github.com/0xCatPKG>
-		    fish4terrisa-MSDSM <fish4terrisa@fishinix.eu.org>
+                    fish4terrisa-MSDSM <fish4terrisa@fishinix.eu.org>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -175,14 +175,13 @@ static int rvvm_main(int argc, const char** argv)
         } else if (cmp_arg(arg_name, "s") || cmp_arg(arg_name, "smp")) {
              smp = str_to_int_dec(arg_val);
         } else if (cmp_arg(arg_name, "res")) {
-            size_t j;
-            for (j=0; arg_val[j] && arg_val[j] != 'x'; ++j);
-            if (arg_val[j] != 'x') {
+            size_t len = 0;
+            fb_x = str_to_uint_base(arg_val, &len, 10);
+            if (arg_val[len] == 'x') fb_y = str_to_uint_base(arg_val + len + 1, NULL, 10);
+            if (fb_x < 100 || fb_y < 100) {
                 rvvm_error("Invalid resoulution: %s, expects 640x480", arg_val);
                 return -1;
             }
-            fb_x = str_to_int_dec(arg_val);
-            fb_y = str_to_int_dec(arg_val + j + 1);
         } else if (cmp_arg(arg_name, "rv32")) {
             rv64 = false;
             arg_size = 1;
