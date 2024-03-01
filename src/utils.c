@@ -215,45 +215,98 @@ DEINIT_ATTR void full_deinit()
     spin_unlock(&deinit_lock);
 }
 
-size_t int_to_str_dec(char* str, size_t size, int val)
+static inline char digit_symbol(uint32_t val)
+{
+    if (val < 10) return '0' + val;
+    if (val < 36) return 'A' + val - 10;
+    return '?';
+}
+
+static inline uint32_t digit_value(char digit)
+{
+    if (digit >= '0' && digit <= '9') return digit - '0';
+    if (digit >= 'A' && digit <= 'Z') return digit - 'A' + 10;
+    if (digit >= 'a' && digit <= 'z') return digit - 'a' + 10;
+    return -1;
+}
+
+size_t uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base)
 {
     size_t len = 0;
-    bool neg = val < 0;
-    do {
-        if (len + 1 > size) return 0;
-        str[len++] = ('0' + (val % 10));
-        val /= 10;
+    if (base >= 2 && base <= 36) do {
+        if (len + 1 >= size) {
+            len = 0;
+            break;
+        }
+        str[len++] = digit_symbol(val % base);
+        val /= base;
     } while (val);
-
-    // Append sign
-    if (len + 1 > size) return 0;
-    if (neg) str[len++] = '-';
-    str[len] = 0;
-
     // Reverse the string
     for (size_t i=0; i<len / 2; ++i) {
         char tmp = str[i];
         str[i] = str[len - i - 1];
         str[len - i - 1] = tmp;
     }
+    if (size) str[len] = 0;
     return len;
 }
 
-int str_to_int_dec(const char* str)
+uint64_t str_to_uint_base(const char* str, size_t* len, uint8_t base)
 {
     int val = 0;
-    bool neg = false;
-    if (*str == '-') {
-        neg = true;
-        str++;
+    size_t size = 0;
+    if (base == 0) {
+        base = 10;
+        if (str[0] == '0') {
+            base = 8; // Octal literal
+            if (str[1] == 'o' || str[1] == 'O') {
+                size = 2;
+            } else if (str[1] == 'x' || str[1] == 'X') {
+                base = 16; // Hex literal
+                size = 2;
+            } else if (str[1] == 'b' || str[1] == 'B') {
+                base = 2; // Binary literal
+                size = 2;
+            }
+        }
     }
-    while (*str >= '0' && *str <= '9') {
-        val *= 10;
-        val += *str - '0';
-        str++;
+    if (base >= 2 && base <= 36) while (digit_value(str[size]) < base) {
+        val *= base;
+        val += digit_value(str[size++]);
+        if (len) len[0] = size;
     }
-    if (neg) val *= -1;
     return val;
+}
+
+size_t int_to_str_base(char* str, size_t size, int64_t val, uint8_t base)
+{
+    size_t off = (val < 0 && size) ? 1 : 0;
+    size_t len = uint_to_str_base(str + off, size - off, off ? -val : val, base);
+    if (!len) {
+        if (size) str[0] = 0;
+    } else if (off) {
+        str[0] = '-';
+        len += off;
+    }
+    return len;
+}
+
+int64_t str_to_int_base(const char* str, size_t* len, uint8_t base)
+{
+    bool neg = (str[0] == '-');
+    uint64_t val = str_to_uint_base(str + neg, len, base);
+    if (neg && len && len[0]) len[0]++;
+    return neg ? -val : val;
+}
+
+size_t int_to_str_dec(char* str, size_t size, int64_t val)
+{
+    return int_to_str_base(str, size, val, 10);
+}
+
+int64_t str_to_int_dec(const char* str)
+{
+    return str_to_int_base(str, NULL, 0);
 }
 
 void rvvm_set_args(int new_argc, const char** new_argv)

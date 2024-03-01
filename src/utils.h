@@ -97,9 +97,13 @@ do { \
 void call_at_deinit(void (*function)());
 void full_deinit();
 
-// Portable itoa/atoi replacement
-size_t int_to_str_dec(char* str, size_t size, int val);
-int str_to_int_dec(const char* str);
+// Portable strtol/ltostr replacement
+size_t   uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base);
+uint64_t str_to_uint_base(const char* str, size_t* len, uint8_t base);
+size_t   int_to_str_base(char* str, size_t size, int64_t val, uint8_t base);
+int64_t  str_to_int_base(const char* str, size_t* len, uint8_t base);
+size_t   int_to_str_dec(char* str, size_t size, int64_t val);
+int64_t  str_to_int_dec(const char* str);
 
 // Global argparser
 void rvvm_set_args(int new_argc, const char** new_argv);
