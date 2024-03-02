@@ -57,6 +57,9 @@ extern const net_addr_t net_ipv6_local_addr;
 #define NET_ERR_DISCONNECT (-3)
 #define NET_ERR_RESET      (-4)
 
+// Parses "[port]"; "0.0.0.0:[port]"; "[::1]:[port]"; "localhost"; etc
+bool        net_parse_addr(net_addr_t* addr, const char* str);
+
 // TCP Sockets
 
 net_sock_t* net_tcp_listen(const net_addr_t* addr);

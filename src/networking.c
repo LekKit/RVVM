@@ -406,6 +406,77 @@ static int32_t net_last_error()
 
 // Public socket API
 
+bool net_parse_addr(net_addr_t* addr, const char* str)
+{
+    net_addr_t result = {0};
+    const char* parse = str;
+    const char* colon = rvvm_strfind(parse, ":");
+    bool ipv6 = colon && rvvm_strfind(colon + 1, ":"); // More than a single :
+    bool ipv4 = rvvm_strfind(parse, ".");
+    bool parse_port = !ipv4 && !ipv6 && !rvvm_strfind(parse, "localhost");
+    size_t len = 0;
+    if (ipv6) {
+        bool bracket = parse[0] == '[';
+        bool skip_colon = false;
+        const char* colon_pair = rvvm_strfind(parse, "::");
+        size_t bytes = 0;
+        size_t right_start = 0;
+        if (bracket) parse++;
+        for (; bytes < 16; bytes += 2) {
+            if (parse == colon_pair) {
+                // Record location of encountered ::, skip it like a group
+                parse += 2;
+                right_start = bytes;
+                skip_colon = false;
+                continue;
+            } else if (skip_colon && parse[0] == ':') {
+                // If we are beyond first hex group, skip prepending :
+                parse++;
+            } else if (parse[0] == 0 || (bracket && parse[0] == ']')) break;
+            // Parse hex group
+            uint16_t hex = str_to_uint_base(parse, &len, 16);
+            if (!len || len > 4) return false; // Hex parsing failed or too long
+            write_uint16_be_m(result.ip + bytes, hex);
+            parse += len;
+            skip_colon = true;
+        }
+        if (bracket) {
+            if (parse[0] != ']') return false; // Missing closing ]
+            parse++;
+        }
+        if (!bracket && parse[0] != 0) return false; // Trailing garbage without []
+        if (colon_pair) {
+            // Align fields at the right of colon pair to end of IPv6, zero hole
+            memmove(result.ip + 16 - (bytes - right_start), result.ip + right_start, bytes - right_start);
+            memset(result.ip + right_start, 0, 16 - bytes);
+        } else if (bytes != 16) return false; // Not enough hex groups and no colon pair
+        result.type = NET_TYPE_IPV6;
+    } else if (ipv4) {
+        for (size_t i=0; i<4; ++i) {
+            result.ip[i] = str_to_uint_base(parse, &len, 10);
+            if (!len) return false; // Integer parsing failed
+            parse += len;
+            if (i < 3 && parse[0] == '.') parse++;
+        }
+    } else if (rvvm_strfind(parse, "localhost") == parse) {
+        result = net_ipv4_local_addr;
+        parse += 9;
+    }
+    if (parse[0] == ':') {
+        parse_port = true;
+        parse++;
+    }
+    if (parse_port) {
+        result.port = str_to_uint_base(parse, &len, 10);
+        if (!len) return false; // Integer parsing failed
+        parse += len;
+    }
+    if (parse[0] != 0) return false; // Trailing garbage
+
+    memcpy(addr, &result, sizeof(result));
+    return true;
+}
+
 net_sock_t* net_tcp_listen(const net_addr_t* addr)
 {
     net_handle_t fd = net_create_handle(SOCK_STREAM, addr, false);
