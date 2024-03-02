@@ -388,6 +388,7 @@ static bool tap_addr_allowed(const tap_dev_t* tap, const net_addr_t* addr)
             if (addr->ip[0] == 10) return false;
             if (addr->ip[0] == 172 && addr->ip[1] >= 16 && addr->ip[1] < 32) return false;
             if (addr->ip[0] == 192 && addr->ip[1] == 168) return false;
+            if (addr->ip[0] == 169 && addr->ip[1] == 254) return false; // Link-local range
         }
     }
     return true;
@@ -414,7 +415,7 @@ static void handle_udp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
         return;
     }
     udp_size -= UDP_HDR_SIZE;
-    
+
     spin_lock(&tap->lock);
     tap_sock_t* ts = (tap_sock_t*)hashmap_get(&tap->udp_ports, src->port);
     if (ts == NULL) {
@@ -721,7 +722,7 @@ static void handle_ipv4(tap_dev_t* tap, const uint8_t* buffer, size_t size)
         // Encoded size exceeds frame size
         return;
     }
-    
+
     memcpy(src.ip, buffer + 12, PLEN_IPv4);
     memcpy(dst.ip, buffer + 16, PLEN_IPv4);
     uint8_t proto = buffer[9];
@@ -751,7 +752,7 @@ static void handle_ipv6(tap_dev_t* tap, const uint8_t* buffer, size_t size)
         // Encoded size exceeds frame size
         return;
     }
-    
+
     memcpy(src.ip,  buffer + 8, PLEN_IPv6);
     memcpy(dst.ip, buffer + 24, PLEN_IPv6);
     uint8_t proto = buffer[6];
@@ -1093,7 +1094,7 @@ void tap_close(tap_dev_t* tap)
     // Shut down the TAP thread
     net_sock_close(tap->shut[1]);
     thread_join(tap->thread);
-    
+
     // Cleanup
     hashmap_foreach(&tap->tcp_map, hash, ts_val) {
         ts_vec_t* vec = (ts_vec_t*)ts_val;
