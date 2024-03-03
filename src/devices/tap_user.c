@@ -150,7 +150,6 @@ struct tap_dev {
 
 static inline bool eth_send(tap_dev_t* tap, const void* buffer, size_t size)
 {
-    if (!tap->net.feed_rx) return false;
     return tap->net.feed_rx(tap->net.net_dev, buffer, size);
 }
 
@@ -1081,16 +1080,15 @@ tap_dev_t* tap_open()
     tap_portfwd(tap, "tcp/[::1]:2022=22");
     tap_portfwd(tap, "tcp/127.0.0.1:2022=22");
 
-    tap->thread = thread_create(tap_thread, tap);
-
     return tap;
 }
 
 void tap_attach(tap_dev_t* tap, const tap_net_dev_t* net_dev)
 {
-    spin_lock(&tap->lock);
-    tap->net = *net_dev;
-    spin_unlock(&tap->lock);
+    if (tap->net.feed_rx == NULL) {
+        tap->net = *net_dev;
+        tap->thread = thread_create(tap_thread, tap);
+    }
 }
 
 bool tap_portfwd(tap_dev_t* tap, const char* fwd)
