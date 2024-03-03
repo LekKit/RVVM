@@ -190,7 +190,9 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** a
             }
             fb_window_init_auto(machine, fb_x, fb_y);
         } else if (cmp_arg(arg_name, "portfwd")) {
+#ifdef USE_NET
             if (!tap_portfwd(tap, arg_val)) return false;
+#endif
         }
     }
     if (rvvm_getarg("dumpdtb")) rvvm_dump_dtb(machine, rvvm_getarg("dumpdtb"));
