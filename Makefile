@@ -127,12 +127,6 @@ ifeq ($(OS),windows)
 override LDFLAGS += -static
 BIN_EXT := .exe
 LIB_EXT := .dll
-# Link to winmm / WinCE mmtimer for timeBeginPeriod()
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lwinmm 2>&1)))
-override LDFLAGS += -lwinmm
-else
-override LDFLAGS += -lmmtimer
-endif
 else
 
 LIB_EXT := .so
