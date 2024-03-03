@@ -98,7 +98,6 @@ typedef struct tcp_segment tcp_segment_t;
 struct tcp_segment {
     tcp_segment_t* next;
     size_t size;
-    uint8_t buffer[TAP_FRAME_SIZE];
 };
 
 typedef struct {
@@ -443,6 +442,11 @@ static void handle_udp(tap_dev_t* tap, const uint8_t* buffer, size_t size, net_a
     if (ts->timeout != BOUND_INF) ts->timeout = 0;
     spin_unlock(&tap->lock);
     if (tap_addr_allowed(tap, dst)) net_udp_send(ts->sock, udb_buff, udp_size, dst);
+}
+
+static inline uint8_t* tcp_seg_buffer(tcp_segment_t* seg)
+{
+    return ((uint8_t*)seg) + sizeof(tcp_segment_t);
 }
 
 static void tap_tcp_segment_gen(tap_dev_t* tap, tap_sock_t* ts, uint8_t flags, uint32_t seq_sub)
@@ -879,19 +883,23 @@ static void tap_tcp_recv(tap_dev_t* tap, tap_sock_t* ts)
         return;
     }
 
-    tcp_segment_t* seg = safe_new_obj(tcp_segment_t);
-    size_t size = sizeof(seg->buffer) - TCP_WRAP_SIZE;
-    int32_t result = net_tcp_recv(ts->sock, seg->buffer + TCP_WRAP_SIZE, size);
+    tcp_segment_t* seg = safe_malloc(sizeof(tcp_segment_t) + TAP_FRAME_SIZE);
+    size_t size = TAP_FRAME_SIZE - TCP_WRAP_SIZE;
+    int32_t result = net_tcp_recv(ts->sock, tcp_seg_buffer(seg) + TCP_WRAP_SIZE, size);
     if (result > 0) {
         // Push a segment and buffer it for retransmit
         seg->size = result;
-        uint8_t* ipv4 = create_eth_frame(tap, seg->buffer, ETH2_IPv4);
+        seg->next = NULL;
+        uint8_t* ipv4 = create_eth_frame(tap, tcp_seg_buffer(seg), ETH2_IPv4);
         uint8_t* tcp  = create_ipv4_frame(ipv4, seg->size + TCP_HDR_SIZE, IP_PROTO_TCP, ts->addr.ip, net_sock_addr(ts->sock)->ip);
         create_tcp_segment(tcp, TCP_FLAG_PSH | TCP_FLAG_ACK, ts->tcp->seq, ts->tcp->ack, ts->addr.port, net_sock_addr(ts->sock)->port);
         tcp_ipv4_checksum(ipv4, seg->size);
+        eth_send(tap, tcp_seg_buffer(seg), seg->size + TCP_WRAP_SIZE);
 
         ts->tcp->seq += seg->size;
 
+        // Shrink the retransmit segment
+        seg = safe_realloc(seg, sizeof(tcp_segment_t) + result + TCP_WRAP_SIZE);
         if (!ts->tcp->head) {
             ts->tcp->head = seg;
             ts->tcp->tail = seg;
@@ -899,7 +907,6 @@ static void tap_tcp_recv(tap_dev_t* tap, tap_sock_t* ts)
             ts->tcp->tail->next = seg;
             ts->tcp->tail = seg;
         }
-        eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
     } else {
         free(seg);
         if (result == NET_ERR_DISCONNECT) {
@@ -970,7 +977,7 @@ static void tap_tcp_periodic(tap_dev_t* tap, tap_sock_t* ts)
         tcp_segment_t* seg = tcp->head;
         uint32_t seq = tcp->seq_ack;
         while (seg && seq - tcp->seq_ack < tcp->window) {
-            eth_send(tap, seg->buffer, seg->size + TCP_WRAP_SIZE);
+            eth_send(tap, tcp_seg_buffer(seg), seg->size + TCP_WRAP_SIZE);
             seq += seg->size;
             seg = seg->next;
         }
