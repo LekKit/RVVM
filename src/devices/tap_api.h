@@ -45,6 +45,11 @@ bool       tap_send(tap_dev_t* tap, const void* data, size_t size);
 bool       tap_get_mac(tap_dev_t* tap, uint8_t mac[6]);
 bool       tap_set_mac(tap_dev_t* tap, const uint8_t mac[6]);
 
+// Forward ports from host address into guest network
+// By default forwards to guest DHCP address
+// Format: "tcp/2022=22"; "[::1]:2022=22"; "127.0.0.1:2022=192.168.0.101:22"
+bool       tap_portfwd(tap_dev_t* tap, const char* fwd);
+
 // Shut down the interface
 void       tap_close(tap_dev_t* tap);
 

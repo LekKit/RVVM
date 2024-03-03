@@ -821,21 +821,19 @@ bool tap_set_mac(tap_dev_t* tap, const uint8_t mac[6])
     return true;
 }
 
-static void bind_port(tap_dev_t* tap, uint16_t internal, uint16_t external, bool tcp)
+static bool bind_port(tap_dev_t* tap, const net_addr_t* internal, const net_addr_t* external, bool tcp)
 {
-    net_addr_t remote = { .port = external, };
-    net_addr_t local = { .ip = {192, 168, 0, 100, }, .port = internal, };
     net_sock_t* sock = NULL;
     if (tcp) {
-        sock = net_tcp_listen(&remote);
+        sock = net_tcp_listen(external);
     } else {
-        sock = net_udp_bind(&remote);
+        sock = net_udp_bind(external);
     }
     net_sock_set_blocking(sock, false);
     if (sock) {
         tap_sock_t* ts = safe_new_obj(tap_sock_t);
         ts->sock = sock;
-        ts->addr = local;
+        ts->addr = *internal;
         spin_lock(&tap->lock);
         if (tcp) {
             ts->tcp = safe_new_obj(tcp_ctx_t);
@@ -843,12 +841,13 @@ static void bind_port(tap_dev_t* tap, uint16_t internal, uint16_t external, bool
             vector_push_back(tap->tcp_listeners, ts);
         } else {
             ts->timeout = BOUND_INF;
-            hashmap_put(&tap->udp_ports, internal, (size_t)ts);
+            hashmap_put(&tap->udp_ports, internal->port, (size_t)ts);
         }
         spin_unlock(&tap->lock);
         net_event_t event = { .data = ts, .flags = NET_POLL_RECV, };
         net_poll_add(tap->poll, ts->sock, &event);
-    } else rvvm_warn("Failed to bind port!");
+    }
+    return sock;
 }
 
 static void tap_udp_recv(tap_dev_t* tap, tap_sock_t* ts)
@@ -1079,14 +1078,41 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
     hashmap_init(&tap->udp_ports, 16);
     hashmap_init(&tap->tcp_map, 16);
 
-    bind_port(tap, 27015, 27015, false);
-    bind_port(tap, 19132, 19132, false);
-    bind_port(tap, 22, 2022, true);
-    bind_port(tap, 80, 2080, true);
+    tap_portfwd(tap, "tcp/[::1]:2022=22");
+    tap_portfwd(tap, "tcp/127.0.0.1:2022=22");
 
     tap->thread = thread_create(tap_thread, tap);
 
     return tap;
+}
+
+bool tap_portfwd(tap_dev_t* tap, const char* fwd)
+{
+    net_addr_t host, guest;
+    char host_str[256];
+    const char* tcp_prefix = rvvm_strfind(fwd, "tcp/");
+    const char* udp_prefix = rvvm_strfind(fwd, "udp/");
+    if (tcp_prefix || udp_prefix) fwd += 4;
+    const char* delim = rvvm_strfind(fwd, "=");
+    if (!delim) return false;
+    rvvm_strlcpy(host_str, fwd, EVAL_MIN((size_t)(delim - fwd + 1), sizeof(host_str)));
+    if (!net_parse_addr(&host, host_str) || !net_parse_addr(&guest, delim + 1)) {
+        return false;
+    }
+    // Accomodate addr types (If only port is passed at either side, etc)
+    if (guest.type == NET_TYPE_IPV4) guest.type = host.type;
+    if (host.type == NET_TYPE_IPV4) host.type = guest.type;
+    if (guest.type == NET_TYPE_IPV4 && memcmp(guest.ip, net_ipv4_any_addr.ip, PLEN_IPv4) == 0) {
+        memcpy(guest.ip, CLIENT_IP, PLEN_IPv4);
+    }
+    bool ret = true;
+    if (tcp_prefix || !udp_prefix) ret = bind_port(tap, &guest, &host, true);
+    if (ret && (udp_prefix || !tcp_prefix)) ret = bind_port(tap, &guest, &host, false);
+    if (!ret) {
+        rvvm_error("Failed to bind %s", host_str);
+        if (host.port && host.port < 1024) rvvm_error("Binding ports below 1024 requires root/admin privilege");
+    }
+    return ret;
 }
 
 void tap_close(tap_dev_t* tap)
