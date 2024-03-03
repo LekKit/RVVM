@@ -22,10 +22,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvmlib.h"
 #include "plic.h"
+#include "tap_api.h"
 
 #define ETHOC_DEFAULT_MMIO 0x21000000
 
-PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
-PUBLIC void ethoc_init_auto(rvvm_machine_t* machine);
+PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
+                                     rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
+PUBLIC rvvm_mmio_handle_t ethoc_init_auto(rvvm_machine_t* machine);
 
 #endif

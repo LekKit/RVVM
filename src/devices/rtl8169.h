@@ -19,10 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVVM_RTL8169_H
 #define RVVM_RTL8169_H
 
-#include "rvvmlib.h"
 #include "pci-bus.h"
+#include "tap_api.h"
 
-PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus);
+PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus, tap_dev_t* tap);
 PUBLIC pci_dev_t* rtl8169_init_auto(rvvm_machine_t* machine);
 
 #endif

@@ -478,15 +478,16 @@ static rvvm_mmio_type_t rtl8169_type = {
     .reset = rtl8169_reset,
 };
 
-PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus)
+PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus, tap_dev_t* tap)
 {
     rtl8169_dev_t* rtl8169 = safe_new_obj(rtl8169_dev_t);
-    tap_net_dev_t tap_net = {
+    tap_net_dev_t nic = {
         .net_dev = rtl8169,
         .feed_rx = rtl8169_feed_rx,
     };
 
-    rtl8169->tap = tap_open(&tap_net);
+    rtl8169->tap = tap;
+    tap_attach(tap, &nic);
     if (rtl8169->tap == NULL) {
         rvvm_error("Failed to create TAP device!");
         free(rtl8169);
@@ -518,7 +519,12 @@ PUBLIC pci_dev_t* rtl8169_init(pci_bus_t* pci_bus)
 
 PUBLIC pci_dev_t* rtl8169_init_auto(rvvm_machine_t* machine)
 {
-    return rtl8169_init(rvvm_get_pci_bus(machine));
+    tap_dev_t* tap = tap_open();
+    if (tap == NULL) {
+        rvvm_error("Failed to create TAP device!");
+        return NULL;
+    }
+    return rtl8169_init(rvvm_get_pci_bus(machine), tap);
 }
 
 #endif

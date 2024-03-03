@@ -150,6 +150,7 @@ struct tap_dev {
 
 static inline bool eth_send(tap_dev_t* tap, const void* buffer, size_t size)
 {
+    if (!tap->net.feed_rx) return false;
     return tap->net.feed_rx(tap->net.net_dev, buffer, size);
 }
 
@@ -1060,10 +1061,9 @@ static void* tap_thread(void* arg)
     return NULL;
 }
 
-tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
+tap_dev_t* tap_open()
 {
     tap_dev_t* tap = safe_new_obj(tap_dev_t);
-    tap->net = *net_dev;
     // Generate a random local unicast MAC
     rvvm_randombytes(tap->mac, 6);
     tap->mac[0] = (tap->mac[0] & 0xFE) | 0x2;
@@ -1084,6 +1084,13 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
     tap->thread = thread_create(tap_thread, tap);
 
     return tap;
+}
+
+void tap_attach(tap_dev_t* tap, const tap_net_dev_t* net_dev)
+{
+    spin_lock(&tap->lock);
+    tap->net = *net_dev;
+    spin_unlock(&tap->lock);
 }
 
 bool tap_portfwd(tap_dev_t* tap, const char* fwd)

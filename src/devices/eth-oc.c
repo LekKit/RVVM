@@ -510,10 +510,11 @@ static rvvm_mmio_type_t ethoc_dev_type = {
     .reset = ethoc_reset,
 };
 
-PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
+                                     rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
-    tap_net_dev_t tap_net = {
+    tap_net_dev_t nic = {
         .net_dev = eth,
         .feed_rx = ethoc_feed_rx,
     };
@@ -522,12 +523,8 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
     eth->irq = irq;
     eth->machine = machine;
 
-    eth->tap = tap_open(&tap_net);
-    if (eth->tap == NULL) {
-        rvvm_error("Failed to create TAP device!");
-        free(eth);
-        return;
-    }
+    eth->tap = tap;
+    tap_attach(tap, &nic);
 
     rvvm_mmio_dev_t ethoc_dev = {
         .min_op_size = 4,
@@ -539,8 +536,8 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
         .size = 0x800,
         .data = eth,
     };
-    rvvm_attach_mmio(machine, &ethoc_dev);
-
+    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &ethoc_dev);
+    if (handle == RVVM_INVALID_MMIO) return handle;
 #ifdef USE_FDT
     struct fdt_node* ethoc = fdt_node_create_reg("ethernet", base_addr);
     fdt_node_add_prop_reg(ethoc, "reg", base_addr, 0x800);
@@ -549,13 +546,19 @@ PUBLIC void ethoc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_
     fdt_node_add_prop_u32(ethoc, "interrupts", irq);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), ethoc);
 #endif
+    return handle;
 }
 
-PUBLIC void ethoc_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_handle_t ethoc_init_auto(rvvm_machine_t* machine)
 {
+    tap_dev_t* tap = tap_open();
+    if (tap == NULL) {
+        rvvm_error("Failed to create TAP device!");
+        return RVVM_INVALID_MMIO;
+    }
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ETHOC_DEFAULT_MMIO, 0x800);
-    ethoc_init(machine, addr, plic, plic_alloc_irq(plic));
+    return ethoc_init(machine, tap, addr, plic, plic_alloc_irq(plic));
 }
 
 #endif
