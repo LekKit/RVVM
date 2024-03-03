@@ -32,6 +32,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <net/if_arp.h>
 #include <linux/if_tun.h>
 
+/*
+ * Linux TUN/TAP networking manual by cerg2010cerg2010 (circa 2021)
+ * In the guest:
+    ip addr add 192.168.2.1/24 dev enp0s1
+    ip link set enp0s1 up
+    ip route add default dev enp0s1
+    ip route del default
+    ip route add default via 192.168.2.2
+    echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+ * Workaround TX checksum failure:
+    ethtool -K enp0s1 tx off
+ * On the host (replace wlan0 with your host NIC ifname):
+    sudo sysctl net.ipv4.ip_forward=1
+    sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+    sudo ip addr add 192.168.2.2/24 dev tap0
+ */
+
 struct tap_dev {
     tap_net_dev_t net;
     thread_ctx_t* thread;
@@ -71,10 +88,9 @@ static void* tap_thread(void* arg)
     return arg;
 }
 
-tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
+tap_dev_t* tap_open()
 {
-    tap_dev_t* tap = safe_calloc(sizeof(tap_dev_t), 1);
-    tap->net = *net_dev;
+    tap_dev_t* tap = safe_new_obj(tap_dev_t);
     // Open TUN
     tap->fd = open("/dev/net/tun", O_RDWR);
     if (tap->fd < 0) {
@@ -110,10 +126,16 @@ tap_dev_t* tap_open(const tap_net_dev_t* net_dev)
     ioctl(sock, SIOCSIFFLAGS, &ifr);
     close(sock);
 
-    // Run TAP thread
-    tap->thread = thread_create(tap_thread, tap);
-    
     return tap;
+}
+
+void tap_attach(tap_dev_t* tap, const tap_net_dev_t* net_dev)
+{
+    if (tap->net.feed_rx == NULL) {
+        tap->net = *net_dev;
+        // Run TAP thread
+        tap->thread = thread_create(tap_thread, tap);
+    }
 }
 
 bool tap_send(tap_dev_t* tap, const void* data, size_t size)
