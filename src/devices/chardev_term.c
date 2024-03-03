@@ -256,12 +256,12 @@ PUBLIC chardev_t* chardev_fd_create(int rfd, int wfd)
 PUBLIC chardev_t* chardev_pty_create(const char* path)
 {
     if (rvvm_strcmp(path, "stdout")) return chardev_term_create();
+    if (rvvm_strcmp(path, "null")) return NULL; // NULL chardev
 #ifdef POSIX_TERM_IMPL
     int fd = open(path, O_RDWR | O_CLOEXEC);
     if (fd >= 0) return chardev_fd_create(fd, fd);
     rvvm_error("Could not open PTY %s", path);
 #else
-    UNUSED(path);
     rvvm_error("No PTY chardev support on non-POSIX");
 #endif
     return NULL;
