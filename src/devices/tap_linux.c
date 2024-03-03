@@ -164,6 +164,12 @@ bool tap_set_mac(tap_dev_t* tap, const uint8_t mac[6])
     return ioctl(tap->fd, SIOCSIFHWADDR, &ifr) >= 0;
 }
 
+bool tap_portfwd(tap_dev_t* tap, const char* fwd)
+{
+    UNUSED(tap); UNUSED(fwd);
+    return false;
+}
+
 void tap_close(tap_dev_t* tap)
 {
     // Shut down the TAP thread
