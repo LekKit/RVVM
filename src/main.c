@@ -147,7 +147,57 @@ static bool cmp_arg(const char* arg, const char* name)
     return *name == 0 && (*arg == '=' || *arg == 0);
 }
 
-static int rvvm_main(int argc, const char** argv)
+static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** argv,
+                               const char* bootrom, tap_dev_t* tap)
+{
+    const char* arg_name = "";
+    const char* arg_val = "";
+    size_t      arg_size = 0;
+
+    rvvm_append_cmdline(machine, "root=/dev/nvme0n1 rootflags=discard rw");
+    if (rvvm_getarg("cmdline")) rvvm_set_cmdline(machine, rvvm_getarg("cmdline"));
+    if (rvvm_getarg("append")) rvvm_append_cmdline(machine, rvvm_getarg("append"));
+
+    if (!rvvm_load_bootrom(machine, bootrom)) return false;
+    if (rvvm_getarg("k") && !rvvm_load_kernel(machine, rvvm_getarg("k"))) return false;
+    if (rvvm_getarg("kernel") && !rvvm_load_kernel(machine, rvvm_getarg("kernel"))) return false;
+    if (rvvm_getarg("dtb") && !rvvm_load_dtb(machine, rvvm_getarg("dtb"))) return false;
+
+    for (int i=1; i<argc; i+=arg_size) {
+        arg_size = get_arg(argv + i, &arg_name, &arg_val);
+        if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image") || cmp_arg(arg_name, "nvme")) {
+            if (!nvme_init_auto(machine, arg_val, true)) {
+                rvvm_error("Failed to attach image \"%s\"", arg_val);
+                return false;
+            }
+        } else if (cmp_arg(arg_name, "ata")) {
+            if (!ata_init_auto(machine, arg_val, true)) {
+                rvvm_error("Failed to attach image \"%s\"", arg_val);
+                return false;
+            }
+        } else if (cmp_arg(arg_name, "serial")) {
+            chardev_t* chardev = chardev_pty_create(arg_val);
+            if (chardev == NULL) return false;
+            ns16550a_init_auto(machine, chardev);
+        } else if (cmp_arg(arg_name, "res")) {
+            size_t len = 0;
+            uint32_t fb_x = str_to_uint_base(arg_val, &len, 10);
+            uint32_t fb_y = str_to_uint_base(arg_val + len + 1, NULL, 10);
+            if (arg_val[len] != 'x') fb_y = 0;
+            if (fb_x < 100 || fb_y < 100) {
+                rvvm_error("Invalid resoulution: %s, expects 640x480", arg_val);
+                return false;
+            }
+            fb_window_init_auto(machine, fb_x, fb_y);
+        } else if (cmp_arg(arg_name, "portfwd")) {
+            if (!tap_portfwd(tap, arg_val)) return false;
+        }
+    }
+    if (rvvm_getarg("dumpdtb")) rvvm_dump_dtb(machine, rvvm_getarg("dumpdtb"));
+    return true;
+}
+
+static int rvvm_cli_main(int argc, const char** argv)
 {
     const char* arg_name = "";
     const char* arg_val = "";
@@ -158,46 +208,26 @@ static int rvvm_main(int argc, const char** argv)
     size_t mem = 256 << 20;
     size_t smp = 1;
     bool   rv64 = true;
-    size_t fb_x = 640;
-    size_t fb_y = 480;
-    bool   gui = true;
+    tap_dev_t* tap = NULL;
 
     // Set up global argparser
     rvvm_set_args(argc, argv);
+    if (rvvm_has_arg("h") || rvvm_has_arg("help") || rvvm_has_arg("H")) {
+        print_help();
+        return 0;
+    }
 
-    // Parse machine options
+    // Parse initial machine options
+    if (rvvm_getarg_size("m"))   mem = rvvm_getarg_size("m");
+    if (rvvm_getarg_size("mem")) mem = rvvm_getarg_size("mem");
+    if (rvvm_getarg_int("s"))    smp = rvvm_getarg_int("s");
+    if (rvvm_getarg_int("smp"))  smp = rvvm_getarg_int("smp");
+    rv64 = !rvvm_has_arg("rv32");
+
     for (int i=1; i<argc; i+=arg_size) {
         arg_size = get_arg(argv + i, &arg_name, &arg_val);
-        if (cmp_arg(arg_name, "m") || cmp_arg(arg_name, "mem")) {
-            if (rvvm_strlen(arg_val)) {
-                mem = ((size_t)str_to_int_dec(arg_val)) << mem_suffix_shift(arg_val[rvvm_strlen(arg_val)-1]);
-            }
-        } else if (cmp_arg(arg_name, "s") || cmp_arg(arg_name, "smp")) {
-             smp = str_to_int_dec(arg_val);
-        } else if (cmp_arg(arg_name, "res")) {
-            size_t len = 0;
-            fb_x = str_to_uint_base(arg_val, &len, 10);
-            if (arg_val[len] == 'x') fb_y = str_to_uint_base(arg_val + len + 1, NULL, 10);
-            if (fb_x < 100 || fb_y < 100) {
-                rvvm_error("Invalid resoulution: %s, expects 640x480", arg_val);
-                return -1;
-            }
-        } else if (cmp_arg(arg_name, "rv32")) {
-            rv64 = false;
-            arg_size = 1;
-        } else if (cmp_arg(arg_name, "rv64")) {
-            rv64 = true;
-            arg_size = 1;
-        } else if (cmp_arg(arg_name, "nogui")) {
-            gui = false;
-            arg_size = 1;
-        } else if (cmp_arg(arg_name, "bootrom") || cmp_arg(arg_name, "bios")) {
+        if (cmp_arg(arg_name, "bootrom") || cmp_arg(arg_name, "bios")) {
             bootrom = arg_val;
-        }  else if (cmp_arg(arg_name, "help")
-                 || cmp_arg(arg_name, "h")
-                 || cmp_arg(arg_name, "H")) {
-            print_help();
-            return 0;
         }
     }
     if (bootrom == NULL) {
@@ -216,55 +246,24 @@ static int rvvm_main(int argc, const char** argv)
     pci_bus_init_auto(machine);
     i2c_oc_init_auto(machine);
 
-    if (!rvvm_has_arg("serial")) ns16550a_init_term_auto(machine);
     rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
-
-    bool success = rvvm_load_bootrom(machine, bootrom);
-    rvvm_append_cmdline(machine, "root=/dev/nvme0n1 rootflags=discard rw");
-
-    if (gui) fb_window_init_auto(machine, fb_x, fb_y);
-
+    if (!rvvm_has_arg("serial")) ns16550a_init_term_auto(machine);
+    if (!rvvm_has_arg("nogui") && !rvvm_has_arg("res")) fb_window_init_auto(machine, 640, 480);
 #ifdef USE_NET
-    rtl8169_init_auto(machine);
+    if (!rvvm_has_arg("nonet")) {
+        tap = tap_open();
+        rtl8169_init(rvvm_get_pci_bus(machine), tap);
+    }
 #endif
 
-    // Post-creation setup
-    for (int i=1; i<argc; i+=arg_size) {
-        arg_size = get_arg(argv + i, &arg_name, &arg_val);
-        if (cmp_arg(arg_name, "dtb")) {
-            success = success && rvvm_load_dtb(machine, arg_val);
-        } else if (cmp_arg(arg_name, "k") || cmp_arg(arg_name, "kernel")) {
-            success = success && rvvm_load_kernel(machine, arg_val);
-        } else if (cmp_arg(arg_name, "i") || cmp_arg(arg_name, "image") || cmp_arg(arg_name, "nvme")) {
-            if (success && !nvme_init_auto(machine, arg_val, true)) {
-                rvvm_error("Failed to attach image \"%s\"", arg_val);
-                success = false;
-            }
-        } else if (cmp_arg(arg_name, "ata")) {
-            if (success && !ata_init_auto(machine, arg_val, true)) {
-                rvvm_error("Failed to attach image \"%s\"", arg_val);
-                success = false;
-            }
-        } else if (cmp_arg(arg_name, "cmdline")) {
-            rvvm_set_cmdline(machine, arg_val);
-        } else if (cmp_arg(arg_name, "append")) {
-            rvvm_append_cmdline(machine, arg_val);
-        } else if (cmp_arg(arg_name, "dumpdtb")) {
-            rvvm_dump_dtb(machine, arg_val);
-        } else if (cmp_arg(arg_name, "serial")) {
-            chardev_t* chardev = chardev_pty_create(arg_val);
-            if (chardev) ns16550a_init_auto(machine, chardev);
-        }
-    }
-    if (success) {
+    if (rvvm_cli_configure(machine, argc, argv, bootrom, tap)) {
         rvvm_enable_builtin_eventloop(false);
         rvvm_start_machine(machine);
         rvvm_run_eventloop(); // Returns on machine shutdown
     } else {
         rvvm_error("Failed to initialize VM");
     }
-
     rvvm_free_machine(machine);
     return 0;
 }
@@ -288,7 +287,7 @@ int main(int argc, char** argv)
         WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, argv[i], arg_len, NULL, NULL);
     }
 #endif
-    int ret = rvvm_main(argc, (const char**)argv);
+    int ret = rvvm_cli_main(argc, (const char**)argv);
 #if defined(_WIN32) && !defined(UNDER_CE)
     for (int i=0; i<argc; ++i) free(argv[i]);
     free(argv);
