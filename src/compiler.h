@@ -94,29 +94,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MSAN_SUPPRESS
 #endif
 
-#ifdef GNU_EXTS
-
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define HOST_LITTLE_ENDIAN 1
-#else
-#define HOST_BIG_ENDIAN 1
-#endif
-
-#else
-
 // Guess endianness based on arch/common macros
 // Able to detect big-endian MIPS, ARM, PowerPC, PA-RISC, s390
-#if defined(__MIPSEB__) || defined(__ARMEB__) || \
-    defined(__hppa__) || defined(__hppa64__) || defined(__s390__) || \
-    (defined(__ppc__) || defined(__ppc64__)) && defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(__MIPSEB__) || \
+    defined(__ARMEB__) || defined(__hppa__) || defined(__hppa64__) || defined(__s390__)
 #define HOST_BIG_ENDIAN 1
-#else
+#elif !defined(GNU_EXTS) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 #define HOST_LITTLE_ENDIAN 1
 #endif
 
-#endif
-
-#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_AMD64)
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_AMD64) || defined(__aarch64__)
 #define HOST_MISALIGN_SUPPORT 1
 #else
 // Not sure about other arches, misaligns may be very slow
@@ -128,6 +115,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #if UINTPTR_MAX == UINT64_MAX
 #define HOST_64BIT 1
+#elif UINTPTR_MAX == UINT32_MAX
+#define HOST_32BIT 1
 #endif
 
 // Unwrap a token or a token value into a string literal
