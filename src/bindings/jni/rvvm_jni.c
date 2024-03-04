@@ -1,4 +1,5 @@
 #include "tiny-jni.h"
+#include "compiler.h"
 #include "utils.h"
 #include "rvvmlib.h"
 #include "devices/clint.h"
@@ -13,6 +14,8 @@
 #include "devices/mtd-physmap.h"
 #include "devices/framebuffer.h"
 #include "devices/hid_api.h"
+
+PUSH_OPTIMIZATION_SIZE
 
 JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_get_1abi_1version(JNIEnv* env, jclass class)
 {
@@ -326,3 +329,5 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1keyboard_1release(JNIEnv
     UNUSED(env); UNUSED(class);
     hid_keyboard_release((hid_keyboard_t*)(size_t)kb, key);
 }
+
+POP_OPTIMIZATION_SIZE
