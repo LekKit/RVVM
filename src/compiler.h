@@ -94,6 +94,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MSAN_SUPPRESS
 #endif
 
+// Optimization pragmas (Clang doesn't support this)
+#if GCC_CHECK_VER(4, 4)
+#define SOURCE_OPTIMIZATION_NONE _Pragma("GCC optimize(\"O0\")")
+#define SOURCE_OPTIMIZATION_O2 _Pragma("GCC optimize(\"O2\")")
+#define SOURCE_OPTIMIZATION_O3 _Pragma("GCC optimize(\"O3\")")
+#else
+#define SOURCE_OPTIMIZATION_NONE
+#define SOURCE_OPTIMIZATION_O2
+#define SOURCE_OPTIMIZATION_O3
+#endif
+#if GCC_CHECK_VER(12, 1)
+#define SOURCE_OPTIMIZATION_SIZE _Pragma("GCC optimize(\"Oz\")")
+#elif GCC_CHECK_VER(4, 4)
+#define SOURCE_OPTIMIZATION_SIZE _Pragma("GCC optimize(\"Os\")")
+#else
+#define SOURCE_OPTIMIZATION_SIZE
+#endif
+
+// Pushable size optimization attribute, Clang supports this to some degree
+#if CLANG_CHECK_VER(8, 0) && GNU_ATTRIBUTE(minsize)
+#define PUSH_OPTIMIZATION_SIZE _Pragma("clang attribute push (__attribute__((minsize)), apply_to=function)")
+#define POP_OPTIMIZATION_SIZE _Pragma("clang attribute pop")
+#elif GCC_CHECK_VER(4, 4)
+#define PUSH_OPTIMIZATION_SIZE _Pragma("GCC push_options") SOURCE_OPTIMIZATION_SIZE
+#define POP_OPTIMIZATION_SIZE _Pragma("GCC pop_options")
+#else
+#define PUSH_OPTIMIZATION_SIZE
+#define POP_OPTIMIZATION_SIZE
+#endif
+
 // Guess endianness based on arch/common macros
 // Able to detect big-endian MIPS, ARM, PowerPC, PA-RISC, s390
 #if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(__MIPSEB__) || \
