@@ -212,7 +212,7 @@ PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
         .min_op_size = 1,
         .max_op_size = 4,
     };
-    rvvm_attach_mmio(machine, &i2c_oc);
+    if (rvvm_attach_mmio(machine, &i2c_oc) == RVVM_INVALID_MMIO) return NULL;
 #ifdef USE_FDT
     struct fdt_node* i2c_fdt = fdt_node_create_reg("i2c", base_addr);
     fdt_node_add_prop_reg(i2c_fdt, "reg", base_addr, I2C_OC_REG_SIZE);
