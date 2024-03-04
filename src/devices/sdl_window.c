@@ -280,6 +280,7 @@ static SDL_Surface* sdl_surface = NULL;
 
 bool fb_window_create(fb_window_t* win)
 {
+    DO_ONCE(setenv("SDL_DEBUG", "1", false));
     if (sdl_surface) {
         // SDL_PollEvent is very inconvenient
         rvvm_error("SDL doesn't support multiple windows");
