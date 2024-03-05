@@ -1,5 +1,5 @@
 /*
-i2c-keyboard.c - HID Keyboard
+hid-keyboard.c - HID Keyboard
 Copyright (C) 2022  X512 <github.com/X547>
 
 This program is free software: you can redistribute it and/or modify
@@ -21,8 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "spinlock.h"
 #include "utils.h"
 #include "bit_ops.h"
-
-#include <string.h>
+#include "mem_ops.h"
 
 #define MAX_PRESSED_KEYS 6
 
@@ -63,55 +62,56 @@ static const uint8_t keyboard_hid_report_descriptor[] = {
 
 struct hid_keyboard {
     hid_dev_t hid_dev;
-
     spinlock_t lock;
 
     uint8_t input_report[10];
     uint8_t output_report[3];
 
-    // state
-    uint32_t keys[8];
+    // State
+    uint32_t keys_report[8];
+    uint32_t keys_pressed[8];
     uint32_t leds;
 };
-
 
 static void hid_keyboard_reset(void* dev)
 {
     hid_keyboard_t* kb = (hid_keyboard_t*)dev;
     spin_lock(&kb->lock);
-    memset(kb->keys, 0, sizeof(kb->keys));
     kb->leds = 0;
     spin_unlock(&kb->lock);
 }
 
 static void hid_keyboard_fill_pressed_keys(hid_keyboard_t* kb, uint8_t* pressed)
 {
-    uint32_t idx = 0;
-    for (uint32_t code_hi = 0; code_hi < 8; code_hi++) {
-        uint32_t keys = kb->keys[code_hi];
-        if (keys == 0) continue;
-        for (uint32_t code_lo = 0; code_lo < 32; code_lo++) {
-            if (keys & (1U << code_lo)) {
-                pressed[idx++] = code_hi*32 + code_lo;
-                if (idx == MAX_PRESSED_KEYS) return;
+    size_t count = 0;
+    memset(pressed, HID_KEY_NONE, MAX_PRESSED_KEYS);
+
+    for (size_t code_hi = 0; code_hi < 8; ++code_hi) {
+        uint32_t keys = kb->keys_report[code_hi] | kb->keys_pressed[code_hi];
+        if (keys) {
+            for (bitcnt_t code_lo = 0; code_lo < 32; ++code_lo) {
+                if (bit_check(keys, code_lo)) {
+                    // Clear bit in keys_report
+                    kb->keys_report[code_hi] &= ~(1U << code_lo);
+                    pressed[count++] = (code_hi << 5) | code_lo;
+                    if (count == MAX_PRESSED_KEYS) return;
+                }
             }
         }
     }
-    while (idx < MAX_PRESSED_KEYS)
-        pressed[idx++] = HID_KEY_NONE;
 }
 
 static void hid_keyboard_read_report(void* dev,
     uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t *val)
 {
-    UNUSED(report_id);
     hid_keyboard_t* kb = (hid_keyboard_t*)dev;
+    UNUSED(report_id);
     spin_lock(&kb->lock);
     if (report_type == REPORT_TYPE_INPUT) {
         if (offset == 0) {
             kb->input_report[0] = bit_cut(sizeof(kb->input_report), 0, 8);
             kb->input_report[1] = bit_cut(sizeof(kb->input_report), 8, 8);
-            kb->input_report[2] = bit_cut(kb->keys[7], 0, 8);
+            kb->input_report[2] = bit_cut(kb->keys_pressed[7] | kb->keys_report[7], 0, 8);
             kb->input_report[3] = 0;
             hid_keyboard_fill_pressed_keys(kb, &kb->input_report[4]);
         }
@@ -126,8 +126,8 @@ static void hid_keyboard_read_report(void* dev,
 static void hid_keyboard_write_report(void* dev,
     uint8_t report_type, uint8_t report_id, uint32_t offset, uint8_t val)
 {
-    UNUSED(report_id);
     hid_keyboard_t* kb = (hid_keyboard_t*)dev;
+    UNUSED(report_id);
     spin_lock(&kb->lock);
     if (report_type == REPORT_TYPE_OUTPUT) {
         if (offset < sizeof(kb->output_report)) {
@@ -173,27 +173,24 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine)
 
 PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key)
 {
-    bool is_input_avail = false;
-    spin_lock(&kb->lock);
-    // key is guaranteed to be 1 byte according to HID spec
+    // Key is guaranteed to be 1 byte according to HID spec
     if (key != HID_KEY_NONE) {
-        kb->keys[key/32] |= 1U << (key%32);
-        is_input_avail = true;
-    }
-    spin_unlock(&kb->lock);
-    if (is_input_avail)
+        spin_lock(&kb->lock);
+        kb->keys_pressed[key/32] |= 1U << (key%32);
+        kb->keys_report[key/32] |= 1U << (key%32);
+        spin_unlock(&kb->lock);
+        // Never interrupt under a lock
         kb->hid_dev.input_available(kb->hid_dev.host, 0);
+    }
 }
 
 PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key)
 {
-    bool is_input_avail = false;
-    spin_lock(&kb->lock);
     if (key != HID_KEY_NONE) {
-        kb->keys[key/32] &= ~(1U << (key%32));
-        is_input_avail = true;
-    }
-    spin_unlock(&kb->lock);
-    if (is_input_avail)
+        spin_lock(&kb->lock);
+        kb->keys_pressed[key/32] &= ~(1U << (key%32));
+        spin_unlock(&kb->lock);
+
         kb->hid_dev.input_available(kb->hid_dev.host, 0);
+    }
 }
