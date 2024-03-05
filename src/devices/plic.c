@@ -121,6 +121,7 @@ static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
     size_t nirqs = 0;
     uint32_t claimed_irq = 0;
     uint32_t max_prio = 0;
+    riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     for (size_t i=0; i<PLIC_SRC_REG_COUNT; ++i) {
         uint32_t irqs = atomic_load_uint32(&plic->pending[i]);
         // Only enabled interrupts will pass
@@ -147,8 +148,8 @@ static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
             return 0;
         }
     }
-    if (nirqs <= 1 || max_prio <= atomic_load_uint32(&plic->threshold[ctx])) {
-        riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
+    if (nirqs > 1 && max_prio > atomic_load_uint32(&plic->threshold[ctx])) {
+        riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     }
     return claimed_irq;
 }
