@@ -112,7 +112,7 @@ bool ringbuf_put(ringbuf_t* rb, const void* data, size_t len)
         ringbuf_write(rb, data, len);
         return true;
     }
-    rvvm_warn("Overflow in ring %p! (size: %u, consumed: %u, len: %u)",
-              (void*)rb, (uint32_t)rb->size, (uint32_t)rb->consumed, (uint32_t)len);
+    DO_ONCE(rvvm_info("Overflow in ring %p! (size: %u, consumed: %u, len: %u)",
+              (void*)rb, (uint32_t)rb->size, (uint32_t)rb->consumed, (uint32_t)len));
     return false;
 }
