@@ -370,10 +370,11 @@ PUBLIC bool plic_send_irq(plic_ctx_t* plic, uint32_t irq)
     if (plic == NULL || irq == 0 || irq >= PLIC_SOURCE_MAX) {
         return false;
     }
-
     // Mark the IRQ pending
-    atomic_or_uint32(&plic->pending[irq >> 5], 1U << (irq & 0x1F));
-    plic_notify_irq(plic, irq);
+    uint32_t mask = 1U << (irq & 0x1F);
+    if (!(atomic_or_uint32(&plic->pending[irq >> 5], mask) & mask)) {
+        plic_notify_irq(plic, irq);
+    }
     return true;
 }
 
@@ -383,9 +384,10 @@ PUBLIC bool plic_raise_irq(plic_ctx_t* plic, uint32_t irq)
     if (plic == NULL || irq == 0 || irq >= PLIC_SOURCE_MAX) {
         return false;
     }
-
-    atomic_or_uint32(&plic->raised[irq >> 5], 1U << (irq & 0x1F));
-    plic_send_irq(plic, irq);
+    uint32_t mask = 1U << (irq & 0x1F);
+    if (!(atomic_or_uint32(&plic->raised[irq >> 5], mask) & mask)) {
+        plic_send_irq(plic, irq);
+    }
     return true;
 }
 
