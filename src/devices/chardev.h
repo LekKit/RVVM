@@ -58,7 +58,7 @@ static inline size_t chardev_read(chardev_t* dev, void* buf, size_t nbytes)
 static inline size_t chardev_write(chardev_t* dev, const void* buf, size_t nbytes)
 {
     if (dev) return dev->write(dev, buf, nbytes);
-    return 0;
+    return nbytes;
 }
 
 static inline uint32_t chardev_poll(chardev_t* dev)
