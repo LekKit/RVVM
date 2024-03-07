@@ -1084,9 +1084,6 @@ tap_dev_t* tap_open()
     hashmap_init(&tap->udp_ports, 16);
     hashmap_init(&tap->tcp_map, 16);
 
-    tap_portfwd(tap, "tcp/[::1]:2022=22");
-    tap_portfwd(tap, "tcp/127.0.0.1:2022=22");
-
     return tap;
 }
 
