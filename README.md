@@ -30,6 +30,7 @@ RISC-V CPU & System software implementation written in С
 - I2C HID keyboard & mouse, OpenCores I2C controller
 - Realtek RTL8169, OpenCores Ethernet NICs
 - Userspace networking
+- SiFive GPIO
 - Deprecated: PS2 keyboard & mouse, ATA (IDE) drive, Linux TAP
 
 ## 📦 Installing
@@ -129,8 +130,9 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - VFIO for GPU passthrough
 - More RVJIT optimizations, shared caches
 - FPU JIT (Complicated AF to make a conformant one)
-- Vector/Bitmanip extensions
-- Other peripherals from real boards (SiFive GPIO, flash)
+- Vector/Bitmanip extensions (Blocked on interpreter rewrite which is scheduled for 0.7-git)
+- Other peripherals from real boards (VisionFive 2: GPIO, SPI, flash...)
+- RISC-V APLIC, PCIe MSI Interrupts
 - *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
 - Free page reporting via virtio-balloon
 - *A lot more...*
