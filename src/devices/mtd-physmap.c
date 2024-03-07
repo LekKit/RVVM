@@ -84,7 +84,7 @@ PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_add
     {
         struct fdt_node* partition0 = fdt_node_create("partition@0");
         uint32_t reg[2] = { 0, mtd_mmio.size, };
-        fdt_node_add_prop(partition0, "reg", reg, sizeof(reg));
+        fdt_node_add_prop_cells(partition0, "reg", reg, 2);
         fdt_node_add_prop_str(partition0, "label", "firmware");
         fdt_node_add_child(mtd_fdt, partition0);
     }
