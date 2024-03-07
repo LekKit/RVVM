@@ -217,7 +217,7 @@ PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
     struct fdt_node* i2c_clock = fdt_node_create_reg("i2c_osc", base_addr);
     fdt_node_add_prop_str(i2c_clock, "compatible", "fixed-clock");
     fdt_node_add_prop_u32(i2c_clock, "#clock-cells", 0);
-    fdt_node_add_prop_u32(i2c_clock, "clock-frequency", 32768);
+    fdt_node_add_prop_u32(i2c_clock, "clock-frequency", 20000000);
     fdt_node_add_prop_str(i2c_clock, "clock-output-names", "clk");
     fdt_node_add_child(rvvm_get_fdt_soc(machine), i2c_clock);
 
