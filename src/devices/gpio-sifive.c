@@ -180,6 +180,7 @@ static bool gpio_sifive_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offs
     switch (offset) {
         case GPIO_SIFIVE_REG_INPUT_EN:
             atomic_store_uint32(&bus->input_en, read_uint32_le_m(data));
+            gpio_sifive_update_pins(bus, atomic_load_uint32(&bus->pins));
             break;
         case GPIO_SIFIVE_REG_OUTPUT_EN:
             atomic_store_uint32(&bus->output_en, read_uint32_le_m(data));
