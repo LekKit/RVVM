@@ -45,7 +45,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define GNU_ATTRIBUTE(attr) 0
 #endif
 
-#ifdef GNU_EXTS
+#if defined(GNU_EXTS) && defined(__has_builtin)
+#define GNU_BUILTIN(builtin) __has_builtin(builtin)
+#else
+#define GNU_BUILTIN(attr) 0
+#endif
+
+#if GNU_BUILTIN(__builtin_expect)
 #define likely(x)     __builtin_expect(!!(x),1)
 #define unlikely(x)   __builtin_expect(!!(x),0)
 #else
@@ -53,12 +59,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define unlikely(x)   (x)
 #endif
 
-#if GNU_ATTRIBUTE(noinline)
-#define NOINLINE      __attribute__((noinline))
-#elif defined(_WIN32)
+#if GNU_ATTRIBUTE(__noinline__)
+#define NOINLINE      __attribute__((__noinline__))
+#elif defined(_MSC_VER)
 #define NOINLINE      __declspec(noinline)
 #else
 #define NOINLINE
+#endif
+
+// Attribute __preserve_most__ is broken on Clang (Doesn't work with RVJIT, apparently invoking func pointers is broken)
+// This is intented to remove unnecessary spills from algorithm fast path
+// Hopefully one day similar thing will appear in GCC
+#if CLANG_CHECK_VER(13, 0) && GNU_ATTRIBUTE(__no_caller_saved_registers__)
+#define slow_path __attribute__((__no_caller_saved_registers__,__noinline__,__target__("general-regs-only")))
+#else
+#define slow_path NOINLINE
 #endif
 
 #if GNU_ATTRIBUTE(__always_inline__)
@@ -67,6 +82,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define forceinline __forceinline
 #else
 #define forceinline inline
+#endif
+
+#if GNU_ATTRIBUTE(__flatten__)
+#define flattencalls __attribute__((__flatten__))
+#else
+#define flattencalls
 #endif
 
 // Match GCC macro __SANITIZE_THREAD__ on Clang, provide __SANITIZE_MEMORY__
@@ -81,15 +102,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Suppress ThreadSanitizer in places with false alarms (emulated load/stores or RCU)
 // Guest dataraces hinder normal code instrumentation, so this is handy
-#if defined(__SANITIZE_THREAD__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(no_sanitize)
-#define TSAN_SUPPRESS __attribute__((no_sanitize("thread")))
+#if defined(__SANITIZE_THREAD__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(__no_sanitize__)
+#define TSAN_SUPPRESS __attribute__((__no_sanitize__("thread")))
 #else
 #define TSAN_SUPPRESS
 #endif
 
 // Suppress MemorySanitizer in places with false alarms (non-instrumented syscalls, X11 libs, etc)
-#if defined(__SANITIZE_MEMORY__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(no_sanitize)
-#define MSAN_SUPPRESS __attribute__((no_sanitize("memory")))
+#if defined(__SANITIZE_MEMORY__) && !defined(USE_SANITIZE_FULL) && GNU_ATTRIBUTE(__no_sanitize__)
+#define MSAN_SUPPRESS __attribute__((__no_sanitize__("memory")))
 #else
 #define MSAN_SUPPRESS
 #endif
@@ -113,8 +134,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 // Pushable size optimization attribute, Clang supports this to some degree
-#if CLANG_CHECK_VER(8, 0) && GNU_ATTRIBUTE(minsize)
-#define PUSH_OPTIMIZATION_SIZE _Pragma("clang attribute push (__attribute__((minsize)), apply_to=function)")
+#if CLANG_CHECK_VER(8, 0) && GNU_ATTRIBUTE(__minsize__)
+#define PUSH_OPTIMIZATION_SIZE _Pragma("clang attribute push (__attribute__((__minsize__)), apply_to=function)")
 #define POP_OPTIMIZATION_SIZE _Pragma("clang attribute pop")
 #elif GCC_CHECK_VER(4, 4)
 #define PUSH_OPTIMIZATION_SIZE _Pragma("GCC push_options") SOURCE_OPTIMIZATION_SIZE
