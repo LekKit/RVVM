@@ -85,9 +85,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 #if GNU_ATTRIBUTE(__flatten__)
-#define flattencalls __attribute__((__flatten__))
+#define flatten_calls __attribute__((__flatten__))
 #else
-#define flattencalls
+#define flatten_calls
 #endif
 
 // Match GCC macro __SANITIZE_THREAD__ on Clang, provide __SANITIZE_MEMORY__
