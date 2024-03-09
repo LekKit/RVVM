@@ -119,9 +119,9 @@ void     atomic_thread_fence(int memorder);
 
 #endif
 
-// For byte reverse
-#ifdef HOST_BIG_ENDIAN
-#include "bit_ops.h"
+#ifndef HOST_LITTLE_ENDIAN
+// Use portable conversions instead of host atomics for explicit little endian
+#include "mem_ops.h"
 #endif
 
 static forceinline void atomic_fence_ex(int memorder)
@@ -598,7 +598,8 @@ static inline void atomic_store_uint32_le(void* addr, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     atomic_store_uint32(addr, val);
 #else
-    atomic_store_uint32(addr, byteswap_uint32(val));
+    write_uint32_le(&val, val);
+    atomic_store_uint32(addr, val);
 #endif
 }
 
@@ -607,7 +608,8 @@ static inline uint32_t atomic_load_uint32_le(const void* addr)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_load_uint32(addr);
 #else
-    return byteswap_uint32(atomic_load_uint32(addr));
+    uint32_t val = atomic_load_uint32(addr);
+    return read_uint32_le(&val);
 #endif
 }
 
@@ -616,7 +618,9 @@ static inline uint32_t atomic_swap_uint32_le(void* addr, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_swap_uint32(addr, val);
 #else
-    return byteswap_uint32(atomic_swap_uint32(addr, byteswap_uint32(val)));
+    write_uint32_le(&val, val);
+    val = atomic_swap_uint32(addr, val);
+    return read_uint32_le(&val);
 #endif
 }
 
@@ -625,7 +629,9 @@ static inline bool atomic_cas_uint32_le(void* addr, uint32_t exp, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_cas_uint32(addr, exp, val);
 #else
-    return atomic_cas_uint32(addr, byteswap_uint32(exp), byteswap_uint32(val));
+    write_uint32_le(&exp, exp);
+    write_uint32_le(&val, val);
+    return atomic_cas_uint32(addr, exp, val);
 #endif
 }
 
@@ -634,7 +640,9 @@ static inline uint32_t atomic_or_uint32_le(void* addr, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_or_uint32(addr, val);
 #else
-    return byteswap_uint32(atomic_or_uint32(addr, byteswap_uint32(val)));
+    write_uint32_le(&val, val);
+    val = atomic_or_uint32(addr, val);
+    return read_uint32_le(&val);
 #endif
 }
 
@@ -643,7 +651,9 @@ static inline uint32_t atomic_xor_uint32_le(void* addr, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_xor_uint32(addr, val);
 #else
-    return byteswap_uint32(atomic_xor_uint32(addr, byteswap_uint32(val)));
+    write_uint32_le(&val, val);
+    val = atomic_xor_uint32(addr, val);
+    return read_uint32_le(&val);
 #endif
 }
 
@@ -652,7 +662,9 @@ static inline uint32_t atomic_and_uint32_le(void* addr, uint32_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_and_uint32(addr, val);
 #else
-    return byteswap_uint32(atomic_and_uint32(addr, byteswap_uint32(val)));
+    write_uint32_le(&val, val);
+    val = atomic_and_uint32(addr, val);
+    return read_uint32_le(&val);
 #endif
 }
 
@@ -661,7 +673,8 @@ static inline void atomic_store_uint64_le(void* addr, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     atomic_store_uint64(addr, val);
 #else
-    atomic_store_uint64(addr, byteswap_uint64(val));
+    write_uint64_le(&val, val);
+    atomic_store_uint64(addr, val);
 #endif
 }
 
@@ -670,7 +683,8 @@ static inline uint64_t atomic_load_uint64_le(const void* addr)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_load_uint64(addr);
 #else
-    return byteswap_uint64(atomic_load_uint64(addr));
+    uint64_t val = atomic_load_uint64(addr);
+    return read_uint64_le(&val);
 #endif
 }
 
@@ -679,7 +693,9 @@ static inline uint64_t atomic_swap_uint64_le(void* addr, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_swap_uint64(addr, val);
 #else
-    return byteswap_uint64(atomic_swap_uint64(addr, byteswap_uint64(val)));
+    write_uint64_le(&val, val);
+    val = atomic_swap_uint64(addr, val);
+    return read_uint64_le(&val);
 #endif
 }
 
@@ -688,7 +704,9 @@ static inline bool atomic_cas_uint64_le(void* addr, uint64_t exp, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_cas_uint64(addr, exp, val);
 #else
-    return atomic_cas_uint64(addr, byteswap_uint64(exp), byteswap_uint64(val));
+    write_uint64_le(&exp, exp);
+    write_uint64_le(&val, val);
+    return atomic_cas_uint64(addr, exp, val);
 #endif
 }
 
@@ -697,7 +715,9 @@ static inline uint64_t atomic_or_uint64_le(void* addr, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_or_uint64(addr, val);
 #else
-    return byteswap_uint64(atomic_or_uint64(addr, byteswap_uint64(val)));
+    write_uint64_le(&val, val);
+    val = atomic_or_uint64(addr, val);
+    return read_uint64_le(&val);
 #endif
 }
 
@@ -706,7 +726,9 @@ static inline uint64_t atomic_xor_uint64_le(void* addr, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_xor_uint64(addr, val);
 #else
-    return byteswap_uint64(atomic_xor_uint64(addr, byteswap_uint64(val)));
+    write_uint64_le(&val, val);
+    val = atomic_xor_uint64(addr, val);
+    return read_uint64_le(&val);
 #endif
 }
 
@@ -715,7 +737,9 @@ static inline uint64_t atomic_and_uint64_le(void* addr, uint64_t val)
 #ifdef HOST_LITTLE_ENDIAN
     return atomic_and_uint64(addr, val);
 #else
-    return byteswap_uint64(atomic_and_uint64(addr, byteswap_uint64(val)));
+    write_uint64_le(&val, val);
+    val = atomic_and_uint64(addr, val);
+    return read_uint64_le(&val);
 #endif
 }
 
