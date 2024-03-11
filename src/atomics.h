@@ -317,52 +317,52 @@ static forceinline uint32_t atomic_or_uint32_ex(void* addr, uint32_t val, int me
 
 static forceinline uint32_t atomic_load_uint32(const void* addr)
 {
-    return atomic_load_uint32_ex(addr, ATOMIC_SEQ_CST);
+    return atomic_load_uint32_ex(addr, ATOMIC_ACQUIRE);
 }
 
 static forceinline void atomic_store_uint32(void* addr, uint32_t val)
 {
-    atomic_store_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    atomic_store_uint32_ex(addr, val, ATOMIC_RELEASE);
 }
 
 static forceinline uint32_t atomic_swap_uint32(void* addr, uint32_t val)
 {
-    return atomic_swap_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_swap_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline bool atomic_cas_uint32(void* addr, uint32_t exp, uint32_t val)
 {
-    return atomic_cas_uint32_ex(addr, exp, val, false, ATOMIC_SEQ_CST, ATOMIC_SEQ_CST);
+    return atomic_cas_uint32_ex(addr, exp, val, false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 }
 
 static forceinline bool atomic_cas_uint32_weak(void* addr, uint32_t exp, uint32_t val)
 {
-    return atomic_cas_uint32_ex(addr, exp, val, true, ATOMIC_SEQ_CST, ATOMIC_SEQ_CST);
+    return atomic_cas_uint32_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 }
 
 static forceinline uint32_t atomic_add_uint32(void* addr, uint32_t val)
 {
-    return atomic_add_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_add_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint32_t atomic_sub_uint32(void* addr, uint32_t val)
 {
-    return atomic_sub_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_sub_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint32_t atomic_and_uint32(void* addr, uint32_t val)
 {
-    return atomic_and_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_and_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint32_t atomic_xor_uint32(void* addr, uint32_t val)
 {
-    return atomic_xor_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_xor_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint32_t atomic_or_uint32(void* addr, uint32_t val)
 {
-    return atomic_or_uint32_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_or_uint32_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 /*
@@ -541,52 +541,52 @@ static forceinline uint64_t atomic_or_uint64_ex(void* addr, uint64_t val, int me
 
 static forceinline uint64_t atomic_load_uint64(const void* addr)
 {
-    return atomic_load_uint64_ex(addr, ATOMIC_SEQ_CST);
+    return atomic_load_uint64_ex(addr, ATOMIC_ACQUIRE);
 }
 
 static forceinline void atomic_store_uint64(void* addr, uint64_t val)
 {
-    atomic_store_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    atomic_store_uint64_ex(addr, val, ATOMIC_RELEASE);
 }
 
 static forceinline uint64_t atomic_swap_uint64(void* addr, uint64_t val)
 {
-    return atomic_swap_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_swap_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline bool atomic_cas_uint64(void* addr, uint64_t exp, uint64_t val)
 {
-    return atomic_cas_uint64_ex(addr, exp, val, false, ATOMIC_SEQ_CST, ATOMIC_SEQ_CST);
+    return atomic_cas_uint64_ex(addr, exp, val, false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 }
 
 static forceinline bool atomic_cas_uint64_weak(void* addr, uint64_t exp, uint64_t val)
 {
-    return atomic_cas_uint64_ex(addr, exp, val, true, ATOMIC_SEQ_CST, ATOMIC_SEQ_CST);
+    return atomic_cas_uint64_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 }
 
 static forceinline uint64_t atomic_add_uint64(void* addr, uint64_t val)
 {
-    return atomic_add_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_add_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint64_t atomic_sub_uint64(void* addr, uint64_t val)
 {
-    return atomic_sub_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_sub_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint64_t atomic_and_uint64(void* addr, uint64_t val)
 {
-    return atomic_and_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_and_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint64_t atomic_xor_uint64(void* addr, uint64_t val)
 {
-    return atomic_xor_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_xor_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 static forceinline uint64_t atomic_or_uint64(void* addr, uint64_t val)
 {
-    return atomic_or_uint64_ex(addr, val, ATOMIC_SEQ_CST);
+    return atomic_or_uint64_ex(addr, val, ATOMIC_ACQ_REL);
 }
 
 /*
