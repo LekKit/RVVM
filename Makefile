@@ -222,8 +222,10 @@ DEBUG_OPTS := -DNDEBUG
 endif
 endif
 
-# Warning options (Strict safety/portability)
-WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Wframe-larger-than=32768
+# Warning options (Strict safety/portability, stack/object size limits)
+# -Wbad-function-cast, -Wcast-align, -Wdouble-promotion need fixes in codebase
+WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
+-Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Werror=return-type
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
