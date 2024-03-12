@@ -96,7 +96,8 @@ PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint
 struct rvvm_mmio_dev_t {
     rvvm_addr_t addr;        // MMIO region address in physical memory
     size_t      size;        // Size of the MMIO region, size zero means a device placeholder
-    void*       data;        // Device-specific data, or pointer to memory (For native memory regions)
+    void*       data;        // Device-specific data
+    void*       mapping;     // Directly mapped memory region, read/write act as dirty handlers
     rvvm_machine_t* machine; // Parent machine
 
     // Device class specific operations & info
