@@ -252,6 +252,10 @@ VERSION := $(VERSION)-$(GIT_COMMIT)
 $(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
 
+ifeq ($(GIT_COMMIT),unknown)
+$(info [$(RED)WARN$(RESET)] Unknown upstream git commit!)
+endif
+
 # Generic compiler flags
 override CFLAGS := -I$(SRCDIR) -DRVVM_VERSION=\"$(VERSION)\" $(CFLAGS)
 
