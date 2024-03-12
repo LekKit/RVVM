@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SV48_LEVELS       4
 #define SV57_LEVELS       5
 
-bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size)
+bool riscv_init_ram(rvvm_ram_t* mem, phys_addr_t begin, phys_addr_t size)
 {
     // Memory boundaries should be always aligned to page size
     if ((begin & PAGE_MASK) || (size & PAGE_MASK)) {
@@ -91,9 +91,9 @@ void riscv_tlb_flush(rvvm_hart_t* vm)
     riscv_restart_dispatch(vm);
 }
 
-void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
+void riscv_tlb_flush_page(rvvm_hart_t* vm, virt_addr_t addr)
 {
-    vaddr_t vpn = (addr >> PAGE_SHIFT);
+    virt_addr_t vpn = (addr >> PAGE_SHIFT);
     // VPN is off by 1, thus invalidating the entry
     vm->tlb[vpn & TLB_MASK].r = vpn - 1;
     vm->tlb[vpn & TLB_MASK].w = vpn - 1;
@@ -106,9 +106,9 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, vaddr_t addr)
     }
 }
 
-static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t op)
+static void riscv_tlb_put(rvvm_hart_t* vm, virt_addr_t vaddr, vmptr_t ptr, uint8_t op)
 {
-    vaddr_t vpn = vaddr >> PAGE_SHIFT;
+    virt_addr_t vpn = vaddr >> PAGE_SHIFT;
     rvvm_tlb_entry_t* entry = &vm->tlb[vpn & TLB_MASK];
 
     /*
@@ -148,11 +148,11 @@ static void riscv_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, vmptr_t ptr, uint8_t o
 }
 
 // Virtual memory addressing mode (SV32)
-static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t priv, uint8_t access)
+static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr, uint8_t priv, uint8_t access)
 {
     // Pagetable is always aligned to PAGE_SIZE
-    paddr_t pagetable = vm->root_page_table;
-    paddr_t pte, pgt_off;
+    phys_addr_t pagetable = vm->root_page_table;
+    phys_addr_t pte, pgt_off;
     vmptr_t pte_addr;
     bitcnt_t bit_off = SV32_VPN_BITS + PAGE_SHIFT;
 
@@ -175,10 +175,10 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                     }
                     // Check access bits & translate
                     if (pte & access) {
-                        vaddr_t vmask = bit_mask(bit_off);
-                        paddr_t pmask = bit_mask(SV32_PHYS_BITS - bit_off) << bit_off;
-                        paddr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
-                        paddr_t pte_shift = pte << 2;
+                        virt_addr_t vmask = bit_mask(bit_off);
+                        phys_addr_t pmask = bit_mask(SV32_PHYS_BITS - bit_off) << bit_off;
+                        phys_addr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
+                        phys_addr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
                         if (unlikely(pte_shift & vmask & PAGE_PNMASK))
                             return false;
@@ -205,15 +205,15 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
 #ifdef USE_RV64
 
 // Virtual memory addressing mode (RV64 MMU template)
-static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t priv, uint8_t access, uint8_t sv_levels)
+static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr, uint8_t priv, uint8_t access, uint8_t sv_levels)
 {
     // Pagetable is always aligned to PAGE_SIZE
-    paddr_t pagetable = vm->root_page_table;
-    paddr_t pte, pgt_off;
+    phys_addr_t pagetable = vm->root_page_table;
+    phys_addr_t pte, pgt_off;
     vmptr_t pte_addr;
     bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + PAGE_SHIFT - SV64_VPN_BITS;
 
-    if (unlikely(vaddr != (vaddr_t)sign_extend(vaddr, bit_off+SV64_VPN_BITS)))
+    if (unlikely(vaddr != (virt_addr_t)sign_extend(vaddr, bit_off+SV64_VPN_BITS)))
         return false;
 
     for (size_t i=0; i<sv_levels; ++i) {
@@ -235,10 +235,10 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
                     }
                     // Check access bits & translate
                     if (pte & access) {
-                        vaddr_t vmask = bit_mask(bit_off);
-                        paddr_t pmask = bit_mask(SV64_PHYS_BITS - bit_off) << bit_off;
-                        paddr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
-                        paddr_t pte_shift = pte << 2;
+                        virt_addr_t vmask = bit_mask(bit_off);
+                        phys_addr_t pmask = bit_mask(SV64_PHYS_BITS - bit_off) << bit_off;
+                        phys_addr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
+                        phys_addr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
                         if (unlikely(pte_shift & vmask & PAGE_PNMASK))
                             return false;
@@ -265,7 +265,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* pa
 #endif
 
 // Translate virtual address to physical with respect to current CPU mode
-bool riscv_mmu_translate(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t* paddr, uint8_t access)
+bool riscv_mmu_translate(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr, uint8_t access)
 {
     uint8_t priv = vm->priv_mode;
     // If MPRV is enabled, and we aren't fetching an instruction,
@@ -346,7 +346,7 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, void* dest, size_t off
 }
 
 // Receives any operation on physical address space out of RAM region
-static bool riscv_mmio_scan(rvvm_hart_t* vm, vaddr_t vaddr, paddr_t paddr, void* dest, uint8_t size, uint8_t access)
+static bool riscv_mmio_scan(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t paddr, void* dest, uint8_t size, uint8_t access)
 {
     rvvm_mmio_dev_t* dev;
     rvvm_mmio_handler_t rwfunc;
@@ -419,10 +419,10 @@ TSAN_SUPPRESS static inline void atomic_memcpy_relaxed(void* dest, const void* s
     }
 }
 
-static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size, uint8_t access)
+static bool riscv_mmu_op(rvvm_hart_t* vm, virt_addr_t addr, void* dest, uint8_t size, uint8_t access)
 {
     //rvvm_info("Hart %p tlb miss at 0x%08"PRIxXLEN, vm, addr);
-    paddr_t paddr;
+    phys_addr_t paddr;
     vmptr_t ptr;
     uint32_t trap_cause;
 
@@ -500,10 +500,10 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, vaddr_t addr, void* dest, uint8_t size
  * call MMIO handlers if needed.
  */
 
-vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size, uint8_t access)
+vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, virt_addr_t addr, void* buff, size_t size, uint8_t access)
 {
     //rvvm_info("Hart %p vma tlb miss at 0x%08"PRIxXLEN, vm, addr);
-    paddr_t paddr;
+    phys_addr_t paddr;
     vmptr_t ptr;
     uint32_t trap_cause;
 
@@ -561,15 +561,15 @@ vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_
     return NULL;
 }
 
-void riscv_mmu_vma_mmio_write(rvvm_hart_t* vm, vaddr_t addr, void* buff, size_t size)
+void riscv_mmu_vma_mmio_write(rvvm_hart_t* vm, virt_addr_t addr, void* buff, size_t size)
 {
-    paddr_t paddr = 0;
+    phys_addr_t paddr = 0;
     if (riscv_mmu_translate(vm, addr, &paddr, MMU_WRITE)) {
         riscv_mmio_scan(vm, addr, paddr, buff, size, MMU_WRITE);
     }
 }
 
-bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
+bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, virt_addr_t addr, uint32_t* inst)
 {
     uint8_t buff[4] = {0};
     if (!riscv_block_in_page(addr, 4)) {
@@ -591,7 +591,7 @@ bool riscv_mmu_fetch_inst(rvvm_hart_t* vm, vaddr_t addr, uint32_t* inst)
     }
 }
 
-void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u64(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
@@ -599,7 +599,7 @@ void riscv_mmu_load_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u32(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -607,7 +607,7 @@ void riscv_mmu_load_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s32(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -615,7 +615,7 @@ void riscv_mmu_load_s32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u16(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
@@ -623,7 +623,7 @@ void riscv_mmu_load_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s16(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     if (riscv_mmu_op(vm, addr, buff, 2, MMU_READ)) {
@@ -631,7 +631,7 @@ void riscv_mmu_load_s16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_u8(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
@@ -639,7 +639,7 @@ void riscv_mmu_load_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_s8(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     if (riscv_mmu_op(vm, addr, buff, 1, MMU_READ)) {
@@ -647,28 +647,28 @@ void riscv_mmu_load_s8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_store_u64(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u64(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     write_uint64_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
 }
 
-void riscv_mmu_store_u32(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u32(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     write_uint32_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 4, MMU_WRITE);
 }
 
-void riscv_mmu_store_u16(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u16(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[2];
     write_uint16_le_m(buff, vm->registers[reg]);
     riscv_mmu_op(vm, addr, buff, 2, MMU_WRITE);
 }
 
-void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_u8(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[1];
     buff[0] = vm->registers[reg];
@@ -677,7 +677,7 @@ void riscv_mmu_store_u8(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
 
 #ifdef USE_FPU
 
-void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_double(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     if (riscv_mmu_op(vm, addr, buff, 8, MMU_READ)) {
@@ -686,7 +686,7 @@ void riscv_mmu_load_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_load_float(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     if (riscv_mmu_op(vm, addr, buff, 4, MMU_READ)) {
@@ -695,14 +695,14 @@ void riscv_mmu_load_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
     }
 }
 
-void riscv_mmu_store_double(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_double(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[8];
     write_double_le_m(buff, vm->fpu_registers[reg]);
     riscv_mmu_op(vm, addr, buff, 8, MMU_WRITE);
 }
 
-void riscv_mmu_store_float(rvvm_hart_t* vm, vaddr_t addr, regid_t reg)
+void riscv_mmu_store_float(rvvm_hart_t* vm, virt_addr_t addr, regid_t reg)
 {
     uint8_t buff[4];
     write_float_le_m(buff, read_float_nanbox(&vm->fpu_registers[reg]));
