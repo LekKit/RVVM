@@ -44,7 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //#define TLB_VADDR(vaddr)  ((vaddr) & PAGE_MASK) // we may remove vaddr offset if needed
 
 // Init physical memory (be careful to not overlap MMIO regions!)
-bool riscv_init_ram(rvvm_ram_t* mem, paddr_t begin, paddr_t size);
+bool riscv_init_ram(rvvm_ram_t* mem, phys_addr_t begin, phys_addr_t size);
 void riscv_free_ram(rvvm_ram_t* mem);
 
 // Flush the TLB (on context switch, SFENCE.VMA, etc)
@@ -61,7 +61,7 @@ void riscv_jit_tlb_flush(rvvm_hart_t* vm);
  */
 
 // Translate virtual address to physical with respect to current CPU mode
-bool riscv_mmu_translate(rvvm_hart_t* vm, virt_addr_t vaddr, paddr_t* paddr, uint8_t access);
+bool riscv_mmu_translate(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr, uint8_t access);
 // Translate virtual address into VM pointer OR buff in case of RMW MMIO operation
 vmptr_t riscv_mmu_vma_translate(rvvm_hart_t* vm, virt_addr_t addr, void* buff, size_t size, uint8_t access);
 // Commit changes back to MMIO
@@ -136,7 +136,7 @@ static inline bool riscv_fetch_inst(rvvm_hart_t* vm, virt_addr_t addr, uint32_t*
 
 // VM Address translation (translated within single page bounds)
 
-static inline bool riscv_virt_translate_r(rvvm_hart_t* vm, virt_addr_t vaddr, paddr_t* paddr)
+static inline bool riscv_virt_translate_r(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr)
 {
     virt_addr_t vpn = vaddr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].r == vpn)) {
@@ -146,7 +146,7 @@ static inline bool riscv_virt_translate_r(rvvm_hart_t* vm, virt_addr_t vaddr, pa
     return riscv_mmu_translate(vm, vaddr, paddr, MMU_READ);
 }
 
-static inline bool riscv_virt_translate_w(rvvm_hart_t* vm, virt_addr_t vaddr, paddr_t* paddr)
+static inline bool riscv_virt_translate_w(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr)
 {
     virt_addr_t vpn = vaddr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].w == vpn)) {
@@ -156,7 +156,7 @@ static inline bool riscv_virt_translate_w(rvvm_hart_t* vm, virt_addr_t vaddr, pa
     return riscv_mmu_translate(vm, vaddr, paddr, MMU_WRITE);
 }
 
-static inline bool riscv_virt_translate_e(rvvm_hart_t* vm, virt_addr_t vaddr, paddr_t* paddr)
+static inline bool riscv_virt_translate_e(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t* paddr)
 {
     virt_addr_t vpn = vaddr >> PAGE_SHIFT;
     if (likely(vm->tlb[vpn & TLB_MASK].e == vpn)) {
@@ -194,9 +194,9 @@ static inline vmptr_t riscv_vma_translate_e(rvvm_hart_t* vm, virt_addr_t addr, v
 }
 
 #ifdef USE_VMSWAP
-vmptr_t riscv_phys_translate(rvvm_hart_t* vm, paddr_t addr)
+vmptr_t riscv_phys_translate(rvvm_hart_t* vm, phys_addr_t addr)
 #else
-static inline vmptr_t riscv_phys_translate(rvvm_hart_t* vm, paddr_t addr)
+static inline vmptr_t riscv_phys_translate(rvvm_hart_t* vm, phys_addr_t addr)
 {
     if (likely(addr >= vm->mem.begin && (addr - vm->mem.begin) < vm->mem.size)) {
         return vm->mem.data + (addr - vm->mem.begin);
