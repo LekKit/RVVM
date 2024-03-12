@@ -37,7 +37,7 @@ PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t 
 {
     // Map the framebuffer into physical memory
     rvvm_mmio_dev_t fb_region = {
-        .data = fb->buffer,
+        .mapping = fb->buffer,
         .addr = addr,
         .size = framebuffer_size(fb),
         .type = &fb_dev_type,
