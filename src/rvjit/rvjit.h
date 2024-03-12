@@ -122,15 +122,15 @@ typedef struct {
 
 typedef struct {
     rvjit_heap_t heap;
-    vector_t(struct {paddr_t dest; size_t ptr;}) links;
+    vector_t(struct {phys_addr_t dest; size_t ptr;}) links;
     uint8_t* code;
     size_t size;
     size_t space;
     size_t hreg_mask;        // Bitmask of available non-clobbered host registers
     size_t abireclaim_mask;  // Bitmask of reclaimed abi-clobbered host registers to restore
     rvjit_reginfo_t regs[RVJIT_REGISTERS];
-    vaddr_t virt_pc;
-    paddr_t phys_pc;
+    virt_addr_t virt_pc;
+    phys_addr_t phys_pc;
     int32_t pc_off;
     bool rv64;
     bool native_ptrs;
@@ -174,11 +174,11 @@ static inline bool rvjit_block_nonempty(rvjit_block_t* block)
 rvjit_func_t rvjit_block_finalize(rvjit_block_t* block);
 
 // Looks up for compiled block by phys_pc, returns NULL when no block was found
-rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, paddr_t phys_pc);
+rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, phys_addr_t phys_pc);
 
 // Track dirty memory to transparently invalidate JIT caches
 void rvjit_init_memtracking(rvjit_block_t* block, size_t size);
-void rvjit_mark_dirty_mem(rvjit_block_t* block, paddr_t addr, size_t size);
+void rvjit_mark_dirty_mem(rvjit_block_t* block, phys_addr_t addr, size_t size);
 
 // Cleans up internal heap & lookup cache entirely
 void rvjit_flush_cache(rvjit_block_t* block);

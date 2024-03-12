@@ -141,14 +141,14 @@ void rvjit_ctx_free(rvjit_block_t* block)
     free(block->heap.dirty_pages);
 }
 
-static inline void rvjit_mark_dirty_page(rvjit_block_t* block, paddr_t addr)
+static inline void rvjit_mark_dirty_page(rvjit_block_t* block, phys_addr_t addr)
 {
     size_t offset = (addr >> 17) & block->heap.dirty_mask;
     uint32_t mask = 1U << ((addr >> 12) & 0x1F);
     atomic_or_uint32_ex(block->heap.dirty_pages + offset, mask, ATOMIC_RELAXED);
 }
 
-void rvjit_mark_dirty_mem(rvjit_block_t* block, paddr_t addr, size_t size)
+void rvjit_mark_dirty_mem(rvjit_block_t* block, phys_addr_t addr, size_t size)
 {
     if (block->heap.dirty_pages == NULL) return;
     for (size_t i=0; i<size; i += 4096) {
@@ -156,7 +156,7 @@ void rvjit_mark_dirty_mem(rvjit_block_t* block, paddr_t addr, size_t size)
     }
 }
 
-static inline bool rvjit_page_needs_flush(rvjit_block_t* block, paddr_t addr)
+static inline bool rvjit_page_needs_flush(rvjit_block_t* block, phys_addr_t addr)
 {
     size_t offset = (addr >> 17) & block->heap.dirty_mask;
     uint32_t mask = 1U << ((addr >> 12) & 0x1F);
@@ -202,7 +202,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 
 #ifdef RVJIT_NATIVE_LINKER
     vector_t(uint8_t*)* linked_blocks;
-    paddr_t k;
+    phys_addr_t k;
     size_t v;
     vector_foreach(block->links, i) {
         k = vector_at(block->links, i).dest;
@@ -235,7 +235,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
     return (rvjit_func_t)code;
 }
 
-rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, paddr_t phys_pc)
+rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, phys_addr_t phys_pc)
 {
     if (rvjit_page_needs_flush(block, phys_pc)) {
         vector_t(uint8_t*)* linked_blocks;
