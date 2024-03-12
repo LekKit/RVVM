@@ -109,9 +109,9 @@ NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm);
 static inline bool riscv_jtlb_lookup(rvvm_hart_t* vm)
 {
     // Try to find & execute a block
-    vaddr_t pc = vm->registers[REGISTER_PC];
-    vaddr_t entry = (pc >> 1) & (TLB_SIZE - 1);
-    vaddr_t tpc = vm->jtlb[entry].pc;
+    virt_addr_t pc = vm->registers[REGISTER_PC];
+    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    virt_addr_t tpc = vm->jtlb[entry].pc;
     if (likely(pc == tpc)) {
         vm->jtlb[entry].block(vm);
         return true;
@@ -125,9 +125,9 @@ static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
 {
     if (unlikely(!vm->jit_enabled)) return false;
 
-    vaddr_t pc = vm->registers[REGISTER_PC];
-    vaddr_t entry = (pc >> 1) & (TLB_SIZE - 1);
-    vaddr_t tpc = vm->jtlb[entry].pc;
+    virt_addr_t pc = vm->registers[REGISTER_PC];
+    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    virt_addr_t tpc = vm->jtlb[entry].pc;
     if (likely(pc == tpc)) {
         vm->jtlb[entry].block(vm);
 #ifndef RVJIT_NATIVE_LINKER
@@ -167,7 +167,7 @@ do { \
  */
 #define RVVM_RVJIT_TRACE_LDST(intrinsic, inst_size) \
 do { \
-    vaddr_t pc = vm->registers[REGISTER_PC]; \
+    virt_addr_t pc = vm->registers[REGISTER_PC]; \
     if (!vm->jit_compiling && vm->ldst_trace && riscv_jit_tlb_lookup(vm)) { \
         vm->ldst_trace = pc != vm->registers[REGISTER_PC]; \
         vm->registers[REGISTER_PC] -= inst_size; \

@@ -74,9 +74,9 @@ void riscv_install_opcode_C(rvvm_hart_t* vm, uint32_t opcode, riscv_inst_c_t fun
  * trace-interpret-compile and trace-execute states
  */
 
-static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, rvjit_func_t block)
+static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, virt_addr_t vaddr, rvjit_func_t block)
 {
-    vaddr_t entry = (vaddr >> 1) & TLB_MASK;
+    virt_addr_t entry = (vaddr >> 1) & TLB_MASK;
     vm->jtlb[entry].pc = vaddr;
     vm->jtlb[entry].block = block;
 }
@@ -84,8 +84,8 @@ static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, vaddr_t vaddr, rvjit_func_
 NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
 {
     // Translate virtual PC into physical, JIT operates on phys_pc
-    vaddr_t virt_pc = vm->registers[REGISTER_PC];
-    paddr_t phys_pc = 0;
+    virt_addr_t virt_pc = vm->registers[REGISTER_PC];
+    phys_addr_t phys_pc = 0;
     // Lookup in the hashmap, cache virt_pc->block in JTLB
     if (riscv_virt_translate_e(vm, virt_pc, &phys_pc)) {
         rvjit_func_t block = rvjit_block_lookup(&vm->jit, phys_pc);
@@ -217,7 +217,7 @@ TSAN_SUPPRESS void riscv_run_till_event(rvvm_hart_t* vm)
     size_t inst_ptr = 0;  // Updated before any read
     uint32_t instruction;
     // page_addr should always mismatch pc by at least 1 page before execution
-    vaddr_t inst_addr, page_addr = vm->registers[REGISTER_PC] + 0x1000;
+    virt_addr_t inst_addr, page_addr = vm->registers[REGISTER_PC] + 0x1000;
 
     // Execute instructions loop until some event occurs (interrupt, trap)
     while (likely(vm->wait_event)) {
@@ -243,7 +243,7 @@ TSAN_SUPPRESS void riscv_run_till_event(rvvm_hart_t* vm)
             riscv_emulate(vm, instruction);
             // Update pointer to the current page in real memory
             // If we are executing code from MMIO, direct memory fetch fails
-            vaddr_t vpn = vm->registers[REGISTER_PC] >> 12;
+            virt_addr_t vpn = vm->registers[REGISTER_PC] >> 12;
             inst_ptr = vm->tlb[vpn & TLB_MASK].ptr;
             page_addr = vm->tlb[vpn & TLB_MASK].e << 12;
         } else break;
