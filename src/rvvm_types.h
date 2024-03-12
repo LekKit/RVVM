@@ -63,8 +63,6 @@ typedef int32_t smaxlen_t;
 typedef double fmaxlen_t;
 
 // Distinguish between virtual and physical addresses
-typedef maxlen_t vaddr_t;
-typedef maxlen_t paddr_t;
 typedef maxlen_t virt_addr_t;
 typedef maxlen_t phys_addr_t;
 
