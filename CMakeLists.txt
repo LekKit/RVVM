@@ -1,4 +1,5 @@
 # CMake configuration file for those who don't like Make (like I do)
+# Prev-maintainer: cerg2010cerg2010
 
 cmake_minimum_required(VERSION 3.9)
 
@@ -14,22 +15,34 @@ option(RVVM_USE_JIT "Use RVJIT Just-in-time compiler" ON)
 option(RVVM_USE_FB "Use framebuffer window" ON)
 option(RVVM_USE_SDL "Use SDL instead of native windowing APIs" OFF)
 option(RVVM_USE_XSHM "Use XSHM shared memory extension for X11" ON)
-option(RVVM_USE_NET "Use networking" OFF)
+option(RVVM_USE_NET "Use networking" ON)
 option(RVVM_USE_TAP_LINUX "Use Linux TAP implementation" OFF)
 option(RVVM_USE_FDT "Use Flattened Device Tree library for DTB generation" ON)
 option(RVVM_USE_PCI "Use ATA over PCI, PIO mode is used otherwise" ON)
 option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking" OFF)
+option(RVVM_USE_LIB "Build shared librvvm library" ON)
+option(RVVM_USE_JNI "Enable JNI bindings in librvvm (Very tiny size impact)" ON)
 option(BUILD_LIBRETRO "Build a libretro core" OFF)
 option(LIBRETRO_STATIC "Statically link the libretro core" OFF)
 
+if(NOT WIN32)
+	# Fancy coloring
+	string(ASCII 27 VT_ESC)
+	set(COLOR_RESET   "${VT_ESC}[m")
+	set(COLOR_BOLD    "${VT_ESC}[1m")
+	set(COLOR_RED     "${VT_ESC}[1;31m")
+	set(COLOR_GREEN   "${VT_ESC}[1;32m")
+	set(COLLOR_YELLOW "${VT_ESC}[1;33m")
+	set(COLOR_BLUE    "${VT_ESC}[1;34m")
+endif()
 
 if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
 endif()
 
 if (NOT CMAKE_BUILD_TYPE AND NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
-	message(STATUS "Setting build type to Release as none was specified.")
+	message(STATUS "${COLLOR_YELLOW}Setting build type to Release as none was specified${COLOR_RESET}")
 	set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 	set(CMAKE_CONFIGURATION_TYPES "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
@@ -79,8 +92,10 @@ if (RVVM_LTO)
 endif()
 
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-	# Warning options (Strict safety/portability)
-	add_compile_options(-Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Wframe-larger-than=32768)
+	# Warning options (Strict safety/portability, stack/object size limits)
+	# -Wbad-function-cast, -Wcast-align, -Wdouble-promotion need fixes in codebase
+	add_compile_options(-Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond)
+	add_compile_options(-Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Werror=return-type)
 	if (NOT CMAKE_BUILD_TYPE MATCHES "Debug")
 		# Optimization options
 		add_compile_options(-O3 -DNDEBUG)
@@ -93,9 +108,7 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 	endif()
 endif()
 
-if (WIN32)
-	target_link_libraries(rvvm_common INTERFACE winmm)
-elseif (UNIX)
+if (UNIX)
 	find_package(Threads REQUIRED)
 	target_link_libraries(rvvm_common INTERFACE Threads::Threads)
 	# Link librt, libatomic if we have them
@@ -109,20 +122,22 @@ elseif (UNIX)
 	endif()
 endif()
 
-# CPU interpreter sources
-file(GLOB RVVM_CPU_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_SRC_DIR}/cpu/*.h"
-	"${RVVM_SRC_DIR}/cpu/*.c"
+# General sources
+file(GLOB RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
+	"${RVVM_SRC_DIR}/*.h"
+	"${RVVM_SRC_DIR}/*.c"
+	"${RVVM_SRC_DIR}/cpu/riscv_*.c"
 )
-add_library(rvvm_cpu32 STATIC EXCLUDE_FROM_ALL ${RVVM_CPU_SRC})
-target_link_libraries(rvvm_cpu32 PRIVATE rvvm_common)
-target_link_libraries(rvvm_common INTERFACE rvvm_cpu32)
+set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
+set(RVVM_NETWORKING_SRC "${RVVM_SRC_DIR}/networking.c")
+list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC} ${RVVM_NETWORKING_SRC})
+
 if (RVVM_USE_RV64)
+	file(GLOB RVVM_RV64_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
+		"${RVVM_SRC_DIR}/cpu/riscv64_*.c"
+	)
 	target_compile_definitions(rvvm_common INTERFACE USE_RV64)
-	add_library(rvvm_cpu64 STATIC EXCLUDE_FROM_ALL ${RVVM_CPU_SRC})
-	target_link_libraries(rvvm_cpu64 PRIVATE rvvm_common)
-	target_link_libraries(rvvm_common INTERFACE rvvm_cpu64)
-	target_compile_definitions(rvvm_cpu64 PRIVATE RV64)
+	list(APPEND RVVM_SRC ${RVVM_RV64_SRC})
 endif()
 
 if (RVVM_USE_FPU)
@@ -133,33 +148,28 @@ if (RVVM_USE_FPU)
 	if (RVVM_M_LIB)
 		target_link_libraries(rvvm_common INTERFACE ${RVVM_M_LIB})
 	endif()
+endif()
 
-	# Enforce correct floating-point behavior
-	if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-		include(CheckCCompilerFlag)
-		check_c_compiler_flag(-frounding-math FROUNDING_MATH)
-		if (FROUNDING_MATH)
-			target_compile_options(rvvm_common INTERFACE -frounding-math)
+# Check JIT support for target
+if (RVVM_USE_JIT AND NOT MSVC)
+	execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpmachine RESULT_VARIABLE RESULT OUTPUT_VARIABLE TRIPLET ERROR_QUIET)
+	if (RESULT)
+		message(WARNING "Couldn't determine target triplet! If build fails, disable USE_JIT")
+	else()
+		if (NOT TRIPLET MATCHES "^(x86|amd64|i386|aarch64|arm|riscv)")
+			message(WARNING "Unsupported RVJIT target! RVJIT won't be built")
+			set(RVVM_USE_JIT OFF)
 		endif()
 	endif()
 endif()
 
-# RVJIT library
+# RVJIT sources
 if (RVVM_USE_JIT)
 	file(GLOB RVVM_RVJIT_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
 		"${RVVM_SRC_DIR}/rvjit/*.h"
 		"${RVVM_SRC_DIR}/rvjit/*.c"
 	)
-	# Hacky way to link with librvvm
-	# Perhaps we should merge this libs?
-	if (BUILD_SHARED_LIBS)
-		add_library(rvjit SHARED EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
-	else()
-		add_library(rvjit STATIC EXCLUDE_FROM_ALL ${RVVM_RVJIT_SRC})
-		target_link_libraries(rvvm_common INTERFACE rvjit)
-		target_link_libraries(rvjit PRIVATE rvvm)
-	endif()
-	target_link_libraries(rvjit PRIVATE rvvm_common)
+	list(APPEND RVVM_SRC ${RVVM_RVJIT_SRC})
 	target_compile_definitions(rvvm_common INTERFACE USE_JIT)
 endif()
 
@@ -219,22 +229,29 @@ if (RVVM_USE_FB AND (NOT BUILD_LIBRETRO))
 endif()
 
 if (RVVM_USE_NET)
+	list(APPEND RVVM_SRC ${RVVM_NETWORKING_SRC})
 	target_compile_definitions(rvvm_common INTERFACE USE_NET)
+	if (WIN32)
+		target_link_libraries(rvvm_common INTERFACE ws2_32)
+	elseif (HAIKU)
+		target_link_libraries(rvvm_common INTERFACE network)
+	elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS") # Solaris, Illumos, etc
+		target_link_libraries(rvvm_common INTERFACE socket)
+	endif()
+
 	if (RVVM_USE_TAP_LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 		list(APPEND RVVM_DEVICES_SRC ${RVVM_TAP_LINUX_SRC})
 		target_compile_definitions(rvvm_common INTERFACE USE_TAP_LINUX)
 	else()
-		if (RVVM_USE_TAP_LINUX)
-			message(STATUS "TAP is supported only on Linux")
-		endif()
 		list(APPEND RVVM_DEVICES_SRC ${RVVM_TAP_USER_SRC})
-		if (WIN32)
-			target_link_libraries(rvvm_common INTERFACE ws2_32)
-		endif()
-		if (HAIKU)
-			target_link_libraries(rvvm_common INTERFACE network)
+		if (RVVM_USE_TAP_LINUX)
+			message(WARNING "TAP is supported only on Linux, building userland networking")
 		endif()
 	endif()
+endif()
+
+if (RVVM_USE_LIB AND RVVM_USE_JNI)
+	list(APPEND RVVM_SRC "${RVVM_SRC_DIR}/bindings/jni/rvvm_jni.c")
 endif()
 
 if (RVVM_USE_FDT)
@@ -253,25 +270,31 @@ if (RVVM_USE_PRECISE_FS)
 	target_compile_definitions(rvvm_common INTERFACE USE_PRECISE_FS)
 endif()
 
-# General sources
-file(GLOB RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_SRC_DIR}/*.h"
-	"${RVVM_SRC_DIR}/*.c"
-)
-set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
-list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
-add_library(rvvm ${RVVM_SRC} ${RVVM_DEVICES_SRC})
-target_link_libraries(rvvm PRIVATE rvvm_common)
-if (RVVM_USE_JIT)
-	target_link_libraries(rvvm PRIVATE rvjit)
-endif()
+# Compile all object files once
+add_library(rvvm_objlib OBJECT ${RVVM_SRC} ${RVVM_DEVICES_SRC})
+target_link_libraries(rvvm_objlib PRIVATE rvvm_common)
+
+# Static library target
+add_library(rvvm_static STATIC $<TARGET_OBJECTS:rvvm_objlib>)
+target_link_libraries(rvvm_static PRIVATE rvvm_common)
+set_target_properties(rvvm_static PROPERTIES PREFIX "lib")
 
 if (NOT BUILD_LIBRETRO)
+	# Shared library target
+	if (RVVM_USE_LIB)
+		target_compile_definitions(rvvm_common INTERFACE USE_LIB)
+		set_property(TARGET rvvm_objlib PROPERTY POSITION_INDEPENDENT_CODE 1)
+		target_compile_options(rvvm_objlib INTERFACE -ffat-lto-objects)
+		add_library(rvvm SHARED $<TARGET_OBJECTS:rvvm_objlib>)
+		target_link_libraries(rvvm PRIVATE rvvm_common)
+		set_target_properties(rvvm PROPERTIES PREFIX "lib")
+	endif()
+
 	# Main executable
-	add_executable(rvvm_bin ${RVVM_MAIN_SRC})
-	target_link_libraries(rvvm_bin PUBLIC rvvm)
-	target_link_libraries(rvvm_bin PRIVATE rvvm_common)
-	set_target_properties(rvvm_bin PROPERTIES OUTPUT_NAME rvvm)
+	add_executable(rvvm_cli ${RVVM_MAIN_SRC})
+	target_link_libraries(rvvm_cli PUBLIC rvvm_static)
+	target_link_libraries(rvvm_cli PRIVATE rvvm_common)
+	set_target_properties(rvvm_cli PROPERTIES OUTPUT_NAME rvvm)
 else()
 	# libretro core
 	set(RVVM_LIBRETRO_SRC "${RVVM_SRC_DIR}/bindings/libretro/libretro.c")
@@ -280,7 +303,7 @@ else()
 	else()
 		add_library(rvvm_libretro SHARED ${RVVM_LIBRETRO_SRC})
 	endif()
-	target_link_libraries(rvvm_libretro PRIVATE rvvm rvvm_common)
+	target_link_libraries(rvvm_libretro PRIVATE rvvm_static rvvm_common)
 	if (RVVM_USE_NET)
 		target_compile_definitions(rvvm_libretro PRIVATE USE_NET)
 	endif()

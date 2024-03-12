@@ -269,7 +269,7 @@ else
 override BINARY := $(BUILDDIR)/$(BINARY)
 endif
 SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
-STATIC := $(BUILDDIR)/lib$(NAME).a
+STATIC := $(BUILDDIR)/lib$(NAME)_static.a
 
 # Select sources to compile
 SRC := $(wildcard $(SRCDIR)/*.c $(SRCDIR)/devices/*.c)
@@ -464,19 +464,18 @@ SRC += $(SRCDIR)/bindings/jni/rvvm_jni.c
 endif
 endif
 
+# CPU interpreter sources
+SRC += $(wildcard $(SRCDIR)/cpu/riscv_*.c)
+ifeq ($(USE_RV64),1)
+SRC += $(wildcard $(SRCDIR)/cpu/riscv64_*.c)
+endif
+
 # Rules for object files from sources
 OBJ := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 OBJ_CXX := $(SRC_CXX:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 
-# Rules to build CPU object files for RV32/RV64
-SRC_CPU   := $(wildcard $(SRCDIR)/cpu/*.c)
-OBJ_CPU32 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.32.o)
-ifeq ($(USE_RV64),1)
-OBJ_CPU64 := $(SRC_CPU:$(SRCDIR)/%.c=$(OBJDIR)/%.64.o)
-endif
-
 # Combine the object files
-OBJS := $(OBJ) $(OBJ_CXX) $(OBJ_CPU32) $(OBJ_CPU64)
+OBJS := $(OBJ) $(OBJ_CXX)
 LIB_OBJS := $(filter-out main.o,$(OBJS))
 DEPS := $(OBJS:.o=.d)
 DIRS := $(sort $(BUILDDIR) $(OBJDIR) $(dir $(OBJS)))
@@ -535,22 +534,12 @@ endif
 %.h:
 	@:
 
-# RV64 CPU
-$(OBJDIR)/%.64.o: $(SRCDIR)/%.c Makefile
-	$(info [$(YELLOW)CC$(RESET)] $<)
-	$(DO_CC) -DRV64
-
-# RV32 CPU
-$(OBJDIR)/%.32.o: $(SRCDIR)/%.c Makefile
-	$(info [$(YELLOW)CC$(RESET)] $<)
-	$(DO_CC)
-
-# Any normal code
+# C object files
 $(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
 	$(info [$(YELLOW)CC$(RESET)] $<)
 	$(DO_CC)
 
-# Any C++ code
+# C++ object files
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
 	$(info [$(YELLOW)CXX$(RESET)] $<)
 	$(DO_CXX)
@@ -646,7 +635,7 @@ ifeq ($(HOST_POSIX),1)
 	@echo "[$(YELLOW)INFO$(RESET)] Installing to prefix $(DESTDIR)$(prefix)"
 	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
 	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
-	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm.a
+	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm_static.a
 	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
 	@install -Dm644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
 	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/
