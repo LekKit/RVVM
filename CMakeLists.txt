@@ -54,8 +54,13 @@ find_package(Git)
 execute_process(COMMAND
   "${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh_TaG --always --dirty
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  RESULT_VARIABLE RESULT
   OUTPUT_VARIABLE RVVM_COMMIT
   ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+if (RESULT)
+	message(WARNING "Couldn't determine upstream git commit!")
+	set(RVVM_COMMIT "unknown")
+endif()
 
 # Common pseudo-library to pass parameters to other targets
 add_library(rvvm_common INTERFACE)
