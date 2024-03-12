@@ -345,53 +345,6 @@ static bool riscv_mmio_unaligned_op(rvvm_mmio_dev_t* dev, void* dest, size_t off
     return true;
 }
 
-// Receives any operation on physical address space out of RAM region
-static bool riscv_mmio_scan(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t paddr, void* dest, uint8_t size, uint8_t access)
-{
-    rvvm_mmio_dev_t* dev;
-    rvvm_mmio_handler_t rwfunc;
-    size_t offset;
-
-    //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
-
-    vector_foreach(vm->machine->mmio, i) {
-        dev = &vector_at(vm->machine->mmio, i);
-        if (paddr >= dev->addr && (paddr + size) <= (dev->addr + dev->size)) {
-            // Found the device, access lies in range
-            //rvvm_info("Hart %p accessing MMIO at 0x%08x", vm, paddr);
-            offset = paddr - dev->addr;
-            if (access == MMU_WRITE) {
-                rwfunc = dev->write;
-            } else {
-                rwfunc = dev->read;
-            }
-
-            if (rwfunc == NULL) {
-                // Missing handler, this is a direct memory region
-                // Copy the data, cache translation in TLB if possible
-                if (access == MMU_WRITE) {
-                    memcpy(((vmptr_t)dev->data) + offset, dest, size);
-                } else {
-                    memcpy(dest, ((vmptr_t)dev->data) + offset, size);
-                }
-                if ((paddr & PAGE_PNMASK) >= dev->addr && dev->size - (offset & PAGE_PNMASK) >= PAGE_SIZE) {
-                    riscv_tlb_put(vm, vaddr, ((vmptr_t)dev->data) + offset, access);
-                }
-                return true;
-            }
-
-            if (unlikely(size > dev->max_op_size || size < dev->min_op_size || (offset & (size - 1)))) {
-                // Misaligned or poorly sized operation, attempt fixup
-                //rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
-                return riscv_mmio_unaligned_op(dev, dest, offset, size, access);
-            }
-            return rwfunc(dev, dest, offset, size);
-        }
-    }
-
-    return false;
-}
-
 /*
  * Since aligned loads/stores expect relaxed atomicity, MMU should use this
  * instead of a regular memcpy, to prevent other harts from observing
@@ -417,6 +370,51 @@ TSAN_SUPPRESS static inline void atomic_memcpy_relaxed(void* dest, const void* s
     for (uint8_t i=0; i<size; ++i) {
         ((uint8_t*)dest)[i] = ((const uint8_t*)src)[i];
     }
+}
+
+// Receives any operation on physical address space out of RAM region
+static bool riscv_mmio_scan(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t paddr, void* dest, uint8_t size, uint8_t access)
+{
+    //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
+    vector_foreach(vm->machine->mmio, i) {
+        rvvm_mmio_dev_t* mmio = &vector_at(vm->machine->mmio, i);
+        rvvm_mmio_handler_t rwfunc = NULL;
+        if (paddr >= mmio->addr && (paddr + size) <= (mmio->addr + mmio->size)) {
+            // Found the device, access lies in range
+            //rvvm_info("Hart %p accessing MMIO at 0x%08x", vm, paddr);
+            size_t offset = paddr - mmio->addr;
+            if (access == MMU_WRITE) {
+                rwfunc = mmio->write;
+            } else {
+                rwfunc = mmio->read;
+            }
+
+            if (mmio->mapping) {
+                // This is a direct memory region, cache translation in TLB if possible
+                if ((paddr & PAGE_PNMASK) >= mmio->addr && mmio->size - (offset & PAGE_PNMASK) >= PAGE_SIZE) {
+                    riscv_tlb_put(vm, vaddr, ((vmptr_t)mmio->mapping) + offset, access);
+                }
+                if (rwfunc == NULL) {
+                    // Just copy the data over
+                    if (access == MMU_WRITE) {
+                        atomic_memcpy_relaxed(((vmptr_t)mmio->mapping) + offset, dest, size);
+                    } else {
+                        atomic_memcpy_relaxed(dest, ((vmptr_t)mmio->mapping) + offset, size);
+                    }
+                    return true;
+                }
+            } else if (rwfunc == NULL) return false;
+
+            if (unlikely(size > mmio->max_op_size || size < mmio->min_op_size || (offset & (size - 1)))) {
+                // Misaligned or poorly sized operation, attempt fixup
+                //rvvm_info("Hart %p accessing unaligned MMIO at 0x%08"PRIxXLEN, vm, paddr);
+                return riscv_mmio_unaligned_op(mmio, dest, offset, size, access);
+            }
+            return rwfunc(mmio, dest, offset, size);
+        }
+    }
+
+    return false;
 }
 
 static bool riscv_mmu_op(rvvm_hart_t* vm, virt_addr_t addr, void* dest, uint8_t size, uint8_t access)
