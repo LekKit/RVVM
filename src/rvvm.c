@@ -140,7 +140,7 @@ static rvvm_addr_t rvvm_gen_dtb(rvvm_machine_t* machine)
     }
 
     size_t dtb_size = fdt_size(machine->fdt);
-    paddr_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
+    size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
     dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
     if (dtb_size) {
         rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->mem.begin + dtb_off, (uint32_t)dtb_size);
@@ -781,7 +781,7 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
     // Bypass entire process memory except the NULL page
     // RVVM expects mem.data to be non-NULL, let's leave that for now
     machine->mem.begin = 0x1000;
-    machine->mem.size = (paddr_t)-0x1000ULL;
+    machine->mem.size = (phys_addr_t)-0x1000ULL;
     machine->mem.data = (void*)0x1000;
     machine->rv64 = rv64;
     // I don't know what time CSR frequency userspace expects...

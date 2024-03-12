@@ -155,11 +155,11 @@ typedef struct {
     size_t align;
 #endif
     // Virtual page number per each op type (vaddr >> 12)
-    vaddr_t r;
-    vaddr_t w;
-    vaddr_t e;
+    virt_addr_t r;
+    virt_addr_t w;
+    virt_addr_t e;
 #if defined(HOST_64BIT) && !defined(USE_RV64)
-    vaddr_t align[3];
+    virt_addr_t align[3];
 #endif
 } rvvm_tlb_entry_t;
 
@@ -171,26 +171,26 @@ typedef struct {
     size_t align;
 #endif
     // Virtual PC of this entry
-    vaddr_t pc;
+    virt_addr_t pc;
 #if defined(HOST_64BIT) && !defined(USE_RV64)
-    vaddr_t align;
+    virt_addr_t align;
 #endif
 } rvvm_jtlb_entry_t;
 #endif
 
 typedef struct {
-    paddr_t begin;  // First usable address in physical memory
-    paddr_t size;   // Memory amount (since the region may be empty)
-    vmptr_t data;   // Pointer to memory data
+    phys_addr_t begin; // First usable address in physical memory
+    phys_addr_t size;  // Memory amount (since the region may be empty)
+    vmptr_t data;      // Pointer to memory data
 } rvvm_ram_t;
 
 typedef struct {
     // Virtual page number per each op type (vaddr >> 12)
-    vaddr_t r;
-    vaddr_t w;
-    vaddr_t e;
+    virt_addr_t r;
+    virt_addr_t w;
+    virt_addr_t e;
     // Physical address of the page mapped to the device
-    paddr_t phys;
+    phys_addr_t phys;
     // The device itself
     const rvvm_mmio_dev_t* mmio;
 } rvvm_mmio_tlb_t;
@@ -210,7 +210,7 @@ struct rvvm_hart_t {
     rvvm_decoder_t decoder;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
-    paddr_t root_page_table;
+    phys_addr_t root_page_table;
     uint8_t mmu_mode;
     uint8_t priv_mode;
     bool rv64;
