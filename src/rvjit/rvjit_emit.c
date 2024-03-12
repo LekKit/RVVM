@@ -383,7 +383,7 @@ static void rvjit_lookup_block(rvjit_block_t* block)
 static void rvjit_link_block(rvjit_block_t* block)
 {
 #ifdef RVJIT_NATIVE_LINKER
-    paddr_t next_pc = block->phys_pc + block->pc_off;
+    phys_addr_t next_pc = block->phys_pc + block->pc_off;
     size_t exit_ptr = (size_t)(block->heap.data + block->heap.curr + block->size);
     size_t next_block;
     if (next_pc == block->phys_pc) {
