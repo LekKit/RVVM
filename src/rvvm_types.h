@@ -65,6 +65,8 @@ typedef double fmaxlen_t;
 // Distinguish between virtual and physical addresses
 typedef maxlen_t vaddr_t;
 typedef maxlen_t paddr_t;
+typedef maxlen_t virt_addr_t;
+typedef maxlen_t phys_addr_t;
 
 typedef uint8_t regid_t;  // Register index
 typedef uint8_t bitcnt_t; // Bits count
