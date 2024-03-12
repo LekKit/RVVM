@@ -18,15 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "ata.h"
+#include "blk_io.h"
 #include "bit_ops.h"
 #include "mem_ops.h"
 #include "spinlock.h"
 #include "utils.h"
 #include "threading.h"
-
-#ifdef USE_FDT
 #include "fdtlib.h"
-#endif
 
 // Data registers
 #define ATA_REG_DATA   0x00
@@ -119,7 +117,7 @@ struct ata_dev
         uint8_t buf[SECTOR_SIZE];
     } drive[2];
     struct {
-        paddr_t prdt_addr;
+        rvvm_addr_t prdt_addr;
         spinlock_t lock;
         uint8_t cmd;
         uint8_t status;

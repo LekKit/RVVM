@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvmlib.h"
 #include "pci-bus.h"
-#include "blk_io.h"
 
 #define ATA_DATA_DEFAULT_MMIO 0x40000000
 #define ATA_CTL_DEFAULT_MMIO  0x40001000
