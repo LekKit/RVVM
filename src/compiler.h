@@ -48,7 +48,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #if defined(GNU_EXTS) && defined(__has_builtin)
 #define GNU_BUILTIN(builtin) __has_builtin(builtin)
 #else
-#define GNU_BUILTIN(attr) 0
+#define GNU_BUILTIN(builtin) 0
 #endif
 
 #if GNU_BUILTIN(__builtin_expect)
@@ -57,6 +57,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #else
 #define likely(x)     (x)
 #define unlikely(x)   (x)
+#endif
+
+#if GNU_BUILTIN(__builtin_prefetch) && !defined(NO_PREFETCH)
+#define mem_prefetch(addr, rw, loc) __builtin_prefetch(addr, !!(rw), loc)
+#else
+#define mem_prefetch(addr, rw, loc)
 #endif
 
 #if GNU_ATTRIBUTE(__noinline__)
