@@ -130,6 +130,7 @@ static inline size_t rvjit_native_abireclaim_hregmask()
 {
 #ifdef RVJIT_NATIVE_64BIT
     return rvjit_hreg_mask(X64_RBX) |
+           rvjit_hreg_mask(X64_RBP) |
 #ifdef RVJIT_ABI_WIN64
            rvjit_hreg_mask(X64_RSI) |
            rvjit_hreg_mask(X64_RDI) |
@@ -140,6 +141,7 @@ static inline size_t rvjit_native_abireclaim_hregmask()
            rvjit_hreg_mask(X64_R15);
 #elif RVJIT_ABI_FASTCALL
     return rvjit_hreg_mask(X86_EBX) |
+           rvjit_hreg_mask(X86_EBP) |
            rvjit_hreg_mask(X86_ESI) |
            rvjit_hreg_mask(X86_EDI);
 #else
@@ -297,7 +299,7 @@ static inline void rvjit_x86_memory_ref(rvjit_block_t* block, regid_t dest, regi
     uint8_t code[6] = {0};
     uint8_t inst_size = 1;
     code[0] = (addr & 0x7) | ((dest & 0x7) << 3);
-    if (addr == X64_R12) {
+    if ((addr & 0x7) == X86_ESP) {
         // SIB byte (edge case)
         code[1] = 0x24;
         inst_size++;
@@ -307,7 +309,7 @@ static inline void rvjit_x86_memory_ref(rvjit_block_t* block, regid_t dest, regi
         code[0] |= X86_MEM_OFFW;
         write_uint32_le_m(code + inst_size, off);
         inst_size += 4;
-    } else if (off || addr == X64_R13) {
+    } else if (off || (addr & 0x7) == X86_EBP) {
         // 1-byte offset
         code[0] |= X86_MEM_OFFB;
         code[inst_size] = off;
@@ -369,7 +371,7 @@ static inline void rvjit_x86_lea_add(rvjit_block_t* block, regid_t hrds, regid_t
     if (hrds >= X64_R8) code[0] |= X64_REX_R;
     if (hrs1 >= X64_R8) code[0] |= X64_REX_B;
     if (hrs2 >= X64_R8) code[0] |= X64_REX_X;
-    if (hrs1 == X64_R13) {
+    if ((hrs1 & 0x7) == X86_EBP) {
         code[2] |= X86_MEM_OFFB;
         inst_size++;
     }
