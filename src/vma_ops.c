@@ -217,10 +217,10 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
         ret = NULL;
     } else {
 #if defined(__linux__) && defined(MADV_MERGEABLE)
-        if (flags & VMA_KSM) madvise(addr, size, MADV_MERGEABLE);
+        if (flags & VMA_KSM) madvise(ret, size, MADV_MERGEABLE);
 #endif
 #if defined(__linux__) && defined(MADV_HUGEPAGE)
-        if (flags & VMA_THP) madvise(addr, size, MADV_HUGEPAGE);
+        if (flags & VMA_THP) madvise(ret, size, MADV_HUGEPAGE);
 #endif
     }
 #else
