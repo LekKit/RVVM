@@ -22,8 +22,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVVMLIB_H
 
 #ifdef __cplusplus
-extern "C" {
+#define RVVM_EXTERN_C_BEGIN extern "C" {
+#define RVVM_EXTERN_C_END }
+#else
+#define RVVM_EXTERN_C_BEGIN
+#define RVVM_EXTERN_C_END
 #endif
+RVVM_EXTERN_C_BEGIN
 
 #include <stdint.h>
 #include <stddef.h>
@@ -240,8 +245,6 @@ PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu);
 PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id);
 PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg);
 
-#ifdef __cplusplus
-}
-#endif
+RVVM_EXTERN_C_END
 
 #endif
