@@ -8,7 +8,7 @@ RISC-V CPU & System software implementation written in С
 [![Demo](https://img.shields.io/badge/Check%20it%20out-WASM%20Demo-red?style=for-the-badge)](https://lekkit.github.io/test/index.html)
 - Passes RISC-V compliance/torture tests for both RV64 & RV32
 - OpenSBI, U-Boot, custom firmwares boot and execute properly
-- Working Linux, FreeBSD, OpenBSD, Haiku OS & other cool OSes
+- Working Linux, FreeBSD, OpenBSD, Haiku & other cool OSes
 - Tracing JIT, multicore support
 - Framebuffer display, mouse & keyboard, UART shell
 - NVMe storage drives
@@ -95,7 +95,7 @@ Invoke "./rvvm -h" to see extended help.
 | Windows    | Works                      | Win32, SDL   |
 | MacOS X    | Works, need signing for M1 | SDL, XQuartz |
 | FreeBSD    | Works                      | X11, SDL     |
-| Haiku OS   | Works                      | Haiku, SDL   |
+| Haiku      | Works                      | Haiku, SDL   |
 | Serenity   | Works                      | SDL          |
 | Windows CE | Broken (?)                 | Win32        |
 | Emscripten | -                          | SDL          |
