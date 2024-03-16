@@ -75,8 +75,12 @@ public class RVVMNative {
     public static native boolean    reset_machine(long machine, boolean reset);
     public static native boolean    machine_powered(long machine);
     public static native void       free_machine(long machine);
+    public static native long       mmio_zone_auto(long machine, long addr, long size);
     public static native void       detach_mmio(long machine, int handle, boolean cleanup);
     public static native void       run_eventloop();
+
+    // TODO: MMIO API
+    //public static native int        attach_mmio(long machine, MMIOBase mmio);
 
     // Devices
     public static native void clint_init_auto(long machine);
@@ -92,6 +96,12 @@ public class RVVMNative {
     public static native int  framebuffer_init_auto(long machine, ByteBuffer fb, int x, int y, int bpp);
     public static native long hid_mouse_init_auto(long machine);
     public static native long hid_keyboard_init_auto(long machine);
+
+    public static native long    gpio_dev_create();
+    public static native void    gpio_dev_free(long gpio);
+    public static native int     gpio_read_pins(long gpio, int off);
+    public static native boolean gpio_write_pins(long gpio, int off, int pins);
+    public static native int     gpio_sifive_init_auto(long machine, long gpio);
 
     public static native void pci_remove_device(long dev);
 
