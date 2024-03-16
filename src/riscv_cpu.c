@@ -144,7 +144,7 @@ static inline void riscv_emulate(rvvm_hart_t *vm, uint32_t instruction)
         // If we hit non-compilable instruction or cross page boundaries,
         // the block is finalized.
         if (vm->block_ends
-        || (vm->jit.virt_pc >> PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
+        || (vm->jit.virt_pc >> MMU_PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> MMU_PAGE_SHIFT)) {
             riscv_jit_finalize(vm);
         }
         vm->block_ends = true;

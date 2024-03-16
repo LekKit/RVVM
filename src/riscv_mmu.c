@@ -42,7 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 bool riscv_init_ram(rvvm_ram_t* mem, phys_addr_t begin, phys_addr_t size)
 {
     // Memory boundaries should be always aligned to page size
-    if ((begin & PAGE_MASK) || (size & PAGE_MASK)) {
+    if ((begin & MMU_PAGE_MASK) || (size & MMU_PAGE_MASK)) {
         rvvm_error("Memory boundaries misaligned: 0x%08"PRIxXLEN" - 0x%08"PRIxXLEN, begin, begin+size);
         return false;
     }
@@ -93,7 +93,7 @@ void riscv_tlb_flush(rvvm_hart_t* vm)
 
 void riscv_tlb_flush_page(rvvm_hart_t* vm, virt_addr_t addr)
 {
-    virt_addr_t vpn = (addr >> PAGE_SHIFT);
+    virt_addr_t vpn = (addr >> MMU_PAGE_SHIFT);
     // VPN is off by 1, thus invalidating the entry
     vm->tlb[vpn & TLB_MASK].r = vpn - 1;
     vm->tlb[vpn & TLB_MASK].w = vpn - 1;
@@ -101,14 +101,14 @@ void riscv_tlb_flush_page(rvvm_hart_t* vm, virt_addr_t addr)
 #ifdef USE_JIT
     riscv_jit_tlb_flush(vm);
 #endif
-    if (vpn == (vm->registers[REGISTER_PC] >> PAGE_SHIFT)) {
+    if (vpn == (vm->registers[REGISTER_PC] >> MMU_PAGE_SHIFT)) {
         riscv_restart_dispatch(vm);
     }
 }
 
 static void riscv_tlb_put(rvvm_hart_t* vm, virt_addr_t vaddr, vmptr_t ptr, uint8_t op)
 {
-    virt_addr_t vpn = vaddr >> PAGE_SHIFT;
+    virt_addr_t vpn = vaddr >> MMU_PAGE_SHIFT;
     rvvm_tlb_entry_t* entry = &vm->tlb[vpn & TLB_MASK];
 
     /*
@@ -154,7 +154,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
     phys_addr_t pagetable = vm->root_page_table;
     phys_addr_t pte, pgt_off;
     vmptr_t pte_addr;
-    bitcnt_t bit_off = SV32_VPN_BITS + PAGE_SHIFT;
+    bitcnt_t bit_off = SV32_VPN_BITS + MMU_PAGE_SHIFT;
 
     for (size_t i=0; i<SV32_LEVELS; ++i) {
         pgt_off = ((vaddr >> bit_off) & SV32_VPN_MASK) << 2;
@@ -180,7 +180,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
                         phys_addr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
                         phys_addr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
-                        if (unlikely(pte_shift & vmask & PAGE_PNMASK))
+                        if (unlikely(pte_shift & vmask & MMU_PAGE_PNMASK))
                             return false;
                         // Atomically update A/D flags
                         if (pte != pte_flags) atomic_cas_uint32_le(pte_addr, pte, pte_flags);
@@ -190,7 +190,7 @@ static bool riscv_mmu_translate_sv32(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
                     }
                 } else if ((pte & MMU_WRITE) == 0) {
                     // PGT entry is a pointer to next pagetable
-                    pagetable = (pte >> 10) << PAGE_SHIFT;
+                    pagetable = (pte >> 10) << MMU_PAGE_SHIFT;
                     bit_off -= SV32_VPN_BITS;
                     continue;
                 }
@@ -211,7 +211,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
     phys_addr_t pagetable = vm->root_page_table;
     phys_addr_t pte, pgt_off;
     vmptr_t pte_addr;
-    bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + PAGE_SHIFT - SV64_VPN_BITS;
+    bitcnt_t bit_off = (sv_levels * SV64_VPN_BITS) + MMU_PAGE_SHIFT - SV64_VPN_BITS;
 
     if (unlikely(vaddr != (virt_addr_t)sign_extend(vaddr, bit_off+SV64_VPN_BITS)))
         return false;
@@ -240,7 +240,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
                         phys_addr_t pte_flags = pte | MMU_PAGE_ACCESSED | ((access & MMU_WRITE) << 5);
                         phys_addr_t pte_shift = pte << 2;
                         // Check that PPN[i-1:0] is 0, otherwise the page is misaligned
-                        if (unlikely(pte_shift & vmask & PAGE_PNMASK))
+                        if (unlikely(pte_shift & vmask & MMU_PAGE_PNMASK))
                             return false;
                         // Atomically update A/D flags
                         if (pte != pte_flags) atomic_cas_uint64_le(pte_addr, pte, pte_flags);
@@ -250,7 +250,7 @@ static bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, virt_addr_t vaddr, phys_ad
                     }
                 } else if ((pte & MMU_WRITE) == 0) {
                     // PGT entry is a pointer to next pagetable
-                    pagetable = ((pte >> 10) << PAGE_SHIFT) & SV64_PHYS_MASK;
+                    pagetable = ((pte >> 10) << MMU_PAGE_SHIFT) & SV64_PHYS_MASK;
                     bit_off -= SV64_VPN_BITS;
                     continue;
                 }
@@ -391,7 +391,7 @@ static bool riscv_mmio_scan(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t padd
 
             if (mmio->mapping) {
                 // This is a direct memory region, cache translation in TLB if possible
-                if ((paddr & PAGE_PNMASK) >= mmio->addr && mmio->size - (offset & PAGE_PNMASK) >= PAGE_SIZE) {
+                if ((paddr & MMU_PAGE_PNMASK) >= mmio->addr && mmio->size - (offset & MMU_PAGE_PNMASK) >= MMU_PAGE_SIZE) {
                     riscv_tlb_put(vm, vaddr, ((vmptr_t)mmio->mapping) + offset, access);
                 }
                 if (rwfunc == NULL) {
@@ -427,7 +427,7 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, virt_addr_t addr, void* dest, uint8_t 
     // Handle misalign between pages
     if (!riscv_block_in_page(addr, size)) {
         // Prevent recursive faults by checking return flag
-        uint8_t part_size = PAGE_SIZE - (addr & PAGE_MASK);
+        uint8_t part_size = MMU_PAGE_SIZE - (addr & MMU_PAGE_MASK);
         return riscv_mmu_op(vm, addr, dest, part_size, access) &&
                riscv_mmu_op(vm, addr + part_size, ((vmptr_t)dest) + part_size, size - part_size, access);
     }
