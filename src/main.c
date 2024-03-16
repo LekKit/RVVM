@@ -153,7 +153,7 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** a
     const char* arg_name = "";
     const char* arg_val = "";
     size_t      arg_size = 0;
-
+    UNUSED(tap);
     rvvm_append_cmdline(machine, "root=/dev/nvme0n1 rootflags=discard rw");
     if (rvvm_getarg("cmdline")) rvvm_set_cmdline(machine, rvvm_getarg("cmdline"));
     if (rvvm_getarg("append")) rvvm_append_cmdline(machine, rvvm_getarg("append"));
