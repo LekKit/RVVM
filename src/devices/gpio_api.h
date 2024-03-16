@@ -39,19 +39,19 @@ struct rvvm_gpio_dev {
 
 static inline bool gpio_pins_out(rvvm_gpio_dev_t* dev, size_t off, uint32_t pins)
 {
-    if (dev) return dev->pins_out(dev, off, pins);
+    if (dev && dev->pins_out) return dev->pins_out(dev, off, pins);
     return false;
 }
 
 static inline bool gpio_write_pins(rvvm_gpio_dev_t* dev, size_t off, uint32_t pins)
 {
-    if (dev) return dev->pins_in(dev, off, pins);
+    if (dev && dev->pins_in) return dev->pins_in(dev, off, pins);
     return false;
 }
 
 static inline uint32_t gpio_read_pins(rvvm_gpio_dev_t* dev, size_t off)
 {
-    if (dev) return dev->pins_read(dev, off);
+    if (dev && dev->pins_read) return dev->pins_read(dev, off);
     return 0;
 }
 
