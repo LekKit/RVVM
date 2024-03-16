@@ -396,10 +396,17 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_pci_1remove_1device(JNIEnv* e
     pci_remove_device((pci_dev_t*)(size_t)pci_dev);
 }
 
+static void jni_gpio_remove(rvvm_gpio_dev_t* gpio)
+{
+    free(gpio);
+}
+
 JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1dev_1create(JNIEnv* env, jclass class)
 {
+    rvvm_gpio_dev_t* gpio = safe_new_obj(rvvm_gpio_dev_t);
+    gpio->remove = jni_gpio_remove;
     UNUSED(env); UNUSED(class);
-    return (jlong)(size_t)safe_new_obj(rvvm_gpio_dev_t);
+    return (size_t)gpio;
 }
 
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1dev_1free(JNIEnv* env, jclass class, jlong gpio)
