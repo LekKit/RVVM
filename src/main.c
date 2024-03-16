@@ -177,7 +177,7 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** a
             }
         } else if (cmp_arg(arg_name, "serial")) {
             chardev_t* chardev = chardev_pty_create(arg_val);
-            if (chardev == NULL) return false;
+            if (chardev == NULL && !rvvm_strcmp(arg_val, "null")) return false;
             ns16550a_init_auto(machine, chardev);
         } else if (cmp_arg(arg_name, "res")) {
             size_t len = 0;
