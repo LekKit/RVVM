@@ -43,13 +43,13 @@ static inline bool gpio_pins_out(rvvm_gpio_dev_t* dev, size_t off, uint32_t pins
     return false;
 }
 
-static inline bool gpio_pins_in(rvvm_gpio_dev_t* dev, size_t off, uint32_t pins)
+static inline bool gpio_write_pins(rvvm_gpio_dev_t* dev, size_t off, uint32_t pins)
 {
     if (dev) return dev->pins_in(dev, off, pins);
     return false;
 }
 
-static inline uint32_t gpio_pins_read(rvvm_gpio_dev_t* dev, size_t off)
+static inline uint32_t gpio_read_pins(rvvm_gpio_dev_t* dev, size_t off)
 {
     if (dev) return dev->pins_read(dev, off);
     return 0;
