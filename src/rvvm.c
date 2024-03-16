@@ -143,7 +143,7 @@ static rvvm_addr_t rvvm_gen_dtb(rvvm_machine_t* machine)
     size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
     dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
     if (dtb_size) {
-        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", machine->mem.begin + dtb_off, (uint32_t)dtb_size);
+        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", (phys_addr_t)(machine->mem.begin + dtb_off), (uint32_t)dtb_size);
     } else {
         rvvm_error("Generated DTB does not fit in RAM!");
     }
