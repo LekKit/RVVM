@@ -112,7 +112,15 @@ endif
 $(info Detected OS: $(GREEN)$(OS)$(RESET))
 override OS := $(call tolower,$(OS))
 
-# Set up OS options
+# Windows-specific build options
+ifeq ($(OS),windows)
+# Use LDFLAG -mwindows for GUI-only
+override LDFLAGS += -static
+BIN_EXT := .exe
+LIB_EXT := .dll
+else
+
+# Emscripten-specific build options
 ifeq ($(OS),emscripten)
 override CFLAGS += -pthread
 override LDFLAGS += -s TOTAL_MEMORY=512MB -s PROXY_TO_PTHREAD
@@ -122,14 +130,14 @@ USE_SDL ?= 1
 USE_NET ?= 0
 else
 
-ifeq ($(OS),windows)
-# Use LDFLAG -mwindows for GUI-only
-override LDFLAGS += -static
-BIN_EXT := .exe
-LIB_EXT := .dll
+# POSIX build options
+BIN_EXT :=
+ifeq ($(OS),darwin)
+LIB_EXT := .dylib
 else
-
 LIB_EXT := .so
+endif
+
 # Check for lib presence before linking (there is no pthread on Android, etc)
 ifneq (,$(findstring main, $(shell $(CC) -pthread $(CFLAGS) $(LDFLAGS) -lpthread 2>&1)))
 override CFLAGS += -pthread
@@ -140,7 +148,13 @@ endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
 override LDFLAGS += -lrt
 endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
+override LDFLAGS += -latomic
+else
+override CFLAGS += -DNO_LIBATOMIC
+endif
 
+# Set some addiional options based on POSIX flavor
 ifeq ($(OS),darwin)
 USE_SDL ?= 2
 endif
@@ -153,13 +167,6 @@ override LDFLAGS += -L/usr/X11R6/lib
 endif
 
 endif
-
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
-override LDFLAGS += -latomic
-else
-override CFLAGS += -DNO_LIBATOMIC
-endif
-
 endif
 
 # Detect compiler type, version
@@ -459,8 +466,8 @@ ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
-# Do not pass lib-related flags for dev builds (Faster)
-ifneq (,$(MAKECMDGOALS))
+# Do not pass lib-related flags for dev/cli/test builds (Faster)
+ifneq (,$(findstring lib, $(MAKECMDGOALS)))
 override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
 # Build JNI bindings inside librvvm dynlib
 ifeq ($(USE_JNI),1)
