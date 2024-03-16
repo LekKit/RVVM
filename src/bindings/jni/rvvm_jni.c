@@ -1,6 +1,7 @@
 #include "tiny-jni.h"
 #include "compiler.h"
 #include "utils.h"
+#include "spinlock.h"
 #include "rvvmlib.h"
 #include "devices/clint.h"
 #include "devices/plic.h"
@@ -14,6 +15,7 @@
 #include "devices/mtd-physmap.h"
 #include "devices/framebuffer.h"
 #include "devices/hid_api.h"
+#include "devices/gpio-sifive.h"
 
 PUSH_OPTIMIZATION_SIZE
 
@@ -168,6 +170,54 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_free_1machine(JNIEnv* env, jc
     rvvm_free_machine((rvvm_machine_t*)(size_t)machine);
 }
 
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_mmio_1zone_1auto(JNIEnv* env, jclass class, jlong machine, jlong addr, jlong size)
+{
+    UNUSED(env); UNUSED(class);
+    return rvvm_mmio_zone_auto((rvvm_machine_t*)(size_t)machine, addr, size);
+}
+
+#if 0
+typedef struct {
+    JNIEnv* env;
+    jobject obj;
+    jmethodID read;
+    jmethodID write;
+    jmethodID update;
+    jmethodID reset;
+    jmethodID remove;
+} jni_mmio_data_t;
+
+static bool jni_mmio_read(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
+{
+    jni_mmio_data_t* jni_data = dev->data;
+    memset(dest, 0, size);
+    bool ret = (*env)->CallBoolMethod(env, jni_data->obj, );
+}
+
+static rvvm_mmio_desc_t jni_mmio_desc = {
+    .name = "jni_mmio",
+    //.update =
+};
+
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_attach_1mmio(JNIEnv* env, jclass class, jlong machine, jobject mmio_obj)
+{
+    rvvm_mmio_dev_t* mmio = safe_new_obj(rvvm_mmio_dev_t);
+    jni_mmio_data_t jni_data = safe_new_obj(jni_mmio_data_t);
+    mmio->data = jni_data;
+    class = (*env)->GetObjectClass(env, mmio_obj);
+    jni_data->env = env;
+    jni_data->obj = (*env)->NewGlobalRef(mmio_obj);
+    jni_data->read = (*env)->GetMethodID(env, class, "read", "(Ljava/nio/ByteBuffer;JB)Z");
+    jni_data->write = (*env)->GetMethodID(env, class, "write", "(Ljava/nio/ByteBuffer;JB)Z");
+    jni_data->update = (*env)->GetMethodID(env, class, "update", "()V");
+    jni_data->remove = (*env)->GetMethodID(env, class, "remove", "()V");
+    jni_data->reset = (*env)->GetMethodID(env, class, "reset", "()V");
+
+
+    rvvm_detach_mmio((rvvm_machine_t*)(size_t)machine, handle, cleanup);
+}
+#endif
+
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_detach_1mmio(JNIEnv* env, jclass class, jlong machine, jint handle, jboolean cleanup)
 {
     UNUSED(env); UNUSED(class);
@@ -246,6 +296,64 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_mtd_1physmap_1init_1auto(JNIE
     return ret;
 }
 
+// Share an object reference across threads safely
+typedef struct {
+    JavaVM* jvm;
+    jobject glob_ref;
+    spinlock_t lock;
+    bool attached;
+} jni_glob_objref_t;
+
+static jni_glob_objref_t* jni_create_glob_ref(JNIEnv* env, jobject local_obj)
+{
+    jni_glob_objref_t* ref = safe_new_obj(jni_glob_objref_t);
+    (*env)->GetJavaVM(env, &ref->jvm);
+    ref->glob_ref = (*env)->NewGlobalRef(env, local_obj);
+    return ref;
+}
+
+static JNIEnv* jni_attach_thread(jni_glob_objref_t* ref)
+{
+    JNIEnv* env = NULL;
+    JavaVMAttachArgs args = { .version = JNI_VERSION_1_6, .name = "librvvm JNI Thread", };
+    spin_lock(&ref->lock);
+    if ((*ref->jvm)->GetEnv(ref->jvm, (void**)&env, JNI_VERSION_1_6) == JNI_OK) return env;
+    if ((*ref->jvm)->AttachCurrentThread(ref->jvm, (void**)&env, &args)) {
+        rvvm_warn("JNI AttachCurrentThread failed!");
+        return NULL;
+    }
+    ref->attached = true;
+    return env;
+}
+
+static void jni_dettach_thread(jni_glob_objref_t* ref)
+{
+    if (ref->attached) {
+        (*ref->jvm)->DetachCurrentThread(ref->jvm);
+        ref->attached = false;
+    }
+    spin_unlock(&ref->lock);
+}
+
+static void jni_free_glob_ref(jni_glob_objref_t* ref)
+{
+    JNIEnv* env = jni_attach_thread(ref);
+    (*env)->DeleteGlobalRef(env, ref->glob_ref);
+    jni_dettach_thread(ref);
+    free(ref);
+}
+
+// Clean up the ByteBuffer reference
+static void jni_framebuffer_remove(rvvm_mmio_dev_t* dev)
+{
+    jni_glob_objref_t* ref = dev->data;
+    jni_free_glob_ref(ref);
+}
+
+static rvvm_mmio_type_t jni_fb_cleanup_desc = {
+    .remove = jni_framebuffer_remove,
+};
+
 JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEnv* env, jclass class, jlong machine, jobject fb, jint x, jint y, jint bpp)
 {
     size_t buf_size = (*env)->GetDirectBufferCapacity(env, fb);
@@ -255,9 +363,15 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEn
         .width = x,
         .height = y,
     };
+    rvvm_mmio_dev_t jni_fb_cleaup = {
+        .type = &jni_fb_cleanup_desc,
+        .data = jni_create_glob_ref(env, fb),
+    };
     UNUSED(class);
     if (fb_ctx.buffer && framebuffer_size(&fb_ctx) == buf_size) {
-        return framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
+        rvvm_mmio_handle_t handle = framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
+        if (handle != RVVM_INVALID_MMIO) rvvm_attach_mmio((rvvm_machine_t*)(size_t)machine, &jni_fb_cleaup);
+        return handle;
     } else {
         rvvm_warn("Invalid ByteBuffer passed to JNI framebuffer_init_auto()");
         return RVVM_INVALID_MMIO;
@@ -280,6 +394,37 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_pci_1remove_1device(JNIEnv* e
 {
     UNUSED(env); UNUSED(class);
     pci_remove_device((pci_dev_t*)(size_t)pci_dev);
+}
+
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1dev_1create(JNIEnv* env, jclass class)
+{
+    UNUSED(env); UNUSED(class);
+    return (jlong)(size_t)safe_new_obj(rvvm_gpio_dev_t);
+}
+
+JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1dev_1free(JNIEnv* env, jclass class, jlong gpio)
+{
+    void* ptr = (void*)(size_t)gpio;
+    UNUSED(env); UNUSED(class);
+    free(ptr);
+}
+
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1read_1pins(JNIEnv* env, jclass class, jlong gpio, jint off)
+{
+    UNUSED(env); UNUSED(class);
+    return gpio_read_pins((rvvm_gpio_dev_t*)(size_t)gpio, off);
+}
+
+JNIEXPORT jboolean JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1write_1pins(JNIEnv* env, jclass class, jlong gpio, jint off, jint pins)
+{
+    UNUSED(env); UNUSED(class);
+    return gpio_write_pins((rvvm_gpio_dev_t*)(size_t)gpio, off, pins);
+}
+
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1sifive_1init_1auto(JNIEnv* env, jclass class, jlong machine, jlong gpio)
+{
+    UNUSED(env); UNUSED(class);
+    return gpio_sifive_init_auto((rvvm_machine_t*)(size_t)machine, (rvvm_gpio_dev_t*)(size_t)gpio);
 }
 
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1mouse_1resolution(JNIEnv* env, jclass class, jlong mice, jint x, jint y)
