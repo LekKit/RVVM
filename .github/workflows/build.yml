@@ -11,60 +11,59 @@ on:
 
 env:
   CFLAGS: -Werror
-  #USE_NET: 1
 
 jobs:
   linux-build:
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4.1.1
     - name: Build
       run: make lib all
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v3.1.1
+      uses: actions/upload-artifact@v4.3.1
       with:
         retention-days: 5
         name: rvvm_linux_x86_64
         path: |
           release.linux.x86_64/rvvm_x86_64
           release.linux.x86_64/librvvm.so
-          release.linux.x86_64/librvvm.a
+          release.linux.x86_64/librvvm_static.a
 
   win32-build:
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4.1.1
     - name: Set up MinGW
       run: sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends gcc-mingw-w64-x86-64-win32
     - name: Build
-      run: make CC=x86_64-w64-mingw32-gcc all lib
+      run: make CC=x86_64-w64-mingw32-gcc lib all
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v3.1.1
+      uses: actions/upload-artifact@v4.3.1
       with:
         retention-days: 5
         name: rvvm_win32_x86_64
         path: |
           release.windows.x86_64/rvvm_x86_64.exe
           release.windows.x86_64/librvvm.dll
-          release.windows.x86_64/librvvm.a
+          release.windows.x86_64/librvvm_static.a
         
   macos-build:
     runs-on: macos-12
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4.1.1
       - name: Install SDL
         run: brew install sdl12-compat
       - name: Build
-        run: make all lib
+        run: make lib all
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3.1.1
+        uses: actions/upload-artifact@v4.3.1
         with:
           retention-days: 5
           name: rvvm_macos_x86_64
           path: |
             release.darwin.x86_64/rvvm_x86_64
-            release.darwin.x86_64/librvvm.so
-            release.darwin.x86_64/librvvm.a
+            release.darwin.x86_64/librvvm.dylib
+            release.darwin.x86_64/librvvm_static.a
