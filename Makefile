@@ -467,7 +467,7 @@ override CFLAGS += -DUSE_SPINLOCK_DEBUG
 endif
 
 # Do not pass lib-related flags for dev/cli/test builds (Faster)
-ifneq (,$(findstring lib, $(MAKECMDGOALS)))
+ifneq (,$(findstring lib, $(MAKECMDGOALS))$(findstring install, $(MAKECMDGOALS)))
 override CFLAGS += -DUSE_LIB -fPIC -ffat-lto-objects
 # Build JNI bindings inside librvvm dynlib
 ifeq ($(USE_JNI),1)
