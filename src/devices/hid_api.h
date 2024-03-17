@@ -54,7 +54,10 @@ PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y);
 // Absolute movement (Seamless cursor integration for tablets, etc)
 PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 
-// Mouse definitions
+/*
+ * Mouse definitions
+ */
+
 #define HID_BTN_NONE    0x0
 #define HID_BTN_LEFT    0x1
 #define HID_BTN_RIGHT   0x2
@@ -63,8 +66,16 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_SCROLL_UP   -1
 #define HID_SCROLL_DOWN 1
 
-// Keyboard keycode definitions
+/*
+ * Keyboard keycode definitions
+ */
+
 #define HID_KEY_NONE 0x00
+
+// Keyboard errors (Non-physical keys)
+#define HID_KEY_ERR_ROLLOVER  0x01
+#define HID_KEY_ERR_POSTFAIL  0x02
+#define HID_KEY_ERR_UNDEFINED 0x03
 
 // Typing keys
 #define HID_KEY_A 0x04
@@ -126,15 +137,6 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_SLASH      0x38
 #define HID_KEY_CAPSLOCK   0x39
 
-#define HID_KEY_LEFTCTRL   0xe0
-#define HID_KEY_LEFTSHIFT  0xe1
-#define HID_KEY_LEFTALT    0xe2
-#define HID_KEY_LEFTMETA   0xe3 // The one with the ugly Windows icon
-#define HID_KEY_RIGHTCTRL  0xe4
-#define HID_KEY_RIGHTSHIFT 0xe5
-#define HID_KEY_RIGHTALT   0xe6
-#define HID_KEY_RIGHTMETA  0xe7
-
 // Function keys
 #define HID_KEY_F1  0x3a
 #define HID_KEY_F2  0x3b
@@ -148,19 +150,6 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_F10 0x43
 #define HID_KEY_F11 0x44
 #define HID_KEY_F12 0x45
-
-#define HID_KEY_F13 0x68
-#define HID_KEY_F14 0x69
-#define HID_KEY_F15 0x6a
-#define HID_KEY_F16 0x6b
-#define HID_KEY_F17 0x6c
-#define HID_KEY_F18 0x6d
-#define HID_KEY_F19 0x6e
-#define HID_KEY_F20 0x6f
-#define HID_KEY_F21 0x70
-#define HID_KEY_F22 0x71
-#define HID_KEY_F23 0x72
-#define HID_KEY_F24 0x73
 
 // Editing keys
 #define HID_KEY_SYSRQ      0x46 // Print Screen (REISUB, anyone?)
@@ -196,11 +185,93 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_KP0        0x62
 #define HID_KEY_KPDOT      0x63
 
-// Special keys
-#define HID_KEY_POWER      0x66
-#define HID_KEY_MENU       0x76
+// Non-US keyboard keys
+#define HID_KEY_102ND      0x64 // Non-US \ and |
+#define HID_KEY_COMPOSE    0x65 // Compose key
+#define HID_KEY_POWER      0x66 // Poweroff key
+#define HID_KEY_KPEQUAL    0x67 // Keypad =
+
+// Function keys (F13 - F24)
+#define HID_KEY_F13 0x68
+#define HID_KEY_F14 0x69
+#define HID_KEY_F15 0x6a
+#define HID_KEY_F16 0x6b
+#define HID_KEY_F17 0x6c
+#define HID_KEY_F18 0x6d
+#define HID_KEY_F19 0x6e
+#define HID_KEY_F20 0x6f
+#define HID_KEY_F21 0x70
+#define HID_KEY_F22 0x71
+#define HID_KEY_F23 0x72
+#define HID_KEY_F24 0x73
+
+// Non-US Media/special keys
+#define HID_KEY_OPEN       0x74 // Execute
+#define HID_KEY_HELP       0x75
+#define HID_KEY_PROPS      0x76 // Context menu key (Near right Alt) - Linux evdev naming
+#define HID_KEY_MENU       0x76 // ^ Context menu key too, different naming
+#define HID_KEY_FRONT      0x77 // Select key
+#define HID_KEY_STOP       0x78
+#define HID_KEY_AGAIN      0x79
+#define HID_KEY_UNDO       0x7a
+#define HID_KEY_CUT        0x7b
+#define HID_KEY_COPY       0x7c
+#define HID_KEY_PASTE      0x7d
+#define HID_KEY_FIND       0x7e
 #define HID_KEY_MUTE       0x7f
 #define HID_KEY_VOLUMEUP   0x80
 #define HID_KEY_VOLUMEDOWN 0x81
+#define HID_KEY_KPCOMMA    0x85 // Keypad Comma (Brazilian keypad period key?)
+
+// International keys
+#define HID_KEY_RO               0x87 // International1 (Japanese Ro, \\ key)
+#define HID_KEY_KATAKANAHIRAGANA 0x88 // International2 (Japanese Katakana/Hiragana, second key right to spacebar)
+#define HID_KEY_YEN              0x89 // International3 (Japanese Yen)
+#define HID_KEY_HENKAN           0x8a // International4 (Japanese Henkan, key right to spacebar)
+#define HID_KEY_MUHENKAN         0x8b // International5 (Japanese Muhenkan, key left to spacebar)
+#define HID_KEY_KPJPCOMMA        0x8c // International6 (Japanese Comma? See HID spec...)
+
+// LANG keys
+#define HID_KEY_HANGEUL        0x90 // LANG1 (Korean Hangul/English toggle key)
+#define HID_KEY_HANJA          0x91 // LANG2 (Korean Hanja control key)
+#define HID_KEY_KATAKANA       0x92 // LANG3 (Japanese Katakana key)
+#define HID_KEY_HIRAGANA       0x93 // LANG4 (Japanese Hiragana key)
+#define HID_KEY_ZENKAKUHANKAKU 0x94 // LANG5 (Japanese Zenkaku/Hankaku key)
+
+// Additional keypad keys
+#define KEY_KPLEFTPAREN  0xb6 // Keypad (
+#define KEY_KPRIGHTPAREN 0xb7 // Keypad )
+
+// Modifier keys
+#define HID_KEY_LEFTCTRL   0xe0
+#define HID_KEY_LEFTSHIFT  0xe1
+#define HID_KEY_LEFTALT    0xe2
+#define HID_KEY_LEFTMETA   0xe3 // The one with the ugly Windows icon
+#define HID_KEY_RIGHTCTRL  0xe4
+#define HID_KEY_RIGHTSHIFT 0xe5
+#define HID_KEY_RIGHTALT   0xe6
+#define HID_KEY_RIGHTMETA  0xe7
+
+// Media keys
+#define HID_KEY_MEDIA_PLAYPAUSE    0xe8
+#define HID_KEY_MEDIA_STOPCD       0xe9
+#define HID_KEY_MEDIA_PREVIOUSSONG 0xea
+#define HID_KEY_MEDIA_NEXTSONG     0xeb
+#define HID_KEY_MEDIA_EJECTCD      0xec
+#define HID_KEY_MEDIA_VOLUMEUP     0xed
+#define HID_KEY_MEDIA_VOLUMEDOWN   0xee
+#define HID_KEY_MEDIA_MUTE         0xef
+#define HID_KEY_MEDIA_WWW          0xf0
+#define HID_KEY_MEDIA_BACK         0xf1
+#define HID_KEY_MEDIA_FORWARD      0xf2
+#define HID_KEY_MEDIA_STOP         0xf3
+#define HID_KEY_MEDIA_FIND         0xf4
+#define HID_KEY_MEDIA_SCROLLUP     0xf5
+#define HID_KEY_MEDIA_SCROLLDOWN   0xf6
+#define HID_KEY_MEDIA_EDIT         0xf7
+#define HID_KEY_MEDIA_SLEEP        0xf8
+#define HID_KEY_MEDIA_COFFEE       0xf9
+#define HID_KEY_MEDIA_REFRESH      0xfa
+#define HID_KEY_MEDIA_CALC         0xfb
 
 #endif
