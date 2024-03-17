@@ -2,15 +2,13 @@
 sdl_window.c - SDL RVVM Window
 Copyright (C) 2022  LekKit <github.com/LekKit>
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+Alternatively, the contents of this file may be used under the terms
+of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or any later version.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
@@ -237,6 +235,12 @@ static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDLK_KP0] = HID_KEY_KP0,
     [SDLK_KP_PERIOD] = HID_KEY_KPDOT,
     [SDLK_MENU] = HID_KEY_MENU,
+#ifdef __EMSCRIPTEN__
+    // I dunno why, I don't want to know why,
+    // but some Emscripten SDL keycodes are plain wrong..
+    [0xbb] = HID_KEY_EQUAL,
+    [0xbd] = HID_KEY_MINUS,
+#endif
 };
 
 #endif
@@ -246,6 +250,7 @@ static hid_key_t sdl_key_to_hid(uint32_t sdl_key)
     if (sdl_key < sizeof(sdl_key_to_hid_byte_map)) {
         return sdl_key_to_hid_byte_map[sdl_key];
     }
+    rvvm_warn("Unknown SDL keycode %d!", sdl_key);
     return HID_KEY_NONE;
 }
 
