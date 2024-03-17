@@ -239,8 +239,8 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_ZENKAKUHANKAKU 0x94 // LANG5 (Japanese Zenkaku/Hankaku key)
 
 // Additional keypad keys
-#define KEY_KPLEFTPAREN  0xb6 // Keypad (
-#define KEY_KPRIGHTPAREN 0xb7 // Keypad )
+#define HID_KEY_KPLEFTPAREN  0xb6 // Keypad (
+#define HID_KEY_KPRIGHTPAREN 0xb7 // Keypad )
 
 // Modifier keys
 #define HID_KEY_LEFTCTRL   0xe0
