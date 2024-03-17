@@ -140,6 +140,17 @@ static const hid_key_t haiku_key_to_hid_byte_map[] = {
     HID_KEY_KPDOT,
     HID_KEY_LEFTMETA,
     HID_KEY_RIGHTMETA,
+    HID_KEY_COMPOSE,
+    HID_KEY_102ND,
+    HID_KEY_YEN,
+    HID_KEY_RO,
+    HID_KEY_MUHENKAN,
+    HID_KEY_HENKAN,
+    HID_KEY_KATAKANAHIRAGANA,
+    HID_KEY_NONE, // Haiku keycode 0x6f unused?
+    HID_KEY_KPCOMMA,
+    // 0xf0 hangul?
+    // 0xf1 hanja?
 };
 
 static hid_key_t haiku_key_to_hid(uint32_t haiku_key)
