@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 struct win_data {
     HWND hwnd;
+    HDC  hdc;
 };
 
 static ATOM winclass_atom = 0;
@@ -85,14 +86,6 @@ static const hid_key_t win32_key_to_hid_byte_map[] = {
     [0xBE] = HID_KEY_DOT,
     [0xBF] = HID_KEY_SLASH,
     [0x14] = HID_KEY_CAPSLOCK,
-    [0x11] = HID_KEY_LEFTCTRL,
-    [0x10] = HID_KEY_LEFTSHIFT,
-    [0x12] = HID_KEY_LEFTALT,
-    [0x5B] = HID_KEY_LEFTMETA,
-    [0xA3] = HID_KEY_RIGHTCTRL,
-    [0xA1] = HID_KEY_RIGHTSHIFT,
-    [0xA5] = HID_KEY_RIGHTALT,
-    [0x5C] = HID_KEY_RIGHTMETA,
     [0x70] = HID_KEY_F1,
     [0x71] = HID_KEY_F2,
     [0x72] = HID_KEY_F3,
@@ -136,6 +129,21 @@ static const hid_key_t win32_key_to_hid_byte_map[] = {
     [0x60] = HID_KEY_KP0,
     [0x6E] = HID_KEY_KPDOT,
     [0x5D] = HID_KEY_MENU,
+    [0xE2] = HID_KEY_RO, // It's HID_KEY_102ND on German keyboards (I have one),
+                         // but Windows has no way to distinguish their VK keycodes
+    [0xF2] = HID_KEY_KATAKANAHIRAGANA,
+    [0x1C] = HID_KEY_HENKAN,
+    [0x1D] = HID_KEY_MUHENKAN,
+    [0x15] = HID_KEY_HANGEUL, // Actually KANA on Japanese NEC PC-9800
+    [0x19] = HID_KEY_HANJA,
+    [0x11] = HID_KEY_LEFTCTRL,
+    [0x10] = HID_KEY_LEFTSHIFT,
+    [0x12] = HID_KEY_LEFTALT,
+    [0x5B] = HID_KEY_LEFTMETA,
+    [0xA3] = HID_KEY_RIGHTCTRL,
+    [0xA1] = HID_KEY_RIGHTSHIFT,
+    [0xA5] = HID_KEY_RIGHTALT,
+    [0x5C] = HID_KEY_RIGHTMETA,
 };
 
 static hid_key_t win32_key_to_hid(uint32_t win32_key)
@@ -149,7 +157,7 @@ static hid_key_t win32_key_to_hid(uint32_t win32_key)
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     if (uMsg == WM_CLOSE) {
-        rvvm_reset_machine(((fb_window_t*)GetWindowLongPtrW(hwnd, GWLP_USERDATA))->machine, false);
+        PostQuitMessage(0);
         return 0;
     }
     if (uMsg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT) SetCursor(NULL);
@@ -169,41 +177,56 @@ bool fb_window_create(fb_window_t* win)
             return false;
         }
     }
-    
-    win->data = safe_new_obj(win_data_t);
+    RECT rect = {
+        .right = win->fb.width,
+        .bottom = win->fb.height,
+    };
+    AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, false, 0);
+    HWND hwnd = CreateWindowW(L"RVVM_window", L"RVVM",
+        WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
+        NULL, NULL, GetModuleHandle(NULL), NULL);
+    if (hwnd == NULL) return false;
+
     win->fb.format = RGB_FMT_A8R8G8B8;
     win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
-    
-    // It's not possible to work with window from thread other than the window creator in win32,
-    // so the hacky workaround is to move window creation to fb_update...
+    win->data = safe_new_obj(win_data_t);
+    win->data->hwnd = hwnd;
+    win->data->hdc = GetDC(hwnd);
+
+#ifndef UNDER_CE
+    SetStretchBltMode(win->data->hdc, STRETCH_HALFTONE);
+#endif
     return true;
 }
 
 void fb_window_close(fb_window_t* win)
 {
-    DestroyWindow(win->data->hwnd);
+    if (win->data->hwnd) {
+        DestroyWindow(win->data->hwnd);
+        ReleaseDC(win->data->hwnd, win->data->hdc);
+    }
     free(win->fb.buffer);
     free(win->data);
 }
 
 void fb_window_update(fb_window_t* win)
 {
-    if (win->data->hwnd == NULL) {
-        RECT rect = {
-            .right = win->fb.width,
-            .bottom = win->fb.height,
-        };
-        AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, false, 0);
-        win->data->hwnd = CreateWindowW(L"RVVM_window", L"RVVM",
-            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
-            NULL, NULL, GetModuleHandle(NULL), NULL);
-        if (win->data->hwnd == NULL) return;
-        SetWindowLongPtrW(win->data->hwnd, GWLP_USERDATA, (size_t)win);
-    }
+    BITMAPINFO bmi = {
+        .bmiHeader = {
+            .biSize = sizeof(BITMAPINFOHEADER),
+            .biWidth = win->fb.width,
+            .biHeight = -win->fb.height,
+            .biPlanes = 1,
+            .biBitCount = 32,
+        },
+    };
+    StretchDIBits(win->data->hdc, 0, 0, win->fb.width, win->fb.height,
+                                  0, 0, win->fb.width, win->fb.height,
+                    win->fb.buffer, &bmi, 0, SRCCOPY);
+    SwapBuffers(win->data->hdc);
 
-    InvalidateRect(win->data->hwnd, NULL, 1);
-    MSG Msg;
+    MSG Msg = {0};
     while (PeekMessage(&Msg, win->data->hwnd, 0, 0, PM_REMOVE)) {
         switch (Msg.message) {
             case WM_MOUSEMOVE: {
@@ -245,27 +268,9 @@ void fb_window_update(fb_window_t* win)
             case WM_MOUSEWHEEL:
                 hid_mouse_scroll(win->mouse, -GET_WHEEL_DELTA_WPARAM(Msg.wParam) / WHEEL_DELTA);
                 break;
-            case WM_PAINT: {
-                PAINTSTRUCT ps;
-                RECT rect;
-                HBITMAP hBitmap = CreateBitmap(win->fb.width, win->fb.height, 1, 32, win->fb.buffer);
-                HDC hdc = GetDC(win->data->hwnd);
-                HDC hdcc = CreateCompatibleDC(hdc);
-                ReleaseDC(win->data->hwnd, hdc);
-                SelectObject(hdcc, hBitmap);
-                hdc = BeginPaint(win->data->hwnd, &ps);
-                GetClientRect(win->data->hwnd, &rect);
-#ifndef UNDER_CE
-                SetStretchBltMode(hdc, STRETCH_HALFTONE);
-#endif
-                StretchBlt(hdc, 0, 0, rect.right, rect.bottom, hdcc, 0, 0, win->fb.width, win->fb.height, SRCCOPY);
-
-                EndPaint(win->data->hwnd, &ps);
-
-                DeleteObject(hBitmap);
-                DeleteDC(hdcc);
+            case WM_QUIT:
+                rvvm_reset_machine(win->machine, false);
                 break;
-            }
             default:
                 DispatchMessage(&Msg);
                 break;
