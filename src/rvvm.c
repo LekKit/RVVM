@@ -84,22 +84,23 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
 #ifdef USE_RV64
         if (vector_at(machine->harts, i)->rv64) {
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdc");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdc_zicsr_zifencei");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imac");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imac_zicsr_zifencei");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv39");
         } else {
 #endif
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdc");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdc_zicsr_zifencei");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imac");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imac_zicsr_zifencei");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv32");
 #ifdef USE_RV64
         }
 #endif
+
         fdt_node_add_prop_str(cpu, "status", "okay");
 
         struct fdt_node* clic = fdt_node_create("interrupt-controller");
