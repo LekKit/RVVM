@@ -46,7 +46,7 @@ RVVM_EXTERN_C_BEGIN
 #endif
 
 #ifndef RVVM_VERSION
-#define RVVM_VERSION "0.6-git"
+#define RVVM_VERSION "0.6"
 #endif
 #define RVVM_ABI_VERSION     6
 #define RVVM_DEFAULT_MEMBASE 0x80000000
