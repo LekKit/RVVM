@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.9)
 
-set(RVVM_VERSION 0.6)
+set(RVVM_VERSION 0.7)
 project(RVVM VERSION ${RVVM_VERSION}
 	DESCRIPTION "RISC-V Virtual Machine"
 	HOMEPAGE_URL "https://github.com/LekKit/RVVM"
