@@ -186,7 +186,7 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_KPDOT      0x63
 
 // Non-US keyboard keys
-#define HID_KEY_102ND      0x64 // Non-US \ and |
+#define HID_KEY_102ND      0x64 // Non-US \ and |, also <> key on German-like keyboards
 #define HID_KEY_COMPOSE    0x65 // Compose key
 #define HID_KEY_POWER      0x66 // Poweroff key
 #define HID_KEY_KPEQUAL    0x67 // Keypad =
