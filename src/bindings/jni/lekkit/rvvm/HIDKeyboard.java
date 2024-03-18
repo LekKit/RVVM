@@ -13,6 +13,11 @@ public class HIDKeyboard {
     // Keyboard keycode definitions
     public static final byte HID_KEY_NONE = 0x00;
 
+    // Keyboard errors (Non-physical keys)
+    public static final byte HID_KEY_ERR_ROLLOVER  = 0x01;
+    public static final byte HID_KEY_ERR_POSTFAIL  = 0x02;
+    public static final byte HID_KEY_ERR_UNDEFINED = 0x03;
+
     // Typing keys
     public static final byte HID_KEY_A = 0x04;
     public static final byte HID_KEY_B = 0x05;
@@ -73,15 +78,6 @@ public class HIDKeyboard {
     public static final byte HID_KEY_SLASH      = 0x38;
     public static final byte HID_KEY_CAPSLOCK   = 0x39;
 
-    public static final byte HID_KEY_LEFTCTRL   = (byte)0xe0;
-    public static final byte HID_KEY_LEFTSHIFT  = (byte)0xe1;
-    public static final byte HID_KEY_LEFTALT    = (byte)0xe2;
-    public static final byte HID_KEY_LEFTMETA   = (byte)0xe3; // The one with the ugly Windows icon
-    public static final byte HID_KEY_RIGHTCTRL  = (byte)0xe4;
-    public static final byte HID_KEY_RIGHTSHIFT = (byte)0xe5;
-    public static final byte HID_KEY_RIGHTALT   = (byte)0xe6;
-    public static final byte HID_KEY_RIGHTMETA  = (byte)0xe7;
-
     // Function keys
     public static final byte HID_KEY_F1  = 0x3a;
     public static final byte HID_KEY_F2  = 0x3b;
@@ -95,19 +91,6 @@ public class HIDKeyboard {
     public static final byte HID_KEY_F10 = 0x43;
     public static final byte HID_KEY_F11 = 0x44;
     public static final byte HID_KEY_F12 = 0x45;
-
-    public static final byte HID_KEY_F13 = 0x68;
-    public static final byte HID_KEY_F14 = 0x69;
-    public static final byte HID_KEY_F15 = 0x6a;
-    public static final byte HID_KEY_F16 = 0x6b;
-    public static final byte HID_KEY_F17 = 0x6c;
-    public static final byte HID_KEY_F18 = 0x6d;
-    public static final byte HID_KEY_F19 = 0x6e;
-    public static final byte HID_KEY_F20 = 0x6f;
-    public static final byte HID_KEY_F21 = 0x70;
-    public static final byte HID_KEY_F22 = 0x71;
-    public static final byte HID_KEY_F23 = 0x72;
-    public static final byte HID_KEY_F24 = 0x73;
 
     // Editing keys
     public static final byte HID_KEY_SYSRQ      = 0x46; // Print Screen (REISUB, anyone?)
@@ -143,12 +126,94 @@ public class HIDKeyboard {
     public static final byte HID_KEY_KP0        = 0x62;
     public static final byte HID_KEY_KPDOT      = 0x63;
 
-    // Special keys
-    public static final byte HID_KEY_POWER      = 0x66;
-    public static final byte HID_KEY_MENU       = 0x76;
+    // Non-US keyboard keys
+    public static final byte HID_KEY_102ND      = 0x64; // Non-US \ and |, also <> key on German-like keyboards
+    public static final byte HID_KEY_COMPOSE    = 0x65; // Compose key
+    public static final byte HID_KEY_POWER      = 0x66; // Poweroff key
+    public static final byte HID_KEY_KPEQUAL    = 0x67; // Keypad =
+
+    // Function keys (F13 - F24)
+    public static final byte HID_KEY_F13 = 0x68;
+    public static final byte HID_KEY_F14 = 0x69;
+    public static final byte HID_KEY_F15 = 0x6a;
+    public static final byte HID_KEY_F16 = 0x6b;
+    public static final byte HID_KEY_F17 = 0x6c;
+    public static final byte HID_KEY_F18 = 0x6d;
+    public static final byte HID_KEY_F19 = 0x6e;
+    public static final byte HID_KEY_F20 = 0x6f;
+    public static final byte HID_KEY_F21 = 0x70;
+    public static final byte HID_KEY_F22 = 0x71;
+    public static final byte HID_KEY_F23 = 0x72;
+    public static final byte HID_KEY_F24 = 0x73;
+
+    // Non-US Media/special keys
+    public static final byte HID_KEY_OPEN       = 0x74; // Execute
+    public static final byte HID_KEY_HELP       = 0x75;
+    public static final byte HID_KEY_PROPS      = 0x76; // Context menu key (Near right Alt) - Linux evdev naming
+    public static final byte HID_KEY_MENU       = 0x76; // ^ Context menu key too, different naming
+    public static final byte HID_KEY_FRONT      = 0x77; // Select key
+    public static final byte HID_KEY_STOP       = 0x78;
+    public static final byte HID_KEY_AGAIN      = 0x79;
+    public static final byte HID_KEY_UNDO       = 0x7a;
+    public static final byte HID_KEY_CUT        = 0x7b;
+    public static final byte HID_KEY_COPY       = 0x7c;
+    public static final byte HID_KEY_PASTE      = 0x7d;
+    public static final byte HID_KEY_FIND       = 0x7e;
     public static final byte HID_KEY_MUTE       = 0x7f;
     public static final byte HID_KEY_VOLUMEUP   = (byte)0x80;
     public static final byte HID_KEY_VOLUMEDOWN = (byte)0x81;
+    public static final byte HID_KEY_KPCOMMA    = (byte)0x85; // Keypad Comma (Brazilian keypad period key?)
+
+    // International keys
+    public static final byte HID_KEY_RO               = (byte)0x87; // International1 (Japanese Ro, \\ key)
+    public static final byte HID_KEY_KATAKANAHIRAGANA = (byte)0x88; // International2 (Japanese Katakana/Hiragana, second key right to spacebar)
+    public static final byte HID_KEY_YEN              = (byte)0x89; // International3 (Japanese Yen)
+    public static final byte HID_KEY_HENKAN           = (byte)0x8a; // International4 (Japanese Henkan, key right to spacebar)
+    public static final byte HID_KEY_MUHENKAN         = (byte)0x8b; // International5 (Japanese Muhenkan, key left to spacebar)
+    public static final byte HID_KEY_KPJPCOMMA        = (byte)0x8c; // International6 (Japanese Comma? See HID spec...)
+
+    // LANG keys
+    public static final byte HID_KEY_HANGEUL        = (byte)0x90; // LANG1 (Korean Hangul/English toggle key)
+    public static final byte HID_KEY_HANJA          = (byte)0x91; // LANG2 (Korean Hanja control key)
+    public static final byte HID_KEY_KATAKANA       = (byte)0x92; // LANG3 (Japanese Katakana key)
+    public static final byte HID_KEY_HIRAGANA       = (byte)0x93; // LANG4 (Japanese Hiragana key)
+    public static final byte HID_KEY_ZENKAKUHANKAKU = (byte)0x94; // LANG5 (Japanese Zenkaku/Hankaku key)
+
+    // Additional keypad keys
+    public static final byte HID_KEY_KPLEFTPAREN  = (byte)0xb6; // Keypad (
+    public static final byte HID_KEY_KPRIGHTPAREN = (byte)0xb7; // Keypad )
+
+    // Modifier keys
+    public static final byte HID_KEY_LEFTCTRL   = (byte)0xe0;
+    public static final byte HID_KEY_LEFTSHIFT  = (byte)0xe1;
+    public static final byte HID_KEY_LEFTALT    = (byte)0xe2;
+    public static final byte HID_KEY_LEFTMETA   = (byte)0xe3; // The one with the ugly Windows icon
+    public static final byte HID_KEY_RIGHTCTRL  = (byte)0xe4;
+    public static final byte HID_KEY_RIGHTSHIFT = (byte)0xe5;
+    public static final byte HID_KEY_RIGHTALT   = (byte)0xe6;
+    public static final byte HID_KEY_RIGHTMETA  = (byte)0xe7;
+
+    // Media keys
+    public static final byte HID_KEY_MEDIA_PLAYPAUSE    = (byte)0xe8;
+    public static final byte HID_KEY_MEDIA_STOPCD       = (byte)0xe9;
+    public static final byte HID_KEY_MEDIA_PREVIOUSSONG = (byte)0xea;
+    public static final byte HID_KEY_MEDIA_NEXTSONG     = (byte)0xeb;
+    public static final byte HID_KEY_MEDIA_EJECTCD      = (byte)0xec;
+    public static final byte HID_KEY_MEDIA_VOLUMEUP     = (byte)0xed;
+    public static final byte HID_KEY_MEDIA_VOLUMEDOWN   = (byte)0xee;
+    public static final byte HID_KEY_MEDIA_MUTE         = (byte)0xef;
+    public static final byte HID_KEY_MEDIA_WWW          = (byte)0xf0;
+    public static final byte HID_KEY_MEDIA_BACK         = (byte)0xf1;
+    public static final byte HID_KEY_MEDIA_FORWARD      = (byte)0xf2;
+    public static final byte HID_KEY_MEDIA_STOP         = (byte)0xf3;
+    public static final byte HID_KEY_MEDIA_FIND         = (byte)0xf4;
+    public static final byte HID_KEY_MEDIA_SCROLLUP     = (byte)0xf5;
+    public static final byte HID_KEY_MEDIA_SCROLLDOWN   = (byte)0xf6;
+    public static final byte HID_KEY_MEDIA_EDIT         = (byte)0xf7;
+    public static final byte HID_KEY_MEDIA_SLEEP        = (byte)0xf8;
+    public static final byte HID_KEY_MEDIA_COFFEE       = (byte)0xf9;
+    public static final byte HID_KEY_MEDIA_REFRESH      = (byte)0xfa;
+    public static final byte HID_KEY_MEDIA_CALC         = (byte)0xfb;
 
     public HIDKeyboard(RVVMMachine machine) {
         if (machine.isValid()) {
