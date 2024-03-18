@@ -255,7 +255,6 @@ static int rvvm_cli_main(int argc, const char** argv)
 #ifdef USE_NET
     if (!rvvm_has_arg("nonet")) {
         tap = tap_open();
-        tap_portfwd(tap, "tcp/[::1]:2022=22");
         tap_portfwd(tap, "tcp/127.0.0.1:2022=22");
         rtl8169_init(rvvm_get_pci_bus(machine), tap);
     }
