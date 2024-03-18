@@ -119,14 +119,6 @@ static hid_key_t x11_keysym_to_hid(KeySym keysym)
         case XK_period:       return HID_KEY_DOT;
         case XK_slash:        return HID_KEY_SLASH;
         case XK_Caps_Lock:    return HID_KEY_CAPSLOCK;
-        case XK_Control_L:    return HID_KEY_LEFTCTRL;
-        case XK_Shift_L:      return HID_KEY_LEFTSHIFT;
-        case XK_Alt_L:        return HID_KEY_LEFTALT;
-        case XK_Super_L:      return HID_KEY_LEFTMETA;
-        case XK_Control_R:    return HID_KEY_RIGHTCTRL;
-        case XK_Shift_R:      return HID_KEY_RIGHTSHIFT;
-        case XK_Alt_R:        return HID_KEY_RIGHTALT;
-        case XK_Super_R:      return HID_KEY_RIGHTMETA;
         case XK_F1:           return HID_KEY_F1;
         case XK_F2:           return HID_KEY_F2;
         case XK_F3:           return HID_KEY_F3;
@@ -169,8 +161,32 @@ static hid_key_t x11_keysym_to_hid(KeySym keysym)
         case XK_KP_Page_Up:   return HID_KEY_KP9;
         case XK_KP_Insert:    return HID_KEY_KP0;
         case XK_KP_Delete:    return HID_KEY_KPDOT;
+        case XK_less:         return HID_KEY_102ND;
+        case XK_Multi_key:    return HID_KEY_COMPOSE;
+        case XK_KP_Equal:     return HID_KEY_KPEQUAL;
+        case XK_KP_Separator: return HID_KEY_KPCOMMA;
+        case 0x04db:          return HID_KEY_RO;
+        case 0xff27:          return HID_KEY_KATAKANAHIRAGANA;
+        case XK_yen:          return HID_KEY_YEN;
+        case 0xff23:          return HID_KEY_HENKAN;
+        case 0xff22:          return HID_KEY_MUHENKAN;
+        case 0x04a4:          return HID_KEY_KPJPCOMMA;
+        case 0xff31:          return HID_KEY_HANGEUL;
+        case 0xff34:          return HID_KEY_HANJA;
+        case 0xff26:          return HID_KEY_KATAKANA;
+        case 0xff25:          return HID_KEY_HIRAGANA;
+        case 0xff2a:          return HID_KEY_ZENKAKUHANKAKU;
         case XK_Menu:         return HID_KEY_MENU;
+        case XK_Control_L:    return HID_KEY_LEFTCTRL;
+        case XK_Shift_L:      return HID_KEY_LEFTSHIFT;
+        case XK_Alt_L:        return HID_KEY_LEFTALT;
+        case XK_Super_L:      return HID_KEY_LEFTMETA;
+        case XK_Control_R:    return HID_KEY_RIGHTCTRL;
+        case XK_Shift_R:      return HID_KEY_RIGHTSHIFT;
+        case XK_Alt_R:        return HID_KEY_RIGHTALT;
+        case XK_Super_R:      return HID_KEY_RIGHTMETA;
     }
+    //rvvm_warn("Unknown X11 keysym 0x%x!", (uint32_t)keysym);
     return HID_KEY_NONE;
 }
 
@@ -254,12 +270,11 @@ static void x11_handle_keypress(fb_window_t* win, hid_key_t hid_key)
                     GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
 
             Window child;
-            int win_x, win_y;
-            unsigned int mask;
-	    win->data->grab_root = None;
+            int win_x = 0, win_y = 0;
+            unsigned int mask = 0;
+            win->data->grab_root = None;
             XQueryPointer(dsp, win->data->window, &win->data->grab_root,
-                    &child, &win->data->grab_pointer_x,
-		    &win->data->grab_pointer_y,
+                    &child, &win->data->grab_pointer_x, &win->data->grab_pointer_y,
                     &win_x, &win_y, &mask);
             XWarpPointer(dsp, None, win->data->window, 0, 0, 0, 0,
                     win->fb.width / 2, win->fb.height / 2);
@@ -267,7 +282,7 @@ static void x11_handle_keypress(fb_window_t* win, hid_key_t hid_key)
             XUngrabKeyboard(dsp, CurrentTime);
             XUngrabPointer(dsp, CurrentTime);
             XStoreName(dsp, win->data->window, x11_title);
-	    x11_restore_pointer(win);
+            x11_restore_pointer(win);
         }
         return;
     }
