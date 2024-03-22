@@ -30,14 +30,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <time.h>
 
 #if !defined(__APPLE__) && !defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
-#ifndef CLOCK_MONOTONIC
+#if defined(CLOCK_MONOTONIC_FAST)
+#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_FAST
+#elif defined(CLOCK_MONOTONIC_COARSE)
+#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_COARSE
+#elif defined(CLOCK_MONOTONIC_RAW)
+#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_RAW
+#elif defined(CLOCK_MONOTONIC)
+#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC
+#else
 #include <sys/time.h> // For gettimeofday()
 #endif
 
 static void condvar_fill_timespec(struct timespec* ts)
 {
-#ifdef CLOCK_MONOTONIC
-    clock_gettime(CLOCK_MONOTONIC, ts);
+#ifdef CHOSEN_COND_CLOCK
+    clock_gettime(CHOSEN_COND_CLOCK, ts);
 #else
     // Some targets lack clock_gettime(), use gettimeofday()
     struct timeval tv = {0};
@@ -170,7 +178,7 @@ cond_var_t* condvar_create()
 #endif
     cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (cond->event) return cond;
-#elif defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
+#elif defined(CHOSEN_COND_CLOCK)
     pthread_condattr_t cond_attr;
     if (pthread_condattr_init(&cond_attr) == 0
      && pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
