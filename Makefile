@@ -504,23 +504,23 @@ LDFLAGS_TXT := $(OBJDIR)/ldflags.txt
 CURR_CFLAGS := $(CC) $(CFLAGS)
 CURR_LDFLAGS := $(LD) $(LDFLAGS)
 sinclude $(CFLAGS_TXT) $(LDFLAGS_TXT)
-ifneq ($(CURR_CFLAGS), $(PREV_CFLAGS))
+ifneq ($(CURR_CFLAGS),$(PREV_CFLAGS))
 ifneq ($(PREV_CFLAGS),)
 $(info [$(YELLOW)INFO$(RESET)] CFLAGS changed, doing a full rebuild)
 endif
 override MAKEFLAGS += -B
 else
-ifneq ($(CURR_LDFLAGS), $(PREV_LDFLAGS))
+ifneq ($(CURR_LDFLAGS),$(PREV_LDFLAGS))
 $(info [$(YELLOW)INFO$(RESET)] LDFLAGS changed, relinking binaries)
-$(shell rm -f $(TARGET))
+$(shell rm $(BINARY) $(SHARED) $(NULL_STDERR))
 endif
 endif
 ifeq (3.82,$(firstword $(sort $(MAKE_VERSION) 3.82)))
-$(file >$(CFLAGS_TXT),PREV_CFLAGS = $(CC) $(CFLAGS))
-$(file >$(LDFLAGS_TXT),PREV_LDFLAGS = $(LD) $(LDFLAGS))
+$(file >$(CFLAGS_TXT),PREV_CFLAGS := $(CURR_CFLAGS))
+$(file >$(LDFLAGS_TXT),PREV_LDFLAGS := $(CURR_LDFLAGS))
 else
-$(shell echo PREV_CFLAGS = $(subst \,\\\, $(CC) $(CFLAGS)) > $(CFLAGS_TXT))
-$(shell echo PREV_LDFLAGS = $(subst \,\\\, $(LD) $(LDFLAGS)) > $(LDFLAGS_TXT))
+$(shell echo "PREV_CFLAGS := $(subst ",\\",$(CURR_CFLAGS))" > $(CFLAGS_TXT))
+$(shell echo "PREV_LDFLAGS := $(subst ",\\",$(CURR_LDFLAGS))" > $(LDFLAGS_TXT))
 endif
 
 # Check compiler ability to generate header dependencies
