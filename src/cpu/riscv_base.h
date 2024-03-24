@@ -14,6 +14,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RISCV_BASE_H
+#define RISCV_BASE_H
+
 #include "riscv_priv.h"
 #include "riscv_atomics.h"
 
@@ -726,3 +729,5 @@ static forceinline void riscv_emulate_i(rvvm_hart_t* vm, const uint32_t insn)
     }
     riscv_illegal_insn(vm, insn);
 }
+
+#endif
