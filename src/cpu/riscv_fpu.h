@@ -14,6 +14,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RISCV_FPU_H
+#define RISCV_FPU_H
+
 #include "fpu_lib.h"
 
 #define RISCV_FADD_S   0x0
@@ -746,3 +749,5 @@ static forceinline void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t i
     }
     riscv_illegal_insn(vm, insn);
 }
+
+#endif
