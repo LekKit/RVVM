@@ -24,18 +24,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "atomics.h"
 
-static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
+// Precise instruction values for SYSTEM opcode decoding
+#define RV_PRIV_S_ECALL       0x73
+#define RV_PRIV_S_EBREAK      0x100073
+#define RV_PRIV_S_SRET        0x10200073
+#define RV_PRIV_S_MRET        0x30200073
+#define RV_PRIV_S_WFI         0x10500073
+
+// Privileged FENCE instructions mask and decoding
+#define RV_PRIV_S_FENCE_MASK  0xFE007FFF
+#define RV_PRIV_S_SFENCE_VMA  0x12000073
+#define RV_PRIV_S_HFENCE_BVMA 0x22000073
+#define RV_PRIV_S_HFENCE_GVMA 0xA2000073
+
+void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
 {
-    switch (instruction) {
+    switch (insn) {
         case RV_PRIV_S_ECALL:
             riscv_trap(vm, TRAP_ENVCALL_UMODE + vm->priv_mode, 0);
             return;
         case RV_PRIV_S_EBREAK:
             riscv_trap(vm, TRAP_BREAKPOINT, 0);
-            return;
-        case RV_PRIV_S_URET:
-            // No N extension
-            riscv_trap(vm, TRAP_ILL_INSTR, instruction);
             return;
         case RV_PRIV_S_SRET:
             if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
@@ -51,10 +60,9 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
-            } else {
-                riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+                return;
             }
-            return;
+            break;
         case RV_PRIV_S_MRET:
             if (vm->priv_mode >= PRIVILEGE_MACHINE) {
                 uint8_t next_priv = bit_cut(vm->csr.status, 11, 2);
@@ -69,10 +77,9 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
-            } else {
-                riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+                return;
             }
-            return;
+            break;
         case RV_PRIV_S_WFI:
             // Resume execution for locally enabled interrupts pending at any privilege level
             if (!(vm->csr.ip & vm->csr.ie)) {
@@ -98,148 +105,96 @@ static void riscv_priv_system(rvvm_hart_t* vm, const uint32_t instruction)
             return;
     }
 
-    regid_t rs1 = bit_cut(instruction, 15, 5);
-    regid_t rs2 = bit_cut(instruction, 20, 5);
-    UNUSED(rs1);
-    UNUSED(rs2);
-    switch (instruction & RV_PRIV_S_FENCE_MASK) {
-    case RV_PRIV_S_SFENCE_VMA:
-        if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
-            if (rs1) {
-                riscv_tlb_flush_page(vm, vm->registers[rs1]);
-            } else {
-                riscv_tlb_flush(vm);
+    const regid_t rds = bit_cut(insn, 7, 5);
+    const uint32_t funct3 = bit_cut(insn, 12, 3);
+    const regid_t rs1 = bit_cut(insn, 15, 5);
+    const uint32_t csr = insn >> 20;
+
+    switch (funct3) {
+        case 0x0:
+            switch (insn & RV_PRIV_S_FENCE_MASK) {
+                case RV_PRIV_S_SFENCE_VMA:
+                    if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
+                        if (rs1) {
+                            riscv_tlb_flush_page(vm, vm->registers[rs1]);
+                        } else {
+                            riscv_tlb_flush(vm);
+                        }
+                        return;
+                    }
+                    break;
             }
-        } else {
-            riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+            break;
+        case 0x1: { // csrrw
+            maxlen_t val = vm->registers[rs1];
+            if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
         }
-        return;
-    // The extension is not ratified yet, no reason to implement these now
-    case RV_PRIV_S_HFENCE_BVMA:
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-        return;
-    case RV_PRIV_S_HFENCE_GVMA:
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-        return;
+        case 0x2: { // csrrs
+            maxlen_t val = vm->registers[rs1];
+            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
+        }
+        case 0x3: { // csrrc
+            maxlen_t val = vm->registers[rs1];
+            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
+        }
+        case 0x5: { // csrrwi
+            maxlen_t val = bit_cut(insn, 15, 5);
+            if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
+        }
+        case 0x6: { // csrrsi
+            maxlen_t val = bit_cut(insn, 15, 5);
+            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
+        }
+        case 0x7: { // csrrci
+            maxlen_t val = bit_cut(insn, 15, 5);
+            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+                vm->registers[rds] = val;
+                return;
+            }
+            break;
+        }
     }
 
-    riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+    riscv_illegal_insn(vm, insn);
 }
 
-static void riscv_i_fence(rvvm_hart_t* vm, const uint32_t instruction)
+void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
 {
-    UNUSED(vm);
-    UNUSED(instruction);
-    atomic_fence();
-}
-
-static void riscv_i_zifence(rvvm_hart_t* vm, const uint32_t instruction)
-{
-    UNUSED(instruction);
+    const uint32_t funct3 = bit_cut(insn, 12, 3);
+    switch (funct3) {
+        case 0x0: // fence
+            atomic_fence();
+            return;
+        case 0x1: // fence.i
 #ifdef USE_JIT
-    if (rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
-        riscv_jit_flush_cache(vm);
-    } else {
-        // This eliminates possible dangling dirty blocks in JTLB
-        riscv_jit_tlb_flush(vm);
-    }
-#else
-    UNUSED(vm);
+            if (rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
+                riscv_jit_flush_cache(vm);
+            } else {
+                // This eliminates possible dangling dirty blocks in JTLB
+                riscv_jit_tlb_flush(vm);
+            }
 #endif
-}
-
-static void riscv_zicsr_csrrw(rvvm_hart_t* vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    regid_t rs1 = bit_cut(instruction, 15, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = vm->registers[rs1];
-
-    if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
+            return;
     }
-}
-
-static void riscv_zicsr_csrrs(rvvm_hart_t *vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    regid_t rs1 = bit_cut(instruction, 15, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = vm->registers[rs1];
-
-    if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-    }
-}
-
-static void riscv_zicsr_csrrc(rvvm_hart_t *vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    regid_t rs1 = bit_cut(instruction, 15, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = vm->registers[rs1];
-
-    if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-    }
-}
-
-static void riscv_zicsr_csrrwi(rvvm_hart_t *vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = bit_cut(instruction, 15, 5);
-
-    if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-    }
-}
-
-static void riscv_zicsr_csrrsi(rvvm_hart_t *vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = bit_cut(instruction, 15, 5);
-
-    if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-    }
-}
-
-static void riscv_zicsr_csrrci(rvvm_hart_t *vm, const uint32_t instruction)
-{
-    regid_t rds = bit_cut(instruction, 7, 5);
-    uint32_t csr = bit_cut(instruction, 20, 12);
-    maxlen_t val = bit_cut(instruction, 15, 5);
-
-    if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
-        vm->registers[rds] = val;
-    } else {
-        riscv_trap(vm, TRAP_ILL_INSTR, instruction);
-    }
-}
-
-void riscv_priv_init(rvvm_hart_t* vm)
-{
-    DO_ONCE(riscv_csr_global_init());
-
-    riscv_install_opcode_ISB(vm, RV_PRIV_SYSTEM, riscv_priv_system);
-    riscv_install_opcode_ISB(vm, RV_PRIV_FENCE, riscv_i_fence);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZIFENCE_I, riscv_i_zifence);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRW, riscv_zicsr_csrrw);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRS, riscv_zicsr_csrrs);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRC, riscv_zicsr_csrrc);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRWI, riscv_zicsr_csrrwi);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRSI, riscv_zicsr_csrrsi);
-    riscv_install_opcode_ISB(vm, RV_PRIV_ZICSR_CSRRCI, riscv_zicsr_csrrci);
+    riscv_illegal_insn(vm, insn);
 }

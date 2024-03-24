@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef RVVM_H
 #define RVVM_H
-//#define USE_SJLJ
+
 #include "rvvmlib.h"
 #include "rvvm_types.h"
 #include "compiler.h"
@@ -31,23 +31,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "threading.h"
 #include "blk_io.h"
+#include "fdtlib.h"
 
 #ifdef USE_JIT
 #include "rvjit/rvjit.h"
-#endif
-
-#ifdef USE_FDT
-#include "fdtlib.h"
-#endif
-
-#ifdef USE_SJLJ
-/*
- * Alternate exception unwinding mechanism
- *
- * Since glibc swaps signal mask on longjmp,
- * this is a lot slower
- */
-#include <setjmp.h>
 #endif
 
 #define TLB_SIZE 256  // Always nonzero, power of 2 (32, 64..)
@@ -133,15 +120,6 @@ enum
 
 typedef struct rvvm_hart_t rvvm_hart_t;
 
-typedef void (*riscv_inst_t)(rvvm_hart_t *vm, const uint32_t instruction);
-typedef void (*riscv_inst_c_t)(rvvm_hart_t *vm, const uint16_t instruction);
-
-// Decoder moved to hart struct, allows to switch extensions per-hart
-typedef struct {
-    riscv_inst_t opcodes[512];
-    riscv_inst_c_t opcodes_c[32];
-} rvvm_decoder_t;
-
 /*
  * Address translation cache
  * In future, it would be nice to verify if cache-line alignment
@@ -207,7 +185,6 @@ struct rvvm_hart_t {
 #ifdef USE_JIT
     rvvm_jtlb_entry_t jtlb[TLB_SIZE];
 #endif
-    rvvm_decoder_t decoder;
     rvvm_ram_t mem;
     rvvm_machine_t* machine;
     phys_addr_t root_page_table;
@@ -215,6 +192,7 @@ struct rvvm_hart_t {
     uint8_t priv_mode;
     bool rv64;
     bool trap;
+    maxlen_t trap_pc;
 
     bool user_traps;
 
@@ -249,9 +227,6 @@ struct rvvm_hart_t {
     uint32_t pending_irqs;
     uint32_t pending_events;
     uint32_t preempt_ms;
-#ifdef USE_SJLJ
-    jmp_buf unwind;
-#endif
     // Cacheline alignment
     uint8_t align[64];
 };

@@ -99,7 +99,7 @@ static inline bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest
     }
 }
 
-// Called once from priv_init
+// Called once from riscv_hart_init()
 void riscv_csr_global_init();
 
 #endif

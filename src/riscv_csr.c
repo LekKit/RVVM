@@ -120,13 +120,6 @@ static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, ui
 #ifdef USE_RV64
     if (vm->rv64) *dest |= vm->csr.status & 0x3F00000000ULL;
 #endif
-#ifdef USE_FPU
-    uint8_t new_fs = bit_cut(vm->csr.status, 13, 2);
-    bool fpu_enabled = new_fs != FS_OFF;
-    if (fpu_was_enabled != fpu_enabled) {
-        riscv_decoder_enable_fpu(vm, fpu_enabled);
-    }
-#endif
     if (bit_cut(vm->csr.status, 0, 4) != bit_cut(new_status, 0, 4)) {
         // IRQ enable bits changed
         riscv_restart_dispatch(vm);

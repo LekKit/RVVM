@@ -36,26 +36,21 @@ rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine)
     // Delegate exceptions from M to S
     vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
     vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
-    // Initialize decoder for illegal instructions
-    for (size_t i=0; i<512; ++i) vm->decoder.opcodes[i] = riscv_illegal_insn;
-    for (size_t i=0; i<32; ++i) vm->decoder.opcodes_c[i] = riscv_c_illegal_insn;
 
     if (vm->rv64) {
 #ifdef USE_RV64
         // 0x2A00000000 for H-mode
         vm->csr.status = 0xA00000000;
         vm->csr.isa = CSR_MISA_RV64;
-        riscv_decoder_init_rv64(vm);
 #else
         rvvm_warn("Requested RV64 in RV32-only build");
 #endif
     } else {
         vm->csr.isa = CSR_MISA_RV32;
-        riscv_decoder_init_rv32(vm);
     }
 
     riscv_tlb_flush(vm);
-    riscv_priv_init(vm);
+    DO_ONCE(riscv_csr_global_init());
     return vm;
 }
 
@@ -72,20 +67,14 @@ void riscv_hart_run(rvvm_hart_t* vm)
 {
     rvvm_info("Hart %p started", vm);
     atomic_store_uint32(&vm->wait_event, HART_RUNNING);
-#ifdef USE_SJLJ
-    setjmp(vm->unwind);
-#endif
 
     while (true) {
         riscv_run_till_event(vm);
         atomic_store_uint32_ex(&vm->wait_event, HART_RUNNING, ATOMIC_RELAXED);
-#ifndef USE_SJLJ
         if (vm->trap) {
-            vm->registers[REGISTER_PC] = vm->csr.tvec[vm->priv_mode] & (~3ULL);
+            vm->registers[REGISTER_PC] = vm->trap_pc;
             vm->trap = false;
         }
-#endif
-
         vm->csr.ip |= atomic_swap_uint32(&vm->pending_irqs, 0);
         uint32_t events = atomic_swap_uint32(&vm->pending_events, 0);
 
@@ -110,12 +99,9 @@ rvvm_addr_t riscv_hart_run_userland(rvvm_hart_t* vm)
 {
     vm->user_traps = true;
     atomic_store_uint32(&vm->wait_event, HART_RUNNING);
-#ifdef USE_SJLJ
-    setjmp(vm->unwind);
-#endif
     riscv_run_till_event(vm);
     if (vm->trap) {
-        vm->registers[REGISTER_PC] = vm->csr.tvec[PRIVILEGE_USER];
+        vm->registers[REGISTER_PC] = vm->trap_pc;
         vm->trap = false;
     }
     return vm->csr.cause[PRIVILEGE_USER];
@@ -141,13 +127,6 @@ void riscv_update_xlen(rvvm_hart_t* vm)
     }
 
     if (vm->rv64 != rv64) {
-        if (rv64) {
-            //rvvm_info("Hart %p switches to RV64", vm);
-            riscv_decoder_init_rv64(vm);
-        } else {
-            //rvvm_info("Hart %p switches to RV32", vm);
-            riscv_decoder_init_rv32(vm);
-        }
         vm->rv64 = rv64;
 
 #ifdef USE_JIT
@@ -207,7 +186,7 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
         // Defer usermode trap
         vm->csr.cause[PRIVILEGE_USER] = cause;
         vm->csr.tval[PRIVILEGE_USER] = tval;
-        vm->csr.tvec[PRIVILEGE_USER] = vm->registers[REGISTER_PC];
+        vm->trap_pc = vm->registers[REGISTER_PC];
     } else {
         // Target privilege mode
         uint8_t priv = PRIVILEGE_MACHINE;
@@ -221,14 +200,10 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
         // Modify exception stack in csr.status
         riscv_trap_priv_helper(vm, priv);
         // Jump to trap vector, switch to target priv
-        vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
+        vm->trap_pc = vm->csr.tvec[priv] & (~3ULL);
         riscv_switch_priv(vm, priv);
     }
-#ifdef USE_SJLJ
-    longjmp(vm->unwind, 1);
-#else
     riscv_restart_dispatch(vm);
-#endif
 }
 
 static const uint16_t irq_mask_high[PRIVILEGES_MAX] = {
@@ -284,9 +259,6 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 //rvvm_info("Hart %p irq to %08"PRIxXLEN", cause %x", vm, vm->registers[REGISTER_PC], i);
                 riscv_switch_priv(vm, priv);
                 riscv_jit_discard(vm);
-#ifdef USE_SJLJ
-                longjmp(vm->unwind, 1);
-#endif
                 return true;
             }
         }
