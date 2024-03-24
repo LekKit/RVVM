@@ -133,6 +133,7 @@ void riscv_update_xlen(rvvm_hart_t* vm)
         rvjit_set_rv64(&vm->jit, rv64);
         riscv_jit_flush_cache(vm);
 #endif
+        riscv_restart_dispatch(vm);
     }
 }
 #endif
