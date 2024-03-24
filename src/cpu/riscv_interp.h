@@ -14,6 +14,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RISCV_INTERP_H
+#define RISCV_INTERP_H
+
 #include "riscv_compressed.h"
 
 NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm);
@@ -64,3 +67,5 @@ TSAN_SUPPRESS void riscv_run_interpreter(rvvm_hart_t* vm)
         riscv_emulate(vm, instruction);
     }
 }
+
+#endif
