@@ -47,7 +47,8 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
             riscv_trap(vm, TRAP_BREAKPOINT, 0);
             return;
         case RV_PRIV_S_SRET:
-            if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
+            // Allow sret only when in S-mode or more privileged, and TVM isn't enabled
+            if (vm->priv_mode >= PRIVILEGE_SUPERVISOR && !(vm->csr.status & CSR_STATUS_TSR)) {
                 uint8_t next_priv = bit_cut(vm->csr.status, 8, 1);
                 // Set SPP to U
                 vm->csr.status = bit_replace(vm->csr.status, 8, 1, PRIVILEGE_USER);
@@ -114,7 +115,8 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         case 0x0:
             switch (insn & RV_PRIV_S_FENCE_MASK) {
                 case RV_PRIV_S_SFENCE_VMA:
-                    if (vm->priv_mode >= PRIVILEGE_SUPERVISOR) {
+                    // Allow sfence.vma only when in S-mode or more privileged, and TVM isn't enabled
+                    if (vm->priv_mode >= PRIVILEGE_SUPERVISOR && !(vm->csr.status & CSR_STATUS_TVM)) {
                         if (rs1) {
                             riscv_tlb_flush_page(vm, vm->registers[rs1]);
                         } else {
