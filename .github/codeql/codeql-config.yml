@@ -13,3 +13,7 @@ query-filters:
       id: cpp/equality-on-floats
   - exclude:
       id: cpp/include-non-header
+  - exclude:
+      id: cpp/complex-block
+  - exclude:
+      id: cpp/trivial-switch
