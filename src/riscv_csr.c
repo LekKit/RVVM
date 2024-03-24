@@ -77,8 +77,8 @@ static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, ui
 {
     maxlen_t new_status = *dest;
 #ifdef USE_FPU
-    bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
 #ifndef USE_PRECISE_FS
+    bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
     if (fpu_was_enabled) {
         vm->csr.status = bit_replace(vm->csr.status, 13, 2, FS_DIRTY);
     }
@@ -117,11 +117,12 @@ static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, ui
     }
 #endif
     csr_helper_masked(&vm->csr.status, dest, mask, op);
+    maxlen_t old_status = *dest;
 #ifdef USE_RV64
     if (vm->rv64) *dest |= vm->csr.status & 0x3F00000000ULL;
 #endif
-    if (bit_cut(vm->csr.status, 0, 4) != bit_cut(new_status, 0, 4)) {
-        // IRQ enable bits changed
+    if (bit_cut(new_status, 0, 4) & ~bit_cut(old_status, 0, 4)) {
+        // IRQ enable bits were set
         riscv_restart_dispatch(vm);
     }
 }
