@@ -207,18 +207,6 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
     riscv_restart_dispatch(vm);
 }
 
-static const uint16_t irq_mask_high[PRIVILEGES_MAX] = {
-    0xEEE, 0xCCC, 0x888, 0x0
-};
-
-static inline uint32_t riscv_irq_mask(rvvm_hart_t* vm) {
-    uint32_t ret = irq_mask_high[vm->priv_mode];
-    if ((1 << vm->priv_mode) & vm->csr.status)
-        ret |= (0x111 << vm->priv_mode);
-
-    return ret;
-}
-
 static inline maxlen_t riscv_cause_irq_mask(rvvm_hart_t* vm)
 {
 #ifdef USE_RV64
@@ -235,15 +223,24 @@ static inline maxlen_t riscv_cause_irq_mask(rvvm_hart_t* vm)
 
 bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
 {
-    // IRQs that are pending, enabled by mie and allowed by privilege mode & mstatus
-    uint32_t irqs = vm->csr.ip & vm->csr.ie & riscv_irq_mask(vm);
-    if (unlikely(irqs)) {
+    // IRQs that are pending & enabled by mie
+    uint32_t pending_irqs = vm->csr.ip & vm->csr.ie;
+    if (unlikely(pending_irqs)) {
+        // Target privilege mode
+        uint8_t priv = PRIVILEGE_MACHINE;
+        uint32_t irqs = 0;
+        // Delegate pending IRQs from M to the highest possible mode
+        do {
+            irqs = pending_irqs & ~vm->csr.ideleg[priv];
+            pending_irqs &= vm->csr.ideleg[priv];
+            if (irqs) break;
+        } while (--priv);
+        // Skip if target priv < current priv, or equal and IRQs are disabled in status CSR
+        if (vm->priv_mode > priv) return false;
+        if (vm->priv_mode == priv && !((1 << vm->priv_mode) & vm->csr.status)) return false;
+
         for (int i=11; i>=0; --i) {
             if (irqs & (1 << i)) {
-                // Target privilege mode
-                uint8_t priv = PRIVILEGE_MACHINE;
-                // Delegate to lower privilege mode if needed
-                while ((priv > vm->priv_mode) && (vm->csr.ideleg[priv] & (1 << i))) priv--;
                 // Write exception info
                 vm->csr.epc[priv] = vm->registers[REGISTER_PC];
                 if (wfi) vm->csr.epc[priv] += 4;
@@ -257,7 +254,6 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
                 } else {
                     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
                 }
-                //rvvm_info("Hart %p irq to %08"PRIxXLEN", cause %x", vm, vm->registers[REGISTER_PC], i);
                 riscv_switch_priv(vm, priv);
                 riscv_jit_discard(vm);
                 return true;
