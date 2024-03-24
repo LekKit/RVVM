@@ -14,6 +14,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RISCV_ATOMICS_H
+#define RISCV_ATOMICS_H
+
 #define RISCV_AMO_LR   0x2
 #define RISCV_AMO_SC   0x3
 #define RISCV_AMO_SWAP 0x1
@@ -183,3 +186,5 @@ static inline void riscv_emulate_a_opc_amo(rvvm_hart_t* vm, const uint32_t insn)
     }
     riscv_illegal_insn(vm, insn);
 }
+
+#endif
