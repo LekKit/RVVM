@@ -361,6 +361,7 @@ static bool riscv_csr_sip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     uint8_t prev_mmu = vm->mmu_mode;
+    if (vm->csr.status & CSR_STATUS_TVM) return false; // TVM should trap on acces to satp
 #ifdef USE_RV64
     if (vm->rv64) {
         maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 60) | (vm->root_page_table >> MMU_PAGE_SHIFT);
