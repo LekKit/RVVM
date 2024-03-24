@@ -16,6 +16,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define RISCV_CPU_SOURCE
 
+#ifndef RISCV_COMPRESSED_H
+#define RISCV_COMPRESSED_H
+
 #include "riscv_cpu.h"
 #include "compiler.h"
 #include "bit_ops.h"
@@ -541,3 +544,5 @@ static forceinline void riscv_emulate_insn(rvvm_hart_t* vm, const uint32_t insn)
             return;
     }
 }
+
+#endif
