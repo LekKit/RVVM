@@ -334,6 +334,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, ((int64_t)(sxlen_t)reg1 * (uint64_t)reg2) >> 32);
 #endif
                     return;
+                case 0x10: // sh1add (Zba)
+                    riscv_write_reg(vm, rds, reg2 + (reg1 << 1));
+                    return;
             }
             break;
         case 0x3:
@@ -344,7 +347,6 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     return;
                 case 0x1: // mulhu
                     rvjit_mulhu(rds, rs1, rs2, 4);
-
 #ifdef RV64
                     riscv_write_reg(vm, rds, mulhu_uint64(reg1, reg2));
 #else
@@ -372,6 +374,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, result);
                     return;
                 }
+                case 0x10: // sh2add (Zba)
+                    riscv_write_reg(vm, rds, reg2 + (reg1 << 2));
+                    return;
             }
             break;
         case 0x5:
@@ -415,6 +420,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, result);
                     return;
                 }
+                case 0x10: // sh3add (Zba)
+                    riscv_write_reg(vm, rds, reg2 + (reg1 << 3));
+                    return;
             }
             break;
         case 0x7:
@@ -474,6 +482,9 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     rvjit_mul(rds, rs1, rs2, 4);
                     riscv_write_reg(vm, rds, (int32_t)(reg1 * reg2));
                     return;
+                case 0x4: // add.uw (Zba)
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + ((uint64_t)reg1));
+                    return;
             }
             break;
         case 0x1:
@@ -481,6 +492,13 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                 case 0x0: // sllw
                     rvjit_sllw(rds, rs1, rs2, 4);
                     riscv_write_reg(vm, rds, (int32_t)(reg1 << (reg2 & 0x1F)));
+                    return;
+            }
+            break;
+        case 0x2:
+            switch (funct7) {
+                case 0x10: // sh1add.uw (Zba)
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 1));
                     return;
             }
             break;
@@ -499,6 +517,9 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     riscv_write_reg(vm, rds, result);
                     return;
                 }
+                case 0x10: // sh2add.uw (Zba)
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 2));
+                    return;
             }
             break;
         case 0x5:
@@ -538,6 +559,9 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     riscv_write_reg(vm, rds, result);
                     return;
                 }
+                case 0x10: // sh3add.uw (Zba)
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 3));
+                    return;
             }
             break;
         case 0x7:
