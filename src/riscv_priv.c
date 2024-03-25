@@ -47,7 +47,7 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
             riscv_trap(vm, TRAP_BREAKPOINT, 0);
             return;
         case RV_PRIV_S_SRET:
-            // Allow sret only when in S-mode or more privileged, and TVM isn't enabled
+            // Allow sret only when in S-mode or more privileged, and TSR isn't enabled
             if (vm->priv_mode >= PRIVILEGE_SUPERVISOR && !(vm->csr.status & CSR_STATUS_TSR)) {
                 uint8_t next_priv = bit_cut(vm->csr.status, 8, 1);
                 // Set SPP to U
