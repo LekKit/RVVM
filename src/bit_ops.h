@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVVM_BIT_OPS_H
 #define RVVM_BIT_OPS_H
 
+#include "compiler.h"
 #include "rvvm_types.h"
 
 // Simple bit operations (sign-extend, etc) for internal usage
@@ -28,19 +29,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *
 *     [ext is now equal to signed lower 20 bits of val]
 */
-static inline int64_t sign_extend(uint64_t val, bitcnt_t bits)
+static forceinline int64_t sign_extend(uint64_t val, bitcnt_t bits)
 {
     return ((int64_t)(val << (64 - bits))) >> (64 - bits);
 }
 
 // Generate bitmask of given size
-static inline uint64_t bit_mask(bitcnt_t count)
+static forceinline uint64_t bit_mask(bitcnt_t count)
 {
     return (1ULL << count) - 1;
 }
 
 // Cut bits from val at given position (from lower bit)
-static inline uint64_t bit_cut(uint64_t val, bitcnt_t pos, bitcnt_t bits)
+static forceinline uint64_t bit_cut(uint64_t val, bitcnt_t pos, bitcnt_t bits)
 {
     return (val >> pos) & bit_mask(bits);
 }
@@ -52,7 +53,7 @@ static inline uint64_t bit_replace(uint64_t val, bitcnt_t pos, bitcnt_t bits, ui
 }
 
 // Check if Nth bit of val is 1
-static inline bool bit_check(uint64_t val, bitcnt_t pos)
+static forceinline bool bit_check(uint64_t val, bitcnt_t pos)
 {
     return (val >> pos) & 0x1;
 }
@@ -73,27 +74,137 @@ static inline uint64_t bit_next_pow2(uint64_t val)
     return val + 1;
 }
 
-static inline uint32_t bit_rotl32(uint32_t val, bitcnt_t bits)
+// Rotate u32 left
+static forceinline uint32_t bit_rotl32(uint32_t val, bitcnt_t bits)
 {
     return (val << bits) | (val >> (32 - bits));
 }
 
-static inline uint64_t bit_rotl64(uint64_t val, bitcnt_t bits)
+// Rotate u64 left
+static forceinline uint64_t bit_rotl64(uint64_t val, bitcnt_t bits)
 {
     return (val << bits) | (val >> (64 - bits));
 }
 
-// Reverse bits in val (from lower bit), remaining bits are zero
-static inline uint64_t bit_reverse(uint64_t val, bitcnt_t bits)
+// Rotate u32 right
+static forceinline uint32_t bit_rotr32(uint32_t val, bitcnt_t bits)
+{
+    return (val >> bits) | (val << (32 - bits));
+}
+
+// Rotate u64 right
+static forceinline uint64_t bit_rotr64(uint64_t val, bitcnt_t bits)
+{
+    return (val >> bits) | (val << (64 - bits));
+}
+
+// Count leading zeroes (from highest bit position) in u32
+static inline bitcnt_t bit_clz32(uint32_t val)
+{
+    if (unlikely(!val)) return 32;
+#if GNU_BUILTIN(__builtin_clz)
+    return __builtin_clz(val);
+#else
+    bitcnt_t ret = 0;
+    bitcnt_t tmp = (!(val >> 16)) << 4;
+    val >>= 16 - tmp;
+    ret += tmp;
+    tmp = (!(val >> 8)) << 3;
+    val >>= 8 - tmp;
+    ret += tmp;
+    tmp = (!(val >> 4)) << 2;
+    val >>= 4 - tmp;
+    ret += tmp;
+    tmp = (!(val >> 2)) << 1;
+    val >>= 2 - tmp;
+    ret += tmp;
+    tmp = !(val >> 1);
+    val >>= 1 - tmp;
+    ret += tmp;
+    return ret + !(val & 1);
+#endif
+}
+
+// Count leading zeroes (from highest bit position) in u64
+static inline bitcnt_t bit_clz64(uint64_t val)
+{
+    if (unlikely(!val)) return 64;
+#if GNU_BUILTIN(__builtin_clzll) && defined(HOST_64BIT)
+    return __builtin_clzll(val);
+#else
+    bitcnt_t tmp = (!(val >> 32)) << 5;
+    return bit_clz32(val >> (32 - tmp)) + tmp;
+#endif
+}
+
+// Count trailing zeroes (from lowest bit position) in u32
+static inline bitcnt_t bit_ctz32(uint32_t val)
+{
+    if (unlikely(!val)) return 32;
+#if GNU_BUILTIN(__builtin_ctz)
+    return __builtin_ctz(val);
+#else
+    bitcnt_t ret = 0;
+    bitcnt_t tmp = (!((uint16_t)val)) << 4;
+    val >>= tmp;
+    ret += tmp;
+    tmp = (!((uint8_t)val)) << 3;
+    val >>= tmp;
+    ret += tmp;
+    tmp = (!(val & 0xF)) << 2;
+    val >>= tmp;
+    ret += tmp;
+    tmp = (!(val & 0x3)) << 1;
+    val >>= tmp;
+    ret += tmp;
+    return ret + !(val & 0x1);
+#endif
+}
+
+// Count trailing zeroes (from lowest bit position) in u64
+static inline bitcnt_t bit_ctz64(uint64_t val)
+{
+    if (unlikely(!val)) return 64;
+#if GNU_BUILTIN(__builtin_ctzll) && defined(HOST_64BIT)
+    return __builtin_ctzll(val);
+#else
+    bitcnt_t tmp = (!((uint32_t)val)) << 5;
+    return bit_ctz32(val >> tmp) + tmp;
+#endif
+}
+
+// Count raised bits in u32
+static inline bitcnt_t bit_popcnt32(uint32_t val)
+{
+#if GNU_BUILTIN(__builtin_popcount)
+    return __builtin_popcount(val);
+#else
+    val = (val & 0x55555555) + ((val >>  1) & 0x55555555);
+    val = (val & 0x33333333) + ((val >>  2) & 0x33333333);
+    val = (val & 0x0F0F0F0F) + ((val >>  4) & 0x0F0F0F0F);
+    val = (val & 0x00FF00FF) + ((val >>  8) & 0x00FF00FF);
+    val = (val & 0x0000FFFF) + ((val >> 16) & 0x0000FFFF);
+    return val;
+#endif
+}
+
+// Count raised bits in u64
+static inline bitcnt_t bit_popcnt64(uint64_t val)
+{
+#if GNU_BUILTIN(__builtin_popcountll) && defined(HOST_64BIT)
+    return __builtin_popcountll(val);
+#else
+    return bit_popcnt32(val) + bit_popcnt32(val >> 32);
+#endif
+}
+
+// Bitwise OR-combine, byte granule for orc.b instruction emulation
+static inline uint64_t bit_orc_b(uint64_t val)
 {
     uint64_t ret = 0;
-
-    for (bitcnt_t i=0; i<bits; ++i) {
-        ret <<= 1;
-        ret |= val & 0x1;
-        val >>= 1;
+    for (size_t i=0; i<64; i+=8) {
+        if ((val >> i) & 0xFF) ret |= (0xFFULL << i);
     }
-
     return ret;
 }
 
