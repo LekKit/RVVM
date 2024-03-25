@@ -141,14 +141,25 @@ static forceinline void riscv_emulate_i_opc_imm(rvvm_hart_t* vm, const uint32_t 
             rvjit_addi(rds, rs1, imm, 4);
             riscv_write_reg(vm, rds, src + imm);
             return;
-        case 0x1: // slli
-            if (!decode_i_shift_funct7(insn)) {
-                const bitcnt_t shamt = decode_i_shamt(insn);
-                rvjit_slli(rds, rs1, shamt, 4);
-                riscv_write_reg(vm, rds, src << shamt);
-                return;
+        case 0x1: {
+            const bitcnt_t shamt = decode_i_shamt(insn);
+            switch (decode_i_shift_funct7(insn)) {
+                case 0x0: // slli
+                    rvjit_slli(rds, rs1, shamt, 4);
+                    riscv_write_reg(vm, rds, src << shamt);
+                    return;
+                case 0x14: // bseti (Zbs)
+                    riscv_write_reg(vm, rds, src | (((xlen_t)1U) << shamt));
+                    return;
+                case 0x24: // bclri (Zbs)
+                    riscv_write_reg(vm, rds, src & ~(((xlen_t)1U) << shamt));
+                    return;
+                case 0x34: // binvi (Zbs)
+                    riscv_write_reg(vm, rds, src ^ (((xlen_t)1U) << shamt));
+                    return;
             }
             break;
+        }
         case 0x2: // slti
             rvjit_slti(rds, rs1, imm, 4);
             riscv_write_reg(vm, rds, (((sxlen_t)src) < ((sxlen_t)imm)) ? 1 : 0);
@@ -161,22 +172,23 @@ static forceinline void riscv_emulate_i_opc_imm(rvvm_hart_t* vm, const uint32_t 
             rvjit_xori(rds, rs1, imm, 4);
             riscv_write_reg(vm, rds, src ^ imm);
             return;
-        case 0x5:
+        case 0x5: {
+            const bitcnt_t shamt = decode_i_shamt(insn);
             switch (decode_i_shift_funct7(insn)) {
-                case 0x0: { // srli
-                    const bitcnt_t shamt = decode_i_shamt(insn);
+                case 0x0: // srli
                     rvjit_srli(rds, rs1, shamt, 4);
                     riscv_write_reg(vm, rds, src >> shamt);
                     return;
-                }
-                case 0x20: { // srai
-                    const bitcnt_t shamt = decode_i_shamt(insn);
+                case 0x20: // srai
                     rvjit_srai(rds, rs1, shamt, 4);
                     riscv_write_reg(vm, rds, ((sxlen_t)src) >> shamt);
                     return;
-                }
+                case 0x24: // bexti (Zbs)
+                    riscv_write_reg(vm, rds, (src >> shamt) & 1);
+                    return;
             }
             break;
+        }
         case 0x6: // ori
             rvjit_ori(rds, rs1, imm, 4);
             riscv_write_reg(vm, rds, src | imm);
@@ -215,29 +227,35 @@ static forceinline void riscv_emulate_i_opc_imm32(rvvm_hart_t* vm, const uint32_
             return;
         }
         case 0x1:
-            if (!(insn >> 25)) { // slliw
-                const bitcnt_t shamt = bit_cut(insn, 20, 5);
-                rvjit_slliw(rds, rs1, shamt, 4);
-                riscv_write_reg(vm, rds, (int32_t)(src << shamt));
-                return;
+            switch (insn >> 25) {
+                case 0x0: { // slliw
+                    const bitcnt_t shamt = bit_cut(insn, 20, 5);
+                    rvjit_slliw(rds, rs1, shamt, 4);
+                    riscv_write_reg(vm, rds, (int32_t)(src << shamt));
+                    return;
+                }
+                case 0x4:
+                case 0x5: { // slli.uw
+                    const bitcnt_t shamt = bit_cut(insn, 20, 6);
+                    riscv_write_reg(vm, rds, ((xlen_t)src) << shamt);
+                    return;
+                }
             }
             break;
-        case 0x5:
+        case 0x5: {
+            const bitcnt_t shamt = bit_cut(insn, 20, 5);
             switch (insn >> 25) {
-                case 0x0: { // srli
-                    const bitcnt_t shamt = bit_cut(insn, 20, 5);
+                case 0x0: // srli
                     rvjit_srliw(rds, rs1, shamt, 4);
                     riscv_write_reg(vm, rds, (int32_t)(src >> shamt));
                     return;
-                }
-                case 0x20: { // srai
-                    const bitcnt_t shamt = bit_cut(insn, 20, 5);
+                case 0x20: // srai
                     rvjit_sraiw(rds, rs1, shamt, 4);
                     riscv_write_reg(vm, rds, ((int32_t)src) >> shamt);
                     return;
-                }
             }
             break;
+        }
     }
     riscv_illegal_insn(vm, insn);
 }
@@ -252,27 +270,23 @@ static forceinline void riscv_emulate_i_opc_store(rvvm_hart_t* vm, const uint32_
     const sxlen_t offset = sign_extend(bit_cut(insn, 7, 5) | (bit_cut(insn, 25, 7) << 5), 12);
     const xlen_t addr = riscv_read_reg(vm, rs1) + offset;
     switch (funct3) {
-        case 0x0: { // sb
+        case 0x0: // sb
             rvjit_sb(rs2, rs1, offset, 4);
             riscv_store_u8(vm, addr, rs2);
             return;
-        }
-        case 0x1: { // sh
+        case 0x1: // sh
             rvjit_sh(rs2, rs1, offset, 4);
             riscv_store_u16(vm, addr, rs2);
             return;
-        }
-        case 0x2: { // sw
+        case 0x2: // sw
             rvjit_sw(rs2, rs1, offset, 4);
             riscv_store_u32(vm, addr, rs2);
             return;
-        }
 #ifdef RV64
-        case 0x3: { // sd
+        case 0x3: // sd
             rvjit_sd(rs2, rs1, offset, 4);
             riscv_store_u64(vm, addr, rs2);
             return;
-        }
 #endif
     }
     riscv_illegal_insn(vm, insn);
@@ -317,6 +331,15 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
 #else
                     riscv_write_reg(vm, rds, ((int64_t)(sxlen_t)reg1 * (int64_t)(sxlen_t)reg2) >> 32);
 #endif
+                    return;
+                case 0x14: // bset (Zbs)
+                    riscv_write_reg(vm, rds, reg1 | (((xlen_t)1U) << (reg2 & bit_mask(SHAMT_BITS))));
+                    return;
+                case 0x24: // bclr (Zbs)
+                    riscv_write_reg(vm, rds, reg1 & ~(((xlen_t)1U) << (reg2 & bit_mask(SHAMT_BITS))));
+                    return;
+                case 0x34: // binv (Zbs)
+                    riscv_write_reg(vm, rds, reg1 ^ (((xlen_t)1U) << (reg2 & bit_mask(SHAMT_BITS))));
                     return;
             }
             break;
@@ -399,6 +422,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, result);
                     return;
                 }
+                case 0x24: // bext (Zbs)
+                    riscv_write_reg(vm, rds, (reg1 >> (reg2 & bit_mask(SHAMT_BITS))) & 1);
+                    return;
             }
             break;
         case 0x6:
@@ -483,7 +509,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     riscv_write_reg(vm, rds, (int32_t)(reg1 * reg2));
                     return;
                 case 0x4: // add.uw (Zba)
-                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + ((uint64_t)reg1));
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + ((xlen_t)reg1));
                     return;
             }
             break;
@@ -498,7 +524,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
         case 0x2:
             switch (funct7) {
                 case 0x10: // sh1add.uw (Zba)
-                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 1));
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((xlen_t)reg1) << 1));
                     return;
             }
             break;
@@ -518,7 +544,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     return;
                 }
                 case 0x10: // sh2add.uw (Zba)
-                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 2));
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((xlen_t)reg1) << 2));
                     return;
             }
             break;
@@ -560,7 +586,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     return;
                 }
                 case 0x10: // sh3add.uw (Zba)
-                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((uint64_t)reg1) << 3));
+                    riscv_write_reg(vm, rds, riscv_read_reg(vm, rs2) + (((xlen_t)reg1) << 3));
                     return;
             }
             break;
