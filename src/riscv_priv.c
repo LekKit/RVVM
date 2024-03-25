@@ -34,8 +34,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Privileged FENCE instructions mask and decoding
 #define RV_PRIV_S_FENCE_MASK  0xFE007FFF
 #define RV_PRIV_S_SFENCE_VMA  0x12000073
-#define RV_PRIV_S_HFENCE_BVMA 0x22000073
-#define RV_PRIV_S_HFENCE_GVMA 0xA2000073
+
+#define RISCV_INSN_PAUSE 0x100000F // Instruction value for pause hint
 
 void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
 {
@@ -184,8 +184,14 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
 {
     const uint32_t funct3 = bit_cut(insn, 12, 3);
     switch (funct3) {
-        case 0x0: // fence
-            atomic_fence();
+        case 0x0:
+            if (insn == RISCV_INSN_PAUSE) {
+                // pause hint, yield the vCPU thread
+                sleep_ms(0);
+            } else {
+                // fence
+                atomic_fence();
+            }
             return;
         case 0x1: // fence.i
 #ifdef USE_JIT
