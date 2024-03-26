@@ -323,6 +323,7 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
     }
 
     struct fdt_node* plic_node = fdt_node_create_reg("plic", base_addr);
+    fdt_node_add_prop_u32(plic_node, "#address-cells", 0);
     fdt_node_add_prop_u32(plic_node, "#interrupt-cells", 1);
     fdt_node_add_prop_reg(plic_node, "reg", base_addr, 0x4000000);
     fdt_node_add_prop_str(plic_node, "compatible", "sifive,plic-1.0.0");
