@@ -199,12 +199,94 @@ static inline bitcnt_t bit_popcnt64(uint64_t val)
 }
 
 // Bitwise OR-combine, byte granule for orc.b instruction emulation
+// TODO: Some kind of SSE alternative to this must exist?
 static inline uint64_t bit_orc_b(uint64_t val)
 {
     uint64_t ret = 0;
     for (size_t i=0; i<64; i+=8) {
         if ((val >> i) & 0xFF) ret |= (0xFFULL << i);
     }
+    return ret;
+}
+
+/*
+ * clmul using SSE intrins for future investigation:
+    __m128i a_vec = _mm_cvtsi64_si128(a);
+    __m128i b_vec = _mm_cvtsi64_si128(b);
+    return _mm_cvtsi128_si64(_mm_clmulepi64_si128(a_vec, b_vec, 0));
+ *
+ * clmulh using SSE intrins:
+    __m128i a_vec = _mm_cvtsi64_si128(a);
+    __m128i b_vec = _mm_cvtsi64_si128(b);
+    return _mm_extract_epi64(_mm_clmulepi64_si128(a_vec, b_vec, 0), 1);
+ */
+
+// Carry-less multiply
+static inline uint32_t bit_clmul32(uint32_t a, uint32_t b)
+{
+    uint32_t ret = 0;
+    do {
+        if (b & 1) ret ^= a;
+        b >>= 1;
+    } while ((a <<= 1));
+    return ret;
+}
+
+static inline uint64_t bit_clmul64(uint64_t a, uint64_t b)
+{
+    uint64_t ret = 0;
+    do {
+        if (b & 1) ret ^= a;
+        b >>= 1;
+    } while ((a <<= 1));
+    return ret;
+}
+
+static inline uint32_t bit_clmulh32(uint32_t a, uint32_t b)
+{
+    uint32_t ret = 0;
+    bitcnt_t i = 31;
+    do {
+        b >>= 1;
+        if (b & 1) ret ^= (a >> i);
+        i--;
+    } while (b);
+    return ret;
+}
+
+static inline uint64_t bit_clmulh64(uint64_t a, uint64_t b)
+{
+    uint64_t ret = 0;
+    bitcnt_t i = 63;
+    do {
+        b >>= 1;
+        if (b & 1) ret ^= (a >> i);
+        i--;
+    } while (b);
+    return ret;
+}
+
+static inline uint32_t bit_clmulr32(uint32_t a, uint32_t b)
+{
+    uint32_t ret = 0;
+    bitcnt_t i = 31;
+    do {
+        if (b & 1) ret ^= (a >> i);
+        b >>= 1;
+        i--;
+    } while (b);
+    return ret;
+}
+
+static inline uint64_t bit_clmulr64(uint64_t a, uint64_t b)
+{
+    uint64_t ret = 0;
+    bitcnt_t i = 63;
+    do {
+        if (b & 1) ret ^= (a >> i);
+        b >>= 1;
+        i--;
+    } while (b);
     return ret;
 }
 
