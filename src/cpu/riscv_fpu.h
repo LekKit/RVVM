@@ -244,7 +244,7 @@ static forceinline double fpu_round_evend(double val) {
  * This probably should be done using softfp, since dynamic RM
  * could mess with libm internals
  */
-static forceinline float fpu_round_to_rmf(float x, uint8_t rm)
+static float fpu_round_to_rmf(float x, uint8_t rm)
 {
     float ret;
     switch (rm) {
@@ -267,7 +267,7 @@ static forceinline float fpu_round_to_rmf(float x, uint8_t rm)
     return ret;
 }
 
-static forceinline double fpu_round_to_rmd(double x, uint8_t rm)
+static double fpu_round_to_rmd(double x, uint8_t rm)
 {
     double ret;
     switch (rm) {
@@ -284,6 +284,7 @@ static forceinline double fpu_round_to_rmd(double x, uint8_t rm)
 
 static forceinline int32_t fpu_f2int_u32(float x, float rm)
 {
+    if (likely(rm == RM_RTZ && x > 0.5f && x < 4294967296.5f)) return (uint32_t)x;
     float ret = fpu_round_to_rmf(x, rm);
     if (unlikely(fpu_isnan(ret) || ret < 0.f || ret >= 4294967296.f)) {
         feraiseexcept(FE_INVALID);
@@ -295,6 +296,7 @@ static forceinline int32_t fpu_f2int_u32(float x, float rm)
 
 static forceinline int32_t fpu_d2int_u32(double x, float rm)
 {
+    if (likely(rm == RM_RTZ && x > 0.5 && x < 4294967296.5)) return (uint32_t)x;
     double ret = fpu_round_to_rmd(x, rm);
     if (unlikely(fpu_isnan(ret) || ret < 0.0 || ret >= 4294967296.0)) {
         feraiseexcept(FE_INVALID);
@@ -306,6 +308,7 @@ static forceinline int32_t fpu_d2int_u32(double x, float rm)
 
 static forceinline int32_t fpu_f2int_i32(float x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -2147483648.5f && x < 2147483648.5f)) return (int32_t)x;
     float ret = fpu_round_to_rmf(x, rm);
     if (unlikely(fpu_isnan(ret) || (ret < -2147483648.f) || (ret >= 2147483648.f))) {
         feraiseexcept(FE_INVALID);
@@ -317,6 +320,7 @@ static forceinline int32_t fpu_f2int_i32(float x, uint8_t rm)
 
 static forceinline int32_t fpu_d2int_i32(double x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -2147483648.5 && x < 2147483648.5)) return (int32_t)x;
     double ret = fpu_round_to_rmd(x, rm);
     if (unlikely(fpu_isnan(ret) || (ret < -2147483648.0) || (ret >= 2147483648.0))) {
         feraiseexcept(FE_INVALID);
@@ -328,6 +332,7 @@ static forceinline int32_t fpu_d2int_i32(double x, uint8_t rm)
 
 static forceinline int64_t fpu_f2int_u64(float x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -0.5f && x < 18446744073709551616.5f)) return (uint64_t)x;
     float ret = fpu_round_to_rmf(x, rm);
     if (unlikely(fpu_isnan(ret) || ret < 0.f || ret >= 18446744073709551616.f)) {
         feraiseexcept(FE_INVALID);
@@ -339,6 +344,7 @@ static forceinline int64_t fpu_f2int_u64(float x, uint8_t rm)
 
 static forceinline int64_t fpu_d2int_u64(double x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -0.5 && x < 18446744073709551616.5)) return (uint64_t)x;
     double ret = fpu_round_to_rmd(x, rm);
     if (unlikely(fpu_isnan(ret) || ret < 0.0 || ret >= 18446744073709551616.0)) {
         feraiseexcept(FE_INVALID);
@@ -350,6 +356,7 @@ static forceinline int64_t fpu_d2int_u64(double x, uint8_t rm)
 
 static forceinline int64_t fpu_f2int_i64(float x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -9223372036854775808.5f && x < 9223372036854775808.5f)) return (int64_t)x;
     float ret = fpu_round_to_rmf(x, rm);
     if (unlikely(fpu_isnan(ret) || (ret < -9223372036854775808.f) || (ret >= 9223372036854775808.f))) {
         feraiseexcept(FE_INVALID);
@@ -361,6 +368,7 @@ static forceinline int64_t fpu_f2int_i64(float x, uint8_t rm)
 
 static forceinline int64_t fpu_d2int_i64(double x, uint8_t rm)
 {
+    if (likely(rm == RM_RTZ && x > -9223372036854775808.5 && x < 9223372036854775808.5)) return (int64_t)x;
     double ret = fpu_round_to_rmd(x, rm);
     if (unlikely(fpu_isnan(ret) || (ret < -9223372036854775808.0) || (ret >= 9223372036854775808.0))) {
         feraiseexcept(FE_INVALID);
