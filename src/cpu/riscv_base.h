@@ -47,6 +47,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV_OPC_JAL      0x1B
 #define RISCV_OPC_SYSTEM   0x1C
 
+#ifdef RV64
+#define bit_rotl(val, bits) bit_rotl64(val, bits)
+#define bit_rotr(val, bits) bit_rotr64(val, bits)
+#define bit_clmul(a, b) bit_clmul64(a, b)
+#define bit_clmulh(a, b) bit_clmulh64(a, b)
+#define bit_clmulr(a, b) bit_clmulr64(a, b)
+#else
+#define bit_rotl(val, bits) bit_rotl32(val, bits)
+#define bit_rotr(val, bits) bit_rotr32(val, bits)
+#define bit_clmul(a, b) bit_clmul32(a, b)
+#define bit_clmulh(a, b) bit_clmulh32(a, b)
+#define bit_clmulr(a, b) bit_clmulr32(a, b)
+#endif
+
 static forceinline bitcnt_t decode_i_shamt(const uint32_t insn)
 {
 #ifdef RV64
@@ -233,11 +247,7 @@ static forceinline void riscv_emulate_i_opc_imm(rvvm_hart_t* vm, const uint32_t 
 #endif
                     break;
                 case 0x30: // rori (Zbb)
-#ifdef RV64
-                    riscv_write_reg(vm, rds, bit_rotr64(src, shamt));
-#else
-                    riscv_write_reg(vm, rds, bit_rotr32(src, shamt));
-#endif
+                    riscv_write_reg(vm, rds, bit_rotr(src, shamt));
                     return;
             }
             break;
@@ -401,6 +411,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, ((int64_t)(sxlen_t)reg1 * (int64_t)(sxlen_t)reg2) >> 32);
 #endif
                     return;
+                case 0x5: // clmul (Zbc)
+                    riscv_write_reg(vm, rds, bit_clmul(reg1, reg2));
+                    return;
                 case 0x14: // bset (Zbs)
                     riscv_write_reg(vm, rds, reg1 | (((xlen_t)1U) << (reg2 & bit_mask(SHAMT_BITS))));
                     return;
@@ -411,11 +424,7 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, reg1 ^ (((xlen_t)1U) << (reg2 & bit_mask(SHAMT_BITS))));
                     return;
                 case 0x30: // rol (Zbb)
-#ifdef RV64
-                    riscv_write_reg(vm, rds, bit_rotl64(reg1, reg2 & bit_mask(SHAMT_BITS)));
-#else
-                    riscv_write_reg(vm, rds, bit_rotl32(reg1, reg2 & bit_mask(SHAMT_BITS)));
-#endif
+                    riscv_write_reg(vm, rds, bit_rotl(reg1, reg2 & bit_mask(SHAMT_BITS)));
                     return;
             }
             break;
@@ -432,6 +441,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
 #else
                     riscv_write_reg(vm, rds, ((int64_t)(sxlen_t)reg1 * (uint64_t)reg2) >> 32);
 #endif
+                    return;
+                case 0x5: // clmulr (Zbc)
+                    riscv_write_reg(vm, rds, bit_clmulr(reg1, reg2));
                     return;
                 case 0x10: // sh1add (Zba)
                     riscv_write_reg(vm, rds, reg2 + (reg1 << 1));
@@ -451,6 +463,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
 #else
                     riscv_write_reg(vm, rds, ((uint64_t)reg1 * (uint64_t)reg2) >> 32);
 #endif
+                    return;
+                case 0x5: // clmulh (Zbc)
+                    riscv_write_reg(vm, rds, bit_clmulh(reg1, reg2));
                     return;
             }
             break;
@@ -519,11 +534,7 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     riscv_write_reg(vm, rds, EVAL_MIN(reg1, reg2));
                     return;
                 case 0x30: // ror (Zbb)
-#ifdef RV64
-                    riscv_write_reg(vm, rds, bit_rotr64(reg1, reg2 & bit_mask(SHAMT_BITS)));
-#else
-                    riscv_write_reg(vm, rds, bit_rotr32(reg1, reg2 & bit_mask(SHAMT_BITS)));
-#endif
+                    riscv_write_reg(vm, rds, bit_rotr(reg1, reg2 & bit_mask(SHAMT_BITS)));
                     return;
             }
             break;
