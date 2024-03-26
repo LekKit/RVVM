@@ -578,12 +578,12 @@ lib: $(SHARED) $(STATIC)
 
 .PHONY: test
 test: $(BINARY)
-#@curl url -o $(BUILDDIR)/riscv-tests.tar.gz
-	@tar xf $(BUILDDIR)/riscv-tests.tar.gz -C $(BUILDDIR)
+	@curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz" --output-dir "$(BUILDDIR)"
+	@tar xf "$(BUILDDIR)/riscv-tests.tar.gz" -C $(BUILDDIR)
 	@echo
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
 	@echo
-	@for file in $(BUILDDIR)/riscv-tests/rv32*.bin; do \
+	@for file in "$(BUILDDIR)/riscv-tests/rv32"*; do \
 		result=$$($(BINARY) $$file -nogui -rv32 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [[ "$$result" == "0" ]]; then \
@@ -596,7 +596,7 @@ ifeq ($(USE_RV64),1)
 	@echo
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV64)"
 	@echo
-	@for file in $(BUILDDIR)/riscv-tests/rv64*.bin; do \
+	@for file in "$(BUILDDIR)/riscv-tests/rv64"*; do \
 		result=$$($(BINARY) $$file -nogui -rv64 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [[ "$$result" == "0" ]]; then \
