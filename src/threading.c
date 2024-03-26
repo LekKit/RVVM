@@ -30,9 +30,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <time.h>
 
 #if !defined(__APPLE__) && !defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
-#if defined(CLOCK_MONOTONIC_FAST)
+#if defined(CLOCK_MONOTONIC_FAST) && !defined(__EMSCRIPTEN__)
 #define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_FAST
-#elif defined(CLOCK_MONOTONIC_COARSE)
+#elif defined(CLOCK_MONOTONIC_COARSE) && !defined(__EMSCRIPTEN__)
 #define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_COARSE
 #elif defined(CLOCK_MONOTONIC_RAW)
 #define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_RAW
