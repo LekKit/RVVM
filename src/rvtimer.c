@@ -58,9 +58,9 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 #elif defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
 // Use POSIX clock_gettime(), with a fast monotonic clock if possible
 #include <unistd.h>
-#if defined(CLOCK_MONOTONIC_FAST)
+#if defined(CLOCK_MONOTONIC_FAST) && !defined(__EMSCRIPTEN__)
 #define CHOSEN_POSIX_CLOCK CLOCK_MONOTONIC_FAST
-#elif defined(CLOCK_MONOTONIC_COARSE)
+#elif defined(CLOCK_MONOTONIC_COARSE) && !defined(__EMSCRIPTEN__)
 #define CHOSEN_POSIX_CLOCK CLOCK_MONOTONIC_COARSE
 #elif defined(CLOCK_MONOTONIC_RAW)
 #define CHOSEN_POSIX_CLOCK CLOCK_MONOTONIC_RAW
