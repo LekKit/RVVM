@@ -48,12 +48,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV_OPC_SYSTEM   0x1C
 
 #ifdef RV64
+#define bit_clz(val) bit_clz64(val)
+#define bit_ctz(val) bit_ctz64(val)
+#define bit_popcnt(val) bit_popcnt64(val)
 #define bit_rotl(val, bits) bit_rotl64(val, bits)
 #define bit_rotr(val, bits) bit_rotr64(val, bits)
 #define bit_clmul(a, b) bit_clmul64(a, b)
 #define bit_clmulh(a, b) bit_clmulh64(a, b)
 #define bit_clmulr(a, b) bit_clmulr64(a, b)
 #else
+#define bit_clz(val) bit_clz32(val)
+#define bit_ctz(val) bit_ctz32(val)
+#define bit_popcnt(val) bit_popcnt32(val)
 #define bit_rotl(val, bits) bit_rotl32(val, bits)
 #define bit_rotr(val, bits) bit_rotr32(val, bits)
 #define bit_clmul(a, b) bit_clmul32(a, b)
@@ -174,21 +180,13 @@ static forceinline void riscv_emulate_i_opc_imm(rvvm_hart_t* vm, const uint32_t 
                 case 0x30:
                     switch (shamt) {
                         case 0x0: // clz (Zbb)
-#ifdef RV64
-                            riscv_write_reg(vm, rds, bit_clz64(src));
-#else
-                            riscv_write_reg(vm, rds, bit_clz32(src));
-#endif
+                            riscv_write_reg(vm, rds, bit_clz(src));
                             return;
                         case 0x1: // ctx (Zbb)
-#ifdef RV64
-                            riscv_write_reg(vm, rds, bit_ctz64(src));
-#else
-                            riscv_write_reg(vm, rds, bit_ctz32(src));
-#endif
+                            riscv_write_reg(vm, rds, bit_ctz(src));
                             return;
                         case 0x2: // cpop (Zbb)
-                            riscv_write_reg(vm, rds, bit_popcnt64(src));
+                            riscv_write_reg(vm, rds, bit_popcnt(src));
                             return;
                         case 0x4: // sext.b (Zbb)
                             riscv_write_reg(vm, rds, (int8_t)src);
