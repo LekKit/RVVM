@@ -495,6 +495,7 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
 #ifndef RV64
                 case 0x4: // zext.h (Zbb), RV32 encoding
                     if (likely(!rs2)) {
+                        rvjit_andi(rds, rs1, 0xFFFF, 4);
                         riscv_write_reg(vm, rds, (uint16_t)reg1);
                         return;
                     }
@@ -672,6 +673,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     return;
                 case 0x4: // zext.h (Zbb)
                     if (likely(!rs2)) {
+                        rvjit_andi(rds, rs1, 0xFFFF, 4);
                         riscv_write_reg(vm, rds, (uint16_t)reg1);
                         return;
                     }
