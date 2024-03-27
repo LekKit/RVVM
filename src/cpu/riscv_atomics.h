@@ -55,11 +55,11 @@ static forceinline void riscv_emulate_atomic_w(rvvm_hart_t *vm, const uint32_t i
             break;
         case RISCV_AMO_SC:
             if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
-                vm->lrsc = false;
                 riscv_write_reg(vm, rds, 0);
             } else {
                 riscv_write_reg(vm, rds, 1);
             }
+            vm->lrsc = false;
             break;
         case RISCV_AMO_SWAP:
             riscv_write_reg(vm, rds, (int32_t)atomic_swap_uint32_le(ptr, val));
@@ -126,11 +126,11 @@ static forceinline void riscv_emulate_atomic_d(rvvm_hart_t *vm, const uint32_t i
             break;
         case RISCV_AMO_SC:
             if (vm->lrsc && atomic_cas_uint64_le(ptr, vm->lrsc_cas, val)) {
-                vm->lrsc = false;
                 riscv_write_reg(vm, rds, 0);
             } else {
                 riscv_write_reg(vm, rds, 1);
             }
+            vm->lrsc = false;
             break;
         case RISCV_AMO_SWAP:
             vm->registers[rds] = atomic_swap_uint64_le(ptr, val);
