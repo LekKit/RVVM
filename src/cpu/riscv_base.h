@@ -535,6 +535,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                 case 0x30: // ror (Zbb)
                     riscv_write_reg(vm, rds, bit_rotr(reg1, reg2 & bit_mask(SHAMT_BITS)));
                     return;
+                case 0x7: // czero.eqz (Zicond)
+                    riscv_write_reg(vm, rds, reg2 ? reg1 : 0);
+                    return;
             }
             break;
         case 0x6:
@@ -588,6 +591,9 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                     return;
                 case 0x5: // maxu (Zbb)
                     riscv_write_reg(vm, rds, EVAL_MAX(reg1, reg2));
+                    return;
+                case 0x7: // czero.nez (Zicond)
+                    riscv_write_reg(vm, rds, reg2 ? 0 : reg1);
                     return;
             }
             break;
