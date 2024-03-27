@@ -54,16 +54,16 @@ TSAN_SUPPRESS void riscv_run_interpreter(rvvm_hart_t* vm)
     // Execute instructions loop until some event occurs (interrupt, trap)
     while (likely(vm->wait_event)) {
         xlen_t inst_addr = vm->registers[REGISTER_PC];
-        vm->registers[REGISTER_ZERO] = 0;
         if (likely(inst_addr - page_addr < 0xFFD)) {
             instruction = read_uint32_le_m((vmptr_t)(size_t)(inst_ptr + TLB_VADDR(inst_addr)));
         } else if (likely(riscv_fetch_inst(vm, inst_addr, &instruction))) {
             // Update pointer to the current page in real memory
             // If we are executing code from MMIO, direct memory fetch fails
-            xlen_t vpn = vm->registers[REGISTER_PC] >> 12;
+            const xlen_t vpn = vm->registers[REGISTER_PC] >> 12;
             inst_ptr = vm->tlb[vpn & TLB_MASK].ptr;
             page_addr = vm->tlb[vpn & TLB_MASK].e << 12;
         } else break;
+        vm->registers[REGISTER_ZERO] = 0;
         riscv_emulate(vm, instruction);
     }
 }
