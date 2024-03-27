@@ -176,6 +176,46 @@ static forceinline void riscv_emulate_c_c0(rvvm_hart_t* vm, const uint16_t insn)
             return;
         }
 #endif
+        case 0x4: // Zcb
+            switch (bit_cut(insn, 10, 3)) {
+                case 0x0: { // c.lbu (Zcb)
+                    const xlen_t offset = ((insn & 0x20) >> 4) | ((insn & 0x40) >> 6);
+                    const xlen_t addr = riscv_read_reg(vm, rs1) + offset;
+                    rvjit_lbu(rds, rs1, offset, 2);
+                    riscv_load_u8(vm, addr, rds);
+                    return;
+                }
+                case 0x1: {
+                    const xlen_t offset = (insn & 0x20) >> 4;
+                    const xlen_t addr = riscv_read_reg(vm, rs1) + offset;
+                    if (insn & 0x40) { // c.lh (Zcb)
+                        rvjit_lh(rds, rs1, offset, 2);
+                        riscv_load_s16(vm, addr, rds);
+                    } else { // c.lhu (Zcb)
+                        rvjit_lhu(rds, rs1, offset, 2);
+                        riscv_load_u16(vm, addr, rds);
+                    }
+                    return;
+                }
+                case 0x2: { // c.sb (Zcb)
+                    const xlen_t offset = ((insn & 0x20) >> 4) | ((insn & 0x40) >> 6);
+                    const xlen_t addr = riscv_read_reg(vm, rs1) + offset;
+                    rvjit_sb(rds, rs1, offset, 2);
+                    riscv_store_u8(vm, addr, rds);
+                    return;
+                }
+                case 0x3:
+                    if (!(insn & 0x40)) { // c.sh (Zcb)
+                        const xlen_t offset = (insn & 0x20) >> 4;
+                        const xlen_t addr = riscv_read_reg(vm, rs1) + offset;
+                        rvjit_sh(rds, rs1, offset, 2);
+                        riscv_store_u16(vm, addr, rds);
+                        return;
+
+                    }
+                    break;
+            }
+            break;
 #ifdef USE_FPU
         case 0x5:
             if (likely(fpu_is_enabled(vm))) { // c.fsd
@@ -245,48 +285,80 @@ static forceinline void riscv_emulate_c_misc_alu(rvvm_hart_t* vm, const uint16_t
         case 0x3: {
             const uint8_t funct2 = bit_cut(insn, 5, 2);
             const regid_t rs2 = bit_cut(insn, 2, 3) + 8;
-            const xlen_t reg2 = riscv_read_reg(vm, rs2);
-#ifdef RV64
             if (!bit_check(insn, 12)) {
-#endif
+                const xlen_t reg2 = riscv_read_reg(vm, rs2);
                 switch (funct2) {
-                    case 0x0: { // c.sub
+                    case 0x0: // c.sub
                         rvjit_sub(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, reg1 - reg2);
                         return;
-                    }
-                    case 0x1: { // c.xor
+                    case 0x1: // c.xor
                         rvjit_xor(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, reg1 ^ reg2);
                         return;
-                    }
-                    case 0x2: { // c.or
+                    case 0x2: // c.or
                         rvjit_or(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, reg1 | reg2);
                         return;
-                    }
-                    case 0x3: { // c.and
+                    case 0x3: // c.and
                         rvjit_and(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, reg1 & reg2);
                         return;
-                    }
                 }
-#ifdef RV64
             } else {
                 switch (funct2) {
+#ifdef RV64
                     case 0x0: { // c.subw
+                        const xlen_t reg2 = riscv_read_reg(vm, rs2);
                         rvjit_subw(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, (int32_t)(reg1 - reg2));
                         return;
                     }
                     case 0x1: { // c.addw
+                        const xlen_t reg2 = riscv_read_reg(vm, rs2);
                         rvjit_addw(rds, rds, rs2, 2);
                         riscv_write_reg(vm, rds, (int32_t)(reg1 + reg2));
                         return;
                     }
+#endif
+                    case 0x2: { // c.mul (Zcb + M)
+                        const xlen_t reg2 = riscv_read_reg(vm, rs2);
+                        rvjit_mul(rds, rds, rs2, 2);
+                        riscv_write_reg(vm, rds, reg1 * reg2);
+                        return;
+                    }
+                    case 0x3:
+                        switch (bit_cut(insn, 2, 3)) {
+                            case 0x0: // c.zext.b (Zcb)
+                                rvjit_andi(rds, rds, 0xFF, 2);
+                                riscv_write_reg(vm, rds, (uint8_t)reg1);
+                                return;
+                            case 0x1: // c.sext.b (Zcb + Zbb)
+                                // TODO JIT
+                                riscv_write_reg(vm, rds, (int8_t)reg1);
+                                return;
+                            case 0x2: // c.zext.h (Zcb + Zbb)
+                                rvjit_andi(rds, rds, 0xFFFF, 2);
+                                riscv_write_reg(vm, rds, (uint16_t)reg1);
+                                return;
+                            case 0x3: // c.zext.h (Zcb + Zbb)
+                                // TODO JIT
+                                riscv_write_reg(vm, rds, (int16_t)reg1);
+                                return;
+#ifdef RV64
+                            case 0x4: // c.zext.w (Zcb + Zba), RV64 only
+                                // TODO JIT
+                                riscv_write_reg(vm, rds, (uint32_t)reg1);
+                                return;
+#endif
+                            case 0x5: // c.not (Zcb)
+                                rvjit_xori(rds, rds, -1, 2);
+                                riscv_write_reg(vm, rds, ~reg1);
+                                return;
+                        }
+                        break;;
                 }
             }
-#endif
         }
     }
     riscv_illegal_insn(vm, insn);
@@ -525,6 +597,7 @@ static forceinline void riscv_emulate_c_c2(rvvm_hart_t* vm, const uint16_t insn)
 static forceinline void riscv_emulate_insn(rvvm_hart_t* vm, const uint32_t insn)
 {
     const uint32_t op = insn & 0x3;
+    //rvvm_warn("PC %zx insn %08x", vm->registers[REGISTER_PC],byteswap_uint32(insn));
     switch (op) {
         case 0x0:
             riscv_emulate_c_c0(vm, insn);
