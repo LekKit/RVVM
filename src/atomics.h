@@ -627,11 +627,11 @@ static inline uint32_t atomic_swap_uint32_le(void* addr, uint32_t val)
 static inline bool atomic_cas_uint32_le(void* addr, uint32_t exp, uint32_t val)
 {
 #ifdef HOST_LITTLE_ENDIAN
-    return atomic_cas_uint32(addr, exp, val);
+    return atomic_cas_uint32_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 #else
     write_uint32_le(&exp, exp);
     write_uint32_le(&val, val);
-    return atomic_cas_uint32(addr, exp, val);
+    return atomic_cas_uint32_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 #endif
 }
 
@@ -702,11 +702,11 @@ static inline uint64_t atomic_swap_uint64_le(void* addr, uint64_t val)
 static inline bool atomic_cas_uint64_le(void* addr, uint64_t exp, uint64_t val)
 {
 #ifdef HOST_LITTLE_ENDIAN
-    return atomic_cas_uint64(addr, exp, val);
+    return atomic_cas_uint64_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 #else
     write_uint64_le(&exp, exp);
     write_uint64_le(&val, val);
-    return atomic_cas_uint64(addr, exp, val);
+    return atomic_cas_uint64_ex(addr, exp, val, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
 #endif
 }
 
