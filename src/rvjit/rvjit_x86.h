@@ -247,19 +247,34 @@ static inline void rvjit_x86_shift_op(rvjit_block_t* block, uint8_t opcode, regi
     rvjit_put_code(block, code + (code[0] ? 0 : 1), 2 + (code[0] ? 1 : 0) + (imm ? 1 : 0));
 }
 
-// Negate a register
-static inline void rvjit_x86_neg(rvjit_block_t* block, regid_t reg, bool bits_64)
+#define X86_NEG  0xD8
+#define X86_NOT  0xD0
+#define X86_MUL  0xE0
+#define X86_IMUL 0xE8
+#define X86_DIV  0xF0
+#define X86_IDIV 0xF8
+
+// mul/imul EDX:EAX = EAX * src, used for mulh
+// div/idiv EAX = EDX:EAX / src; EDX = EDX:EAX % src, used for div
+// neg, not
+static inline void rvjit_x86_1reg_op(rvjit_block_t* block, uint8_t opcode, regid_t src, bool bits_64)
 {
     uint8_t code[3];
     code[0] = bits_64 ? X64_REX_W : 0;
     code[1] = 0xF7;
-    if (reg >= X64_R8) {
+    if (src >= X64_R8) {
         code[0] |= X64_REX_B;
-        code[2] = 0xD8 + reg - X64_R8;
+        code[2] = opcode | (src - X64_R8);
     } else {
-        code[2] = 0xD8 + reg;
+        code[2] = opcode | src;
     }
-    rvjit_put_code(block, code + (code[0] ? 0 : 1), 2 + (code[0] ? 1 : 0));
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 3 : 2);
+}
+
+// Negate a register
+static inline void rvjit_x86_neg(rvjit_block_t* block, regid_t reg, bool bits_64)
+{
+    rvjit_x86_1reg_op(block, X86_NEG, reg, bits_64);
 }
 
 // Copy data from native register src to dest
@@ -424,7 +439,10 @@ static inline void rvjit_x86_2reg_imm_op(rvjit_block_t* block, uint8_t opcode, r
         return;
     }
     if (hrds != hrs1) rvjit_x86_mov(block, hrds, hrs1, bits_64);
-    if (imm) rvjit_x86_r_imm_op(block, opcode, hrds, imm, bits_64);
+    if (opcode == X86_XOR_IMM && imm == -1) {
+        // xor r1, r2, -1 -> not r1, r2
+        rvjit_x86_1reg_op(block, X86_NOT, hrds, bits_64);
+    } else if (imm) rvjit_x86_r_imm_op(block, opcode, hrds, imm, bits_64);
 }
 
 static inline void rvjit_x86_2reg_imm_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, uint8_t imm, bool bits_64)
@@ -908,28 +926,6 @@ static inline void rvjit_x86_imul_2reg_op(rvjit_block_t* block, regid_t dest, re
     rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
 }
 
-#define X86_MUL  0xE0
-#define X86_IMUL 0xE8
-#define X86_DIV  0xF0
-#define X86_IDIV 0xF8
-
-// mul/imul EDX:EAX = EAX * src, used for mulh
-// div/idiv EAX = EDX:EAX / src; EDX = EDX:EAX % src, used for div
-static inline void rvjit_x86_muldiv_1reg_op(rvjit_block_t* block, uint8_t opcode, regid_t src, bool bits_64)
-{
-    uint8_t code[3];
-    code[0] = bits_64 ? X64_REX_W : 0;
-    code[1] = 0xF7;
-    code[2] = opcode;
-    if (src >= X64_R8) {
-        code[0] |= X64_REX_B;
-        code[2] |= src - X64_R8;
-    } else {
-        code[2] |= src;
-    }
-    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 3 : 2);
-}
-
 // Sign-extend EAX to EDX:EAX
 static inline void rvjit_x86_cdq(rvjit_block_t* block, bool bits_64)
 {
@@ -980,7 +976,7 @@ static inline void rvjit_x86_mulh_div_rem(rvjit_block_t* block, uint8_t opcode, 
         rvjit_x86_cdq(block, bits_64);
     }
 
-    rvjit_x86_muldiv_1reg_op(block, opcode, s2_reg, bits_64);
+    rvjit_x86_1reg_op(block, opcode, s2_reg, bits_64);
 
     if (s2_reg != hrs2) rvjit_native_pop(block, s2_reg);
     if (hrds != second_reg) rvjit_native_pop(block, second_reg);
