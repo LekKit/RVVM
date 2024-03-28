@@ -562,7 +562,7 @@ static forceinline void riscv_emulate_i_opc_op(rvvm_hart_t* vm, const uint32_t i
                 case 0x10: // sh3add (Zba)
                     riscv_write_reg(vm, rds, reg2 + (reg1 << 3));
                     return;
-                case 0x20: // andn (Zbb)
+                case 0x20: // orn (Zbb)
                     riscv_write_reg(vm, rds, reg1 | ~reg2);
                     return;
                 case 0x5: // max (Zbb)
