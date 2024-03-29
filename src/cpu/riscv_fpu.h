@@ -248,7 +248,7 @@ static float fpu_round_to_rmf(float x, uint8_t rm)
 {
     float ret;
     switch (rm) {
-        case RM_RNE: ret = fpu_round_evend(x); break;
+        case RM_RNE: ret = fpu_round_evenf(x); break;
         case RM_RTZ: ret = truncf(x);      break;
         case RM_RDN: ret = floorf(x);      break;
         case RM_RUP: ret = ceilf(x);       break;
@@ -612,7 +612,7 @@ static forceinline void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t i
             break;
         case RISCV_FCVT_D_S:
             if (likely(rs2 == 0)) {
-                fpu_write_d(vm, rds, fpu_read_s(vm, rs1));
+                fpu_write_d(vm, rds, (double)fpu_read_s(vm, rs1));
                 return;
             }
             break;
