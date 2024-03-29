@@ -77,11 +77,6 @@ else
 ifneq (,$(findstring mingw, $(CC_TRIPLET)))
 override OS := Windows
 else
-ifneq (,$(findstring cygwin, $(CC_TRIPLET)))
-# Technically, Cygwin != Windows, since it defines both _WIN32 & __unix__,
-# which may lead to funny API mixing, but let's ignore that for now
-override OS := Windows
-else
 ifneq (,$(findstring windows, $(CC_TRIPLET)))
 override OS := Windows
 else
@@ -99,7 +94,6 @@ else
 ifndef OS
 # Use host OS as a target
 override OS := $(HOST_UNAME)
-endif
 endif
 endif
 endif
@@ -230,9 +224,9 @@ endif
 endif
 
 # Warning options (Strict safety/portability, stack/object size limits)
-# -Wbad-function-cast, -Wcast-align, -Wdouble-promotion need fixes in codebase
+# -Wbad-function-cast, -Wcast-align, need fixes in codebase
 WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
--Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Werror=return-type
+-Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Wdouble-promotion -Werror=return-type
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
