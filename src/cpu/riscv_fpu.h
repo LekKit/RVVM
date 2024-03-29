@@ -223,10 +223,10 @@ static forceinline double fpu_maxd(double x, double y)
 static forceinline float fpu_round_evenf(float val) {
     float even;
     float frac = modff(val, &even);
-    if (frac < 0.5 && frac > -0.5) {
+    if (frac < 0.5f && frac > -0.5f) {
         return even;
     } else {
-        return even + (even > 0.0 ? 1.0 : -1.0);
+        return even + (even > 0.0f ? 1.0f : -1.0f);
     }
 }
 
