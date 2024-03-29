@@ -514,6 +514,13 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 
 #endif
 
+static bool riscv_csr_seed(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+{
+    UNUSED(op); UNUSED(vm);
+    rvvm_randombytes(dest, sizeof(*dest));
+    return true;
+}
+
 static bool riscv_csr_time(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(op);
@@ -616,6 +623,8 @@ void riscv_csr_global_init()
     riscv_csr_list[0x002] = riscv_csr_frm;      // frm
     riscv_csr_list[0x003] = riscv_csr_fcsr;     // fcsr
 #endif
+
+    riscv_csr_list[0x015] = riscv_csr_seed;     // seed (Zkr)
 
     // User Counter/Timers
     riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
