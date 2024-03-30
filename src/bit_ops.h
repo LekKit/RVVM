@@ -77,25 +77,25 @@ static inline uint64_t bit_next_pow2(uint64_t val)
 // Rotate u32 left
 static forceinline uint32_t bit_rotl32(uint32_t val, bitcnt_t bits)
 {
-    return (val << bits) | (val >> (32 - bits));
+    return (val << (bits & 0x1F)) | (val >> ((32 - bits) & 0x1F));
 }
 
 // Rotate u64 left
 static forceinline uint64_t bit_rotl64(uint64_t val, bitcnt_t bits)
 {
-    return (val << bits) | (val >> (64 - bits));
+    return (val << (bits & 0x3F)) | (val >> ((64 - bits) & 0x3F));
 }
 
 // Rotate u32 right
 static forceinline uint32_t bit_rotr32(uint32_t val, bitcnt_t bits)
 {
-    return (val >> bits) | (val << (32 - bits));
+    return (val >> (bits & 0x1F)) | (val << ((32 - bits) & 0x1F));
 }
 
 // Rotate u64 right
 static forceinline uint64_t bit_rotr64(uint64_t val, bitcnt_t bits)
 {
-    return (val >> bits) | (val << (64 - bits));
+    return (val >> (bits & 0x3F)) | (val << ((64 - bits) & 0x3F));
 }
 
 // Count leading zeroes (from highest bit position) in u32
