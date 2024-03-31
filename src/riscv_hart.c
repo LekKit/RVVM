@@ -128,7 +128,6 @@ void riscv_update_xlen(rvvm_hart_t* vm)
 
     if (vm->rv64 != rv64) {
         vm->rv64 = rv64;
-
 #ifdef USE_JIT
         rvjit_set_rv64(&vm->jit, rv64);
         riscv_jit_flush_cache(vm);
@@ -193,7 +192,6 @@ void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval)
         uint8_t priv = PRIVILEGE_MACHINE;
         // Delegate to lower privilege mode if needed
         while ((priv > vm->priv_mode) && (vm->csr.edeleg[priv] & (1 << cause))) priv--;
-        //rvvm_info("Hart %p trap at %08"PRIxXLEN" -> %08"PRIxXLEN", cause %x, tval %08"PRIxXLEN"\n", vm, vm->registers[REGISTER_PC], vm->csr.tvec[priv] & (~3UL), cause, tval);
         // Write exception info
         vm->csr.epc[priv] = vm->registers[REGISTER_PC];
         vm->csr.cause[priv] = cause;
@@ -241,21 +239,23 @@ bool riscv_handle_irqs(rvvm_hart_t* vm, bool wfi)
 
         for (int i=11; i>=0; --i) {
             if (irqs & (1 << i)) {
+                // Modify exception stack in csr.status
+                riscv_trap_priv_helper(vm, priv);
+                // Discard unfinished JIT block
+                riscv_jit_discard(vm);
+                // Switch privilege
+                riscv_switch_priv(vm, priv);
                 // Write exception info
                 vm->csr.epc[priv] = vm->registers[REGISTER_PC];
                 if (wfi) vm->csr.epc[priv] += 4;
                 vm->csr.cause[priv] = i | riscv_cause_irq_mask(vm);
                 vm->csr.tval[priv] = 0;
-                // Modify exception stack in csr.status
-                riscv_trap_priv_helper(vm, priv);
-                // Jump to trap vector, switch to target priv
+                // Jump to trap vector
                 if (vm->csr.tvec[priv] & 1) {
                     vm->registers[REGISTER_PC] = (vm->csr.tvec[priv] & (~3ULL)) + (i << 2);
                 } else {
                     vm->registers[REGISTER_PC] = vm->csr.tvec[priv] & (~3ULL);
                 }
-                riscv_switch_priv(vm, priv);
-                riscv_jit_discard(vm);
                 return true;
             }
         }
