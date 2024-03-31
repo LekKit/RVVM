@@ -50,7 +50,7 @@ void hashmap_resize(hashmap_t* map, size_t size)
 
 void hashmap_grow(hashmap_t* map, size_t key, size_t val)
 {
-    hashmap_resize(map, map->size << 1);
+    hashmap_resize(map, (map->size + 1) << 1);
     hashmap_put(map, key, val);
 }
 
