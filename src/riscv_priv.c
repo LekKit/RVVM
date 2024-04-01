@@ -203,6 +203,24 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
             }
 #endif
             return;
+        case 0x2:
+            if (likely(!bit_cut(insn, 7, 5))) {
+                switch (insn >> 20) {
+                    case 0x0: // cbo.inval
+                    case 0x1: // cbo.clean
+                    case 0x2: // cbo.flush
+                        atomic_fence();
+                        return;
+                    case 0x4: { // cbo.zero
+                        const regid_t rs1 = bit_cut(insn, 15, 5);
+                        virt_addr_t addr = vm->registers[rs1] & ~63ULL;
+                        void* ptr = riscv_vma_translate_w(vm, addr, NULL, 64);
+                        if (ptr) memset(ptr, 0, 64);
+                        return;
+                    }
+                }
+            }
+            break;
     }
     riscv_illegal_insn(vm, insn);
 }
