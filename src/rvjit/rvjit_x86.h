@@ -62,47 +62,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VM_PTR_REG X86_ECX
 #endif
 
-#define X86_MAX_OFFB  0x7F  // Maximum value for 1-byte offset
-
+// REX prefixes
 #define X64_REX_W     0x48  // Operands are 64-bit wide
 #define X64_REX_R     0x44  // Second (destination) register is >= R8
 #define X64_REX_X     0x42
 #define X64_REX_B     0x41  // First (source) register is >= R8
-
-#define X86_MEM_OFFB  0x40
-#define X86_MEM_OFFW  0x80
-
-#define X86_2_REGS    0xC0
-#define X86_IMM_OP    0x81
-
-#define X86_PUSH      0x50
-#define X86_POP       0x58
-#define X86_MOV_IMM   0xB8
-#define X86_MOV_R_M   0x89
-#define X86_MOV_M_R   0x8B
-#define X86_XCHG      0x87
-#define X86_MOVSXD    0x63  // x86_64 only!!!
-
-#define X86_ADD       0x01
-#define X86_SUB       0x29
-#define X86_OR        0x09
-#define X86_AND       0x21
-#define X86_XOR       0x31
-
-#define X86_ADD_IMM   0xC0
-#define X86_OR_IMM    0xC8
-#define X86_AND_IMM   0xE0
-#define X86_XOR_IMM   0xF0
-
-#define X86_SLL       0xE0
-#define X86_SRL       0xE8
-#define X86_SRA       0xF8
-
-#define X86_CMP_IMM   0xF8
-#define X86_CMP       0x39
-
-#define X86_SETB      0x92
-#define X86_SETL      0x9C
 
 static inline size_t rvjit_native_default_hregmask()
 {
@@ -154,34 +118,47 @@ static inline bool x86_is_byte_imm(int32_t imm)
     return imm == (int32_t)(int8_t)imm;
 }
 
-static inline void rvjit_native_push(rvjit_block_t* block, regid_t reg)
+// Valid 1-byte 1-reg opcodes
+#define X86_PUSH 0x50
+#define X86_POP  0x58
+
+static inline void rvjit_x86_1byte_1reg_op(rvjit_block_t* block, uint8_t opcode, regid_t reg)
 {
     uint8_t code[2];
     if (reg < X64_R8) {
-        code[0] = X86_PUSH + reg;
+        code[0] = opcode | reg;
         rvjit_put_code(block, code, 1);
     } else {
         code[0] = X64_REX_B;
-        code[1] = X86_PUSH + reg - X64_R8;
+        code[1] = opcode | (reg - X64_R8);
         rvjit_put_code(block, code, 2);
     }
+}
+
+static inline void rvjit_native_push(rvjit_block_t* block, regid_t reg)
+{
+    rvjit_x86_1byte_1reg_op(block, X86_PUSH, reg);
 }
 
 static inline void rvjit_native_pop(rvjit_block_t* block, regid_t reg)
 {
-    uint8_t code[2];
-    if (reg < X64_R8) {
-        code[0] = X86_POP + reg;
-        rvjit_put_code(block, code, 1);
-    } else {
-        code[0] = X64_REX_B;
-        code[1] = X86_POP + reg - X64_R8;
-        rvjit_put_code(block, code, 2);
-    }
+    rvjit_x86_1byte_1reg_op(block, X86_POP, reg);
 }
 
-// 2 register operands instruction
-static inline void rvjit_x86_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dest, regid_t src, bool bits_64)
+// Valid 2-reg opcodes
+#define X86_ADD     0x01
+#define X86_SUB     0x29
+#define X86_OR      0x09
+#define X86_AND     0x21
+#define X86_XOR     0x31
+#define X86_CMP     0x39
+#define X86_MOV_R_M 0x89 // Move between registers
+#define X86_MOVSXD  0x63 // Sign-extend 32 to 64 bits, x86_64 only!
+#define X86_XCHG    0x87 // This has a shorter encoding..
+
+#define X86_2_REGS  0xC0
+
+static inline void rvjit_x86_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src, bool bits_64)
 {
     uint8_t code[3];
     // If we are operating on 64 bit values set wide prefix
@@ -190,18 +167,92 @@ static inline void rvjit_x86_2reg_op(rvjit_block_t* block, uint8_t opcode, regid
     code[2] = X86_2_REGS;
     if (src >= X64_R8) {
         code[0] |= X64_REX_R;
-        code[2] += (src - X64_R8) << 3;
+        code[2] |= (src - X64_R8) << 3;
     } else {
-        code[2] += src << 3;
+        code[2] |= src << 3;
     }
-    if (dest >= X64_R8) {
+    if (dst >= X64_R8) {
         code[0] |= X64_REX_B;
-        code[2] += dest - X64_R8;
+        code[2] |= dst - X64_R8;
     } else {
-        code[2] += dest;
+        code[2] |= dst;
     }
     rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 3 : 2);
 }
+
+// Valid 2-reg 0f prefix opcodes
+#define X86_IMUL_2REG 0xAF
+#define X86_BTS       0xAB // Set bit
+#define X86_BTR       0xB3 // Clear bit
+#define X86_BTC       0xBB // Invert bit
+#define X86_BSF       0xBC // Bit scan forward
+#define X86_BSR       0xBD // Bit scan reverse
+#define X86_MOVSXW    0xBF // Sign-extend 16-bit
+#define X86_MOVZXW    0xB7 // Zero-extend 16-bit
+#define X86_CMOVE     0x44 // Conditional move if equal, Pentium Pro+
+#define X86_CMOVNE    0x45 // Conditional move if not equal, Pentium Pro+
+
+static inline void rvjit_x86_0f_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src, bool bits_64)
+{
+    uint8_t code[4];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0x0F;
+    code[2] = opcode;
+    code[3] = X86_2_REGS;
+    if (dst >= X64_R8) {
+        code[0] |= X64_REX_R;
+        code[3] |= (dst - X64_R8) << 3;
+    } else {
+        code[3] |= dst << 3;
+    }
+    if (src >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[3] |= src - X64_R8;
+    } else {
+        code[3] |= src;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
+}
+
+#define X86_MOVSXB    0xBE // Sign-extend 8-bit
+#define X86_MOVZXB    0xB6 // Zero-extend 8-bit
+
+// Zero/sign extend data from 8-bit src to full register
+// Careful: not all 8-bit registers are accessible on i386
+static inline void rvjit_x86_movxb(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src, bool bits_64)
+{
+    uint8_t code[4];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0x0F;
+    code[2] = opcode;
+    code[3] = 0xC0;
+    if (dst >= X64_R8) {
+        code[0] |= X64_REX_R;
+        code[3] |= (dst - X64_R8) << 3;
+    } else {
+        code[3] |= dst << 3;
+    }
+    if (src >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[3] |= src - X64_R8;
+    } else {
+        code[3] |= src;
+    }
+    if (src > X86_EBX) {
+        // REX prefix for using sil, dil registers
+        code[0] |= 0x40;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
+}
+
+// Valid reg + imm opcodes
+#define X86_ADD_IMM 0xC0
+#define X86_OR_IMM  0xC8
+#define X86_AND_IMM 0xE0
+#define X86_XOR_IMM 0xF0
+#define X86_CMP_IMM 0xF8
+
+#define X86_IMM_OP  0x81
 
 // 1 register operand + 32-bit sign-extended immediate instruction
 static inline void rvjit_x86_r_imm_op(rvjit_block_t* block, uint8_t opcode, regid_t reg, int32_t imm, bool bits_64)
@@ -213,9 +264,9 @@ static inline void rvjit_x86_r_imm_op(rvjit_block_t* block, uint8_t opcode, regi
     code[2] = opcode;
     if (reg >= X64_R8) {
         code[0] |= X64_REX_B;
-        code[2] += reg - X64_R8;
+        code[2] |= reg - X64_R8;
     } else {
-        code[2] += reg;
+        code[2] |= reg;
     }
     if (x86_is_byte_imm(imm)) {
         code[1] |= 0x02; // IMM length override
@@ -229,6 +280,34 @@ static inline void rvjit_x86_r_imm_op(rvjit_block_t* block, uint8_t opcode, regi
     rvjit_put_code(block, code + (code[0] ? 0 : 1), inst_size);
 }
 
+#define X86_BTS_IMM 0xE8 // Set bit
+#define X86_BTR_IMM 0xF0 // Clear bit
+#define X86_BTC_IMM 0xF8 // Invert bit
+
+// Single-bit imm operations
+static inline void rvjit_x86_s_bit_imm(rvjit_block_t* block, uint8_t opcode, regid_t reg, uint8_t imm, bool bits_64)
+{
+    uint8_t code[5];
+    code[0] = bits_64 ? X64_REX_W : 0;
+    code[1] = 0x0F;
+    code[2] = 0xBA;
+    code[3] = opcode;
+    code[4] = imm;
+    if (reg >= X64_R8) {
+        code[0] |= X64_REX_B;
+        code[3] |= reg - X64_R8;
+    } else {
+        code[3] |= reg;
+    }
+    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 5 : 4);
+}
+
+#define X86_SLL 0xE0
+#define X86_SRL 0xE8
+#define X86_SRA 0xF8
+#define X86_ROL 0xC0
+#define X86_ROR 0xC8
+
 // 1 register operand + shift amount immediate (If imm is 0, cl(ecx) register is used as shift amount)
 // For whatever stupid reason we cannot use any register as shift amount, needs workarounds
 static inline void rvjit_x86_shift_op(rvjit_block_t* block, uint8_t opcode, regid_t reg, uint8_t imm, bool bits_64)
@@ -240,9 +319,9 @@ static inline void rvjit_x86_shift_op(rvjit_block_t* block, uint8_t opcode, regi
     code[3] = imm;
     if (reg >= X64_R8) {
         code[0] |= X64_REX_B;
-        code[2] += reg - X64_R8;
+        code[2] |= reg - X64_R8;
     } else {
-        code[2] += reg;
+        code[2] |= reg;
     }
     rvjit_put_code(block, code + (code[0] ? 0 : 1), 2 + (code[0] ? 1 : 0) + (imm ? 1 : 0));
 }
@@ -308,6 +387,10 @@ static bool x86_byte_reg_usable(regid_t reg)
 #endif
 }
 
+// Memory operand offset size
+#define X86_MEM_OFFB  0x40
+#define X86_MEM_OFFW  0x80
+
 // Emit memory-addressing part of the instruction
 static inline void rvjit_x86_memory_ref(rvjit_block_t* block, regid_t dest, regid_t addr, int32_t off)
 {
@@ -349,36 +432,8 @@ static inline void rvjit_x86_lea_addi(rvjit_block_t* block, regid_t dest, regid_
     rvjit_x86_memory_ref(block, dest, src, imm);
 }
 
-// Zero-extend data from 8-bit src to full register
-// Careful: not all 8-bit registers are accessible on i386
-static inline void rvjit_x86_movzxb(rvjit_block_t* block, regid_t dest, regid_t src)
-{
-    uint8_t code[4];
-    code[0] = 0;
-    code[1] = 0x0F;
-    code[2] = 0xB6;
-    code[3] = 0xC0;
-    if (dest >= X64_R8) {
-        code[0] |= X64_REX_R;
-        code[3] += (dest - X64_R8) << 3;
-    } else {
-        code[3] += dest << 3;
-    }
-    if (src >= X64_R8) {
-        code[0] |= X64_REX_B;
-        code[3] += src - X64_R8;
-    } else {
-        code[3] += src;
-    }
-    if (src > X86_EBX) {
-        // REX prefix for using sil, dil registers
-        code[0] |= 0x40;
-    }
-    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
-}
-
-// x86 substitute for 3-operand add instruction
-static inline void rvjit_x86_lea_add(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t hrs2, bool bits_64)
+// x86 substitute for 3-operand add instruction (With second operand shift)
+static inline void rvjit_x86_lea_add(rvjit_block_t* block, regid_t hrds, regid_t hrs1, int32_t hrs2, uint8_t shift, bool bits_64)
 {
     uint8_t code[5] = {0x00, 0x8D, 0x04, 0x00, 0x00};
     uint8_t inst_size = 3;
@@ -391,7 +446,7 @@ static inline void rvjit_x86_lea_add(rvjit_block_t* block, regid_t hrds, regid_t
         inst_size++;
     }
     code[2] |= (hrds & 0x7) << 3;
-    code[3] |= (hrs1 & 0x7) | ((hrs2 & 0x7) << 3);
+    code[3] |= (hrs1 & 0x7) | ((hrs2 & 0x7) << 3) | shift;
     rvjit_put_code(block, code + (code[0] ? 0 : 1), inst_size + (code[0] ? 1 : 0));
 }
 
@@ -410,7 +465,7 @@ static inline void rvjit_x86_3reg_op(rvjit_block_t* block, uint8_t opcode, regid
     } else {
         if (opcode == X86_ADD) {
             // add r1, r2, r3 -> lea r1, [r2 + r3]
-            rvjit_x86_lea_add(block, hrds, hrs1, hrs2, bits_64);
+            rvjit_x86_lea_add(block, hrds, hrs1, hrs2, 0, bits_64);
             return;
         }
         rvjit_x86_mov(block, hrds, hrs1, bits_64);
@@ -427,7 +482,7 @@ static inline void rvjit_x86_2reg_imm_op(rvjit_block_t* block, uint8_t opcode, r
             return;
         } else if (imm == 0xFF && x86_byte_reg_usable(hrs1)) {
             // Optimize andi r1, r2, 0xFF -> movzxb r1, r2
-            rvjit_x86_movzxb(block, hrds, hrs1);
+            rvjit_x86_movxb(block, X86_MOVZXB, hrds, hrs1, false);
             return;
         } else if (imm > 0) {
             // Remove REX.W prefix for unsigned andi imm
@@ -603,6 +658,9 @@ static inline void rvjit_x86_setcc_internal(rvjit_block_t* block, uint8_t opcode
     rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
 }
 
+#define X86_SETB 0x92
+#define X86_SETL 0x9C
+
 // Orthogonal version of rvjit_x86_setcc_internal()
 static inline void rvjit_x86_setcc(rvjit_block_t* block, uint8_t opcode, regid_t reg)
 {
@@ -636,6 +694,8 @@ static inline void rvjit_native_ret(rvjit_block_t* block)
 {
     rvjit_put_code(block, "\xC3", 1);
 }
+
+#define X86_MOV_IMM 0xB8
 
 // Set native register reg to zero-extended 32-bit imm
 static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, uint32_t imm)
@@ -738,7 +798,7 @@ static inline void rvjit_x86_lbhu(rvjit_block_t* block, uint8_t opcode, regid_t 
     rvjit_x86_memory_ref(block, dest, addr, off);
 }
 
-#define X86_LWU_LD  X86_MOV_M_R
+#define X86_LWU_LD  0x8B
 #define X86_LW      X86_MOVSXD
 #define X86_SB      0x88
 #define X86_SW_SD   X86_MOV_R_M
@@ -903,29 +963,6 @@ static inline branch_t rvjit_x86_branch_imm(rvjit_block_t* block, uint8_t opcode
  * Multiply/divide internal functions
  */
 
-// imul r1, r2, used for mul/mulw
-static inline void rvjit_x86_imul_2reg_op(rvjit_block_t* block, regid_t dest, regid_t src, bool bits_64)
-{
-    uint8_t code[4];
-    code[0] = bits_64 ? X64_REX_W : 0;
-    code[1] = 0x0F;
-    code[2] = 0xAF;
-    code[3] = X86_2_REGS;
-    if (dest >= X64_R8) {
-        code[0] |= X64_REX_R;
-        code[3] += (dest - X64_R8) << 3;
-    } else {
-        code[3] += dest << 3;
-    }
-    if (src >= X64_R8) {
-        code[0] |= X64_REX_B;
-        code[3] += src - X64_R8;
-    } else {
-        code[3] += src;
-    }
-    rvjit_put_code(block, code + (code[0] ? 0 : 1), code[0] ? 4 : 3);
-}
-
 // Sign-extend EAX to EDX:EAX
 static inline void rvjit_x86_cdq(rvjit_block_t* block, bool bits_64)
 {
@@ -936,12 +973,12 @@ static inline void rvjit_x86_cdq(rvjit_block_t* block, bool bits_64)
 static inline void rvjit_x86_mul(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
 {
     if (hrds == hrs1) {
-        rvjit_x86_imul_2reg_op(block, hrds, hrs2, bits_64);
+        rvjit_x86_0f_2reg_op(block, X86_IMUL_2REG, hrds, hrs2, bits_64);
     } else if (hrds == hrs2) {
-        rvjit_x86_imul_2reg_op(block, hrds, hrs1, bits_64);
+        rvjit_x86_0f_2reg_op(block, X86_IMUL_2REG, hrds, hrs1, bits_64);
     } else {
         rvjit_x86_mov(block, hrds, hrs1, bits_64);
-        rvjit_x86_imul_2reg_op(block, hrds, hrs2, bits_64);
+        rvjit_x86_0f_2reg_op(block, X86_IMUL_2REG, hrds, hrs2, bits_64);
     }
 }
 
@@ -994,7 +1031,7 @@ static inline void rvjit_x86_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t 
     while (second_reg == hrds || second_reg == hrs1 || second_reg == hrs2) second_reg++;
     rvjit_native_push(block, second_reg);
     rvjit_x86_2reg_imm_shift_op(block, X86_SRA, second_reg, hrs1, bits_64 ? 63 : 31, bits_64);
-    rvjit_x86_imul_2reg_op(block, second_reg, hrs2, bits_64);
+    rvjit_x86_0f_2reg_op(block, X86_IMUL_2REG, second_reg, hrs2, bits_64);
     rvjit_x86_3reg_op(block, X86_ADD, hrds, hrds, second_reg, bits_64);
     rvjit_native_pop(block, second_reg);
 }
