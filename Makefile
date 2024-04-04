@@ -166,21 +166,34 @@ endif
 # Detect compiler type, version
 CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
 CC_VERSION := $(shell $(CC) -dumpversion $(NULL_STDERR))
-ifneq (,$(findstring Emscripten,$(CC_HELP)))
-CC_VERSION := (EMCC $(CC_VERSION))
-endif
+
+# Compiler version checking
+less_list=$(wordlist 1,$(1),0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)
+greater=$(filter $(2),$(call less_list,$(1)))
+greater_equal=$(filter $(2),$(call less_list,$(1)) $(1))
+cc_min_ver=$(call greater_equal,$(firstword $(subst ., ,$(CC_VERSION))),$(1))
+
 ifneq (,$(findstring clang,$(CC_HELP)))
 CC_TYPE := clang
+ifneq (,$(findstring Emscripten,$(CC_HELP)))
+$(info Detected CC: $(GREEN)LLVM Clang (EMCC $(CC_VERSION))$(RESET))
+else
 $(info Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
+endif
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
+ifneq (,$(call cc_min_ver,5))
+# GCC < 5.0 is cursed, let's disable LTO and other bells-and-whistles
 CC_TYPE := gcc
+endif
 $(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
 else
-CC_TYPE := unknown
 $(info Detected CC: $(RED)Unknown$(RESET))
 endif
 endif
+
+# Old / obscure compiler
+CC_TYPE ?= generic
 
 # Detect target arch
 ifndef ARCH
@@ -223,10 +236,13 @@ DEBUG_OPTS := -DNDEBUG
 endif
 endif
 
+ifneq (,$(call cc_min_ver,7))
 # Warning options (Strict safety/portability, stack/object size limits)
+# Need at least GCC 7.0 or Clang 7.0
 # -Wbad-function-cast, -Wcast-align, need fixes in codebase
 WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
 -Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Wdouble-promotion -Werror=return-type
+endif
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
@@ -237,7 +253,7 @@ else
 ifeq ($(CC_TYPE),clang)
 CC_STD := -std=gnu11
 CXX_STD := -std=gnu++11
-override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno -Wno-unknown-warning-option $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 # Whatever compiler that might be, use conservative options
 CC_STD := -std=gnu99
@@ -307,7 +323,7 @@ override CFLAGS += -DUSE_FPU
 ifeq (,$(findstring rounding-math, $(shell $(CC) -frounding-math 2>&1)))
 override CFLAGS += -frounding-math
 ifeq ($(CC_TYPE),clang)
-override CFLAGS += -Wno-unsupported-floating-point-opt -Wno-unknown-warning-option -Wno-ignored-optimization-argument
+override CFLAGS += -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument
 endif
 endif
 endif
