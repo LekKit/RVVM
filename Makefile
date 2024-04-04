@@ -165,13 +165,7 @@ endif
 
 # Detect compiler type, version
 CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
-CC_VERSION := $(firstword $(shell $(CC) -dumpfullversion $(NULL_STDERR) || $(CC) -dumpversion $(NULL_STDERR)))
-
-# Compiler version checking
-less_list=$(wordlist 1,$(1),0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)
-greater=$(filter $(2),$(call less_list,$(1)))
-greater_equal=$(filter $(2),$(call less_list,$(1)) $(1))
-cc_min_ver=$(call greater_equal,$(firstword $(subst ., ,$(CC_VERSION))),$(1))
+CC_VERSION := $(shell $(CC) -dumpversion $(NULL_STDERR))
 
 ifneq (,$(findstring clang,$(CC_HELP)))
 CC_TYPE := clang
@@ -182,10 +176,7 @@ $(info Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
 endif
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
-ifneq (,$(call cc_min_ver,5))
-# GCC < 5.0 is cursed, let's disable LTO and other bells-and-whistles
 CC_TYPE := gcc
-endif
 $(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
 else
 $(info Detected CC: $(RED)Unknown$(RESET))
@@ -236,13 +227,11 @@ DEBUG_OPTS := -DNDEBUG
 endif
 endif
 
-ifneq (,$(call cc_min_ver,7))
 # Warning options (Strict safety/portability, stack/object size limits)
 # Need at least GCC 7.0 or Clang 7.0
 # -Wbad-function-cast, -Wcast-align, need fixes in codebase
 WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
 -Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Wdouble-promotion -Werror=return-type
-endif
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
