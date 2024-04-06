@@ -39,18 +39,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define CLANG_CHECK_VER(major, minor) 0
 #endif
 
+// Check GNU attribute presence
 #if defined(GNU_EXTS) && defined(__has_attribute)
 #define GNU_ATTRIBUTE(attr) __has_attribute(attr)
 #else
 #define GNU_ATTRIBUTE(attr) 0
 #endif
 
+// Check GNU builtin presence
 #if defined(GNU_EXTS) && defined(__has_builtin)
 #define GNU_BUILTIN(builtin) __has_builtin(builtin)
 #else
 #define GNU_BUILTIN(builtin) 0
 #endif
 
+// Check header presence
+#ifdef __has_include
+#define CHECK_INCLUDE(x) __has_include(x)
+#else
+#define CHECK_INCLUDE(x) 1
+#endif
+
+// Branch optimization hints
 #if GNU_BUILTIN(__builtin_expect)
 #define likely(x)     __builtin_expect(!!(x),1)
 #define unlikely(x)   __builtin_expect(!!(x),0)
@@ -160,16 +170,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define HOST_LITTLE_ENDIAN 1
 #endif
 
+// Determine whether host has fast misaligned access (Hint)
 #if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_AMD64) || defined(__aarch64__)
-#define HOST_MISALIGN_SUPPORT 1
+#define HOST_FAST_MISALIGN 1
 #else
-// Not sure about other arches, misaligns may be very slow
-// Safer this way
-#define HOST_STRICT_ALIGNMENT 1
+// Not sure about other arches, misaligns may be very slow or crash
+#define HOST_NO_MISALIGN 1
 #endif
 
 #define UNUSED(x) (void)x
 
+// Determine host bitness (Hint)
 #if UINTPTR_MAX == UINT64_MAX
 #define HOST_64BIT 1
 #elif UINTPTR_MAX == UINT32_MAX
@@ -194,7 +205,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Static build-time assertions
 #ifdef IGNORE_BUILD_ASSERTS
 #define BUILD_ASSERT(cond)
-#elif __STDC_VERSION__ >= 201112LL
+#elif __STDC_VERSION__ >= 201112LL && !defined(__chibicc__)
 #define BUILD_ASSERT(cond) _Static_assert(cond, MACRO_TOSTRING(cond))
 #else
 #define BUILD_ASSERT(cond) MACRO_ASSERT_UNWRAP(cond, __LINE__)
@@ -205,6 +216,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define BUILD_ASSERT_EXPR(cond) 0
 #else
 #define BUILD_ASSERT_EXPR(cond) (sizeof(char[(cond) ? 1 : -1]) - 1)
+#endif
+
+// Weak symbol linkage (Runtime library probing)
+#if defined(GNU_EXTS)
+#define WEAK_LINKAGE(symbol) _Pragma(MACRO_TOSTRING(weak symbol))
+#else
+#define WEAK_LINKAGE(symbol)
 #endif
 
 #endif
