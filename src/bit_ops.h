@@ -198,14 +198,12 @@ static inline bitcnt_t bit_popcnt64(uint64_t val)
 }
 
 // Bitwise OR-combine, byte granule for orc.b instruction emulation
-// TODO: Some kind of SSE alternative to this must exist?
 static inline uint64_t bit_orc_b(uint64_t val)
 {
-    uint64_t ret = 0;
-    for (size_t i=0; i<64; i+=8) {
-        if ((val >> i) & 0xFF) ret |= (0xFFULL << i);
-    }
-    return ret;
+    val |= ((val >> 1) | (val << 1)) & 0x7E7E7E7E7E7E7E7EULL;
+    val |= ((val >> 2) | (val << 2)) & 0x3C3C3C3C3C3C3C3CULL;
+    val |= (val << 4) & 0xF0F0F0F0F0F0F0F0ULL;
+    return val;
 }
 
 /*
