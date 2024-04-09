@@ -202,6 +202,7 @@ static inline uint64_t bit_orc_b(uint64_t val)
 {
     val |= ((val >> 1) | (val << 1)) & 0x7E7E7E7E7E7E7E7EULL;
     val |= ((val >> 2) | (val << 2)) & 0x3C3C3C3C3C3C3C3CULL;
+    val |= (val >> 4) & 0x0F0F0F0F0F0F0F0FULL;
     val |= (val << 4) & 0xF0F0F0F0F0F0F0F0ULL;
     return val;
 }
