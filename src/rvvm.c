@@ -130,31 +130,55 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
     fdt_node_add_child(machine->fdt, soc);
     machine->fdt_soc = soc;
 }
-
-static rvvm_addr_t rvvm_gen_dtb(rvvm_machine_t* machine)
-{
-    if (machine->cmdline) {
-        struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-        fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
-        free(machine->cmdline);
-        machine->cmdline = NULL;
-    }
-
-    size_t dtb_size = fdt_size(machine->fdt);
-    size_t dtb_off = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
-    dtb_size = fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
-    if (dtb_size) {
-        rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", (phys_addr_t)(machine->mem.begin + dtb_off), (uint32_t)dtb_size);
-    } else {
-        rvvm_error("Generated DTB does not fit in RAM!");
-    }
-    return machine->mem.begin + dtb_off;
-}
 #endif
 
 #define RVVM_POWER_OFF   0
 #define RVVM_POWER_ON    1
 #define RVVM_POWER_RESET 2
+
+static size_t rvvm_dtb_addr(rvvm_machine_t* machine, size_t dtb_size)
+{
+    return align_size_down(machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0, 8);
+}
+
+static rvvm_addr_t rvvm_pass_dtb(rvvm_machine_t* machine)
+{
+    if (rvvm_get_opt(machine, RVVM_OPT_DTB_ADDR)) {
+        // API user manually passes DTB
+        return rvvm_get_opt(machine, RVVM_OPT_DTB_ADDR);
+    } else if (machine->dtb_file) {
+        // Load DTB from file
+        uint32_t dtb_size = rvfilesize(machine->dtb_file);
+        size_t dtb_off = rvvm_dtb_addr(machine, dtb_size);
+        if (dtb_size < machine->mem.size) {
+            rvread(machine->dtb_file, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0);
+            rvvm_info("Loaded DTB at 0x%08"PRIxXLEN", size %u", machine->mem.begin + dtb_off, dtb_size);
+            return machine->mem.begin + dtb_off;
+        }
+    } else {
+        // Generate DTB
+#ifdef USE_FDT
+        if (machine->cmdline) {
+            struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
+            fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
+            free(machine->cmdline);
+            machine->cmdline = NULL;
+        }
+        uint32_t dtb_size = fdt_size(machine->fdt);
+        size_t dtb_off = rvvm_dtb_addr(machine, dtb_size);
+        if (fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0)) {
+            rvvm_info("Generated DTB at 0x%08"PRIxXLEN", size %u", (phys_addr_t)(machine->mem.begin + dtb_off), dtb_size);
+            return machine->mem.begin + dtb_off;
+        }
+#else
+        rvvm_error("FDT generation is disabled in this RVVM build");
+        return 0;
+#endif
+    }
+
+    rvvm_error("Device tree does not fit in RAM!");
+    return 0;
+}
 
 static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
 {
@@ -178,19 +202,7 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
         size_t kernel_size = machine->mem.size > kernel_offset ? machine->mem.size - kernel_offset : 0;
         bin_objcopy(machine->kernel_file, machine->mem.data + kernel_offset, kernel_size, elf);
     }
-    rvvm_addr_t dtb_addr = rvvm_get_opt(machine, RVVM_OPT_DTB_ADDR);
-    if (machine->dtb_file) {
-        size_t dtb_size = rvfilesize(machine->dtb_file);
-        size_t dtb_offset = machine->mem.size > dtb_size ? machine->mem.size - dtb_size : 0;
-        dtb_addr = machine->mem.begin + dtb_offset;
-        rvread(machine->dtb_file, machine->mem.data + dtb_offset, machine->mem.size - dtb_offset, 0);
-    }
-#ifdef USE_FDT
-    if (dtb_addr == 0) {
-        // If no DTB was supplied, generate it
-        dtb_addr = rvvm_gen_dtb(machine);
-    }
-#endif
+    rvvm_addr_t dtb_addr = rvvm_pass_dtb(machine);
     // Reset CPUs
     rvtimer_init(&machine->timer, 10000000); // 10 MHz timer
     vector_foreach(machine->harts, i) {
