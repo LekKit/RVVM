@@ -63,13 +63,14 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 #define safe_new_arr(type, size) ((type*)safe_calloc(sizeof(type), size))
 
 #define default_free(ptr) free(ptr)
-
-// Implicitly NULL freed pointer to prevent use-after-free
-#define free(ptr) \
+#define safe_free(ptr) \
 do { \
     default_free(ptr); \
     ptr = NULL; \
 } while(0)
+
+// Implicitly NULL freed pointer to prevent use-after-free
+#define free(ptr) safe_free(ptr)
 
 NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed);
 
@@ -93,6 +94,16 @@ do { \
 
 // Compute length of a static array
 #define STATIC_ARRAY_SIZE(arr) (sizeof(arr) / sizeof(*(arr)))
+
+static inline size_t align_size_up(size_t x, size_t align)
+{
+    return (x + (align - 1)) & ~(align - 1);
+}
+
+static inline size_t align_size_down(size_t x, size_t align)
+{
+    return x & ~(align - 1);
+}
 
 void call_at_deinit(void (*function)());
 void full_deinit();
