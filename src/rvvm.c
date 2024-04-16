@@ -158,12 +158,6 @@ static rvvm_addr_t rvvm_pass_dtb(rvvm_machine_t* machine)
     } else {
         // Generate DTB
 #ifdef USE_FDT
-        if (machine->cmdline) {
-            struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-            fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
-            free(machine->cmdline);
-            machine->cmdline = NULL;
-        }
         uint32_t dtb_size = fdt_size(machine->fdt);
         size_t dtb_off = rvvm_dtb_addr(machine, dtb_size);
         if (fdt_serialize(machine->fdt, machine->mem.data + dtb_off, machine->mem.size - dtb_off, 0)) {
@@ -171,7 +165,7 @@ static rvvm_addr_t rvvm_pass_dtb(rvvm_machine_t* machine)
             return machine->mem.begin + dtb_off;
         }
 #else
-        rvvm_error("FDT generation is disabled in this RVVM build");
+        rvvm_error("This build doesn't support FDT generation");
         return 0;
 #endif
     }
@@ -493,13 +487,17 @@ PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str)
 #ifdef USE_FDT
     size_t cmd_len = machine->cmdline ? rvvm_strlen(machine->cmdline) : 0;
     size_t append_len = rvvm_strlen(str);
-    char* tmp = safe_calloc(sizeof(char), cmd_len + append_len + 2);
-    if (machine->cmdline) memcpy(tmp, machine->cmdline, cmd_len);
+    char* tmp = safe_new_arr(char, cmd_len + append_len + (cmd_len ? 2 : 1));
+    if (cmd_len) {
+        memcpy(tmp, machine->cmdline, cmd_len);
+        tmp[cmd_len++] = ' ';
+    }
     memcpy(tmp + cmd_len, str, append_len);
-    tmp[cmd_len + append_len] = ' ';
-    tmp[cmd_len + append_len + 1] = 0;
     free(machine->cmdline);
     machine->cmdline = tmp;
+    struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
+    fdt_node_del_prop(chosen, "bootargs");
+    fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
 #else
     UNUSED(machine);
     UNUSED(str);
@@ -580,6 +578,7 @@ PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path)
         size = fdt_serialize(rvvm_get_fdt_root(machine), buffer, size, 0);
         rvwrite(file, buffer, size, 0);
         rvclose(file);
+        free(buffer);
         return true;
     }
 #else
