@@ -218,7 +218,7 @@ DEINIT_ATTR void full_deinit()
 static inline char digit_symbol(uint32_t val)
 {
     if (val < 10) return '0' + val;
-    if (val < 36) return 'A' + val - 10;
+    if (val < 36) return 'a' + val - 10;
     return '?';
 }
 
