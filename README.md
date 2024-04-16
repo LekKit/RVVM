@@ -34,6 +34,7 @@ RISC-V CPU & System software implementation written in С
 - Deprecated: PS2 keyboard & mouse, ATA (IDE) drive, Linux TAP
 
 ## 📦 Installing
+[![Release](https://img.shields.io/badge/BIN-Release-green?style=for-the-badge)](https://github.com/LekKit/RVVM/releases) 
 [![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
 
 ## 🛠 Building
@@ -52,13 +53,12 @@ Examples:
 make lib CC=aarch64-linux-android21-clang USE_FB=0
 make lib all CC=x86_64-w64-mingw32-gcc USE_NET=1
 make CFLAGS=-m32 ARCH=i386 USE_RV64=0 BUILDDIR=build BINARY=rvvm
-make CC=mipseb-linux-gnu-gcc USE_JIT=0
+make CC=mipseb-linux-gnu-gcc USE_JIT=0 USE_SDL=2
 ```
 Alternatively, you can use CMake:
 ```
 git clone https://github.com/LekKit/RVVM
 cd RVVM
-mkdir build
 cmake -S. -Bbuild
 cmake --build build --target all
 cd build
@@ -67,26 +67,25 @@ cd build
 
 ## 🚀 Running
 ```
-./rvvm fw_jump.bin -k u-boot.bin -i drive.img -m 2G -smp 2 -res 1280x720
+rvvm fw_payload.bin -i drive.img -m 2G -smp 2 -res 1280x720
 ```
+Recommended working firmware, distro images are found in [Release section](https://github.com/LekKit/RVVM/releases/tag/v0.6)
+
 Argument explanation:
 ```
-[fw_jump.bin]          Initial M-mode firmware, OpenSBI in this case
--k, -kernel u-boot.bin S-mode kernel payload (Linux Image, U-Boot, etc)
+[fw_payload.bin]       Initial M-mode firmware, OpenSBI + U-Boot in this case
+-k, -kernel u-boot.bin Optional S-mode kernel payload (Linux Image, U-Boot, etc)
 -i, -image drive.img   Attach storage image (Raw format, NVMe as of now)
 -m, -mem 2G            Memory amount (may be suffixed by k/M/G), default 256M
 -s, -smp 2             Amount of cores, single-core machine by default
 -res 1280x720          Changes framebuffer & VM window resolution
 -rv32                  Enable 32-bit RISC-V, 64-bit by default
  . . .
--serial /tmp/pts1      Add more serial ports (use stdout to bring UART over terminal as usual)
--nvme drive.img        Explicitly attach storage image as NVMe device
--ata drive.img         Explicitly attach storage image as ATA (IDE) device
 -cmdline, -append ...  Override/append default kernel command line
--jitcache 64M          Raise JIT cache limit (64M recommended for complex guests)
 -nogui, -nojit         Disable GUI (Use only UART), Disable JIT (for debugging)
+-v                     Verbose mode
 ```
-Invoke "./rvvm -h" to see extended help.
+Invoke `rvvm -h` to see extended help.
 
 ## Tested environments (Likely works elsewhere as well)
 | OS         | JIT                        | GUI          |
@@ -114,7 +113,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
 |                      | Achievements | Working on |
 |----------------------|-------------|------------|
-| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Userspace network <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format |
+| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Userspace network <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format <br> New CPU features & JIT optimizations |
 | [**cerg2010cerg2010**](https://github.com/cerg2010cerg2010) | Important fixes, RV64 groundwork, FPU <br> Initial PLIC & PCI, PS2 HID, ATA, OC Ethernet <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
 | [**Mr0maks**](https://github.com/Mr0maks)                   | Initial C/M/Zicsr extensions, initial UART, VM debugger <br> ARM32 mul/div JIT intrinsics | - |
 | [**0xCatPKG**](https://github.com/0xCatPKG)                 | Userspace network & API improvements <br> Extended testing & portability fixes | HD Audio |
@@ -130,7 +129,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - VFIO for GPU passthrough
 - More RVJIT optimizations, shared caches
 - FPU JIT (Complicated AF to make a conformant one)
-- Vector/Bitmanip extensions (Blocked on interpreter rewrite which is scheduled for 0.7-git)
+- Vector extensions
 - Other peripherals from real boards (VisionFive 2: GPIO, SPI, flash...)
 - RISC-V APLIC, PCIe MSI Interrupts
 - *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
