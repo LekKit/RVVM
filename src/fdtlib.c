@@ -18,72 +18,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "fdtlib.h"
-#include <stdbool.h>
-#include <string.h>
-
-#ifdef FDTLIB_STANDALONE
-// cerg2010 wanted this to be usable out-of-tree
-#include <stdlib.h>
-#define safe_malloc malloc
-#define safe_calloc calloc
-#else
 #include "utils.h"
-#endif
+#include "vector.h"
+#include "mem_ops.h"
 
-#define FDT_MAGIC 0xd00dfeed
-#define FDT_VERSION 17
+#define FDT_MAGIC        0xD00DFEED
+#define FDT_VERSION      17
 #define FDT_COMP_VERSION 16
 
-struct fdt_header
-{
-    uint32_t magic;
-    uint32_t totalsize;
-    uint32_t off_dt_struct;
-    uint32_t off_dt_strings;
-    uint32_t off_mem_rsvmap;
-    uint32_t version;
-    uint32_t last_comp_version;
-    uint32_t boot_cpuid_phys;
-    uint32_t size_dt_strings;
-    uint32_t size_dt_struct;
+#define FDT_BEGIN_NODE 1
+#define FDT_END_NODE   2
+#define FDT_PROP       3
+#define FDT_NOP        4
+#define FDT_END        9
+
+#define FDT_HDR_SIZE 40
+#define FDT_RSV_SIZE 16
+
+struct fdt_prop {
+    char* name;
+    void* data;
+    uint32_t len;
 };
 
-struct fdt_reserve_entry {
-    uint64_t address;
-    uint64_t size;
+struct fdt_node {
+    char* name;
+    struct fdt_node* parent;
+    // Used as last_phandle in root node (parent = NULL)
+    uint32_t phandle;
+
+    vector_t(struct fdt_prop) props;
+    vector_t(struct fdt_node*) nodes;
 };
-
-enum fdt_node_tokens
-{
-    FDT_BEGIN_NODE = 1,
-    FDT_END_NODE,
-    FDT_PROP,
-    FDT_NOP,
-    FDT_END = 9
-};
-
-/* all values are stored in big-endian format */
-static inline uint32_t fdt_host2u32(uint32_t value)
-{
-    const uint8_t* arr = (const uint8_t*)&value;
-    return ((uint32_t)arr[0] << 24)
-        | ((uint32_t)arr[1] << 16)
-        | ((uint32_t)arr[2] << 8)
-        | ((uint32_t)arr[3]);
-}
-
-static inline uint64_t fdt_host2u64(uint64_t value)
-{
-    const uint8_t* arr = (const uint8_t*)&value;
-    return ((uint64_t)arr[0] << 56)
-        | ((uint64_t)arr[1] << 48)
-        | ((uint64_t)arr[2] << 40)
-        | ((uint64_t)arr[3] << 32)
-        | ((uint64_t)arr[4] << 24)
-        | ((uint64_t)arr[5] << 16)
-        | ((uint64_t)arr[6] << 8)
-        | ((uint64_t)arr[7]);
-}
 
 static char* str_duplicate(const char* str)
 {
@@ -93,57 +59,61 @@ static char* str_duplicate(const char* str)
     return buffer;
 }
 
-void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data, uint32_t len)
+static size_t fdt_name_with_addr(char* buffer, size_t size, const char* name, uint64_t addr)
 {
-    if (node == NULL) return;
-    struct fdt_prop_list *entry = safe_calloc(sizeof(struct fdt_prop_list), 1);
-    entry->prop.name = str_duplicate(name);
-    char *new_data = NULL;
-    if (data && len) {
-        new_data = safe_calloc(len, 1);
-        memcpy(new_data, data, len);
+    size_t len = rvvm_strlcpy(buffer, name, size);
+    len += rvvm_strlcpy(buffer + len, "@", size - len);
+    len += uint_to_str_base(buffer + len, size, addr, 16);
+    return len;
+}
+
+struct fdt_node* fdt_node_create(const char* name)
+{
+    struct fdt_node* node = safe_new_obj(struct fdt_node);
+    node->name = name ? str_duplicate(name) : NULL;
+    return node;
+}
+
+struct fdt_node* fdt_node_create_reg(const char* name, uint64_t addr)
+{
+    char buffer[256];
+    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
+    return fdt_node_create(buffer);
+}
+
+void fdt_node_add_child(struct fdt_node* node, struct fdt_node* child)
+{
+    if (node == NULL || child == NULL) return;
+    child->parent = node;
+    vector_push_back(node->nodes, child);
+}
+
+struct fdt_node* fdt_node_find(struct fdt_node* node, const char* name)
+{
+    if (node) vector_foreach_back(node->nodes, i) {
+        struct fdt_node* child = vector_at(node->nodes, i);
+        if (rvvm_strcmp(child->name, name)) return child;
     }
-    entry->prop.data = new_data;
-    entry->prop.len = len;
-    entry->next = NULL;
-    struct fdt_prop_list** last = &node->props;
-    while ((*last)) last = &(*last)->next;
-    *last = entry;
+    return NULL;
 }
 
-void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val)
+struct fdt_node* fdt_node_find_reg(struct fdt_node* node, const char* name, uint64_t addr)
 {
-    val = fdt_host2u32(val);
-    fdt_node_add_prop(node, name, &val, sizeof(val));
+    char buffer[256];
+    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
+    return fdt_node_find(node, buffer);
 }
 
-void fdt_node_add_prop_u64(struct fdt_node *node, const char *name, uint64_t val)
+struct fdt_node* fdt_node_find_reg_any(struct fdt_node* node, const char* name)
 {
-    val = fdt_host2u64(val);
-    fdt_node_add_prop(node, name, &val, sizeof(val));
-}
-
-void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count)
-{
-    uint32_t* buf = safe_calloc(sizeof(uint32_t), count);
-    for (uint32_t i=0; i<count; ++i) {
-        buf[i] = fdt_host2u32(cells[i]);
+    char buffer[256] = {0};
+    size_t len = rvvm_strlcpy(buffer, name, sizeof(buffer));
+    rvvm_strlcpy(buffer + len, "@", sizeof(buffer) - len);
+    if (node) vector_foreach_back(node->nodes, i) {
+        struct fdt_node* child = vector_at(node->nodes, i);
+        if (rvvm_strfind(child->name, buffer) == child->name) return child;
     }
-    fdt_node_add_prop(node, name, buf, count*sizeof(uint32_t));
-    free(buf);
-}
-
-void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val)
-{
-    fdt_node_add_prop(node, name, val, rvvm_strlen(val) + 1);
-}
-
-void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size)
-{
-    uint64_t arr[2];
-    arr[0] = fdt_host2u64(begin);
-    arr[1] = fdt_host2u64(size);
-    fdt_node_add_prop(node, name, arr, sizeof(arr));
+    return NULL;
 }
 
 static inline bool fdt_is_illegal_phandle(uint32_t phandle)
@@ -151,7 +121,7 @@ static inline bool fdt_is_illegal_phandle(uint32_t phandle)
     return phandle == 0 || phandle == 0xffffffff;
 }
 
-static uint32_t fdt_get_new_phandle(struct fdt_node *node)
+static uint32_t fdt_get_new_phandle(struct fdt_node* node)
 {
     // Trace to root node
     while (node->parent) node = node->parent;
@@ -159,215 +129,157 @@ static uint32_t fdt_get_new_phandle(struct fdt_node *node)
     return node->phandle;
 }
 
-uint32_t fdt_node_get_phandle(struct fdt_node *node)
+uint32_t fdt_node_get_phandle(struct fdt_node* node)
 {
     if (node == NULL || node->parent == NULL) {
         // This is a root node, no handle needed
         return 0;
     }
-
     if (fdt_is_illegal_phandle(node->phandle)) {
+        // Allocate new phandle
         node->phandle = fdt_get_new_phandle(node);
         fdt_node_add_prop_u32(node, "phandle", node->phandle);
     }
-
     return node->phandle;
 }
 
-static void fdt_name_with_addr(char* buffer, size_t size, const char *name, uint64_t addr)
+void fdt_node_add_prop(struct fdt_node* node, const char* name, const void* data, uint32_t len)
 {
-    const char* const lut = "0123456789abcdef";
-    size_t cur = 0;
-    size_t addr_len = 16;
-    while(name[cur] && size > (cur + 17)) {
-        buffer[cur] = name[cur];
-        cur++;
+    if (node) {
+        void* new_data = len ? safe_malloc(len) : NULL;
+        memcpy(new_data, data, len);
+        struct fdt_prop prop = {
+            .name = str_duplicate(name),
+            .data = new_data,
+            .len = len,
+        };
+        vector_push_back(node->props, prop);
     }
-    buffer[cur++] = '@';
-    while (addr_len > 1 && (addr >> 60) == 0) {
-        addr <<= 4;
-        addr_len--;
+}
+
+void fdt_node_add_prop_u32(struct fdt_node* node, const char* name, uint32_t val)
+{
+    write_uint32_be_m(&val, val);
+    fdt_node_add_prop(node, name, &val, sizeof(val));
+}
+
+void fdt_node_add_prop_u64(struct fdt_node *node, const char* name, uint64_t val)
+{
+    write_uint64_be_m(&val, val);
+    fdt_node_add_prop(node, name, &val, sizeof(val));
+}
+
+void fdt_node_add_prop_cells(struct fdt_node* node, const char* name, uint32_t* cells, uint32_t count)
+{
+    uint32_t* buffer = safe_new_arr(uint32_t, count);
+    for (uint32_t i=0; i<count; ++i) {
+        write_uint32_be_m(&buffer[i], cells[i]);
     }
-    for (size_t i=0; i<addr_len; ++i) {
-        buffer[cur++] = lut[(addr >> (60 - (i * 4))) & 0xf];
+    fdt_node_add_prop(node, name, buffer, count * sizeof(uint32_t));
+    free(buffer);
+}
+
+void fdt_node_add_prop_str(struct fdt_node* node, const char* name, const char* val)
+{
+    fdt_node_add_prop(node, name, val, rvvm_strlen(val) + 1);
+}
+
+void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size)
+{
+    uint64_t arr[2] = {0};
+    write_uint64_be_m(&arr[0], begin);
+    write_uint64_be_m(&arr[1], size);
+    fdt_node_add_prop(node, name, arr, sizeof(arr));
+}
+
+bool fdt_node_del_prop(struct fdt_node* node, const char* name)
+{
+    vector_foreach_back(node->props, i) {
+        struct fdt_prop* prop = &vector_at(node->props, i);
+        if (rvvm_strcmp(prop->name, name)) {
+            free(prop->name);
+            free(prop->data);
+            vector_erase(node->props, i);
+            return true;
+        }
     }
-    buffer[cur] = 0;
+    return false;
 }
 
-struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name)
+void fdt_node_free(struct fdt_node* node)
 {
-    if (node == NULL) return NULL;
-    struct fdt_node_list* list = node->nodes;
-    while (list) {
-        if (rvvm_strcmp(list->node->name, name)) return list->node;
-        list = list->next;
+    if (node) {
+        vector_foreach_back(node->props, i) {
+            free(vector_at(node->props, i).name);
+            free(vector_at(node->props, i).data);
+        }
+        vector_foreach_back(node->nodes, i) {
+            fdt_node_free(vector_at(node->nodes, i));
+        }
+        vector_free(node->props);
+        vector_free(node->nodes);
+        free(node->name);
+        free(node);
     }
-    return NULL;
 }
 
-struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint64_t addr)
-{
-    char buffer[256];
-    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
-    return fdt_node_find(node, buffer);
-}
-
-struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name)
-{
-    if (node == NULL) return NULL;
-    char buffer[256] = {0};
-    size_t len = rvvm_strlcpy(buffer, name, sizeof(buffer));
-    rvvm_strlcpy(buffer + len, "@", sizeof(buffer) - len);
-    struct fdt_node_list* list = node->nodes;
-    while (list) {
-        if (rvvm_strfind(list->node->name, buffer) == list->node->name) return list->node;
-        list = list->next;
-    }
-    return NULL;
-}
-
-struct fdt_node* fdt_node_create(const char *name)
-{
-    struct fdt_node* node = safe_calloc(sizeof(struct fdt_node), 1);
-    node->name = name ? str_duplicate(name) : NULL;
-    node->parent = NULL;
-    node->phandle = 0;
-    node->nodes = NULL;
-    node->props = NULL;
-    return node;
-}
-
-struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr)
-{
-    char buffer[256];
-    fdt_name_with_addr(buffer, sizeof(buffer), name, addr);
-    return fdt_node_create(buffer);
-}
-
-void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child)
-{
-    if (node == NULL || child == NULL) return;
-
-    struct fdt_node_list *entry = safe_calloc(sizeof(struct fdt_node_list), 1);
-    child->parent = node;
-    entry->node = child;
-    entry->next = NULL;
-
-    struct fdt_node_list** last = &node->nodes;
-    while ((*last)) last = &(*last)->next;
-    *last = entry;
-}
-
-void fdt_node_free(struct fdt_node *node)
-{
-    if (node == NULL) return;
-    free(node->name);
-
-    for (struct fdt_prop_list *entry = node->props, *entry_next = NULL;
-            entry != NULL;
-            entry = entry_next)
-    {
-        entry_next = entry->next;
-
-        free(entry->prop.name);
-        free(entry->prop.data);
-        free(entry);
-    }
-
-    for (struct fdt_node_list *entry = node->nodes, *entry_next = NULL;
-            entry != NULL;
-            entry = entry_next)
-    {
-        entry_next = entry->next;
-
-        fdt_node_free(entry->node);
-        free(entry);
-    }
-
-    free(node);
-}
-
-struct fdt_size_desc
-{
-    size_t struct_size;
-    size_t strings_size;
+struct fdt_size_desc {
+    uint32_t struct_size;
+    uint32_t string_size;
 };
 
-//#define ALIGN_UP(n, align) ((n) % (align) ? (n) + (align) - (n) % (align) : (n))
-#define ALIGN_UP(n, align) (((n) + (align) - 1) & ~((align) - 1))
-
-static void fdt_get_tree_size(struct fdt_node *node, struct fdt_size_desc *desc)
+static void fdt_get_tree_size(struct fdt_node* node, struct fdt_size_desc* desc)
 {
-    desc->struct_size += sizeof(uint32_t); // FDT_BEGIN_NODE
-    size_t name_len = node->name ? rvvm_strlen(node->name) + 1 : 1;
-    desc->struct_size += ALIGN_UP(name_len, sizeof(uint32_t));
+    size_t name_len = align_size_up(node->name ? rvvm_strlen(node->name) + 1 : 1, sizeof(uint32_t));
+    desc->struct_size += sizeof(uint32_t) + name_len; // FDT_BEGIN_NODE, name
 
-    for (struct fdt_prop_list *entry = node->props;
-            entry != NULL;
-            entry = entry->next)
-    {
-        desc->struct_size += sizeof(uint32_t); // FDT_PROP
-        desc->struct_size += sizeof(uint32_t) * 2; // struct fdt_prop_desc
-        desc->struct_size += ALIGN_UP(entry->prop.len, sizeof(uint32_t));
-        name_len = rvvm_strlen(entry->prop.name) + 1;
-        desc->strings_size += ALIGN_UP(name_len, sizeof(uint32_t));
+    vector_foreach(node->props, i) {
+        struct fdt_prop* prop = &vector_at(node->props, i);
+        desc->struct_size += sizeof(uint32_t) * 3; // FDT_PROP, struct fdt_prop_desc
+        desc->struct_size += align_size_up(prop->len, sizeof(uint32_t));
+        desc->string_size += align_size_up(rvvm_strlen(prop->name) + 1, sizeof(uint32_t));
     }
 
-    for (struct fdt_node_list *entry = node->nodes;
-            entry != NULL;
-            entry = entry->next)
-    {
-        fdt_get_tree_size(entry->node, desc);
+    vector_foreach(node->nodes, i) {
+        struct fdt_node* child = vector_at(node->nodes, i);
+        fdt_get_tree_size(child, desc);
     }
 
     desc->struct_size += sizeof(uint32_t); // FDT_END_NODE
 }
 
-struct fdt_serializer_ctx
-{
-    char *buf;
+struct fdt_serializer_ctx {
+    char* buf;
     uint32_t struct_off;
     uint32_t strings_begin;
     uint32_t strings_off;
     uint32_t reserve_off;
 };
 
-static void fdt_serialize_u32(struct fdt_serializer_ctx *ctx, uint32_t value)
+static void fdt_serialize_u32(struct fdt_serializer_ctx* ctx, uint32_t value)
 {
-    value = fdt_host2u32(value);
-    memcpy(ctx->buf + ctx->struct_off, &value, sizeof(value));
-    ctx->struct_off += sizeof(value);
+    write_uint32_be_m(ctx->buf + ctx->struct_off, value);
+    ctx->struct_off += sizeof(uint32_t);
 }
 
-static void fdt_serialize_string(struct fdt_serializer_ctx *ctx, const char *str)
+static void fdt_serialize_string(struct fdt_serializer_ctx* ctx, const char* str)
 {
-    for (str = str ? str : ""; *str != '\0'; ++str)
-    {
-        *(ctx->buf + ctx->struct_off++) = *str;
-    }
-
-    *(ctx->buf + ctx->struct_off++) = '\0';
-    ctx->struct_off = ALIGN_UP(ctx->struct_off, sizeof(uint32_t));
+    if (!str) str = "";
+    rvvm_strlcpy(ctx->buf + ctx->struct_off, str, -1);
+    ctx->struct_off = align_size_up(ctx->struct_off + rvvm_strlen(str) + 1, sizeof(uint32_t));
 }
 
-static void fdt_serialize_data(struct fdt_serializer_ctx *ctx, const char *data, uint32_t len)
+static void fdt_serialize_data(struct fdt_serializer_ctx* ctx, const char* data, uint32_t len)
 {
-    for (uint32_t i = 0; i < len; ++i)
-    {
-        *(ctx->buf + ctx->struct_off++) = *(data + i);
-    }
-    ctx->struct_off = ALIGN_UP(ctx->struct_off, sizeof(uint32_t));
+    memcpy(ctx->buf + ctx->struct_off, data, len);
+    ctx->struct_off = align_size_up(ctx->struct_off + len, sizeof(uint32_t));
 }
 
-static void fdt_serialize_name(struct fdt_serializer_ctx *ctx, const char *str)
+static void fdt_serialize_name(struct fdt_serializer_ctx* ctx, const char* str)
 {
-    for (str = str ? str : ""; *str != '\0'; ++str)
-    {
-        *(ctx->buf + ctx->strings_off++) = *str;
-    }
-
-    *(ctx->buf + ctx->strings_off++) = '\0';
-    ctx->strings_off = ALIGN_UP(ctx->strings_off, sizeof(uint32_t));
+    if (!str) str = "";
+    rvvm_strlcpy(ctx->buf + ctx->strings_off, str, -1);
+    ctx->strings_off = align_size_up(ctx->strings_off + rvvm_strlen(str) + 1, sizeof(uint32_t));
 }
 
 static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *node)
@@ -375,37 +287,33 @@ static void fdt_serialize_tree(struct fdt_serializer_ctx *ctx, struct fdt_node *
     fdt_serialize_u32(ctx, FDT_BEGIN_NODE);
     fdt_serialize_string(ctx, node->name);
 
-    for (struct fdt_prop_list *entry = node->props;
-            entry != NULL;
-            entry = entry->next)
-    {
+    vector_foreach(node->props, i) {
+        struct fdt_prop* prop = &vector_at(node->props, i);
         fdt_serialize_u32(ctx, FDT_PROP);
 
         // struct fdt_prop_desc
-        fdt_serialize_u32(ctx, entry->prop.len);
+        fdt_serialize_u32(ctx, prop->len);
         fdt_serialize_u32(ctx, ctx->strings_off - ctx->strings_begin);
 
-        fdt_serialize_data(ctx, entry->prop.data, entry->prop.len);
+        fdt_serialize_data(ctx, prop->data, prop->len);
 
-        fdt_serialize_name(ctx, entry->prop.name);
+        fdt_serialize_name(ctx, prop->name);
     }
 
-    for (struct fdt_node_list *entry = node->nodes;
-            entry != NULL;
-            entry = entry->next)
-    {
-        fdt_serialize_tree(ctx, entry->node);
+    vector_foreach(node->nodes, i) {
+        struct fdt_node* child = vector_at(node->nodes, i);
+        fdt_serialize_tree(ctx, child);
     }
 
     fdt_serialize_u32(ctx, FDT_END_NODE);
 }
 
-size_t fdt_size(struct fdt_node *node)
+size_t fdt_size(struct fdt_node* node)
 {
     return fdt_serialize(node, NULL, 0, 0);
 }
 
-size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid)
+size_t fdt_serialize(struct fdt_node* node, void* buffer, size_t size, uint32_t boot_cpuid)
 {
     if (node == NULL) return 0;
     struct fdt_size_desc size_desc = {0};
@@ -413,35 +321,32 @@ size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t 
     size_desc.struct_size += sizeof(uint32_t); // FDT_END
 
     struct fdt_serializer_ctx ctx = {0};
+    uint32_t buf_size = FDT_HDR_SIZE + FDT_RSV_SIZE + size_desc.struct_size;
+    ctx.reserve_off = FDT_HDR_SIZE;
+    ctx.struct_off = FDT_HDR_SIZE + FDT_RSV_SIZE;
+    ctx.strings_begin = buf_size;
+    ctx.strings_off = ctx.strings_begin;
+    buf_size += size_desc.string_size;
 
-    uint32_t buf_size = 0;
-    ctx.reserve_off = buf_size = ALIGN_UP(buf_size + sizeof(struct fdt_header), 8);
-    /* only one sentinel reservation entry with zero values */
-    ctx.struct_off = buf_size = ALIGN_UP(buf_size + sizeof(struct fdt_reserve_entry), 4);
-    ctx.strings_off = ctx.strings_begin = buf_size += size_desc.struct_size;
-    buf_size += size_desc.strings_size;
+    if (buffer) {
+        if (buf_size > size) return 0;
 
-    if (buffer == NULL) return ALIGN_UP(buf_size, 8);
-    if (buf_size > size) return 0;
+        memset(buffer, 0, buf_size);
+        ctx.buf = buffer;
+        write_uint32_be_m(ctx.buf, FDT_MAGIC);
+        write_uint32_be_m(ctx.buf + 4,  buf_size);
+        write_uint32_be_m(ctx.buf + 8,  ctx.struct_off);
+        write_uint32_be_m(ctx.buf + 12, ctx.strings_off);
+        write_uint32_be_m(ctx.buf + 16, ctx.reserve_off);
+        write_uint32_be_m(ctx.buf + 20, FDT_VERSION);
+        write_uint32_be_m(ctx.buf + 24, FDT_COMP_VERSION);
+        write_uint32_be_m(ctx.buf + 28, boot_cpuid);
+        write_uint32_be_m(ctx.buf + 32, size_desc.string_size);
+        write_uint32_be_m(ctx.buf + 36, size_desc.struct_size);
 
-    memset(buffer, 0, buf_size);
-    ctx.buf = buffer;
-    struct fdt_header *hdr = (struct fdt_header *) ctx.buf;
-    hdr->magic = fdt_host2u32(FDT_MAGIC);
-    hdr->version = fdt_host2u32(FDT_VERSION);
-    hdr->last_comp_version = fdt_host2u32(FDT_COMP_VERSION);
-    hdr->boot_cpuid_phys = fdt_host2u32(boot_cpuid);
-    hdr->off_dt_struct = fdt_host2u32(ctx.struct_off);
-    hdr->off_dt_strings = fdt_host2u32(ctx.strings_off);
-    hdr->off_mem_rsvmap = fdt_host2u32(ctx.reserve_off);
-    hdr->size_dt_struct = fdt_host2u32(size_desc.struct_size);
-    hdr->size_dt_strings = fdt_host2u32(size_desc.strings_size);
-    hdr->totalsize = fdt_host2u32((uint32_t) buf_size);
-
-    /* memory reservation block is already zero */
-
-    fdt_serialize_tree(&ctx, node);
-    fdt_serialize_u32(&ctx, FDT_END);
+        fdt_serialize_tree(&ctx, node);
+        fdt_serialize_u32(&ctx, FDT_END);
+    }
 
     return buf_size;
 }

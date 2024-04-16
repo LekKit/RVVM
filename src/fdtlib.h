@@ -17,97 +17,75 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef FDTLIB_H
-#define FDTLIB_H
+#ifndef RVVM_FDTLIB_H
+#define RVVM_FDTLIB_H
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rvvmlib.h"
 
-#ifndef FDTLIB_STANDALONE
-# include "rvvmlib.h"
-#else
-# define PUBLIC
-#endif
+struct fdt_node;
 
-struct fdt_prop
-{
-    char *name;
-    char *data;
-    uint32_t len;
-};
-
-struct fdt_prop_list
-{
-    struct fdt_prop prop;
-    struct fdt_prop_list *next;
-};
-
-struct fdt_node_list;
-
-struct fdt_node
-{
-    char *name;
-    struct fdt_node *parent;
-    // Used as last_phandle in root node (parent = NULL)
-    uint32_t phandle;
-
-    struct fdt_prop_list *props;
-    struct fdt_node_list *nodes;
-};
-
-struct fdt_node_list
-{
-    struct fdt_node *node;
-    struct fdt_node_list *next;
-};
+/*
+ * Node handling
+ */
 
 // Create a fdt node, root node should have name = NULL
-PUBLIC struct fdt_node* fdt_node_create(const char *name);
+PUBLIC struct fdt_node* fdt_node_create(const char* name);
 
 // Create a fdt node with address, like device@10000
-PUBLIC struct fdt_node* fdt_node_create_reg(const char *name, uint64_t addr);
+PUBLIC struct fdt_node* fdt_node_create_reg(const char* name, uint64_t addr);
 
-// Add arbitary byte buffer property
-PUBLIC void fdt_node_add_prop(struct fdt_node *node, const char *name, const void *data, uint32_t len);
-
-// Add single-cell property
-PUBLIC void fdt_node_add_prop_u32(struct fdt_node *node, const char *name, uint32_t val);
-
-// Add double-cell property
-PUBLIC void fdt_node_add_prop_u64(struct fdt_node *node, const char *name, uint64_t val);
-
-// Add multi-cell property
-PUBLIC void fdt_node_add_prop_cells(struct fdt_node *node, const char *name, uint32_t* cells, uint32_t count);
-
-// Add string property
-PUBLIC void fdt_node_add_prop_str(struct fdt_node *node, const char *name, const char* val);
-
-// Add register range property (addr cells: 2, size cells: 2)
-PUBLIC void fdt_node_add_prop_reg(struct fdt_node *node, const char *name, uint64_t begin, uint64_t size);
-
-// Get child node phandle (allocates phandles transparently)
-PUBLIC uint32_t fdt_node_get_phandle(struct fdt_node *node);
+// Attach child node
+PUBLIC void fdt_node_add_child(struct fdt_node* node, struct fdt_node* child);
 
 // Lookup for child node by name (returns NULL on failure)
-PUBLIC struct fdt_node* fdt_node_find(struct fdt_node *node, const char *name);
+PUBLIC struct fdt_node* fdt_node_find(struct fdt_node* node, const char* name);
 
 // Lookup for child node by name + addr, like device@10000 (returns NULL on failure)
-PUBLIC struct fdt_node* fdt_node_find_reg(struct fdt_node *node, const char *name, uint64_t addr);
+PUBLIC struct fdt_node* fdt_node_find_reg(struct fdt_node* node, const char* name, uint64_t addr);
 
 // Lookup for any reg child node by name, like device@* (returns NULL on failure)
-PUBLIC struct fdt_node* fdt_node_find_reg_any(struct fdt_node *node, const char *name);
+PUBLIC struct fdt_node* fdt_node_find_reg_any(struct fdt_node* node, const char *name);
 
-// Add child node
-PUBLIC void fdt_node_add_child(struct fdt_node *node, struct fdt_node *child);
+// Get child node phandle. Allocates phandles transparently, all node hierarchy should be attached!
+PUBLIC uint32_t fdt_node_get_phandle(struct fdt_node* node);
+
+/*
+ * Property handling
+ */
+
+// Add arbitary byte buffer property
+PUBLIC void fdt_node_add_prop(struct fdt_node* node, const char* name, const void* data, uint32_t len);
+
+// Add single-cell property
+PUBLIC void fdt_node_add_prop_u32(struct fdt_node* node, const char* name, uint32_t val);
+
+// Add double-cell property
+PUBLIC void fdt_node_add_prop_u64(struct fdt_node* node, const char* name, uint64_t val);
+
+// Add multi-cell property
+PUBLIC void fdt_node_add_prop_cells(struct fdt_node* node, const char* name, uint32_t* cells, uint32_t count);
+
+// Add string property
+PUBLIC void fdt_node_add_prop_str(struct fdt_node* node, const char* name, const char* val);
+
+// Add register range property (addr cells: 2, size cells: 2)
+PUBLIC void fdt_node_add_prop_reg(struct fdt_node* node, const char* name, uint64_t begin, uint64_t size);
+
+// Delete property
+PUBLIC bool fdt_node_del_prop(struct fdt_node* node, const char* name);
+
+/*
+ * Serialization, cleanup
+ */
 
 // Recursively free a node and it's child nodes
-PUBLIC void fdt_node_free(struct fdt_node *node);
+PUBLIC void fdt_node_free(struct fdt_node* node);
 
 // Returns required buffer size for serializing
-PUBLIC size_t fdt_size(struct fdt_node *node);
+PUBLIC size_t fdt_size(struct fdt_node* node);
 
 // Serialize DTB into buffer, returns 0 when there's insufficient space
 // Returns required buffer size when buffer == NULL
-PUBLIC size_t fdt_serialize(struct fdt_node *node, void* buffer, size_t size, uint32_t boot_cpuid);
+PUBLIC size_t fdt_serialize(struct fdt_node* node, void* buffer, size_t size, uint32_t boot_cpuid);
 
 #endif
