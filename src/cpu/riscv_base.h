@@ -633,7 +633,7 @@ static forceinline void riscv_emulate_i_opc_op32(rvvm_hart_t* vm, const uint32_t
                     riscv_write_reg(vm, rds, (int32_t)(reg1 - reg2));
                     return;
                 case 0x1: // mulw
-                    rvjit_mul(rds, rs1, rs2, 4);
+                    rvjit_mulw(rds, rs1, rs2, 4);
                     riscv_write_reg(vm, rds, (int32_t)(reg1 * reg2));
                     return;
                 case 0x4: // add.uw (Zba)
