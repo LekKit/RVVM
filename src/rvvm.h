@@ -1,5 +1,5 @@
 /*
-rvvm.h - RISC-V Virtual Machine
+rvvm.h - The RISC-V Virtual Machine
 Copyright (C) 2021  LekKit <github.com/LekKit>
                     cerg2010cerg2010 <github.com/cerg2010cerg2010>
                     Mr0maks <mr.maks0443@gmail.com>
@@ -38,56 +38,52 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 #define TLB_SIZE 256  // Always nonzero, power of 2 (32, 64..)
+BUILD_ASSERT(TLB_SIZE && !((TLB_SIZE - 1) & TLB_SIZE));
 
-enum
-{
-    REGISTER_ZERO,
-    REGISTER_X0 = REGISTER_ZERO,
-    REGISTER_X1,
-    REGISTER_X2,
-    REGISTER_X3,
-    REGISTER_X4,
-    REGISTER_X5,
-    REGISTER_X6,
-    REGISTER_X7,
-    REGISTER_X8,
-    REGISTER_X9,
-    REGISTER_X10,
-    REGISTER_X11,
-    REGISTER_X12,
-    REGISTER_X13,
-    REGISTER_X14,
-    REGISTER_X15,
-    REGISTER_X16,
-    REGISTER_X17,
-    REGISTER_X18,
-    REGISTER_X19,
-    REGISTER_X20,
-    REGISTER_X21,
-    REGISTER_X22,
-    REGISTER_X23,
-    REGISTER_X24,
-    REGISTER_X25,
-    REGISTER_X26,
-    REGISTER_X27,
-    REGISTER_X28,
-    REGISTER_X29,
-    REGISTER_X30,
-    REGISTER_X31,
-    REGISTER_PC,
-    REGISTERS_MAX
-};
+#define REGISTER_ZERO 0
+#define REGISTER_X0   0
+#define REGISTER_X1   1
+#define REGISTER_X2   2
+#define REGISTER_X3   3
+#define REGISTER_X4   4
+#define REGISTER_X5   5
+#define REGISTER_X6   6
+#define REGISTER_X7   7
+#define REGISTER_X8   8
+#define REGISTER_X9   9
+#define REGISTER_X10  10
+#define REGISTER_X11  11
+#define REGISTER_X12  12
+#define REGISTER_X13  13
+#define REGISTER_X14  14
+#define REGISTER_X15  15
+#define REGISTER_X16  16
+#define REGISTER_X17  17
+#define REGISTER_X18  18
+#define REGISTER_X19  19
+#define REGISTER_X20  20
+#define REGISTER_X21  21
+#define REGISTER_X22  22
+#define REGISTER_X23  23
+#define REGISTER_X24  24
+#define REGISTER_X25  25
+#define REGISTER_X26  26
+#define REGISTER_X27  27
+#define REGISTER_X28  28
+#define REGISTER_X29  29
+#define REGISTER_X30  30
+#define REGISTER_X31  31
+#define REGISTER_PC   32
 
-#define FPU_REGISTERS_MAX REGISTERS_MAX
+#define REGISTERS_MAX 33
+#define FPU_REGISTERS_MAX 32
 
-enum
-{
-    PRIVILEGE_USER,
-    PRIVILEGE_SUPERVISOR,
-    PRIVILEGE_HYPERVISOR,
-    PRIVILEGE_MACHINE,
-    PRIVILEGES_MAX
-};
+#define PRIVILEGE_USER       0
+#define PRIVILEGE_SUPERVISOR 1
+#define PRIVILEGE_HYPERVISOR 2
+#define PRIVILEGE_MACHINE    3
+
+#define PRIVILEGES_MAX       4
 
 #define INTERRUPT_USOFTWARE    0x0
 #define INTERRUPT_SSOFTWARE    0x1
