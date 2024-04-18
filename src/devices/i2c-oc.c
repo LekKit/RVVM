@@ -214,12 +214,15 @@ PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
     };
     if (rvvm_attach_mmio(machine, &i2c_oc) == RVVM_INVALID_MMIO) return NULL;
 #ifdef USE_FDT
-    struct fdt_node* i2c_clock = fdt_node_create_reg("i2c_osc", base_addr);
-    fdt_node_add_prop_str(i2c_clock, "compatible", "fixed-clock");
-    fdt_node_add_prop_u32(i2c_clock, "#clock-cells", 0);
-    fdt_node_add_prop_u32(i2c_clock, "clock-frequency", 20000000);
-    fdt_node_add_prop_str(i2c_clock, "clock-output-names", "clk");
-    fdt_node_add_child(rvvm_get_fdt_soc(machine), i2c_clock);
+    struct fdt_node* i2c_clock = fdt_node_find(rvvm_get_fdt_soc(machine), "i2c_oc_osc");
+    if (i2c_clock == NULL) {
+        i2c_clock = fdt_node_create("i2c_oc_osc");
+        fdt_node_add_prop_str(i2c_clock, "compatible", "fixed-clock");
+        fdt_node_add_prop_u32(i2c_clock, "#clock-cells", 0);
+        fdt_node_add_prop_u32(i2c_clock, "clock-frequency", 20000000);
+        fdt_node_add_prop_str(i2c_clock, "clock-output-names", "clk");
+        fdt_node_add_child(rvvm_get_fdt_soc(machine), i2c_clock);
+    }
 
     struct fdt_node* i2c_fdt = fdt_node_create_reg("i2c", base_addr);
     fdt_node_add_prop_reg(i2c_fdt, "reg", base_addr, I2C_OC_REG_SIZE);
