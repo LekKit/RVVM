@@ -124,14 +124,16 @@ static inline bool fdt_is_illegal_phandle(uint32_t phandle)
 static uint32_t fdt_get_new_phandle(struct fdt_node* node)
 {
     // Trace to root node
+    const char* orig_node_name = node->name;
     while (node->parent) node = node->parent;
+    if (node->name) rvvm_warn("fdt_node_get_phandle(%s): Invalid hierarchy", orig_node_name);
     node->phandle++;
     return node->phandle;
 }
 
 uint32_t fdt_node_get_phandle(struct fdt_node* node)
 {
-    if (node == NULL || node->parent == NULL) {
+    if (node == NULL || node->name == NULL) {
         // This is a root node, no handle needed
         return 0;
     }
