@@ -55,9 +55,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Check header presence
 #ifdef __has_include
-#define CHECK_INCLUDE __has_include
+#define CHECK_INCLUDE(include) __has_include(#include)
 #else
-#define CHECK_INCLUDE(x) 1
+#define CHECK_INCLUDE(include) 1
 #endif
 
 // Branch optimization hints
