@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
+#include "devices/pci-vfio.h"
 #include "devices/nvme.h"
 #include "devices/ata.h"
 #include "devices/eth-oc.h"
@@ -193,6 +194,8 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** a
 #ifdef USE_NET
             if (!tap_portfwd(tap, arg_val)) return false;
 #endif
+        } else if (cmp_arg(arg_name, "vfio_pci")) {
+            if (!pci_vfio_init_auto(machine, arg_val)) return false;
         }
     }
     if (rvvm_getarg("dumpdtb")) rvvm_dump_dtb(machine, rvvm_getarg("dumpdtb"));
