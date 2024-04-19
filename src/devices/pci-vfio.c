@@ -53,7 +53,7 @@ static void vfio_read_pci_config(const char* pci_id, void* buffer)
     char path[256] = {0};
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/config");
     int fd = open(path, O_RDONLY | O_CLOEXEC);
-    read(fd, buffer, 64);
+    UNUSED(!read(fd, buffer, 64));
     close(fd);
 }
 
@@ -62,7 +62,7 @@ static void vfio_unbind_driver(const char* pci_id)
     char path[256] = "/sys/bus/pci/devices/";
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/driver/unbind");
     int fd = open(path, O_WRONLY | O_CLOEXEC);
-    write(fd, pci_id, strlen(pci_id));
+    UNUSED(!write(fd, pci_id, strlen(pci_id)));
     close(fd);
 }
 
@@ -77,7 +77,7 @@ static void vfio_bind_vfio(const char* pci_id)
     size_t len = uint_to_str_base(devname, sizeof(devname), vid, 16);
     len += rvvm_strlcpy(devname + len, " ", sizeof(devname) - len);
     len += uint_to_str_base(devname + len, sizeof(devname) - len, pid, 16);
-    write(fd, devname, len);
+    UNUSED(!write(fd, devname, len));
     close(fd);
 }
 
@@ -86,7 +86,7 @@ static bool vfio_needs_rebind(const char* pci_id)
     char path[256] = {0};
     char driver_path[256] = {0};
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/driver");
-    readlink(path, driver_path, sizeof(driver_path));
+    if (readlink(path, driver_path, sizeof(driver_path))) return true;
     return !rvvm_strfind(driver_path, "vfio-pci");
 }
 
@@ -106,13 +106,13 @@ static uint32_t vfio_get_iommu_group(const char* pci_id)
     char path[256] = {0};
     char group_path[256] = {0};
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/iommu_group");
-    readlink(path, group_path, sizeof(group_path));
+    if (readlink(path, group_path, sizeof(group_path))) return -1;
     const char* iommu_path = rvvm_strfind(group_path, "/kernel/iommu_groups/");
     if (iommu_path) {
         return str_to_int_dec(iommu_path + rvvm_strlen("/kernel/iommu_groups/"));
     }
     rvvm_error("Invalid VFIO IOMMU group path!");
-    return 0;
+    return -1;
 }
 
 static int vfio_open_group(const char* pci_id)
@@ -166,7 +166,7 @@ static void* vfio_irq_thread(void* data)
     uint8_t buffer[8] = {0};
     while (vfio->running) {
         vfio_unmask_irq(vfio);
-        read(vfio->eventfd, buffer, sizeof(buffer));
+        UNUSED(!read(vfio->eventfd, buffer, sizeof(buffer)));
         pci_send_irq(vfio->pci_dev, 0);
     }
     return NULL;
@@ -363,7 +363,7 @@ PUBLIC bool pci_vfio_init_auto(rvvm_machine_t* machine, const char* pci_id)
         pci_id = long_pci_id;
     }
 
-    system("modprobe vfio_pci"); // Just in case
+    UNUSED(!system("modprobe vfio_pci")); // Just in case
 
     if (vfio_bind(pci_id)) {
         pci_bus_t* pci_bus = rvvm_get_pci_bus(machine);
