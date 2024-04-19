@@ -297,6 +297,7 @@ USE_NET ?= 1
 USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
 USE_PCI ?= 1
+USE_VFIO ?= 1
 USE_SPINLOCK_DEBUG ?= 1
 USE_JNI ?= 1
 
@@ -459,6 +460,10 @@ endif
 
 ifeq ($(USE_PCI),1)
 override CFLAGS += -DUSE_PCI
+endif
+
+ifeq ($(USE_VFIO),1)
+override CFLAGS += -DUSE_VFIO
 endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)
