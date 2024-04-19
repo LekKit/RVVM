@@ -613,10 +613,11 @@ endif
 
 .PHONY: cppcheck
 cppcheck:
+	$(info [$(YELLOW)INFO$(RESET)] Running cppcheck)
 ifeq ($(CHECK_ALL),1)
-	@cppcheck -f -j$(JOBS) --enable=all --language=c --std=c11 $(SRCDIR)
+	@cppcheck -f -j$(JOBS) --enable=all --inconclusive --inline-suppr --std=c99 -q $(SRCDIR)
 else
-	@cppcheck -f -j$(JOBS) --enable=warning,performance,portability --language=c --std=c11 $(SRCDIR)
+	@cppcheck -f -j$(JOBS) --enable=warning,performance,portability --inline-suppr --std=c99 -q $(SRCDIR)
 endif
 
 .PHONY: clean
