@@ -30,6 +30,7 @@ RISC-V CPU & System software implementation written in С
 - I2C HID keyboard & mouse, OpenCores I2C controller
 - Realtek RTL8169, OpenCores Ethernet NICs
 - Userspace networking
+- VFIO PCI Passthrough (For GPUs, etc)
 - SiFive GPIO
 - Deprecated: PS2 keyboard & mouse, ATA (IDE) drive, Linux TAP
 
@@ -113,7 +114,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
 |                      | Achievements | Working on |
 |----------------------|-------------|------------|
-| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, Framebuffer, many tiny devices <br> Userspace network <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format <br> New CPU features & JIT optimizations |
+| [**LekKit**](https://github.com/LekKit)                     | RVVM API & infrastructure <br> RV64IMAFDC interpreter, MMU/IRQs/Priv/etc <br> RVJIT Compiler, X86/RISC-V backends <br> NVMe, RTL8169, VFIO, many tiny devices <br> Userspace network <br> Rework of PCIe, PLIC, etc | Networking, Userspace emulation <br> COW blk-dedup image format <br> New CPU features & JIT optimizations |
 | [**cerg2010cerg2010**](https://github.com/cerg2010cerg2010) | Important fixes, RV64 groundwork, FPU <br> Initial PLIC & PCI, PS2 HID, ATA, OC Ethernet <br> ARM/ARM64 RVJIT backends | Testing, Assistance |
 | [**Mr0maks**](https://github.com/Mr0maks)                   | Initial C/M/Zicsr extensions, initial UART, VM debugger <br> ARM32 mul/div JIT intrinsics | - |
 | [**0xCatPKG**](https://github.com/0xCatPKG)                 | Userspace network & API improvements <br> Extended testing & portability fixes | HD Audio |
@@ -126,7 +127,6 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - Suspend/resume to file, VM migration
 - Linux userspace binary emulation (WIP)
 - Sound (HD Audio or else)
-- VFIO for GPU passthrough
 - More RVJIT optimizations, shared caches
 - FPU JIT (Complicated AF to make a conformant one)
 - Vector extensions
