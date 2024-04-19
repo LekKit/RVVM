@@ -149,7 +149,7 @@ void fdt_node_add_prop(struct fdt_node* node, const char* name, const void* data
 {
     if (node) {
         void* new_data = len ? safe_malloc(len) : NULL;
-        memcpy(new_data, data, len);
+        if (new_data) memcpy(new_data, data, len);
         struct fdt_prop prop = {
             .name = str_duplicate(name),
             .data = new_data,
