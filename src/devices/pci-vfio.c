@@ -193,6 +193,18 @@ static rvvm_mmio_type_t vfio_dev_type = {
     .remove = vfio_dev_remove,
 };
 
+static bool vfio_map_dma(vfio_dev_t* vfio, rvvm_machine_t* machine, rvvm_addr_t mem_base, size_t mem_size)
+{
+    struct vfio_iommu_type1_dma_map dma_map = {
+        .argsz = sizeof(struct vfio_iommu_type1_dma_map),
+        .flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
+        .iova = mem_base,
+        .size = mem_size,
+        .vaddr = (size_t)rvvm_get_dma_ptr(machine, mem_base, mem_size),
+    };
+    return ioctl(vfio->container, VFIO_IOMMU_MAP_DMA, &dma_map) == 0;
+}
+
 static bool vfio_try_attach(vfio_dev_t* vfio, rvvm_machine_t* machine, const char* pci_id)
 {
     vfio->container = open("/dev/vfio/vfio", O_RDWR | O_CLOEXEC);
@@ -220,21 +232,33 @@ static bool vfio_try_attach(vfio_dev_t* vfio, rvvm_machine_t* machine, const cha
     }
 
     // Set up DMA to guest RAM
-    struct vfio_iommu_type1_dma_map dma_map = {
-        .argsz = sizeof(struct vfio_iommu_type1_dma_map),
-        .flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
-        .iova = rvvm_get_opt(machine, RVVM_OPT_MEM_BASE),
-        .size = rvvm_get_opt(machine, RVVM_OPT_MEM_SIZE),
-        .vaddr = (size_t)rvvm_get_dma_ptr(machine,
-            rvvm_get_opt(machine, RVVM_OPT_MEM_BASE), rvvm_get_opt(machine, RVVM_OPT_MEM_SIZE)),
-    };
-    if (ioctl(vfio->container, VFIO_IOMMU_MAP_DMA, &dma_map)) {
-        // TODO: Somehow work around reserved ranges conflict
+    rvvm_addr_t mem_base = rvvm_get_opt(machine, RVVM_OPT_MEM_BASE);
+    rvvm_addr_t mem_size = rvvm_get_opt(machine, RVVM_OPT_MEM_SIZE);
+    if (!vfio_map_dma(vfio, machine, mem_base, mem_size)) {
+        // This *kinda* works around a DMA conflict with x86 MSI IRQ vector reserved region
         // More info: https://lore.kernel.org/linux-iommu/20191211082304.2d4fab45@x1.home/
         // cat /sys/kernel/iommu_groups/[iommu group]/reserved_regions
-        rvvm_error("Failed to set up VFIO DMA: %s", strerror(errno));
-        rvvm_error("This is likely caused by reserved mappings on your host overlapping guest RAM");
-        return false;
+
+        // LAPIC MSI registers are usually placed on address 0xFEE00000, I/O APIC on address 0xFEС00000
+        const rvvm_addr_t msi_x86_low = 0xFEC00000;
+        const rvvm_addr_t msi_x86_end = 0xFEF00000;
+        rvvm_info("Workaround reserved x86 MSI IRQ vector by splitting DMA region");
+        if (mem_base < msi_x86_low) {
+            size_t low_size = EVAL_MIN(mem_size, msi_x86_low - mem_base);
+            if (!vfio_map_dma(vfio, machine, mem_base, low_size)) {
+                rvvm_error("Failed to set up VFIO DMA: %s", strerror(errno));
+                rvvm_error("This is likely caused by reserved mappings on your host overlapping guest RAM");
+                return false;
+            }
+        }
+        if (mem_base + mem_size > msi_x86_end) {
+            size_t high_size = (mem_base + mem_size) - msi_x86_end;
+            if (!vfio_map_dma(vfio, machine, msi_x86_end, high_size)) {
+                rvvm_error("Failed to set up VFIO DMA: %s", strerror(errno));
+                rvvm_error("This is likely caused by reserved mappings on your host overlapping guest RAM");
+                return false;
+            }
+        }
     }
 
     vfio->device = ioctl(vfio->group, VFIO_GROUP_GET_DEVICE_FD, pci_id);
