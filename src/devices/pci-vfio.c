@@ -48,36 +48,19 @@ static void vfio_pci_sysfs_path(char* buffer, size_t size, const char* pci_id, c
     len += rvvm_strlcpy(buffer + len, suffix, size - len);
 }
 
-static void vfio_read_pci_config(const char* pci_id, void* buffer)
-{
-    char path[256] = {0};
-    vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/config");
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
-    UNUSED(!read(fd, buffer, 64));
-    close(fd);
-}
-
 static void vfio_unbind_driver(const char* pci_id)
 {
     char path[256] = "/sys/bus/pci/devices/";
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/driver/unbind");
     int fd = open(path, O_WRONLY | O_CLOEXEC);
-    UNUSED(!write(fd, pci_id, strlen(pci_id)));
+    UNUSED(!write(fd, pci_id, rvvm_strlen(pci_id)));
     close(fd);
 }
 
 static void vfio_bind_vfio(const char* pci_id)
 {
-    uint8_t pci_config[64] = {0};
-    vfio_read_pci_config(pci_id, pci_config);
-    uint16_t vid = read_uint16_le(pci_config);
-    uint16_t pid = read_uint16_le(pci_config + 2);
-    char devname[256] = {0};
-    int fd = open("/sys/bus/pci/drivers/vfio-pci/new_id", O_WRONLY | O_CLOEXEC);
-    size_t len = uint_to_str_base(devname, sizeof(devname), vid, 16);
-    len += rvvm_strlcpy(devname + len, " ", sizeof(devname) - len);
-    len += uint_to_str_base(devname + len, sizeof(devname) - len, pid, 16);
-    UNUSED(!write(fd, devname, len));
+    int fd = open("/sys/bus/pci/drivers/vfio-pci/bind", O_WRONLY | O_CLOEXEC);
+    UNUSED(!write(fd, pci_id, rvvm_strlen(pci_id)));
     close(fd);
 }
 
@@ -86,7 +69,7 @@ static bool vfio_needs_rebind(const char* pci_id)
     char path[256] = {0};
     char driver_path[256] = {0};
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/driver");
-    if (readlink(path, driver_path, sizeof(driver_path))) return true;
+    if (readlink(path, driver_path, sizeof(driver_path)) < 0) return true;
     return !rvvm_strfind(driver_path, "vfio-pci");
 }
 
@@ -106,7 +89,7 @@ static uint32_t vfio_get_iommu_group(const char* pci_id)
     char path[256] = {0};
     char group_path[256] = {0};
     vfio_pci_sysfs_path(path, sizeof(path), pci_id, "/iommu_group");
-    if (readlink(path, group_path, sizeof(group_path))) return -1;
+    if (readlink(path, group_path, sizeof(group_path)) < 0) return -1;
     const char* iommu_path = rvvm_strfind(group_path, "/kernel/iommu_groups/");
     if (iommu_path) {
         return str_to_int_dec(iommu_path + rvvm_strlen("/kernel/iommu_groups/"));
@@ -141,7 +124,7 @@ static void vfio_unmask_irq(vfio_dev_t* vfio)
     struct vfio_irq_set irq_set = {
         .argsz = sizeof(irq_set),
         .flags = VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_ACTION_UNMASK,
-        .index = VFIO_PCI_INTX_IRQ_INDEX,
+        .index = VFIO_PCI_MSI_IRQ_INDEX,
         .start = 0,
         .count = 1,
     };
@@ -153,7 +136,7 @@ static void vfio_trigger_irq(vfio_dev_t* vfio)
     struct vfio_irq_set irq_set = {
         .argsz = sizeof(irq_set),
         .flags = VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_ACTION_TRIGGER,
-        .index = VFIO_PCI_INTX_IRQ_INDEX,
+        .index = VFIO_PCI_MSI_IRQ_INDEX,
         .start = 0,
         .count = 1,
     };
@@ -164,8 +147,8 @@ static void* vfio_irq_thread(void* data)
 {
     vfio_dev_t* vfio = data;
     uint8_t buffer[8] = {0};
+    vfio_unmask_irq(vfio);
     while (vfio->running) {
-        vfio_unmask_irq(vfio);
         UNUSED(!read(vfio->eventfd, buffer, sizeof(buffer)));
         pci_send_irq(vfio->pci_dev, 0);
     }
@@ -314,11 +297,11 @@ static bool vfio_try_attach(vfio_dev_t* vfio, rvvm_machine_t* machine, const cha
     }
 
     // Check IRQ capabilities
-    if (device_info.num_irqs <= VFIO_PCI_INTX_IRQ_INDEX) {
+    if (device_info.num_irqs <= VFIO_PCI_MSI_IRQ_INDEX) {
         rvvm_error("No support for VFIO INTx IRQ");
         return false;
     }
-    struct vfio_irq_info irq_info = { .argsz = sizeof(irq_info), .index = VFIO_PCI_INTX_IRQ_INDEX, };
+    struct vfio_irq_info irq_info = { .argsz = sizeof(irq_info), .index = VFIO_PCI_MSI_IRQ_INDEX, };
     if (ioctl(vfio->device, VFIO_DEVICE_GET_IRQ_INFO, &irq_info)) {
         rvvm_error("Failed to get VFIO IRQ info: %s", strerror(errno));
         return false;
@@ -338,7 +321,7 @@ static bool vfio_try_attach(vfio_dev_t* vfio, rvvm_machine_t* machine, const cha
     struct vfio_irq_set* irq_set = safe_calloc(irq_size, 1);
     irq_set->argsz = irq_size;
     irq_set->flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
-    irq_set->index = VFIO_PCI_INTX_IRQ_INDEX;
+    irq_set->index = VFIO_PCI_MSI_IRQ_INDEX;
     irq_set->start = 0;
     irq_set->count = 1;
     *((int*)irq_set->data) = vfio->eventfd; // For MSI IRQs, this is an array of eventfds
