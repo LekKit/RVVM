@@ -109,6 +109,7 @@ typedef struct {
     hashmap_t block_links;
 
     // Dirty memory tracking
+    uint32_t* jited_pages;
     uint32_t* dirty_pages;
     size_t    dirty_mask;
 } rvjit_heap_t;

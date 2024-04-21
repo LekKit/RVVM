@@ -113,6 +113,7 @@ void rvjit_init_memtracking(rvjit_block_t* block, size_t size)
     free(block->heap.dirty_pages);
     block->heap.dirty_mask = bit_next_pow2((size + 0x1FFFF) >> 17) - 1;
     block->heap.dirty_pages = safe_new_arr(uint32_t, block->heap.dirty_mask + 1);
+    block->heap.jited_pages = safe_new_arr(uint32_t, block->heap.dirty_mask + 1);
 }
 
 static void rvjit_linker_cleanup(rvjit_block_t* block)
@@ -139,13 +140,24 @@ void rvjit_ctx_free(rvjit_block_t* block)
     vector_free(block->links);
     free(block->code);
     free(block->heap.dirty_pages);
+    free(block->heap.jited_pages);
+}
+
+static inline void rvjit_mark_jited_page(rvjit_block_t* block, phys_addr_t addr)
+{
+    size_t offset = (addr >> 17) & block->heap.dirty_mask;
+    uint32_t mask = 1U << ((addr >> 12) & 0x1F);
+    atomic_or_uint32_ex(block->heap.jited_pages + offset, mask, ATOMIC_RELAXED);
 }
 
 static inline void rvjit_mark_dirty_page(rvjit_block_t* block, phys_addr_t addr)
 {
     size_t offset = (addr >> 17) & block->heap.dirty_mask;
     uint32_t mask = 1U << ((addr >> 12) & 0x1F);
-    atomic_or_uint32_ex(block->heap.dirty_pages + offset, mask, ATOMIC_RELAXED);
+    if (atomic_load_uint32_ex(block->heap.jited_pages + offset, ATOMIC_RELAXED) & mask) {
+        atomic_or_uint32_ex(block->heap.dirty_pages + offset, mask, ATOMIC_RELAXED);
+        atomic_and_uint32_ex(block->heap.jited_pages + offset, ~mask, ATOMIC_RELAXED);
+    }
 }
 
 void rvjit_mark_dirty_mem(rvjit_block_t* block, phys_addr_t addr, size_t size)
@@ -231,6 +243,8 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 #ifdef RVJIT_APPLE_SILICON
     pthread_jit_write_protect_np(true);
 #endif
+
+    rvjit_mark_jited_page(block, block->phys_pc);
 
     return (rvjit_func_t)code;
 }
