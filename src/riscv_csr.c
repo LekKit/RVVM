@@ -29,7 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 riscv_csr_handler_t riscv_csr_list[4096];
 
-// no N extension, U_x bits are hardwired to 0
+// No N extension, U_x bits are hardwired to 0
 #define CSR_MSTATUS_MASK 0x7E79AA
 #define CSR_SSTATUS_MASK 0x0C6122
 
@@ -369,7 +369,8 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
         vm->mmu_mode = satp >> 60;
         if (vm->mmu_mode < CSR_SATP_MODE_SV39
          || vm->mmu_mode > CSR_SATP_MODE_SV57
-         || (vm->mmu_mode > CSR_SATP_MODE_SV48 && !rvvm_has_arg("sv57"))) {
+         || (vm->mmu_mode == CSR_SATP_MODE_SV48 && !rvvm_has_arg("sv48"))
+         || (vm->mmu_mode == CSR_SATP_MODE_SV57 && !rvvm_has_arg("sv57"))) {
             vm->mmu_mode = CSR_SATP_MODE_PHYS;
         }
         vm->root_page_table = (satp & bit_mask(44)) << MMU_PAGE_SHIFT;
@@ -517,7 +518,8 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static bool riscv_csr_seed(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     UNUSED(op); UNUSED(vm);
-    rvvm_randombytes(dest, sizeof(*dest));
+    *dest = 0;
+    rvvm_randombytes(dest, 2);
     return true;
 }
 
@@ -592,6 +594,9 @@ void riscv_csr_global_init()
     riscv_csr_list[0x104] = riscv_csr_sie;      // sie
     riscv_csr_list[0x105] = riscv_csr_stvec;    // stvec
     riscv_csr_list[0x106] = riscv_csr_zero_rw;  // scounteren
+
+    riscv_csr_list[0x10A] = riscv_csr_zero_rw;     // senvcfg
+
 
     // Supervisor Trap Handling
     riscv_csr_list[0x140] = riscv_csr_sscratch; // sscratch
