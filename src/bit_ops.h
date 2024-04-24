@@ -20,9 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "rvvm_types.h"
 
-#if defined(__x86_64__) || defined(_M_X64)
 // For optimized bit_orc_b() implementation
+#if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
 #endif
 
 // Simple bit operations (sign-extend, etc) for internal usage
@@ -211,6 +213,10 @@ static inline uint64_t bit_orc_b(uint64_t val)
     __m128i cmp = _mm_cmpeq_epi8(in, zero);
     __m128i orc = _mm_cmpeq_epi8(cmp, zero);
     return _mm_cvtsi128_si64(orc);
+#elif defined(__aarch64__)
+    uint8x8_t in = vreinterpret_u8_u64(vcreate_u64(val));
+    uint8x8_t orc = vtst_u8(in, in);
+    return vget_lane_u64(vreinterpret_u64_u8(orc), 0);
 #else
     val |= ((val >> 1) | (val << 1)) & 0x7E7E7E7E7E7E7E7EULL;
     val |= ((val >> 2) | (val << 2)) & 0x3C3C3C3C3C3C3C3CULL;
