@@ -23,7 +23,7 @@ NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm);
 
 static forceinline void riscv_emulate(rvvm_hart_t *vm, const uint32_t instruction)
 {
-#ifdef USE_JIT
+#if defined(USE_JIT) && (defined(RVJIT_NATIVE_64BIT) || !defined(RV64))
     if (unlikely(vm->jit_compiling)) {
         // If we hit non-compilable instruction or cross page boundaries,
         // the block is finalized.
