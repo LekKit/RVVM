@@ -16,6 +16,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RVVM_PCI_VFIO_H
+#define RVVM_PCI_VFIO_H
+
 #include "pci-bus.h"
 
 PUBLIC bool pci_vfio_init_auto(rvvm_machine_t* machine, const char* pci_id);
+
+#endif
