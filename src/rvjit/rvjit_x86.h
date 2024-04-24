@@ -828,6 +828,11 @@ static inline void rvjit_x86_sb(rvjit_block_t* block, regid_t src, regid_t addr,
     if (x86_byte_reg_usable(src)) {
         rvjit_x86_lwdu_sbwd(block, X86_SB, src, addr, off, false);
     } else {
+        if (addr == src) {
+            addr = X86_EAX;
+        } else if (addr == X86_EAX) {
+            addr = src;
+        }
         rvjit_x86_xchg(block, X86_EAX, src);
         rvjit_x86_lwdu_sbwd(block, X86_SB, X86_EAX, addr, off, false);
         rvjit_x86_xchg(block, X86_EAX, src);
