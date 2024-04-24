@@ -54,6 +54,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define X64_R14 0xE
 #define X64_R15 0xF
 
+#define SSE_XMM0  0x0
+#define SSE_XMM1  0x1
+#define SSE_XMM2  0x2
+#define SSE_XMM3  0x3
+#define SSE_XMM4  0x4
+#define SSE_XMM5  0x5
+#define SSE_XMM6  0x6
+#define SSE_XMM7  0x7
+#define SSE_XMM8  0x8
+#define SSE_XMM9  0x9
+#define SSE_XMM10 0xA
+#define SSE_XMM11 0xB
+#define SSE_XMM12 0xC
+#define SSE_XMM13 0xD
+#define SSE_XMM14 0xE
+#define SSE_XMM15 0xF
+
 #ifdef RVJIT_ABI_SYSV
 #define VM_PTR_REG X64_RDI
 #elif RVJIT_ABI_WIN64
@@ -61,12 +78,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #elif RVJIT_ABI_FASTCALL
 #define VM_PTR_REG X86_ECX
 #endif
-
-// REX prefixes
-#define X64_REX_W     0x48  // Operands are 64-bit wide
-#define X64_REX_R     0x44  // Second (destination) register is >= R8
-#define X64_REX_X     0x42
-#define X64_REX_B     0x41  // First (source) register is >= R8
 
 static inline size_t rvjit_native_default_hregmask()
 {
@@ -112,6 +123,25 @@ static inline size_t rvjit_native_abireclaim_hregmask()
     return 0;
 #endif
 }
+
+static inline size_t rvjit_native_default_fpu_regmask()
+{
+#ifdef RVJIT_ABI_SYSV
+    return 0xFFFF; // All XMM registers are caller-saved
+#elif RVJIT_ABI_WIN64
+    return 0x1F;  // XMM0 - XMM5 are caller-saved
+#elif RVJIT_ABI_FASTCALL
+    return 0x1F;  // TODO
+#else
+    return 0;
+#endif
+}
+
+// REX prefixes
+#define X64_REX_W     0x48  // Operands are 64-bit wide
+#define X64_REX_R     0x44  // Second (destination) register is >= R8
+#define X64_REX_X     0x42
+#define X64_REX_B     0x41  // First (source) register is >= R8
 
 static inline bool x86_is_byte_imm(int32_t imm)
 {
@@ -1783,57 +1813,182 @@ static inline void rvjit64_native_remuw(rvjit_block_t* block, regid_t hrds, regi
 
 #ifdef RVJIT_NATIVE_FPU
 
-#define SSE2_MOVAPSD 0x28
-#define SSE2_FADD    0x58
+#define SSE2_MOVAPSD  0x28
+#define SSE2_UCOMISSD 0x2E
+#define SSE2_COMISSD  0x2F
+#define SSE2_ANDPS    0x54
+#define SSE2_ANDNPS   0x55
+#define SSE2_ORPS     0x56
+#define SSE2_XORPS    0x57
 
-static inline void rvjit_sse2_rex_prefix(rvjit_block_t* block, regid_t hrd, regid_t hrs)
+static inline void rvjit_sse2_scalar_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src, bool fpu_d)
 {
-    uint8_t rex = 0;
-    if (hrd >= X64_R8) rex |= X64_REX_R;
-    if (hrs >= X64_R8) rex |= X64_REX_B;
-    if (rex) rvjit_put_code(block, &rex, 1); // REX operand override prefix
+    if (fpu_d) rvjit_put_code(block, "\x66", 1); // SSE2 double-precision prefix
+    rvjit_x86_0f_2reg_op(block, opcode, dst, src, false);
 }
 
-static inline void rvjit_sse2_2reg_op_raw(rvjit_block_t* block, uint8_t opcode, regid_t hrd, regid_t hrs)
+#define SSE2_PCMPEQB 0x74
+#define SSE2_PAND    0xDB
+#define SSE2_PANDN   0xDF
+#define SSE2_POR     0xEB
+#define SSE2_PXOR    0xEF
+
+static inline void rvjit_sse2_simd_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src)
 {
-    uint8_t code[3] = {0x0F, 0x00, 0xC0};
-    code[1] = opcode;
-    code[2] |= (hrs & 0x7) | ((hrd & 0x7) << 3);
-    rvjit_put_code(block, code, 3);
+    rvjit_sse2_scalar_2reg_op(block, opcode, dst, src, true);
 }
 
-static inline void rvjit_sse2_movapsd(rvjit_block_t* block, regid_t dest, regid_t src, bool fpu_d)
+#define SSE2_MOV_XMM_GPR 0x6E
+#define SSE2_MOV_GPR_XMM 0x7E
+
+// Bitcast integer register to xmm register
+static inline void rvjit_sse2_mov_xmm_gpr(rvjit_block_t* block, regid_t dst, regid_t src, bool bits_64)
 {
-    if (fpu_d) rvjit_put_code(block, "\x66", 1); // SSE2 movapsd prefix
-    rvjit_sse2_rex_prefix(block, dest, src);
-    rvjit_sse2_2reg_op_raw(block, SSE2_MOVAPSD, dest, src);
+    rvjit_put_code(block, "\x66", 1); // XMM prefix
+    rvjit_x86_0f_2reg_op(block, SSE2_MOV_XMM_GPR, dst, src, bits_64);
 }
 
-static inline void rvjit_sse2_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dest, regid_t src, bool fpu_d)
+// Bitcast xmm register to integer register
+static inline void rvjit_sse2_mov_gpr_xmm(rvjit_block_t* block, regid_t dst, regid_t src, bool bits_64)
+{
+    rvjit_put_code(block, "\x66", 1); // XMM prefix
+    rvjit_x86_0f_2reg_op(block, SSE2_MOV_GPR_XMM, dst, src, bits_64);
+}
+
+static inline void rvjit_sse2_movapsd(rvjit_block_t* block, regid_t dst, regid_t src, bool fpu_d)
+{
+    rvjit_sse2_scalar_2reg_op(block, SSE2_MOVAPSD, dst, src, fpu_d);
+}
+
+#define SSE2_FP_CVTSI2S 0x2A
+#define SSE2_FP_CVTS2SI 0x2C
+
+#define SSE2_FP_ADD     0x58
+#define SSE2_FP_SUB     0x5C
+#define SSE2_FP_MUL     0x59
+#define SSE2_FP_DIV     0x5E
+#define SSE2_FP_SQRT    0x51
+
+static inline void rvjit_sse2_fp_2reg_op(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t src, bool fpu_d)
 {
     if (fpu_d) {
         rvjit_put_code(block, "\xF2", 1); // SSE2 Double-precision prefix
     } else {
         rvjit_put_code(block, "\xF3", 1); // SSE2 Single-precision prefix
     }
-    rvjit_sse2_rex_prefix(block, dest, src);
-    rvjit_sse2_2reg_op_raw(block, opcode, dest, src);
+    rvjit_x86_0f_2reg_op(block, opcode, dst, src, false);
 }
 
-static inline void rvjit_sse2_3reg_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, hrs2, bool fpu_d)
+static inline void rvjit_sse2_fp_3reg_op(rvjit_block_t* block, uint8_t opcode, regid_t hrds, regid_t hrs1, regid_t hrs2, bool fpu_d)
 {
     if (hrds == hrs1) {
-        rvjit_sse2_2reg_op(block, opcode, hrds, hrs2, fpu_d);
+        rvjit_sse2_fp_2reg_op(block, opcode, hrds, hrs2, fpu_d);
     } else if (hrds == hrs2) {
-        // TODO: handle non-reversible operands
-        rvjit_sse2_2reg_op(block, opcode, hrds, hrs1, fpu_d);
+        if (opcode == SSE2_FP_ADD || opcode == SSE2_FP_MUL) {
+            // Reversible operands
+            rvjit_sse2_fp_2reg_op(block, opcode, hrds, hrs1, fpu_d);
+        } else {
+            // TODO Non-reversible operands, need regalloc
+            rvvm_fatal("Unimplemented non-reversible SSE2 FP 3-reg operands");
+        }
     } else {
         rvjit_sse2_movapsd(block, hrds, hrs1, fpu_d);
-        rvjit_sse2_2reg_op(block, opcode, hrds, hrs2, fpu_d);
+        rvjit_sse2_fp_2reg_op(block, opcode, hrds, hrs2, fpu_d);
     }
 }
 
-static inline void rvjit_native_fmv_s()
+#define SSE2_FP_LOAD  0x10
+#define SSE2_FP_STORE 0x11
+
+static inline void rvjit_sse2_fp_loadstore(rvjit_block_t* block, uint8_t opcode, regid_t dst, regid_t addr, int32_t off, bool fpu_d)
+{
+    uint8_t code[3] = { 0xF3, 0x0f, opcode, };
+    if (fpu_d) code[0] = 0xF2;
+    rvjit_put_code(block, code, 3);
+    rvjit_x86_memory_ref(block, dst, addr, off);
+}
+
+// FPU intrinsics
+
+static inline void rvjit_native_fadd_s(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_ADD, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit_native_fsub_s(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_SUB, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit_native_fmul_s(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_MUL, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit_native_fdiv_s(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_DIV, hrds, hrs1, hrs2, false);
+}
+
+static inline void rvjit_native_fsqrt_s(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_fp_2reg_op(block, SSE2_FP_SQRT, hrds, hrs1, false);
+}
+
+// TODO fsgnj, fmin/fmax, fcvt, fcmp, fma
+
+static inline void rvjit_native_fmv_w_x(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_mov_xmm_gpr(block, hrds, hrs1, false);
+}
+
+static inline void rvjit_native_fmv_x_w(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_mov_gpr_xmm(block, hrds, hrs1, false);
+}
+
+
+
+static inline void rvjit_native_fadd_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_ADD, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit_native_fsub_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_SUB, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit_native_fmul_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_MUL, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit_native_fdiv_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
+{
+    rvjit_sse2_fp_3reg_op(block, SSE2_FP_DIV, hrds, hrs1, hrs2, true);
+}
+
+static inline void rvjit_native_fsqrt_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_fp_2reg_op(block, SSE2_FP_SQRT, hrds, hrs1, true);
+}
+
+// TODO fsgnj, fmin/fmax, fcvt, fcmp, fma
+
+#ifdef RVJIT_NATIVE_64BIT
+
+static inline void rvjit_native_fmv_d_x(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_mov_xmm_gpr(block, hrds, hrs1, true);
+}
+
+static inline void rvjit_native_fmv_x_d(rvjit_block_t* block, regid_t hrds, regid_t hrs1)
+{
+    rvjit_sse2_mov_gpr_xmm(block, hrds, hrs1, true);
+}
+
+#endif
 
 #endif
 
