@@ -26,8 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "vector.h"
 #include <string.h>
 
-#define REG_ILL 0xFF // Register is not allocated
-
 // RISC-V register allocator details
 #define RVJIT_REGISTERS 32
 #define RVJIT_REGISTER_ZERO 0
@@ -89,8 +87,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 typedef void (* RVJIT_CALL rvjit_func_t)(void* vm);
-typedef uint8_t regflags_t;
-typedef size_t  branch_t;
+typedef size_t   branch_t;
+typedef uint8_t  regflags_t;
+typedef uint32_t regmask_t;
 
 #define BRANCH_NEW ((branch_t)-1)
 #define BRANCH_ENTRY  false
@@ -99,6 +98,8 @@ typedef size_t  branch_t;
 #define LINKAGE_NONE 0
 #define LINKAGE_TAIL 1
 #define LINKAGE_JMP  2
+
+#define REG_ILL 0xFF // Register is not allocated
 
 typedef struct {
     uint8_t* data;
@@ -114,8 +115,9 @@ typedef struct {
     size_t    dirty_mask;
 } rvjit_heap_t;
 
+
 typedef struct {
-    size_t last_used;   // Last usage of register for LRU reclaim
+    uint32_t last_used; // Last usage of register for LRU reclaim
     int32_t auipc_off;
     regid_t hreg;       // Claimed host register, REG_ILL if not mapped
     regflags_t flags;   // Register allocation details
@@ -123,16 +125,27 @@ typedef struct {
 
 typedef struct {
     rvjit_heap_t heap;
-    vector_t(struct {phys_addr_t dest; size_t ptr;}) links;
+
     uint8_t* code;
     size_t size;
     size_t space;
-    size_t hreg_mask;        // Bitmask of available non-clobbered host registers
-    size_t abireclaim_mask;  // Bitmask of reclaimed abi-clobbered host registers to restore
+
+    // Block exit paths
+    vector_t(struct {phys_addr_t dest; size_t ptr;}) links;
+
+    regmask_t hreg_mask;       // Bitmask of available non-clobbered host registers
+    regmask_t abireclaim_mask; // Bitmask of reclaimed abi-clobbered host registers to restore
     rvjit_reginfo_t regs[RVJIT_REGISTERS];
+
+#ifdef RVJIT_NATIVE_FPU
+    regmask_t fpu_reg_mask;
+    rvjit_reginfo_t fpu_regs[RVJIT_REGISTERS];
+#endif
+
     virt_addr_t virt_pc;
     phys_addr_t phys_pc;
     int32_t pc_off;
+
     bool rv64;
     bool native_ptrs;
     uint8_t linkage;
@@ -184,18 +197,23 @@ void rvjit_mark_dirty_mem(rvjit_block_t* block, phys_addr_t addr, size_t size);
 // Cleans up internal heap & lookup cache entirely
 void rvjit_flush_cache(rvjit_block_t* block);
 
-// Internal APIs
+/*
+ * Internal codegen APIs
+ */
 
-void rvjit_emit_init(rvjit_block_t* block);
-void rvjit_emit_end(rvjit_block_t* block, uint8_t linkage);
-
-regid_t rvjit_reclaim_hreg(rvjit_block_t* block);
-
-static inline size_t rvjit_hreg_mask(regid_t hreg)
+// Register bitmask
+static inline regmask_t rvjit_hreg_mask(regid_t hreg)
 {
     return (1ULL << hreg);
 }
 
+// Emit RVJIT prologue, set up codegen state
+void rvjit_emit_init(rvjit_block_t* block);
+
+// Emit RVJIT epilogue
+void rvjit_emit_end(rvjit_block_t* block, uint8_t linkage);
+
+// Emit instruction bytes into the block
 static inline void rvjit_put_code(rvjit_block_t* block, const void* inst, size_t size)
 {
     if (unlikely(block->space < block->size + size)) {
@@ -206,32 +224,26 @@ static inline void rvjit_put_code(rvjit_block_t* block, const void* inst, size_t
     block->size += size;
 }
 
+// Claims any free hardware register, or reclaims mapped register preserving it's value in VM
+regid_t rvjit_claim_hreg(rvjit_block_t* block);
+
 // Frees explicitly claimed hardware register
 static inline void rvjit_free_hreg(rvjit_block_t* block, regid_t hreg)
 {
     block->hreg_mask |= rvjit_hreg_mask(hreg);
 }
 
-static inline regid_t rvjit_try_claim_hreg(rvjit_block_t* block)
-{
-    for (regid_t i=0; i<RVJIT_REGISTERS; ++i) {
-        if (block->hreg_mask & rvjit_hreg_mask(i)) {
-            block->hreg_mask &= ~rvjit_hreg_mask(i);
-            return i;
-        }
-    }
-    return REG_ILL;
-}
+#ifdef RVJIT_NATIVE_FPU
 
 // Claims any free hardware register, or reclaims mapped register preserving it's value in VM
-static inline regid_t rvjit_claim_hreg(rvjit_block_t* block)
+regid_t rvjit_claim_fpu_reg(rvjit_block_t* block);
+
+// Frees explicitly claimed hardware register
+static inline void rvjit_free_fpu_reg(rvjit_block_t* block, regid_t hreg)
 {
-    regid_t hreg = rvjit_try_claim_hreg(block);
-    // No free host registers
-    if (hreg == REG_ILL) {
-        hreg = rvjit_reclaim_hreg(block);
-    }
-    return hreg;
+    block->fpu_reg_mask |= rvjit_hreg_mask(hreg);
 }
+
+#endif
 
 #endif

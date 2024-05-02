@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvjit_emit.h"
 #include "rvvm.h"
+#include "bit_ops.h"
 
 #ifdef RVJIT_X86
 #include "rvjit_x86.h"
@@ -105,7 +106,7 @@ static void rvjit_free_reg(rvjit_block_t* block, regid_t reg)
     }
 }
 
-regid_t rvjit_reclaim_hreg(rvjit_block_t* block)
+static regid_t rvjit_reclaim_hreg(rvjit_block_t* block)
 {
     // If we have any registers clobbered by ABI we can reuse them
     if (block->abireclaim_mask != rvjit_native_abireclaim_hregmask()) {
@@ -133,6 +134,26 @@ regid_t rvjit_reclaim_hreg(rvjit_block_t* block)
     hreg = block->regs[greg].hreg;
     rvjit_free_reg(block, greg);
     block->hreg_mask &= ~rvjit_hreg_mask(hreg);
+    return hreg;
+}
+
+static inline regid_t rvjit_try_claim_hreg(rvjit_block_t* block)
+{
+    if (block->hreg_mask) {
+        regid_t reg = bit_clz32(block->hreg_mask) ^ 31;
+        block->hreg_mask &= ~rvjit_hreg_mask(reg);
+        return reg;
+    }
+    return REG_ILL;
+}
+
+regid_t rvjit_claim_hreg(rvjit_block_t* block)
+{
+    regid_t hreg = rvjit_try_claim_hreg(block);
+    // No free host registers
+    if (hreg == REG_ILL) {
+        hreg = rvjit_reclaim_hreg(block);
+    }
     return hreg;
 }
 
