@@ -216,11 +216,11 @@ static void net_close_handle(net_handle_t fd)
 static bool net_handle_set_blocking(net_handle_t fd, bool block)
 {
 #ifdef _WIN32
-    u_long blocking = block ? 0 : 1;
-    return ioctlsocket(fd, FIONBIO, &blocking) == 0;
+    u_long nb = block ? 0 : 1;
+    return ioctlsocket(fd, FIONBIO, &nb) == 0;
 #elif defined(FIONBIO)
     // Use a single syscall instead of fcntl implementation
-    int nb = block;
+    int nb = block ? 0 : 1;
     return ioctl(fd, FIONBIO, &nb) == 0;
 #elif defined(F_SETFL) && defined(O_NONBLOCK)
     int flags = fcntl(fd, F_GETFL, 0);
