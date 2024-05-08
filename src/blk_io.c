@@ -144,7 +144,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
         return NULL;
     }
 
-    rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    rvfile_t* file = safe_new_obj(rvfile_t);
     file->size = lseek(fd, 0, SEEK_END);
     file->pos = 0;
     file->fd = fd;
@@ -482,7 +482,7 @@ bool rvfsync_async(rvfile_t* file)
 
 bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata)
 {
-    rvaio_op_t* task_iolist = safe_calloc(sizeof(rvaio_op_t), count);
+    rvaio_op_t* task_iolist = safe_new_arr(rvaio_op_t, count);
     memcpy(task_iolist, iolist, sizeof(rvaio_op_t) * count);
     void* args[4] = {task_iolist, (void*)count, (void*)callback, userdata};
     thread_create_task_va(async_io_task, args, 4);
