@@ -334,7 +334,7 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto_ps2(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20001000, ALTPS2_MMIO_SIZE);
-    hid_keyboard_t* kb = safe_calloc(sizeof(hid_keyboard_t), 1);
+    hid_keyboard_t* kb = safe_new_obj(hid_keyboard_t);
 
     kb->chardev.read = ps2_keyboard_read;
     kb->chardev.write = ps2_keyboard_write;
