@@ -118,7 +118,7 @@ static rvvm_mmio_type_t win_dev_type = {
 
 bool fb_window_init_auto(rvvm_machine_t* machine, uint32_t width, uint32_t height)
 {
-    fb_window_t* window = safe_calloc(sizeof(fb_window_t), 1);
+    fb_window_t* window = safe_new_obj(fb_window_t);
     window->fb.width = width;
     window->fb.height = height;
     window->fb.format = RGB_FMT_A8R8G8B8;
