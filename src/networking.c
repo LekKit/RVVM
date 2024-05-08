@@ -360,7 +360,7 @@ static bool net_connect_handle(net_handle_t fd, const net_addr_t* addr)
 static net_sock_t* net_wrap_handle(net_handle_t fd)
 {
     if (fd == NET_HANDLE_INVALID) return NULL;
-    net_sock_t* sock = safe_calloc(sizeof(net_sock_t), 1);
+    net_sock_t* sock = safe_new_obj(net_sock_t);
     sock->fd = fd;
     return sock;
 }
@@ -704,8 +704,7 @@ void net_sock_close(net_sock_t* sock)
 net_poll_t* net_poll_create()
 {
     net_init();
-    net_poll_t* poll = calloc(sizeof(net_poll_t), 1);
-    if (poll == NULL) return NULL;
+    net_poll_t* poll = safe_new_obj(net_poll_t);
 #if defined(EPOLL_NET_IMPL)
     poll->fd = epoll_create(16);
     if (poll->fd < 0) {
