@@ -274,7 +274,7 @@ PUBLIC hid_mouse_t* hid_mouse_init_auto_ps2(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x20000000, ALTPS2_MMIO_SIZE);
-    hid_mouse_t* mice = safe_calloc(sizeof(hid_mouse_t), 1);
+    hid_mouse_t* mice = safe_new_obj(hid_mouse_t);
 
     mice->chardev.read = ps2_mouse_read;
     mice->chardev.write = ps2_mouse_write;
