@@ -513,7 +513,7 @@ static rvvm_mmio_type_t ethoc_dev_type = {
 PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
                                      rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
-    struct ethoc_dev* eth = (struct ethoc_dev*)safe_calloc(sizeof(struct ethoc_dev), 1);
+    struct ethoc_dev* eth = safe_new_obj(struct ethoc_dev);
     tap_net_dev_t nic = {
         .net_dev = eth,
         .feed_rx = ethoc_feed_rx,
