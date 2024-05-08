@@ -369,7 +369,7 @@ bool fb_window_create(fb_window_t* win)
         return false;
     }
 
-    win->data = safe_calloc(sizeof(win_data_t), 1);
+    win->data = safe_new_obj(win_data_t);
     win->data->display = dsp;
     win->fb.format = x11_get_rgb_format(dsp);
 
