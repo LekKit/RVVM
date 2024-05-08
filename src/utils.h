@@ -59,8 +59,8 @@ SAFE_CALLOC void* safe_calloc(size_t size, size_t n);
 SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 
 // Safe object allocation with type checking & zeroing
-#define safe_new_obj(type) ((type*)safe_calloc(sizeof(type), 1))
-#define safe_new_arr(type, size) ((type*)safe_calloc(sizeof(type), size))
+#define safe_new_obj(type) ((type*)safe_calloc(1, sizeof(type)))
+#define safe_new_arr(type, size) ((type*)safe_calloc(size, sizeof(type)))
 
 #define default_free(ptr) free(ptr)
 #define safe_free(ptr) \
