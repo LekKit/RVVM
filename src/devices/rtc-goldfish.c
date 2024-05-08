@@ -109,7 +109,7 @@ static rvvm_mmio_type_t rtc_goldfish_dev_type = {
 
 PUBLIC rvvm_mmio_handle_t rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
-    struct rtc_goldfish_data* ptr = safe_calloc(sizeof(struct rtc_goldfish_data), 1);
+    struct rtc_goldfish_data* ptr = safe_new_obj(struct rtc_goldfish_data);
     ptr->plic = plic;
     ptr->irq = irq;
 
