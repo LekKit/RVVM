@@ -287,11 +287,11 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     plic_ctx_t* plic = safe_new_obj(plic_ctx_t);
     plic->machine = machine;
-    plic->enable = safe_calloc(sizeof(uint32_t*), plic_ctx_count(plic));
+    plic->enable = safe_new_arr(uint32_t*, plic_ctx_count(plic));
     for (size_t ctx=0; ctx<plic_ctx_count(plic); ++ctx){
-        plic->enable[ctx] = safe_calloc(sizeof(uint32_t), PLIC_SRC_REG_COUNT);
+        plic->enable[ctx] = safe_new_arr(uint32_t, PLIC_SRC_REG_COUNT);
     }
-    plic->threshold = safe_calloc(sizeof(uint32_t), plic_ctx_count(plic));
+    plic->threshold = safe_new_arr(uint32_t, plic_ctx_count(plic));
 
     rvvm_mmio_dev_t plic_mmio = {
         .addr = base_addr,
@@ -311,7 +311,7 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
         return plic;
     }
 
-    uint32_t* irq_ext = safe_calloc(sizeof(uint32_t), vector_size(machine->harts) * 4);
+    uint32_t* irq_ext = safe_new_arr(uint32_t, vector_size(machine->harts) * 4);
     vector_foreach(machine->harts, i) {
         struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
         struct fdt_node* cpu_irq = fdt_node_find(cpu, "interrupt-controller");
