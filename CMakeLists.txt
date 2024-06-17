@@ -23,6 +23,7 @@ option(RVVM_USE_SPINLOCK_DEBUG "Use spinlock debugging" ON)
 option(RVVM_USE_PRECISE_FS "Use precise floating-point status tracking" OFF)
 option(RVVM_USE_LIB "Build shared librvvm library" ON)
 option(RVVM_USE_JNI "Enable JNI bindings in librvvm (Very tiny size impact)" ON)
+option(RVVM_USE_ISOLATION "Enable seccomp/pledge isolation measures" ON)
 option(BUILD_LIBRETRO "Build a libretro core" OFF)
 option(LIBRETRO_STATIC "Statically link the libretro core" OFF)
 
@@ -257,6 +258,10 @@ endif()
 
 if (RVVM_USE_LIB AND RVVM_USE_JNI)
 	list(APPEND RVVM_SRC "${RVVM_SRC_DIR}/bindings/jni/rvvm_jni.c")
+endif()
+
+if (RVVM_USE_ISOLATION)
+	target_compile_definitions(rvvm_common INTERFACE USE_ISOLATION)
 endif()
 
 if (RVVM_USE_FDT)
