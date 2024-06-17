@@ -503,6 +503,7 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 
 void rvvm_restrict_this_thread(void)
 {
+    drop_root_user();
     drop_thread_caps();
 #ifdef ISOLATION_SECCOMP_IMPL
     seccomp_setup_syscall_filter(false);
