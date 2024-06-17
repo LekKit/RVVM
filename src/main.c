@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "rvvmlib.h"
+#include "rvvm_isolation.h"
 #include "utils.h"
 
 #include "devices/clint.h"
@@ -266,7 +267,14 @@ static int rvvm_cli_main(int argc, const char** argv)
     if (rvvm_cli_configure(machine, argc, argv, bootrom, tap)) {
         rvvm_enable_builtin_eventloop(false);
         rvvm_start_machine(machine);
-        rvvm_run_eventloop(); // Returns on machine shutdown
+
+        if (!rvvm_has_arg("noisolation")) {
+            // Preparations are done, isolate the process as much as possible
+            rvvm_restrict_process();
+        }
+
+        // Returns on machine shutdown
+        rvvm_run_eventloop();
     } else {
         rvvm_error("Failed to initialize VM");
     }
