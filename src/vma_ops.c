@@ -350,11 +350,11 @@ bool vma_clean(void* addr, size_t size, bool lazy)
         return true;
     }
 #elif defined(VMA_MMAP_IMPL)
-#ifdef MADV_FREE
-    if (lazy) return madvise(addr, size, MADV_FREE) == 0;
-#endif
 #if defined(__linux__) && defined(MADV_DONTNEED)
     return madvise(addr, size, MADV_DONTNEED) == 0;
+#endif
+#ifdef MADV_FREE
+    return madvise(addr, size, MADV_FREE) == 0 && lazy;
 #endif
 #endif
     return addr && size && lazy;
