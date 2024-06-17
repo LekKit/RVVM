@@ -87,10 +87,14 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
     }
 
     if (block->heap.data == NULL) {
-        if (!vma_multi_mmap((void**)&block->heap.data, (void**)&block->heap.code, size)) {
+        void* rw = NULL;
+        void* exec = NULL;
+        if (!vma_multi_mmap(&rw, &exec, size)) {
             rvvm_warn("Failed to allocate W^X RVJIT heap!");
             return false;
         }
+        block->heap.data = rw;
+        block->heap.code = exec;
     }
 
     rvjit_flush_icache(block->heap.code, block->heap.size);
@@ -270,7 +274,7 @@ rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, phys_addr_t phys_pc)
 
 void rvjit_flush_cache(rvjit_block_t* block)
 {
-    if (block->heap.code == block->heap.data && block->heap.curr > 0x10000) {
+    if (block->heap.curr > 0x10000) {
         // Deallocate the physical memory used for RWX JIT cache
         // This reduces average memory usage since the cache is never full
         vma_clean(block->heap.data, block->heap.size, true);
