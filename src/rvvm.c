@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "rvvm.h"
+#include "rvvm_isolation.h"
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
 #include "riscv_cpu.h"
@@ -215,13 +216,18 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
     return true;
 }
 
-static void* rvvm_eventloop(void* arg)
+static void* rvvm_eventloop(void* manual)
 {
-    // The eventloop runs while its enabled/ran manually,
-    // and there are any running machines
+    if (!manual && rvvm_getarg_int("noisolation") < 1) {
+        rvvm_restrict_this_thread();
+    }
+    /*
+     * The eventloop runs in a separate thread if it's enabled,
+     * and returns on any machine shutdown if ran manually.
+     */
     while (true) {
         spin_lock_slow(&global_lock);
-        if (vector_size(global_machines) == 0 || builtin_eventloop_enabled == !!arg) {
+        if (vector_size(global_machines) == 0 || builtin_eventloop_enabled == !!manual) {
             builtin_eventloop_running = false;
             spin_unlock(&global_lock);
             break;
@@ -268,7 +274,7 @@ static void* rvvm_eventloop(void* arg)
                     rvvm_info("Machine %p shutting down", machine);
                     atomic_store_uint32(&machine->running, false);
                     vector_erase(global_machines, m);
-                    if (arg) {
+                    if (manual) {
                         spin_unlock(&global_lock);
                         return NULL;
                     }
