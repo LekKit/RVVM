@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "rvvm_isolation.h"
 #include "riscv_hart.h"
 #include "riscv_mmu.h"
 #include "riscv_csr.h"
@@ -270,6 +271,9 @@ void riscv_restart_dispatch(rvvm_hart_t* vm)
 
 static void* riscv_hart_run_wrap(void* ptr)
 {
+    if (rvvm_getarg_int("noisolation") < 1) {
+        rvvm_restrict_this_thread();
+    }
     riscv_hart_run((rvvm_hart_t*)ptr);
     return NULL;
 }
