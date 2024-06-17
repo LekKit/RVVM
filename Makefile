@@ -300,6 +300,7 @@ USE_PCI ?= 1
 USE_VFIO ?= 1
 USE_SPINLOCK_DEBUG ?= 1
 USE_JNI ?= 1
+USE_ISOLATION ?= 1
 
 ifeq ($(USE_RV64),1)
 override CFLAGS += -DUSE_RV64
@@ -468,6 +469,10 @@ endif
 
 ifeq ($(USE_SPINLOCK_DEBUG),1)
 override CFLAGS += -DUSE_SPINLOCK_DEBUG
+endif
+
+ifeq ($(USE_ISOLATION),1)
+override CFLAGS += -DUSE_ISOLATION
 endif
 
 # Do not pass lib-related flags for dev/cli/test builds (Faster)
