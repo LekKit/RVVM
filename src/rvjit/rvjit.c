@@ -78,9 +78,12 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
         rvvm_info("RWX disabled, allocating W^X multi-mmap RVJIT heap");
     } else {
         block->heap.data = vma_alloc(NULL, size, VMA_RWX);
+        block->heap.code = block->heap.data;
 
         // Possible on Linux PaX (hardened) or OpenBSD
-        if (block->heap.data == NULL) rvvm_info("Failed to allocate RWX RVJIT heap, falling back to W^X multi-mmap");
+        if (block->heap.data == NULL) {
+            rvvm_info("Failed to allocate RWX RVJIT heap, falling back to W^X multi-mmap");
+        }
     }
 
     if (block->heap.data == NULL) {
@@ -88,10 +91,9 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
             rvvm_warn("Failed to allocate W^X RVJIT heap!");
             return false;
         }
-        rvjit_flush_icache(block->heap.code, block->heap.size);
     }
 
-    rvjit_flush_icache(block->heap.data, block->heap.size);
+    rvjit_flush_icache(block->heap.code, block->heap.size);
 
     block->space = 1024;
     block->code = safe_malloc(block->space);
@@ -132,7 +134,7 @@ static void rvjit_linker_cleanup(rvjit_block_t* block)
 void rvjit_ctx_free(rvjit_block_t* block)
 {
     vma_free(block->heap.data, block->heap.size);
-    if (block->heap.code) {
+    if (block->heap.code != block->heap.data) {
         vma_free((void*)block->heap.code, block->heap.size);
     }
     rvjit_linker_cleanup(block);
@@ -188,13 +190,8 @@ void rvjit_block_init(rvjit_block_t* block)
 
 rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 {
-    uint8_t* dest = block->heap.data + block->heap.curr;
-    const uint8_t* code;
-    if (block->heap.code == NULL) {
-        code = dest;
-    } else {
-        code = block->heap.code + block->heap.curr;
-    }
+    void* dest = block->heap.data + block->heap.curr;
+    const void* code = block->heap.code + block->heap.curr;
 
     rvjit_emit_end(block, block->linkage);
 
@@ -273,14 +270,12 @@ rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, phys_addr_t phys_pc)
 
 void rvjit_flush_cache(rvjit_block_t* block)
 {
-    if (block->heap.code) {
-        rvjit_flush_icache(block->heap.code, block->heap.curr);
-    } else if (block->heap.curr > 0x10000) {
+    if (block->heap.code == block->heap.data && block->heap.curr > 0x10000) {
         // Deallocate the physical memory used for RWX JIT cache
         // This reduces average memory usage since the cache is never full
         vma_clean(block->heap.data, block->heap.size, true);
     }
-    rvjit_flush_icache(block->heap.data, block->heap.curr);
+    rvjit_flush_icache(block->heap.code, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
     block->heap.curr = 0;
