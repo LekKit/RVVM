@@ -112,7 +112,7 @@ typedef struct {
 typedef struct blkdev_t blkdev_t;
 
 struct blkdev_t {
-    blkdev_type_t* type;
+    const blkdev_type_t* type;
     void* data;
     uint64_t size;
     uint64_t pos;
