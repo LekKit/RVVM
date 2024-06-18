@@ -62,7 +62,8 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size);
 #define safe_new_obj(type) ((type*)safe_calloc(1, sizeof(type)))
 #define safe_new_arr(type, size) ((type*)safe_calloc(size, sizeof(type)))
 
-#define default_free(ptr) free(ptr)
+#define default_free(ptr) (free)(ptr)
+
 #define safe_free(ptr) \
 do { \
     default_free(ptr); \
