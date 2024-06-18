@@ -19,7 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define _LARGEFILE64_SOURCE
 
 // Needed for pread()/pwrite(), syscall() when not passing -std=gnu..
-#define _XOPEN_SOURCE 500
 #define _GNU_SOURCE
 #define _BSD_SOURCE
 #define _DEFAULT_SOURCE
@@ -46,8 +45,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define O_CLOEXEC 0
 #endif
 
-#ifdef __linux__
-#include <sys/syscall.h>
+#ifdef __FreeBSD__
+#include <sys/syscall.h> // For SYS_fspacectl()
 #endif
 
 static bool try_lock_fd(int fd)
@@ -67,8 +66,8 @@ static bool try_lock_fd(int fd)
 #define DEVIOCTL_SET_SPARSE    0x000900c4
 #define DEVIOCTL_SET_ZERO_DATA 0x000980c8
 typedef struct {
-  LARGE_INTEGER FileOffset;
-  LARGE_INTEGER BeyondFinalZero;
+    LARGE_INTEGER FileOffset;
+    LARGE_INTEGER BeyondFinalZero;
 } SET_ZERO_DATA_INFO;
 
 #else
@@ -348,12 +347,21 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
 bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 {
     if (!file) return false;
-#if defined(POSIX_FILE_IMPL) && defined(__linux__) && defined(__NR_fallocate)
-    // FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE
-    return syscall(__NR_fallocate, file->fd, 0x3, offset, count) == 0;
+#if defined(POSIX_FILE_IMPL) && defined(__linux__) && defined(FALLOC_FL_PUNCH_HOLE) && defined(FALLOC_FL_KEEP_SIZE)
+    return fallocate(file->fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, count) == 0;
+#elif defined(POSIX_FILE_IMPL) && defined(__FreeBSD__) && defined(SYS_fspacectl)
+    struct {
+        off_t r_offset;
+        off_t r_len;
+    } rmsr = {
+        .r_offset = offset,
+        .r_len = count,
+    };
+    // Use fspacectl(SPACECTL_DEALLOC) added in FreeBSD 14
+    return syscall(SYS_fspacectl, file->fd, 1, &rmsr, 0, NULL) == 0;
 #elif defined(WIN32_FILE_IMPL)
-    SET_ZERO_DATA_INFO fz;
-    DWORD tmp;
+    SET_ZERO_DATA_INFO fz = {0};
+    DWORD tmp = 0;
     fz.FileOffset.QuadPart = offset;
     fz.BeyondFinalZero.QuadPart = offset + count;
     return DeviceIoControl(file->handle, DEVIOCTL_SET_ZERO_DATA, &fz, sizeof(fz), NULL, 0 , &tmp, NULL);
@@ -495,7 +503,7 @@ bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callba
 
 // Raw block device implementation
 // Be careful with function prototypes
-static blkdev_type_t blkdev_type_raw = {
+static const blkdev_type_t blkdev_type_raw = {
     .name = "raw",
     .close = (void*)rvclose,
     .read = (void*)rvread,
@@ -504,29 +512,40 @@ static blkdev_type_t blkdev_type_raw = {
     .sync = (void*)rvflush,
 };
 
-static bool blk_init_raw(blkdev_t* dev, rvfile_t* file)
+static blkdev_t* blk_open_raw(const char* filename, uint8_t filemode)
 {
+    rvfile_t* file = rvopen(filename, filemode);
+    if (!file) return NULL;
+    blkdev_t* dev = safe_new_obj(blkdev_t);
     dev->type = &blkdev_type_raw;
     dev->size = rvfilesize(file);
     dev->data = file;
-    return true;
+    return dev;
 }
 
-bool blk_init_dedup(blkdev_t* dev, rvfile_t* file);
+static bool check_file_ext(const char* filename, const char* ext)
+{
+    const char* r = NULL;
+    while (true) {
+        const char* tmp = rvvm_strfind(filename, ext);
+        if (tmp == NULL) break;
+        r = tmp;
+        filename = r + 1;
+    }
+    return r && rvvm_strcmp(r, ext);
+}
 
 blkdev_t* blk_open(const char* filename, uint8_t opts)
 {
     uint8_t filemode = (opts & BLKDEV_RW) ? (RVFILE_RW | RVFILE_EXCL) : 0;
-    rvfile_t* file = rvopen(filename, filemode);
-    if (!file) return NULL;
-
-    blkdev_t* dev = safe_new_obj(blkdev_t);
-#ifdef USE_BLK_DEDUP
-    if (blk_init_dedup(dev, file)) return dev;
-#endif
-    blk_init_raw(dev, file);
-
-    return dev;
+    if (check_file_ext(filename, ".bdi")) {
+        return NULL;
+    }
+    if (check_file_ext(filename, ".qcow2")) {
+        rvvm_error("QCOW2 images aren't supported yet");
+        return NULL;
+    }
+    return blk_open_raw(filename, filemode);
 }
 
 void blk_close(blkdev_t* dev)
