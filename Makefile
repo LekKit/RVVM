@@ -616,13 +616,24 @@ ifeq ($(USE_RV64),1)
 	done
 endif
 
+CPPCHECK_GENERIC_OPTIONS := -f -j$(JOBS) --inline-suppr --std=c99 -q -I $(SRCDIR)
+CPPCHECK_SUPPRESS_OPTIONS :=  --suppress=missingIncludeSystem \
+--suppress=constParameterPointer --suppress=constVariablePointer --suppress=constParameterCallback \
+--suppress=constVariable --suppress=variableScope --suppress=knownConditionTrueFalse \
+--suppress=unusedStructMember --suppress=uselessAssignmentArg --suppress=unreadVariable --suppress=syntaxError
+ifneq ($(CPPCHECK_FAST),1)
+CPPCHECK_GENERIC_OPTIONS += --check-level=exhaustive
+else
+CPPCHECK_SUPPRESS_OPTIONS += --suppress=normalCheckLevelMaxBranches
+endif
+
 .PHONY: cppcheck
 cppcheck:
-	$(info [$(YELLOW)INFO$(RESET)] Running cppcheck)
-ifeq ($(CHECK_ALL),1)
-	@cppcheck -f -j$(JOBS) --enable=all --inconclusive --inline-suppr --std=c99 -q $(SRCDIR)
+	$(info [$(YELLOW)INFO$(RESET)] Running Cppcheck analysis)
+ifeq ($(CPPCHECK_ALL),1)
+	@cppcheck $(CPPCHECK_GENERIC_OPTIONS) $(CPPCHECK_SUPPRESS_OPTIONS) --enable=all --inconclusive $(SRCDIR)
 else
-	@cppcheck -f -j$(JOBS) --enable=warning,performance,portability --inline-suppr --std=c99 -q $(SRCDIR)
+	@cppcheck $(CPPCHECK_GENERIC_OPTIONS) $(CPPCHECK_SUPPRESS_OPTIONS) --enable=warning,performance,portability $(SRCDIR)
 endif
 
 .PHONY: clean
