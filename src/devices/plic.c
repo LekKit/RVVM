@@ -52,6 +52,12 @@ static inline uint32_t plic_ctx_count(plic_ctx_t* plic)
     return vector_size(plic->machine->harts) << 1;
 }
 
+// Check if the IRQ is pending
+static inline bool plic_irq_pending(plic_ctx_t* plic, uint32_t irq)
+{
+    return bit_check(atomic_load_uint32(&plic->pending[irq >> 5]), irq & 0x1F);
+}
+
 // Check if the IRQ is enabled for specific CTX
 static inline bool plic_irq_enabled(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
 {
@@ -84,7 +90,7 @@ static void plic_notify_irq(plic_ctx_t* plic, uint32_t irq)
 // Update on IRQ prio change
 static void plic_update_irq(plic_ctx_t* plic, uint32_t irq)
 {
-    if (atomic_load_uint32(&plic->pending[irq >> 5]) & (1U << (irq & 0x1F))) {
+    if (plic_irq_pending(plic, irq)) {
         plic_notify_irq(plic, irq);
     }
 }
@@ -92,66 +98,122 @@ static void plic_update_irq(plic_ctx_t* plic, uint32_t irq)
 // Update on changes to IRQ enable register of CTX
 static void plic_update_ctx_irq_reg(plic_ctx_t* plic, uint32_t ctx, uint32_t reg)
 {
-    uint32_t irqs = atomic_load_uint32(&plic->pending[reg]);
-    // Only enabled interrupts will pass
-    if (irqs) irqs &= atomic_load_uint32(&plic->enable[ctx][reg]);
+    uint32_t irqs = atomic_load_uint32(&plic->pending[reg]) & atomic_load_uint32(&plic->enable[ctx][reg]);
     if (irqs) {
-        for (size_t j=0; j<32; ++j) {
-            if (bit_check(irqs, j)) {
-                uint32_t irq = (reg << 5) | j;
-                if (atomic_load_uint32(&plic->prio[irq]) > atomic_load_uint32(&plic->threshold[ctx])) {
-                    riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
-                    return;
-                }
-            }
+        for (size_t i=0; i<32; ++i) {
+            plic_update_irq(plic, (reg << 5) | i);
         }
     }
 }
 
-// Update on CTX threshold change
-static void plic_update_ctx(plic_ctx_t* plic, uint32_t ctx)
+// Update a CTX (Also used for IRQ claim process)
+static uint32_t plic_update_ctx(plic_ctx_t* plic, uint32_t ctx, bool claim)
 {
-    for (size_t i=0; i<PLIC_SRC_REG_COUNT; ++i) {
-        plic_update_ctx_irq_reg(plic, ctx, i);
-    }
-}
-
-static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
-{
-    size_t nirqs = 0;
-    uint32_t claimed_irq = 0;
+    uint32_t threshold = atomic_load_uint32(&plic->threshold[ctx]);
+    uint32_t notifying_irqs = 0;
+    uint32_t highest_prio_irq = 0;
     uint32_t max_prio = 0;
+
     riscv_interrupt_clear(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
+
     for (size_t i=0; i<PLIC_SRC_REG_COUNT; ++i) {
-        uint32_t irqs = atomic_load_uint32(&plic->pending[i]);
-        // Only enabled interrupts will pass
-        if (irqs) irqs &= atomic_load_uint32(&plic->enable[ctx][i]);
+        uint32_t irqs = atomic_load_uint32(&plic->pending[i]) & atomic_load_uint32(&plic->enable[ctx][i]);
         if (irqs) {
-            // Count IRQs, claim one with highest priority
             for (size_t j=0; j<32; ++j) {
                 if (bit_check(irqs, j)) {
                     uint32_t irq = (i << 5) | j;
                     uint32_t prio = atomic_load_uint32(&plic->prio[irq]);
+                    if (prio > threshold) {
+                        // Count IRQs above CTX threshold
+                        notifying_irqs++;
+                    }
                     if (prio > max_prio) {
+                        // Determine highest priority IRQ
                         max_prio = prio;
-                        claimed_irq = irq;
-                        nirqs++;
+                        highest_prio_irq = irq;
                     }
                 }
             }
         }
     }
-    if (claimed_irq) {
-        uint32_t mask = 1U << (claimed_irq & 0x1F);
-        if (!(atomic_and_uint32(&plic->pending[claimed_irq >> 5], ~mask) & mask)) {
-            // Someone stole the IRQ
-            return 0;
-        }
+
+    if (claim && max_prio > threshold) {
+        // Don't count the to-be-claimed IRQ as notifying
+        notifying_irqs--;
     }
-    if (nirqs > 1 && max_prio > atomic_load_uint32(&plic->threshold[ctx])) {
+
+    if (notifying_irqs) {
         riscv_interrupt(vector_at(plic->machine->harts, CTX_HARTID(ctx)), CTX_IRQ_PRIO(ctx));
     }
-    return claimed_irq;
+
+    return highest_prio_irq;
+}
+
+/*
+ * Update PLIC state entirely
+ * Use after any operation that potentially causes an IRQ cease to signal
+ *
+ * Efforts are made so that this function is called in very rare cases,
+ * and usually it is replaced by a partial update for performance
+ */
+static void plic_full_update(plic_ctx_t* plic)
+{
+    for (size_t ctx=0; ctx<plic_ctx_count(plic); ++ctx) {
+        plic_update_ctx(plic, ctx, false);
+    }
+}
+
+static void plic_set_irq_prio(plic_ctx_t* plic, uint32_t irq, uint32_t prio)
+{
+    uint32_t old_prio = atomic_swap_uint32(&plic->prio[irq], prio);
+    if (prio < old_prio) {
+        if (plic_irq_pending(plic, irq)) {
+            // Pending IRQ priority was lowered - do a full PLIC state update
+            plic_full_update(plic);
+        }
+    } else if (prio > old_prio) {
+        // IRQ priority was raised - do a partial check
+        plic_update_irq(plic, irq);
+    }
+}
+
+static void plic_set_enable_bits(plic_ctx_t* plic, uint32_t ctx, uint32_t reg, uint32_t enable)
+{
+    uint32_t old_enable = atomic_swap_uint32(&plic->enable[ctx][reg], enable);
+    uint32_t irqs_disabled = old_enable & ~enable;
+    if (irqs_disabled) {
+        if (irqs_disabled & atomic_load_uint32(&plic->pending[reg])) {
+            // Some pending IRQs were disabled - do a full PLIC state update
+            plic_full_update(plic);
+        }
+    } else if (enable & ~old_enable) {
+        // Some IRQs were enabled - do a partial check
+        plic_update_ctx_irq_reg(plic, ctx, reg);
+    }
+}
+
+static void plic_set_ctx_threshold(plic_ctx_t* plic, uint32_t ctx, uint32_t threshold)
+{
+    uint32_t old_threshold = atomic_swap_uint32(&plic->threshold[ctx], threshold);
+    if (old_threshold != threshold) {
+        // CTX threshold changed - do a CTX update
+        plic_update_ctx(plic, ctx, false);
+    }
+}
+
+static uint32_t plic_claim_irq(plic_ctx_t* plic, uint32_t ctx)
+{
+    while (true) {
+        uint32_t irq = plic_update_ctx(plic, ctx, true);
+        if (irq) {
+            uint32_t mask = 1U << (irq & 0x1F);
+            if (!(atomic_and_uint32(&plic->pending[irq >> 5], ~mask) & mask)) {
+                // Someone stole our IRQ in the meantime, retry
+                continue;
+            }
+        }
+        return irq;
+    }
 }
 
 static void plic_complete_irq(plic_ctx_t* plic, uint32_t ctx, uint32_t irq)
@@ -216,8 +278,7 @@ static bool plic_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uin
         // Interrupt priority
         uint32_t irq = offset >> 2;
         if (irq > 0 && irq < PLIC_SOURCE_MAX) {
-            atomic_store_uint32(&plic->prio[irq], read_uint32_le(data));
-            plic_update_irq(plic, irq);
+            plic_set_irq_prio(plic, irq, read_uint32_le_m(data));
         }
     } else if (offset < 0x1080) {
         // R/O, do nothing. Pending bits are cleared by reading CLAIMCOMPLETE register
@@ -228,8 +289,7 @@ static bool plic_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uin
         uint32_t reg = ((offset - 0x2000) >> 2) & 0x1F;
         uint32_t ctx = (offset - 0x2000) >> 7;
         if (reg < PLIC_SRC_REG_COUNT && ctx < plic_ctx_count(plic)) {
-            atomic_store_uint32(&plic->enable[ctx][reg], read_uint32_le(data));
-            plic_update_ctx_irq_reg(plic, ctx, reg);
+            plic_set_enable_bits(plic, ctx, reg, read_uint32_le_m(data));
         }
     } else if (offset < 0x200000) {
         // Reserved, ignore
@@ -239,10 +299,9 @@ static bool plic_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uin
         uint32_t ctx = (offset - 0x200000) >> 12;
         if (ctx < plic_ctx_count(plic)) {
             if (flag == PLIC_CTXFLAG_CLAIMCOMPLETE) {
-                plic_complete_irq(plic, ctx, read_uint32_le(data));
+                plic_complete_irq(plic, ctx, read_uint32_le_m(data));
             } else if (flag == PLIC_CTXFLAG_THRESHOLD) {
-                atomic_store_uint32(&plic->threshold[ctx], read_uint32_le(data));
-                plic_update_ctx(plic, ctx);
+                plic_set_ctx_threshold(plic, ctx, read_uint32_le_m(data));
             }
         }
     }
