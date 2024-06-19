@@ -314,8 +314,9 @@ static void riscv_hart_notify(rvvm_hart_t* vm)
 
 void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)
 {
-    atomic_or_uint32(&vm->pending_irqs, 1U << irq);
-    riscv_hart_notify(vm);
+    if (~atomic_or_uint32(&vm->pending_irqs, 1U << irq) & (1U << irq)) {
+        riscv_hart_notify(vm);
+    }
 }
 
 void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
