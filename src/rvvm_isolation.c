@@ -98,10 +98,10 @@ static void drop_root_user(void)
     DO_ONCE({
         if (getuid() == 0) {
             // We are root for whatever reason, drop to nobody
-            rvvm_warn("Drop root");
             char buffer[256] = {0};
             struct passwd pwd = {0};
             struct passwd* result = NULL;
+            rvvm_info("Dropping from root user to nobody");
             if (getpwnam_r("nobody", &pwd, buffer, sizeof(buffer), &result)
             || setresgid(pwd.pw_gid, pwd.pw_gid, pwd.pw_gid)
             || setresuid(pwd.pw_uid, pwd.pw_uid, pwd.pw_uid)) {
@@ -530,7 +530,7 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
     int flags = all_threads ? SECCOMP_FILTER_FLAG_TSYNC : 0;
 
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, flags) && errno != ENOSYS) {
-        DO_ONCE(rvvm_warn("Failed to set seccomp syscall filter: %s!", strerror(errno)));
+        DO_ONCE(rvvm_warn("Failed to enforce seccomp syscall filter: %s!", strerror(errno)));
     }
 }
 
