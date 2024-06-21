@@ -82,18 +82,34 @@ static void drop_thread_caps(void)
 static void drop_root_user(void)
 {
 #ifdef ISOLATION_DROP_ROOT_IMPL
-    if (getuid() == 0) {
-        // We are root for whatever reason, drop to nobody
-        char buffer[256] = {0};
-        struct passwd pwd = {0};
-        struct passwd* result = NULL;
-        if (getpwnam_r("nobody", &pwd, buffer, sizeof(buffer), &result)
-         || setresgid(pwd.pw_gid, pwd.pw_gid, pwd.pw_gid)
-         || setresuid(pwd.pw_uid, pwd.pw_uid, pwd.pw_uid)) {
-            rvvm_fatal("Failed to drop root privileges!");
+    /*
+     * On Linux, UID/GID are per-thread properties and the raw
+     * setuid syscall only applies new UID to the calling thread.
+     *
+     * Glibc broadcasts a signal to all existing threads to
+     * implement a POSIX-compliant setuid(), however this opens
+     * a whole new can of worms - an already isolated thread
+     * can't setuid() anymore - so glibc aborts the process...
+     *
+     * Currently it's fixed by dropping root before any kind of
+     * isolation happens, and it's done under a DO_ONCE() construct
+     * to prevent race conditions.
+     */
+    DO_ONCE({
+        if (getuid() == 0) {
+            // We are root for whatever reason, drop to nobody
+            rvvm_warn("Drop root");
+            char buffer[256] = {0};
+            struct passwd pwd = {0};
+            struct passwd* result = NULL;
+            if (getpwnam_r("nobody", &pwd, buffer, sizeof(buffer), &result)
+            || setresgid(pwd.pw_gid, pwd.pw_gid, pwd.pw_gid)
+            || setresuid(pwd.pw_uid, pwd.pw_uid, pwd.pw_uid)) {
+                rvvm_fatal("Failed to drop root privileges!");
+            }
+            UNUSED(!chdir("/"));
         }
-        UNUSED(!chdir("/"));
-    }
+    });
 #endif
 }
 
@@ -116,8 +132,17 @@ static void drop_root_user(void)
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW), \
 
 static void seccomp_setup_syscall_filter(bool all_threads) {
-
-    // Let's just hope this won't blow up out of nowhere
+    /*
+     * Let's just hope this won't blow up out of nowhere.
+     *
+     * Many syscalls are covered in #ifdef - some of them
+     * are arch-specific (off64 syscalls for 32-bit arches,
+     * __NR_riscv_flush_icache for RISC-V, etc).
+     *
+     * This also allows backward compatibility with older
+     * build systems - most of such syscalls are going to be
+     * omitted by the libc when getting ENOSYS.
+     */
     struct sock_filter filter[] = {
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
 
@@ -127,6 +152,7 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
         BPF_SECCOMP_BLOCK_RWX_MMAN(__NR_mmap)
         BPF_SECCOMP_BLOCK_RWX_MMAN(__NR_mprotect)
 
+        // Fast path exit for frequent syscalls
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_sched_yield)
 #ifdef __NR_futex
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_futex)
@@ -165,9 +191,10 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 #endif
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_clock_gettime)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_nanosleep)
-
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_read)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_write)
+
+        // Allow operations on already open fds
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_close)
 #ifdef __NR_fstat
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_fstat)
@@ -189,6 +216,8 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_rt_sigaction)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_rt_sigprocmask)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_rt_sigreturn)
+
+        // TODO: Research what malicious stuff can ioctl() do
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_ioctl)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_readv)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_writev)
@@ -230,6 +259,8 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 #ifdef __NR_sendfile64
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_sendfile64)
 #endif
+
+        // Allow networking
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_socket)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_connect)
 #ifdef __NR_accept
@@ -248,6 +279,9 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_socketpair)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_setsockopt)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_getsockopt)
+
+        // sys_clone() may be used for fork(), but all our isolation
+        // is inherited anyways
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_clone)
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_exit)
 #ifdef __NR_wait4
@@ -479,12 +513,13 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 #ifdef __NR_riscv_flush_icache
         BPF_SECCOMP_ALLOW_SYSCALL(__NR_riscv_flush_icache)
 #elif defined(__riscv)
+        // Allow icache flush if no definition is provided
         BPF_SECCOMP_ALLOW_SYSCALL(259)
 #endif
 
         // Return ENOSYS for everything not allowed here
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | (ENOSYS & SECCOMP_RET_DATA)),
-        //BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_KILL_PROCESS),
+        //BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_TRAP),
     };
 
     struct sock_fprog prog = {
