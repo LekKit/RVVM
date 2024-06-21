@@ -30,13 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <time.h>
 
 #if !defined(__APPLE__) && !defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
-#if defined(CLOCK_MONOTONIC_FAST) && !defined(__EMSCRIPTEN__)
-#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_FAST
-#elif defined(CLOCK_MONOTONIC_COARSE) && !defined(__EMSCRIPTEN__)
-#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_COARSE
-#elif defined(CLOCK_MONOTONIC_RAW)
-#define CHOSEN_COND_CLOCK CLOCK_MONOTONIC_RAW
-#elif defined(CLOCK_MONOTONIC)
+#if defined(CLOCK_MONOTONIC)
 #define CHOSEN_COND_CLOCK CLOCK_MONOTONIC
 #else
 #include <sys/time.h> // For gettimeofday()
@@ -64,7 +58,6 @@ static void condvar_fill_timespec(struct timespec* ts)
 #include "utils.h"
 
 #define COND_FLAG_SIGNALED 0x1
-#define COND_FLAG_LOCKED   0x2
 
 struct thread_ctx {
 #ifdef _WIN32
@@ -181,7 +174,7 @@ cond_var_t* condvar_create()
 #elif defined(CHOSEN_COND_CLOCK)
     pthread_condattr_t cond_attr;
     if (pthread_condattr_init(&cond_attr) == 0
-     && pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) == 0
+     && pthread_condattr_setclock(&cond_attr, CHOSEN_COND_CLOCK) == 0
      && pthread_cond_init(&cond->cond, &cond_attr)  == 0
      && pthread_mutex_init(&cond->lock, NULL) == 0) {
         pthread_condattr_destroy(&cond_attr);
@@ -205,25 +198,34 @@ bool condvar_wait(cond_var_t* cond, uint64_t timeout_ms)
     return condvar_wait_ns(cond, timeout_ns);
 }
 
+static inline bool condvar_try_consume_signal(cond_var_t* cond)
+{
+    return (atomic_load_uint32(&cond->flag) & COND_FLAG_SIGNALED)
+        && (atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED) & COND_FLAG_SIGNALED);
+}
+
 bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
 {
-    if (!cond) return false;
     bool ret = false;
-    uint32_t flag = 0;
-    // Mark that a thread is waiting here first of all, otherwise wake may set signal
+    if (!cond) return false;
+
+    // Fast-path exit on an already signaled condvar (atomic_load is cheaper than RMW)
+    if (condvar_try_consume_signal(cond)) {
+        return true;
+    }
+
+    // Mark that a thread is about to be waiting here, otherwise wake may set signal
     // too late be consumed, but not see any waiters and so a wakeup event may be lost.
     uint32_t waiters = atomic_add_uint32(&cond->waiters, 1);
-    // Sometimes it's also useful to know there are other waiters
     UNUSED(waiters);
-    do {
-        // Try consuming a signal in userspace, and spin here if locked
-        flag = atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
-    } while (flag & COND_FLAG_LOCKED);
-    // Check if the condition is already signaled or timeout is zero
-    if ((flag & COND_FLAG_SIGNALED) || !timeout_ns) {
+
+    // Try to consume a signal again, since condvar_wake() could have been called
+    // in-between the fast-path exit and waiter marking.
+    if (condvar_try_consume_signal(cond)) {
         atomic_sub_uint32(&cond->waiters, 1);
-        return !!(flag & COND_FLAG_SIGNALED);
+        return true;
     }
+
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
         ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
@@ -241,7 +243,7 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
     }
 #else
     pthread_mutex_lock(&cond->lock);
-    if (!(atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED) & COND_FLAG_SIGNALED)) {
+    if (!condvar_try_consume_signal(cond)) {
         if (timeout_ns == CONDVAR_INFINITE) {
             ret = pthread_cond_wait(&cond->cond, &cond->lock) == 0;
         } else {
@@ -261,7 +263,7 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
     }
     pthread_mutex_unlock(&cond->lock);
 #endif
-    atomic_and_uint32(&cond->flag, ~COND_FLAG_SIGNALED);
+    if (condvar_try_consume_signal(cond)) ret = true;
     atomic_sub_uint32(&cond->waiters, 1);
     return ret;
 }
@@ -272,7 +274,7 @@ bool condvar_wake(cond_var_t* cond)
     // Signal the condition
     atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
     // Omit syscall if there are no waiters
-    if (!atomic_load_uint32(&cond->waiters)) return false;
+    if (!condvar_waiters(cond)) return false;
 #ifdef _WIN32
     SetEvent(cond->event);
 #else
@@ -288,14 +290,13 @@ bool condvar_wake(cond_var_t* cond)
 bool condvar_wake_all(cond_var_t* cond)
 {
     if (!cond) return false;
-#ifdef _WIN32
-    // Wake old waiters, lock others
-    atomic_or_uint32(&cond->flag, COND_FLAG_LOCKED | COND_FLAG_SIGNALED);
-    for (uint32_t i=atomic_load_uint32(&cond->waiters); i--;) SetEvent(cond->event);
-    atomic_and_uint32(&cond->flag, ~COND_FLAG_LOCKED);
-#else
     atomic_or_uint32(&cond->flag, COND_FLAG_SIGNALED);
-    if (!atomic_load_uint32(&cond->waiters)) return false;
+    if (!condvar_waiters(cond)) return false;
+#ifdef _WIN32
+    for (uint32_t i=condvar_waiters(cond); i--;) {
+        condvar_wake(cond);
+    }
+#else
     pthread_mutex_lock(&cond->lock);
     pthread_mutex_unlock(&cond->lock);
     pthread_cond_broadcast(&cond->cond);
@@ -305,7 +306,7 @@ bool condvar_wake_all(cond_var_t* cond)
 
 uint32_t condvar_waiters(cond_var_t* cond)
 {
-    if (!cond) return false;
+    if (!cond) return 0;
     return atomic_load_uint32(&cond->waiters);
 }
 
@@ -349,6 +350,7 @@ typedef struct {
 } work_queue_t;
 
 static uint32_t      pool_run;
+static uint32_t      pool_shut;
 static work_queue_t  pool_wq;
 static cond_var_t*   pool_cond;
 static thread_ctx_t* pool_threads[WORKER_THREADS];
@@ -429,10 +431,14 @@ static bool workqueue_submit(work_queue_t* wq, thread_func_t func, void** arg, u
     return false;
 }
 
-static void thread_workers_terminate()
+static void thread_workers_terminate(void)
 {
-    atomic_store_uint32_ex(&pool_run, 0, ATOMIC_RELAXED);
-    condvar_wake_all(pool_cond);
+    atomic_store_uint32(&pool_run, 0);
+    // Wake & shut down all threads properly
+    while (atomic_load_uint32(&pool_shut) != WORKER_THREADS) {
+        condvar_wake_all(pool_cond);
+        sleep_ms(1);
+    }
     for (size_t i=0; i<WORKER_THREADS; ++i) {
         thread_join(pool_threads[i]);
     }
@@ -445,20 +451,25 @@ static void* threadpool_worker(void* ptr)
         while (workqueue_try_perform(&pool_wq));
         condvar_wait(pool_cond, CONDVAR_INFINITE);
     }
+    atomic_add_uint32(&pool_shut, 1);
     return ptr;
+}
+
+static void threadpool_init(void)
+{
+    atomic_store_uint32(&pool_shut, 0);
+    atomic_store_uint32(&pool_run, 1);
+    workqueue_init(&pool_wq);
+    pool_cond = condvar_create();
+    for (size_t i=0; i<WORKER_THREADS; ++i) {
+        pool_threads[i] = thread_create(threadpool_worker, NULL);
+    }
+    call_at_deinit(thread_workers_terminate);
 }
 
 static bool thread_queue_task(thread_func_t func, void** arg, unsigned arg_count, bool va)
 {
-    DO_ONCE ({
-        atomic_store_uint32_ex(&pool_run, 1, ATOMIC_RELAXED);
-        workqueue_init(&pool_wq);
-        pool_cond = condvar_create();
-        for (size_t i=0; i<WORKER_THREADS; ++i) {
-            pool_threads[i] = thread_create(threadpool_worker, NULL);
-        }
-        call_at_deinit(thread_workers_terminate);
-    });
+    DO_ONCE(threadpool_init());
 
     if (workqueue_submit(&pool_wq, func, arg, arg_count, va)) {
         //if (condvar_waiters(pool_cond) == WORKER_THREADS)
