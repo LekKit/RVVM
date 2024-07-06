@@ -338,7 +338,7 @@ static void jni_dettach_thread(jni_glob_objref_t* ref)
 static void jni_free_glob_ref(jni_glob_objref_t* ref)
 {
     JNIEnv* env = jni_attach_thread(ref);
-    (*env)->DeleteGlobalRef(env, ref->glob_ref);
+    if (env) (*env)->DeleteGlobalRef(env, ref->glob_ref);
     jni_dettach_thread(ref);
     free(ref);
 }
