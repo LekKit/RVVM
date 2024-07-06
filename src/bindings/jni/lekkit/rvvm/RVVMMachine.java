@@ -95,8 +95,9 @@ public class RVVMMachine {
     }
 
     // Beware to drop all references beforehand
-    public void dumpContext() {
+    public synchronized void dumpContext() {
         if (isValid()) RVVMNative.free_machine(machine);
+        machine = 0;
     }
 
     @Override
