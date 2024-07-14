@@ -49,7 +49,7 @@ bool riscv_init_ram(rvvm_ram_t* mem, phys_addr_t begin, phys_addr_t size)
 
     uint32_t flags = VMA_RDWR;
     if (!rvvm_has_arg("no_ksm")) flags |= VMA_KSM;
-    if (!rvvm_has_arg("no_thp") && (size > (256 << 20))) flags |= VMA_THP;
+    if (!rvvm_has_arg("no_thp")) flags |= VMA_THP;
     mem->data = vma_alloc(NULL, size, flags);
     if (mem->data) {
         mem->begin = begin;
