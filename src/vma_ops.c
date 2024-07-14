@@ -360,6 +360,28 @@ bool vma_clean(void* addr, size_t size, bool lazy)
     return addr && size && lazy;
 }
 
+bool vma_pageout(void* addr, size_t size, bool lazy)
+{
+    size = ptrsize_to_page(addr, size);
+    addr = ptr_to_page(addr);
+
+    if (!lazy) {
+#if defined(VMA_WIN32_IMPL)
+        return VirtualUnlock(addr, size) || GetLastError() == ERROR_NOT_LOCKED;
+#elif defined(VMA_MMAP_IMPL) && defined(__linux__) && defined(MADV_PAGEOUT)
+        return madvise(addr, size, MADV_PAGEOUT) == 0;
+#endif
+    }
+
+#if defined(VMA_MMAP_IMPL) && defined(__linux__) && defined(MADV_COLD)
+    madvise(addr, size, MADV_COLD);
+#elif defined(VMA_MMAP_IMPL) && defined(__FreeBSD__) && defined(MADV_DONTNEED)
+    madvise(addr, size, MADV_DONTNEED);
+#endif
+
+    return lazy;
+}
+
 bool vma_free(void* addr, size_t size)
 {
     size = ptrsize_to_page(addr, size);

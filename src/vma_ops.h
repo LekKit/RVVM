@@ -48,8 +48,11 @@ void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags);
 // Change VMA protection flags
 bool  vma_protect(void* addr, size_t size, uint32_t flags);
 
-// Hint to free underlying memory, VMA is still intact
+// Hint to free (zero-fill) underlying memory, VMA is still intact
 bool  vma_clean(void* addr, size_t size, bool lazy);
+
+// Hint to pageout memory, data is kept intact
+bool  vma_pageout(void* addr, size_t size, bool lazy);
 
 // Unmap the VMA
 bool  vma_free(void* addr, size_t size);
