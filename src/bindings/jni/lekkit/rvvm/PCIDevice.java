@@ -10,7 +10,10 @@ public class PCIDevice {
     protected RVVMMachine machine;
     protected long pci_dev;
 
-    public void detach() {
-        RVVMNative.pci_remove_device(pci_dev);
+    public synchronized void detach() {
+        if (pci_dev != 0) {
+            RVVMNative.pci_remove_device(pci_dev);
+            pci_dev = 0;
+        }
     }
 }

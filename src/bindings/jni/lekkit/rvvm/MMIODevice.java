@@ -14,7 +14,10 @@ public class MMIODevice {
         this.machine = machine;
     }
 
-    public void detach() {
-        if (mmio_handle != -1) RVVMNative.detach_mmio(machine.machine, mmio_handle, true);
+    public synchronized void detach() {
+        if (mmio_handle != -1) {
+            RVVMNative.detach_mmio(machine.machine, mmio_handle, true);
+            mmio_handle = -1;
+        }
     }
 }
