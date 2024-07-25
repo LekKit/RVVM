@@ -8,6 +8,8 @@ package lekkit.rvvm;
 
 import java.nio.ByteBuffer;
 
+// TODO MMIO, PCI, I2C devices implementable in Java
+
 public class MMIOBase {
     public long region_addr = 0;
     public long region_size = 0;

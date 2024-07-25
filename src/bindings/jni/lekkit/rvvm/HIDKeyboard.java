@@ -7,7 +7,7 @@
 package lekkit.rvvm;
 
 public class HIDKeyboard {
-    private RVVMMachine machine;
+    private final RVVMMachine machine;
     private final long hid_keyboard;
 
     // Keyboard keycode definitions
@@ -218,18 +218,26 @@ public class HIDKeyboard {
     public HIDKeyboard(RVVMMachine machine) {
         if (machine.isValid()) {
             this.machine = machine;
-            this.hid_keyboard = RVVMNative.hid_keyboard_init_auto(machine.machine);
+            this.hid_keyboard = RVVMNative.hid_keyboard_init_auto(machine.getPtr());
         } else {
             this.machine = null;
             this.hid_keyboard = 0;
         }
     }
 
+    public boolean isValid() {
+        return hid_keyboard != 0;
+    }
+
     public void press(byte key) {
-        if (hid_keyboard != 0) RVVMNative.hid_keyboard_press(hid_keyboard, key);
+        if (isValid()) {
+            RVVMNative.hid_keyboard_press(hid_keyboard, key);
+        }
     }
     public void release(byte key) {
-        if (hid_keyboard != 0) RVVMNative.hid_keyboard_release(hid_keyboard, key);
+        if (isValid()) {
+            RVVMNative.hid_keyboard_release(hid_keyboard, key);
+        }
     }
 }
 

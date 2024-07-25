@@ -10,7 +10,7 @@ public class Syscon extends MMIODevice {
     public Syscon(RVVMMachine machine) {
         super(machine);
         if (machine.isValid()) {
-            this.mmio_handle = RVVMNative.syscon_init_auto(machine.machine);
+            setMMIOHandle(RVVMNative.syscon_init_auto(machine.getPtr()));
         }
     }
 }

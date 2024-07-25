@@ -29,7 +29,7 @@ public class Framebuffer extends MMIODevice {
         this.bpp = bpp;
         this.buff = ByteBuffer.allocateDirect(x * y * (bpp / 8));
         if (machine.isValid()) {
-            this.mmio_handle = RVVMNative.framebuffer_init_auto(machine.machine, this.buff, x, y, bpp);
+            setMMIOHandle(RVVMNative.framebuffer_init_auto(machine.getPtr(), this.buff, x, y, bpp));
         }
     }
 

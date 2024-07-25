@@ -9,7 +9,7 @@ package lekkit.rvvm;
 import java.nio.ByteBuffer;
 
 public class RVVMMachine {
-    public long machine;
+    private long machine = 0;
 
     public static final int RVVM_OPT_NONE = 0;
     public static final int RVVM_OPT_JIT = 1;          // Enable JIT
@@ -29,10 +29,9 @@ public class RVVMMachine {
     public RVVMMachine(long mem_mb, int smp, boolean rv64) {
         if (RVVMNative.isLoaded()) {
             this.machine = RVVMNative.create_machine(RVVMNative.DEFAULT_MEMBASE, mem_mb << 20, smp, rv64);
-        } else {
-            this.machine = 0;
         }
-        if (machine != 0) {
+
+        if (isValid()) {
             RVVMNative.clint_init_auto(machine);
         }
     }
@@ -40,72 +39,118 @@ public class RVVMMachine {
     public boolean isValid() {
         return machine != 0;
     }
+
+    public long getPtr() {
+        return machine;
+    }
+
     public ByteBuffer getDmaBuffer(long addr, long size) {
-        if (isValid()) return RVVMNative.get_dma_buf(machine, addr, size);
+        if (isValid()) {
+            return RVVMNative.get_dma_buf(machine, addr, size);
+        }
         return null;
     }
+
     public void setCmdline(String cmdline) {
-        if (isValid()) RVVMNative.set_cmdline(machine, cmdline);
+        if (isValid()) {
+            RVVMNative.set_cmdline(machine, cmdline);
+        }
     }
+
     public void appendCmdline(String cmdline) {
-        if (isValid()) RVVMNative.append_cmdline(machine, cmdline);
+        if (isValid()) {
+            RVVMNative.append_cmdline(machine, cmdline);
+        }
     }
+
     public long getOption(int opt) {
-        if (isValid()) return RVVMNative.get_opt(machine, opt);
+        if (isValid()) {
+            return RVVMNative.get_opt(machine, opt);
+        }
         return 0;
     }
+
     public void setOption(int opt, long val) {
-        if (isValid()) RVVMNative.set_opt(machine, opt, val);
+        if (isValid()) {
+            RVVMNative.set_opt(machine, opt, val);
+        }
     }
+
     public boolean loadBootrom(String path) {
-        if (isValid()) return RVVMNative.load_bootrom(machine, path);
+        if (isValid()) {
+            return RVVMNative.load_bootrom(machine, path);
+        }
         return false;
     }
+
     public boolean loadKernel(String path) {
-        if (isValid()) return RVVMNative.load_kernel(machine, path);
+        if (isValid()) {
+            return RVVMNative.load_kernel(machine, path);
+        }
         return false;
     }
+
     public boolean loadDeviceTree(String path) {
-        if (isValid()) return RVVMNative.load_dtb(machine, path);
+        if (isValid()) {
+            return RVVMNative.load_dtb(machine, path);
+        }
         return false;
     }
+
     public boolean dumpDeviceTree(String path) {
-        if (isValid()) return RVVMNative.dump_dtb(machine, path);
+        if (isValid()) {
+            return RVVMNative.dump_dtb(machine, path);
+        }
         return false;
     }
+
     public boolean start() {
-        if (isValid()) return RVVMNative.start_machine(machine);
+        if (isValid()) {
+            return RVVMNative.start_machine(machine);
+        }
         return false;
     }
+
     public boolean reset() {
-        if (isValid()) return RVVMNative.reset_machine(machine, true);
+        if (isValid()) {
+            return RVVMNative.reset_machine(machine, true);
+        }
         return false;
     }
+
     public boolean poweroff() {
-        if (isValid()) return RVVMNative.reset_machine(machine, false);
+        if (isValid()) {
+            return RVVMNative.reset_machine(machine, false);
+        }
         return false;
     }
+
     public boolean pause() {
-        if (isValid()) return RVVMNative.pause_machine(machine);
+        if (isValid()) {
+            return RVVMNative.pause_machine(machine);
+        }
         return false;
     }
+
     public boolean isPowered() {
-        if (isValid()) return RVVMNative.machine_powered(machine);
+        if (isValid()) {
+            return RVVMNative.machine_powered(machine);
+        }
         return false;
     }
 
     // Beware to drop all references beforehand
-    public synchronized void dumpContext() {
-        if (isValid()) RVVMNative.free_machine(machine);
-        machine = 0;
-    }
-
-    @Override
-    protected synchronized void finalize() {
+    public synchronized void free() {
         if (isValid()) {
             RVVMNative.free_machine(machine);
             machine = 0;
         }
+    }
+
+    // Should not be relied upon
+    @Override
+    protected synchronized void finalize() {
+        free();
     }
 }
 

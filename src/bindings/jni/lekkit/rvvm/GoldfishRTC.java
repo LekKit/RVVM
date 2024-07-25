@@ -10,7 +10,7 @@ public class GoldfishRTC extends MMIODevice {
     public GoldfishRTC(RVVMMachine machine) {
         super(machine);
         if (machine.isValid()) {
-            this.mmio_handle = RVVMNative.rtc_goldfish_init_auto(machine.machine);
+            setMMIOHandle(RVVMNative.rtc_goldfish_init_auto(machine.getPtr()));
         }
     }
 }

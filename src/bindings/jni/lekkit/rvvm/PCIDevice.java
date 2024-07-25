@@ -6,12 +6,28 @@
 
 package lekkit.rvvm;
 
-public class PCIDevice {
-    protected RVVMMachine machine;
-    protected long pci_dev;
+public abstract class PCIDevice implements IRemovableDevice {
+    private final RVVMMachine machine;
+    private long pci_dev;
 
-    public synchronized void detach() {
-        if (pci_dev != 0) {
+    public PCIDevice(RVVMMachine machine) {
+        this.machine = machine;
+    }
+
+    public RVVMMachine getMachine() {
+        return machine;
+    }
+
+    protected void setPCIHandle(long pci_dev) {
+        this.pci_dev = pci_dev;
+    }
+
+    public boolean isValid() {
+        return machine.isValid() && pci_dev != 0;
+    }
+
+    public synchronized void remove() {
+        if (isValid()) {
             RVVMNative.pci_remove_device(pci_dev);
             pci_dev = 0;
         }

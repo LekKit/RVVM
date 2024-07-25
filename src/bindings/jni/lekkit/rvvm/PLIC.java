@@ -13,7 +13,7 @@ public class PLIC {
     public PLIC(RVVMMachine machine) {
         if (machine.isValid()) {
             this.machine = machine;
-            plic_ctx = RVVMNative.plic_init_auto(machine.machine);
+            plic_ctx = RVVMNative.plic_init_auto(machine.getPtr());
         } else {
             this.machine = null;
             plic_ctx = 0;

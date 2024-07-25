@@ -6,17 +6,29 @@
 
 package lekkit.rvvm;
 
-public class MMIODevice {
-    protected RVVMMachine machine;
-    protected int mmio_handle = -1;
+public abstract class MMIODevice implements IRemovableDevice {
+    private final RVVMMachine machine;
+    private int mmio_handle = -1;
 
     public MMIODevice(RVVMMachine machine) {
         this.machine = machine;
     }
 
-    public synchronized void detach() {
-        if (mmio_handle != -1) {
-            RVVMNative.detach_mmio(machine.machine, mmio_handle, true);
+    public RVVMMachine getMachine() {
+        return machine;
+    }
+
+    protected void setMMIOHandle(int mmio_handle) {
+        this.mmio_handle = mmio_handle;
+    }
+
+    public boolean isValid() {
+        return machine.isValid() && mmio_handle != -1;
+    }
+
+    public synchronized void remove() {
+        if (isValid()) {
+            RVVMNative.detach_mmio(machine.getPtr(), mmio_handle, true);
             mmio_handle = -1;
         }
     }

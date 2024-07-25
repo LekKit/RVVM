@@ -10,7 +10,7 @@ public class NS16550A extends MMIODevice {
     public NS16550A(RVVMMachine machine) {
         super(machine);
         if (machine.isValid()) {
-            this.mmio_handle = RVVMNative.ns16550a_init_auto(machine.machine);
+            setMMIOHandle(RVVMNative.ns16550a_init_auto(machine.getPtr()));
         }
     }
 }

@@ -6,11 +6,9 @@
 
 package lekkit.rvvm;
 
-public class RTL8169 extends PCIDevice {
-    public RTL8169(RVVMMachine machine) {
-        super(machine);
-        if (machine.isValid()) {
-            setPCIHandle(RVVMNative.rtl8169_init_auto(machine.getPtr()));
-        }
-    }
+public interface IRemovableDevice {
+
+    public boolean isValid();
+
+    public void remove();
 }

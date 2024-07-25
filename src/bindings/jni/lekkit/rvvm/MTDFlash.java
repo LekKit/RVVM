@@ -10,7 +10,7 @@ public class MTDFlash extends MMIODevice {
     public MTDFlash(RVVMMachine machine, String imagePath, boolean rw) {
         super(machine);
         if (machine.isValid()) {
-            this.mmio_handle = RVVMNative.mtd_physmap_init_auto(machine.machine, imagePath, rw);
+            setMMIOHandle(RVVMNative.mtd_physmap_init_auto(machine.getPtr(), imagePath, rw));
         }
     }
 }

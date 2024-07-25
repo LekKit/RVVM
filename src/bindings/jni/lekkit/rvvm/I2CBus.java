@@ -13,7 +13,7 @@ public class I2CBus {
     public I2CBus(RVVMMachine machine) {
         if (machine.isValid()) {
             this.machine = machine;
-            i2c_bus = RVVMNative.i2c_bus_init_auto(machine.machine);
+            i2c_bus = RVVMNative.i2c_bus_init_auto(machine.getPtr());
         } else {
             this.machine = null;
             i2c_bus = 0;
