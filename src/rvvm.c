@@ -711,28 +711,37 @@ PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_
     return &vector_at(machine->mmio, (size_t)handle);
 }
 
+// Returns addr if zone is free
+static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
+{
+    if (addr >= machine->mem.begin && (addr + size) <= (machine->mem.begin + machine->mem.size)) {
+        addr = machine->mem.begin + machine->mem.size;
+    }
+
+    vector_foreach(machine->mmio, i) {
+        struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
+        if (dev->data == NULL && dev->mapping == NULL && dev->type == NULL) {
+            // This is a leftover device which was removed from running VM
+            rvvm_detach_mmio(machine, i, true);
+        } else if (addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
+            addr = dev->addr + dev->size;
+        }
+    }
+
+    return addr;
+}
+
 // Regions of size 0 are ignored (those are non-IO placeholders)
 PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
-    for (size_t attempt=0; attempt<64; ++attempt) {
-        if (size && addr >= machine->mem.begin && (addr + size) <= (machine->mem.begin + machine->mem.size)) {
-            addr = machine->mem.begin + machine->mem.size;
-            continue;
-        }
+    rvvm_addr_t ret = addr;
+    if (size == 0) return addr;
 
-        vector_foreach(machine->mmio, i) {
-            struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
-            if (size && addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
-                addr = dev->addr + dev->size;
-                continue;
-            }
-        }
+    do {
+        ret = rvvm_mmio_zone_check(machine, addr, size);
+    } while (ret != addr);
 
-        return addr;
-    }
-
-    rvvm_warn("Cannot find free MMIO range!");
-    return addr + 0x1000;
+    return ret;
 }
 
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
