@@ -51,12 +51,25 @@ struct fdt_node {
     vector_t(struct fdt_node*) nodes;
 };
 
+static void* heap_duplicate(const void* data, size_t size)
+{
+    if (size) {
+        void* buffer = safe_malloc(size);
+        memcpy(buffer, data, size);
+        return buffer;
+    }
+    return NULL;
+}
+
 static char* str_duplicate(const char* str)
 {
-    size_t size = rvvm_strlen(str) + 1;
-    char* buffer = safe_malloc(size);
-    memcpy(buffer, str, size);
-    return buffer;
+    return heap_duplicate(str, rvvm_strlen(str) + 1);
+}
+
+static void fdt_prop_free(struct fdt_prop* prop)
+{
+    free(prop->name);
+    free(prop->data);
 }
 
 static size_t fdt_name_with_addr(char* buffer, size_t size, const char* name, uint64_t addr)
@@ -148,11 +161,21 @@ uint32_t fdt_node_get_phandle(struct fdt_node* node)
 void fdt_node_add_prop(struct fdt_node* node, const char* name, const void* data, uint32_t len)
 {
     if (node) {
-        void* new_data = len ? safe_malloc(len) : NULL;
-        if (new_data) memcpy(new_data, data, len);
+        // Replace old prop if present
+        vector_foreach(node->props, i) {
+            struct fdt_prop* repl_prop = &vector_at(node->props, i);
+            if (rvvm_strcmp(repl_prop->name, name)) {
+                free(repl_prop->data);
+                repl_prop->data = heap_duplicate(data, len);
+                repl_prop->len = len;
+                return;
+            }
+        }
+
+        // Put a new prop
         struct fdt_prop prop = {
             .name = str_duplicate(name),
-            .data = new_data,
+            .data = heap_duplicate(data, len),
             .len = len,
         };
         vector_push_back(node->props, prop);
@@ -199,8 +222,7 @@ bool fdt_node_del_prop(struct fdt_node* node, const char* name)
     vector_foreach_back(node->props, i) {
         struct fdt_prop* prop = &vector_at(node->props, i);
         if (rvvm_strcmp(prop->name, name)) {
-            free(prop->name);
-            free(prop->data);
+            fdt_prop_free(prop);
             vector_erase(node->props, i);
             return true;
         }
@@ -212,8 +234,7 @@ void fdt_node_free(struct fdt_node* node)
 {
     if (node) {
         vector_foreach_back(node->props, i) {
-            free(vector_at(node->props, i).name);
-            free(vector_at(node->props, i).data);
+            fdt_prop_free(&vector_at(node->props, i));
         }
         vector_foreach_back(node->nodes, i) {
             fdt_node_free(vector_at(node->nodes, i));
