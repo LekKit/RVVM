@@ -768,15 +768,28 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle,
     if (handle >= 0 && (size_t)handle < vector_size(machine->mmio)) {
         bool was_running = rvvm_pause_machine(machine);
         struct rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, handle);
+
         // Keep the placeholder device in vector so that the handles remain valid
         if (cleanup) rvvm_cleanup_mmio(dev);
+
+        // It's a shared memory mapping, flush each hart TLB
+        if (dev->mapping) {
+            vector_foreach(machine->harts, i) {
+                rvvm_hart_t* vm = vector_at(machine->harts, i);
+                riscv_tlb_flush(vm);
+            }
+        }
+
         dev->data = NULL;
         dev->type = NULL;
+        dev->mapping = NULL;
         dev->read = rvvm_mmio_none;
         dev->write = rvvm_mmio_none;
+
         // Tearing the device from running machine leaves a dummy range
         // Experimentally confirmed this actually happens on real boards
         if (!rvvm_machine_powered(machine)) dev->size = 0;
+
         if (was_running) rvvm_start_machine(machine);
     }
 }
