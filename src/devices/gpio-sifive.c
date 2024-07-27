@@ -45,8 +45,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef struct {
     rvvm_gpio_dev_t* gpio;
     plic_ctx_t* plic;
-    uint32_t irq;
+    uint32_t plic_irqs[GPIO_SIFIVE_PINS];
+
+    // Cache IRQ lines state
+    uint32_t irqs;
+
+    // Input pins
     uint32_t pins;
+
+    // Controller registers
     uint32_t input_en;
     uint32_t output_en;
     uint32_t output;
@@ -65,13 +72,21 @@ typedef struct {
 
 static void gpio_sifive_update_irqs(gpio_sifive_dev_t* bus)
 {
-    if ((atomic_load_uint32(&bus->rise_ip) & atomic_load_uint32(&bus->rise_ie))
-     || (atomic_load_uint32(&bus->fall_ip) & atomic_load_uint32(&bus->fall_ie))
-     || (atomic_load_uint32(&bus->high_ip) & atomic_load_uint32(&bus->high_ie))
-     || (atomic_load_uint32(&bus->low_ip)  & atomic_load_uint32(&bus->low_ie))) {
-        plic_raise_irq(bus->plic, bus->irq);
-    } else {
-        plic_lower_irq(bus->plic, bus->irq);
+    // Combine pin IRQs
+    uint32_t ip = (atomic_load_uint32(&bus->rise_ip) & atomic_load_uint32(&bus->rise_ie))
+                | (atomic_load_uint32(&bus->fall_ip) & atomic_load_uint32(&bus->fall_ie))
+                | (atomic_load_uint32(&bus->high_ip) & atomic_load_uint32(&bus->high_ie))
+                | (atomic_load_uint32(&bus->low_ip)  & atomic_load_uint32(&bus->low_ie));
+
+    // Update PLIC IRQs
+    if (atomic_swap_uint32(&bus->irqs, ip) != ip) {
+        for (size_t i=0; i<GPIO_SIFIVE_PINS; ++i) {
+            if (ip & (1U << i)) {
+                plic_raise_irq(bus->plic, bus->plic_irqs[i]);
+            } else {
+                plic_lower_irq(bus->plic, bus->plic_irqs[i]);
+            }
+        }
     }
 }
 
@@ -169,7 +184,6 @@ static bool gpio_sifive_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offse
             write_uint32_le_m(data, atomic_load_uint32(&bus->out_xor));
             break;
     }
-    //rvvm_warn("gpio read  %08x from %08zx", read_uint32_le_m(data), offset);
     return true;
 }
 
@@ -233,7 +247,6 @@ static bool gpio_sifive_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offs
             gpio_sifive_update_out(bus);
             break;
     }
-    //rvvm_warn("gpio write %08x to   %08zx", read_uint32_le_m(data), offset);
     return true;
 }
 
@@ -257,17 +270,24 @@ static rvvm_mmio_type_t gpio_sifive_dev_type = {
 };
 
 PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
-                                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+                                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t* irqs)
 {
     gpio_sifive_dev_t* bus = safe_new_obj(gpio_sifive_dev_t);
     bus->gpio = gpio;
     bus->plic = plic;
-    bus->irq = irq;
+
+    // Amount of IRQs controlls amount of GPIO pins
+    // Each GPIO pin should have a unique IRQ!
+    for (size_t i=0; i<GPIO_SIFIVE_PINS; ++i) {
+        bus->plic_irqs[i] = irqs[i];
+    }
+
     if (gpio) {
         gpio->io_dev = bus;
         gpio->pins_in = gpio_sifive_pins_in;
         gpio->pins_read = gpio_sifive_pins_read;
     }
+
     rvvm_mmio_dev_t gpio_sifive = {
         .addr = base_addr,
         .size = GPIO_SIFIVE_MMIO_SIZE,
@@ -278,18 +298,16 @@ PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_de
         .min_op_size = 4,
         .max_op_size = 4,
     };
+
     rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &gpio_sifive);
     if (handle == RVVM_INVALID_MMIO) return handle;
+
 #ifdef USE_FDT
     struct fdt_node* gpio_fdt = fdt_node_create_reg("gpio", base_addr);
     fdt_node_add_prop_reg(gpio_fdt, "reg", base_addr, GPIO_SIFIVE_MMIO_SIZE);
     fdt_node_add_prop_str(gpio_fdt, "compatible", "sifive,gpio0");
     fdt_node_add_prop_u32(gpio_fdt, "interrupt-parent", plic_get_phandle(plic));
-    // Amount of IRQs controlls amount of GPIO pins, but they may overlap
-    uint32_t irqs[32] = {0};
-    for (size_t i=0; i<32; ++i) irqs[i] = irq;
-    fdt_node_add_prop_cells(gpio_fdt, "interrupts", irqs, 32);
-    //fdt_node_add_prop_u32(gpio_fdt, "interrupts", irq);
+    fdt_node_add_prop_cells(gpio_fdt, "interrupts", bus->plic_irqs, GPIO_SIFIVE_PINS);
     fdt_node_add_prop(gpio_fdt, "gpio-controller", NULL, 0);
     fdt_node_add_prop_u32(gpio_fdt, "#gpio-cells", 2);
     fdt_node_add_prop(gpio_fdt, "interrupt-controller", NULL, 0);
@@ -305,5 +323,9 @@ PUBLIC rvvm_mmio_handle_t gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gp
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, GPIO_SIFIVE_DEFAULT_MMIO, GPIO_SIFIVE_MMIO_SIZE);
-    return gpio_sifive_init(machine, gpio, addr, plic, plic_alloc_irq(plic));
+    uint32_t irqs[GPIO_SIFIVE_PINS] = {0};
+    for (size_t i=0; i<GPIO_SIFIVE_PINS; ++i) {
+        irqs[i] = plic_alloc_irq(plic);
+    }
+    return gpio_sifive_init(machine, gpio, addr, plic, irqs);
 }

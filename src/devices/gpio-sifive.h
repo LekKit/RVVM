@@ -22,10 +22,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvmlib.h"
 #include "gpio_api.h"
 
+#define GPIO_SIFIVE_PINS 32
+
 #define GPIO_SIFIVE_DEFAULT_MMIO 0x10060000
 
 PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
-                                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq);
+                                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t* irqs);
+
 PUBLIC rvvm_mmio_handle_t gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio);
 
 #endif
