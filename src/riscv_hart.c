@@ -67,15 +67,12 @@ void riscv_hart_free(rvvm_hart_t* vm)
 void riscv_hart_run(rvvm_hart_t* vm)
 {
     rvvm_info("Hart %p started", vm);
-    atomic_store_uint32(&vm->wait_event, HART_RUNNING);
 
     while (true) {
-        riscv_run_till_event(vm);
+        // Allow hart to run
         atomic_store_uint32_ex(&vm->wait_event, HART_RUNNING, ATOMIC_RELAXED);
-        if (vm->trap) {
-            vm->registers[REGISTER_PC] = vm->trap_pc;
-            vm->trap = false;
-        }
+
+        // Handle events
         vm->csr.ip |= atomic_swap_uint32(&vm->pending_irqs, 0);
         uint32_t events = atomic_swap_uint32(&vm->pending_events, 0);
 
@@ -93,6 +90,13 @@ void riscv_hart_run(rvvm_hart_t* vm)
         }
 
         riscv_handle_irqs(vm, false);
+
+        // Run the hart
+        riscv_run_till_event(vm);
+        if (vm->trap) {
+            vm->registers[REGISTER_PC] = vm->trap_pc;
+            vm->trap = false;
+        }
     }
 }
 
