@@ -123,6 +123,7 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 | [**nebulka1**](https://github.com/nebulka1)                 | Relative input mode | |
 
 ## 🔍 TODO
+- Implement Sstimecmp, Svpbmt, Svnapot extensions
 - Sparse block image format with compression/deduplication
 - Suspend/resume to file, VM migration
 - Linux userspace binary emulation (WIP)
