@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
@@ -47,10 +48,15 @@ static void term_rawmode()
 {
     tcgetattr(STDIN_FILENO, &orig_term_opts);
     call_at_deinit(term_origmode);
-    struct termios term_opts = orig_term_opts;
-    term_opts.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-    term_opts.c_iflag &= ~(IXON | ICRNL);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &term_opts);
+
+    struct termios term_opts = {
+        .c_iflag = ICRNL,
+        .c_oflag = OPOST | ONLCR,
+        .c_cflag = orig_term_opts.c_cflag,
+        .c_lflag = 0,
+        .c_cc[VMIN] = 1,
+    };
+    tcsetattr(STDIN_FILENO, TCSANOW, &term_opts);
 }
 
 #elif defined(_WIN32) && !defined(UNDER_CE)
