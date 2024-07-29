@@ -170,7 +170,8 @@ size_t vma_page_size()
 #elif defined(VMA_MMAP_IMPL)
         host_pagesize = sysconf(_SC_PAGESIZE);
 #else
-        host_pagesize = 0x1000;
+        // Non-paging fallback via malloc/free, disable alignment
+        host_pagesize = 1;
 #endif
     }
     return host_pagesize;
