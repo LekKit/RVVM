@@ -1,0 +1,39 @@
+#
+# To clean up the repo, run `git clean -Xdf`
+#
+
+# Makefile default build paths
+/release.*/
+/debug.*/
+
+# CMake default build path
+/build/
+
+# CMake garbage if someone tries in-source build
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile*
+
+# Assets for WASM build
+/wasm/
+
+# Temporary local stuff
+/tmp/
+
+# Kate editor temp files
+*.kate-swp
+
+# Other editors that people might use
+/.vscode/
+
+# Patches stuff
+/*.patch
+*.rej
+*.orig
+
+# Random stuff on Windows build host
+NUL
+
+# Explicitly allow our main makefile
+!/Makefile
