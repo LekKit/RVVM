@@ -19,11 +19,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "dlib.h"
 #include "utils.h"
 
-#if defined(DLIB_DISABLED)
-// Disable dynamic library loading
-#define DLIB_FILE_EXT ""
+#ifndef DLIB_DISABLED
 
-#elif defined(_WIN32)
+#ifdef _WIN32
 #include <windows.h>
 #define DLIB_WIN32_IMPL
 #define DLIB_FILE_EXT ".dll"
@@ -36,7 +34,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #else
 #define DLIB_FILE_EXT ".so"
 #endif
+#endif
 
+#endif
+
+#ifndef DLIB_FILE_EXT
+#define DLIB_FILE_EXT ""
 #endif
 
 struct dlib_ctx {
