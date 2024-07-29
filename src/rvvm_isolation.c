@@ -530,7 +530,8 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
     int flags = all_threads ? SECCOMP_FILTER_FLAG_TSYNC : 0;
 
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, flags) && errno != ENOSYS) {
-        DO_ONCE(rvvm_warn("Failed to enforce seccomp syscall filter: %s!", strerror(errno)));
+        // Seccomp not available on this system
+        DO_ONCE(rvvm_info("Failed to enforce seccomp syscall filter: %s!", strerror(errno)));
     }
 }
 
