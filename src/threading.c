@@ -442,8 +442,10 @@ static void thread_workers_terminate(void)
     }
     for (size_t i=0; i<WORKER_THREADS; ++i) {
         thread_join(pool_threads[i]);
+        pool_threads[i] = NULL;
     }
     condvar_free(pool_cond);
+    pool_cond = NULL;
 }
 
 static void* threadpool_worker(void* ptr)
