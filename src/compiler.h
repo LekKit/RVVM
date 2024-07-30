@@ -83,6 +83,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define NOINLINE
 #endif
 
+#if GNU_ATTRIBUTE(__destructor__)
+#define GNU_DESTRUCTOR __attribute__((__destructor__))
+#else
+#define GNU_DESTRUCTOR
+#endif
+
+#if GNU_ATTRIBUTE(__constructor__)
+#define GNU_CONSTRUCTOR __attribute__((__constructor__))
+#else
+#define GNU_CONSTRUCTOR
+#endif
+
 // Attribute __preserve_most__ is broken on Clang (Doesn't work with RVJIT, apparently invoking func pointers is broken)
 // This is intented to remove unnecessary spills from algorithm fast path
 // Hopefully one day similar thing will appear in GCC
