@@ -405,11 +405,13 @@ PUBLIC bool pci_vfio_init_auto(rvvm_machine_t* machine, const char* pci_id)
                 vfio->thread = thread_create(vfio_irq_thread, vfio);
                 return true;
             } else {
-                rvvm_detach_mmio(machine, placeholder, false);
+                // Failed to attach to guest PCI bus
+                rvvm_detach_mmio(machine, placeholder);
             }
+        } else {
+            // Failed to attach to the host VFIO device
+            vfio_dev_free(vfio);
         }
-        // We couldn't attach to either host VFIO device or guest PCI bus
-        vfio_dev_free(vfio);
     } else rvvm_error("Can't bind PCI device to vfio_pci kernel module");
 
     return false;
