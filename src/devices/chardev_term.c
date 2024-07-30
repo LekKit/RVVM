@@ -157,7 +157,7 @@ static void term_process_input(chardev_term_t* term, char* buffer, size_t size)
         if (term->ctrl_a) {
             if (buffer[i] == 'x') {
                 // Exit on Ctrl+A, x
-                _exit(0);
+                exit(0);
             }
         }
 
