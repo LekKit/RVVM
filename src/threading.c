@@ -121,6 +121,7 @@ void* thread_join(thread_ctx_t* thread)
     DWORD ltmp = 0;
     WaitForSingleObject(thread->handle, INFINITE);
     GetExitCodeThread(thread->handle, &ltmp);
+    CloseHandle(thread->handle);
     ret = (void*)(size_t)ltmp;
 #else
     pthread_join(thread->pthread, &ret);
