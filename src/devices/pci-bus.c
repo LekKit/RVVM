@@ -442,7 +442,7 @@ PUBLIC void pci_remove_device(pci_dev_t* dev)
     dev->bus->dev[dev->dev_id] = NULL;
     for (size_t func=0; func<PCI_DEV_FUNCS; ++func) {
         for (size_t bar=0; bar<PCI_FUNC_BARS; ++bar) {
-            rvvm_detach_mmio(dev->bus->machine, dev->func[func].bar_handle[bar], true);
+            rvvm_detach_mmio(dev->bus->machine, dev->func[func].bar_handle[bar]);
         }
     }
     if (was_running) rvvm_start_machine(dev->bus->machine);
