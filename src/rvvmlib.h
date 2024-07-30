@@ -28,6 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVVM_EXTERN_C_BEGIN
 #define RVVM_EXTERN_C_END
 #endif
+
 RVVM_EXTERN_C_BEGIN
 
 #include <stdint.h>
@@ -45,12 +46,18 @@ RVVM_EXTERN_C_BEGIN
 #define PUBLIC
 #endif
 
+// Version string
 #ifndef RVVM_VERSION
 #define RVVM_VERSION "0.7-git"
 #endif
-#define RVVM_ABI_VERSION     6
+
+// Increments on each API/ABI breakage
+#define RVVM_ABI_VERSION 6
+
+// Default memory base address
 #define RVVM_DEFAULT_MEMBASE 0x80000000
 
+// Configurable options
 #define RVVM_OPT_NONE           0
 #define RVVM_OPT_JIT            1 // Enable JIT
 #define RVVM_OPT_JIT_CACHE      2 // Amount of per-core JIT cache (In bytes)
@@ -67,16 +74,16 @@ RVVM_EXTERN_C_BEGIN
 #define RVVM_OPT_MEM_SIZE       0x80000002U // Physical RAM size
 #define RVVM_OPT_HART_COUNT     0x80000003U // Amount of harts
 
-// Forward-declare FDT node
-struct fdt_node;
+// Various RVVM public API types
+typedef uint64_t rvvm_addr_t;
 
 typedef struct rvvm_machine_t rvvm_machine_t;
+
+struct fdt_node;
 
 typedef struct plic    plic_ctx_t;
 typedef struct pci_bus pci_bus_t;
 typedef struct i2c_bus i2c_bus_t;
-
-typedef uint64_t rvvm_addr_t;
 
 typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
 typedef int rvvm_mmio_handle_t;
@@ -122,6 +129,10 @@ struct rvvm_mmio_dev_t {
     uint8_t max_op_size;
 };
 
+/*
+ * Machine API
+ */
+
 // Memory starts at 0x80000000 by default, machine boots from there as well
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
@@ -154,10 +165,6 @@ PUBLIC struct fdt_node* rvvm_get_fdt_soc(rvvm_machine_t* machine);
 PUBLIC void rvvm_set_cmdline(rvvm_machine_t* machine, const char* str);
 PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str);
 
-// Machine configuration
-PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt);
-PUBLIC bool        rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val);
-
 // Load bootrom, kernel, device tree binaries into RAM (Handles reset as well)
 PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);
 PUBLIC bool rvvm_load_kernel(rvvm_machine_t* machine, const char* path);
@@ -166,16 +173,23 @@ PUBLIC bool rvvm_load_dtb(rvvm_machine_t* machine, const char* path);
 // Dump generated device tree to a file
 PUBLIC bool rvvm_dump_dtb(rvvm_machine_t* machine, const char* path);
 
-// Spawns CPU threads and continues machine execution
+// Machine configuration
+PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt);
+PUBLIC bool        rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val);
+
+// Powers up or resumes a paused machine
 // Returns false if the machine is already running
 PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine);
 
-// Stops the CPUs, the machine is frozen upon return
-// Returns false if the machine isn't yet running
+// Stops the vCPUs, the machine is frozen upon return
+// Returns false if the machine is already paused
 PUBLIC bool rvvm_pause_machine(rvvm_machine_t* machine);
 
 // Reset/shutdown the machine
 PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
+
+// Returns true if the machine is running and not paused
+PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine);
 
 // Returns true if the machine is powered on (Even when it's paused)
 PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine);
@@ -183,7 +197,7 @@ PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine);
 // Complete cleanup (Frees memory, devices data, VM structures)
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine);
 
-// Get near MMIO zone if the one specified is busy (Before attaching device, for example)
+// Get usable MMIO zone if the one specified is busy (Before attaching device, for example)
 // Returns addr if the specified zone is usable
 PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size);
 
@@ -194,8 +208,8 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 //   frees the device state as if the machine was shut down
 PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 
-// Detach MMIO device from the machine, optionally freeing the device state
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle, bool cleanup);
+// Detach MMIO device from the machine, free it's state
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
 
 // Manipulate attached MMIO device by handle, may be done on a running VM
 // Returns:
@@ -203,16 +217,13 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle,
 // - Invalid handle: NULL pointer
 PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
 
-// Re-enable internal event thread after offload, or disable altogether (DANGEROUS)
-PUBLIC void rvvm_enable_builtin_eventloop(bool enabled);
-
 // Offload eventloop into current thread, returns when any machine stops
 // For self-contained VMs this should be used in main thread
 PUBLIC void rvvm_run_eventloop();
 
-//
-// Userland Emulation API (WIP)
-//
+/*
+ * Userland Emulation API (WIP)
+ */
 
 typedef void* rvvm_cpu_handle_t;
 
