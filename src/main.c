@@ -265,7 +265,6 @@ static int rvvm_cli_main(int argc, const char** argv)
 #endif
 
     if (rvvm_cli_configure(machine, argc, argv, bootrom, tap)) {
-        rvvm_enable_builtin_eventloop(false);
         rvvm_start_machine(machine);
 
         if (!rvvm_has_arg("noisolation")) {
