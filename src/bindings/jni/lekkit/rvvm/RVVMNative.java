@@ -76,7 +76,7 @@ public class RVVMNative {
     public static native boolean    machine_powered(long machine);
     public static native void       free_machine(long machine);
     public static native long       mmio_zone_auto(long machine, long addr, long size);
-    public static native void       detach_mmio(long machine, int handle, boolean cleanup);
+    public static native void       detach_mmio(long machine, int handle);
     public static native void       run_eventloop();
 
     // TODO: MMIO API

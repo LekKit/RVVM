@@ -28,7 +28,7 @@ public abstract class MMIODevice implements IRemovableDevice {
 
     public synchronized void remove() {
         if (isValid()) {
-            RVVMNative.detach_mmio(machine.getPtr(), mmio_handle, true);
+            RVVMNative.detach_mmio(machine.getPtr(), mmio_handle);
             mmio_handle = -1;
         }
     }

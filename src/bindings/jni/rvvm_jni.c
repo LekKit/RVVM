@@ -218,10 +218,10 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_attach_1mmio(JNIEnv* env, jcl
 }
 #endif
 
-JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_detach_1mmio(JNIEnv* env, jclass class, jlong machine, jint handle, jboolean cleanup)
+JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_detach_1mmio(JNIEnv* env, jclass class, jlong machine, jint handle)
 {
     UNUSED(env); UNUSED(class);
-    rvvm_detach_mmio((rvvm_machine_t*)(size_t)machine, handle, cleanup);
+    rvvm_detach_mmio((rvvm_machine_t*)(size_t)machine, handle);
 }
 
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_run_1eventloop(JNIEnv* env, jclass class)
