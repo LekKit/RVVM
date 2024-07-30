@@ -169,50 +169,63 @@ SAFE_REALLOC void* safe_realloc(void* ptr, size_t size)
     return ret;
 }
 
-typedef void (*deinit_func_t)();
-static vector_t(uint32_t*) deinit_tickets;
-static vector_t(deinit_func_t) deinit_funcs;
-static spinlock_t deinit_lock;
-
-NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed)
+NOINLINE void do_once_finalize(uint32_t* ticket)
 {
-    if (claimed) {
-        // Register the DO_ONCE ticket for deinit
-        while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
-        vector_push_back(deinit_tickets, ticket);
-        spin_unlock(&deinit_lock);
-    } else while (atomic_load_uint32_ex(ticket, ATOMIC_ACQUIRE) != 2) {
+    while (atomic_load_uint32_ex(ticket, ATOMIC_ACQUIRE) != 2) {
         sleep_ms(1);
     }
 }
 
+typedef void (*deinit_func_t)();
+static vector_t(deinit_func_t) deinit_funcs = {0};
+static spinlock_t deinit_lock = {0};
+static bool deinit_happened = false;
+
 void call_at_deinit(void (*function)())
 {
-    while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
-    vector_push_back(deinit_funcs, function);
+    bool call_func = false;
+
+    spin_lock(&deinit_lock);
+    if (!deinit_happened) {
+        vector_push_back(deinit_funcs, function);
+    } else {
+        call_func = true;
+    }
     spin_unlock(&deinit_lock);
+
+    if (call_func) {
+        function();
+    }
 }
 
-#ifdef GNU_EXTS
-#define DEINIT_ATTR __attribute__((destructor))
-#else
-#define DEINIT_ATTR
-#endif
+static deinit_func_t dequeue_func(void)
+{
+    deinit_func_t ret = NULL;
 
-DEINIT_ATTR void full_deinit()
+    spin_lock(&deinit_lock);
+    deinit_happened = true;
+    if (vector_size(deinit_funcs) == 0) {
+        vector_free(deinit_funcs);
+    } else {
+        size_t end = vector_size(deinit_funcs) - 1;
+        ret = vector_at(deinit_funcs, end);
+        vector_erase(deinit_funcs, end);
+    }
+    spin_unlock(&deinit_lock);
+    return ret;
+}
+
+GNU_DESTRUCTOR static void full_deinit(void)
 {
     rvvm_info("Fully deinitializing librvvm");
-    spin_lock(&deinit_lock);
-    // Reset the DO_ONCE tickets and run destructors
-    vector_foreach_back(deinit_funcs, i) {
-        vector_at(deinit_funcs, i)();
+    while (true) {
+        deinit_func_t func = dequeue_func();
+        if (func) {
+            func();
+        } else {
+            break;
+        }
     }
-    vector_foreach_back(deinit_tickets, i) {
-        atomic_store_uint32(vector_at(deinit_tickets, i), 0);
-    }
-    vector_free(deinit_tickets);
-    vector_free(deinit_funcs);
-    spin_unlock(&deinit_lock);
 }
 
 static inline char digit_symbol(uint32_t val)

@@ -73,19 +73,18 @@ do { \
 // Implicitly NULL freed pointer to prevent use-after-free
 #define free(ptr) safe_free(ptr)
 
-NOINLINE void do_once_finalize(uint32_t* ticket, bool claimed);
+NOINLINE void do_once_finalize(uint32_t* ticket);
 
 // Run a function only once upon reaching this, for lazy init, etc
 #define DO_ONCE(expr) \
 do { \
     static uint32_t already_done_once = 0; \
-    if (unlikely(atomic_load_uint32_ex(&already_done_once, ATOMIC_ACQUIRE) != 2)) { \
-        bool do_once_claimed = atomic_cas_uint32(&already_done_once, 0, 1); \
-        if (do_once_claimed) { \
+    if (unlikely(atomic_load_uint32_ex(&already_done_once, ATOMIC_RELAXED) != 2)) { \
+        if (atomic_cas_uint32(&already_done_once, 0, 1)) { \
             expr; \
             atomic_store_uint32_ex(&already_done_once, 2, ATOMIC_RELEASE); \
         } \
-        do_once_finalize(&already_done_once, do_once_claimed); \
+        do_once_finalize(&already_done_once); \
     } \
 } while (0)
 
@@ -107,7 +106,6 @@ static inline size_t align_size_down(size_t x, size_t align)
 }
 
 void call_at_deinit(void (*function)());
-void full_deinit();
 
 // Portable strtol/ltostr replacement
 size_t   uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base);
