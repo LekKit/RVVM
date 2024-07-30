@@ -232,6 +232,7 @@ struct rvvm_machine_t {
     vector_t(rvvm_hart_t*) harts;
     vector_t(rvvm_mmio_dev_t) mmio;
     rvtimer_t timer;
+
     uint32_t running;
     uint32_t power_state;
     bool rv64;

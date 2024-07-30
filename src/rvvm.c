@@ -30,10 +30,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 static spinlock_t global_lock = SPINLOCK_INIT;
 static vector_t(rvvm_machine_t*) global_machines = {0};
-static cond_var_t* builtin_eventloop_cond;
-static thread_ctx_t* builtin_eventloop_thread;
-static bool builtin_eventloop_enabled = true;
-static bool builtin_eventloop_running = false;
+static bool global_manual = false;
+
+static spinlock_t eventloop_lock = SPINLOCK_INIT;
+static cond_var_t* eventloop_cond = NULL;
+static thread_ctx_t* eventloop_thread = NULL;
 
 #ifdef USE_FDT
 static void rvvm_init_fdt(rvvm_machine_t* machine)
@@ -132,7 +133,7 @@ static void rvvm_prepare_fdt(rvvm_machine_t* machine)
         vector_foreach(machine->harts, i) {
             struct fdt_node* cpus = fdt_node_find(machine->fdt, "cpus");
             struct fdt_node* cpu = fdt_node_find_reg(cpus, "cpu", i);
-            fdt_node_add_prop(cpu, "compatible", "lekkit,arc5xx\0riscv\0", 20);
+            fdt_node_add_prop(cpu, "compatible", "lekkit,arc7xx\0riscv\0", 20);
         }
     }
 }
@@ -224,16 +225,16 @@ static void* rvvm_eventloop(void* manual)
         rvvm_restrict_this_thread();
     }
     /*
-     * The eventloop runs in a separate thread if it's enabled,
+     * The eventloop runs in a separate thread if needed,
      * and returns on any machine shutdown if ran manually.
      */
     while (true) {
-        spin_lock_slow(&global_lock);
-        if (vector_size(global_machines) == 0 || builtin_eventloop_enabled == !!manual) {
-            builtin_eventloop_running = false;
+        spin_lock(&global_lock);
+        if (vector_size(global_machines) == 0 || global_manual == !manual) {
             spin_unlock(&global_lock);
             break;
         }
+
         vector_foreach_back(global_machines, m) {
             rvvm_machine_t* machine = vector_at(global_machines, m);
             uint32_t power_state = atomic_load_uint32(&machine->power_state);
@@ -282,41 +283,39 @@ static void* rvvm_eventloop(void* manual)
             }
         }
         spin_unlock(&global_lock);
-        condvar_wait(builtin_eventloop_cond, 10);
+        condvar_wait(eventloop_cond, 10);
     }
 
     return NULL;
 }
 
-static void builtin_eventloop_shutdown()
+static void rvvm_reconfigure_eventloop()
 {
-    // Check for any leftover machines (Invalid API usage)
     spin_lock(&global_lock);
-    if (vector_size(global_machines)) {
-        rvvm_warn("Invalid API usage detected: Leaking machine state!");
-    }
+    bool needs_cond = global_manual || vector_size(global_machines);
+    bool needs_thread = !global_manual && vector_size(global_machines);
     spin_unlock(&global_lock);
 
-    // Join on the eventloop thread
-    condvar_wake(builtin_eventloop_cond);
-    thread_join(builtin_eventloop_thread);
-    vector_free(global_machines);
-}
+    spin_lock(&eventloop_lock);
+    if (!needs_thread && eventloop_thread) {
+        condvar_wake(eventloop_cond);
+        thread_join(eventloop_thread);
+        eventloop_thread = NULL;
+    }
 
-static void setup_eventloop()
-{
-    DO_ONCE({
-        builtin_eventloop_cond = condvar_create();
-        call_at_deinit(builtin_eventloop_shutdown);
-    });
-    if (builtin_eventloop_enabled && vector_size(global_machines) && !builtin_eventloop_running) {
-        builtin_eventloop_running = true;
-        thread_join(builtin_eventloop_thread);
-        builtin_eventloop_thread = thread_create(rvvm_eventloop, NULL);
+    if (!needs_cond && eventloop_cond) {
+        condvar_free(eventloop_cond);
+        eventloop_cond = NULL;
     }
-    if (!builtin_eventloop_enabled && builtin_eventloop_running) {
-        condvar_wake(builtin_eventloop_cond);
+
+    if (needs_cond && !eventloop_cond) {
+        eventloop_cond = condvar_create();
     }
+
+    if (needs_thread && !eventloop_thread) {
+        eventloop_thread = thread_create(rvvm_eventloop, NULL);
+    }
+    spin_unlock(&eventloop_lock);
 }
 
 PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint8_t size)
@@ -413,7 +412,7 @@ PUBLIC void rvvm_flush_icache(rvvm_machine_t* machine, rvvm_addr_t addr, size_t 
     // Needs improvements in RVJIT
     UNUSED(addr);
     UNUSED(size);
-    spin_lock_slow(&global_lock);
+    spin_lock(&global_lock);
     vector_foreach(machine->harts, i) {
         riscv_jit_flush_cache(vector_at(machine->harts, i));
     }
@@ -496,7 +495,6 @@ PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str)
     free(machine->cmdline);
     machine->cmdline = tmp;
     struct fdt_node* chosen = fdt_node_find(machine->fdt, "chosen");
-    fdt_node_del_prop(chosen, "bootargs");
     fdt_node_add_prop_str(chosen, "bootargs", machine->cmdline);
 #else
     UNUSED(machine);
@@ -589,11 +587,12 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
         return false;
     }
 
-    spin_lock_slow(&global_lock);
+    spin_lock(&global_lock);
 
     if (!rvvm_machine_powered(machine)) {
         rvvm_reset_machine_state(machine);
     }
+
     vector_foreach(machine->harts, i) {
         riscv_hart_prepare(vector_at(machine->harts, i));
     }
@@ -603,8 +602,9 @@ PUBLIC bool rvvm_start_machine(rvvm_machine_t* machine)
 
     // Register the machine as running
     vector_push_back(global_machines, machine);
-    setup_eventloop();
     spin_unlock(&global_lock);
+
+    rvvm_reconfigure_eventloop();
     return true;
 }
 
@@ -614,19 +614,21 @@ PUBLIC bool rvvm_pause_machine(rvvm_machine_t* machine)
         return false;
     }
 
-    spin_lock_slow(&global_lock);
+    spin_lock(&global_lock);
 
     vector_foreach(machine->harts, i) {
         riscv_hart_pause(vector_at(machine->harts, i));
     }
 
-    vector_foreach(global_machines, i) {
+    vector_foreach_back(global_machines, i) {
         if (vector_at(global_machines, i) == machine) {
             vector_erase(global_machines, i);
             break;
         }
     }
     spin_unlock(&global_lock);
+
+    rvvm_reconfigure_eventloop();
     return true;
 }
 
@@ -639,7 +641,7 @@ PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
     if (vector_size(machine->harts) == 1) {
         riscv_hart_queue_pause(vector_at(machine->harts, 0));
     }
-    condvar_wake(builtin_eventloop_cond);
+    condvar_wake(eventloop_cond);
 }
 
 PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine)
@@ -647,20 +649,29 @@ PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine)
     return atomic_load_uint32(&machine->power_state) != RVVM_POWER_OFF;
 }
 
+PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine)
+{
+    return atomic_load_uint32(&machine->running);
+}
+
 static void rvvm_cleanup_mmio(rvvm_mmio_dev_t* dev)
 {
     rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
     // Either device implements it's own cleanup routine,
     // or we free it's data buffer
-    if (dev->type && dev->type->remove)
+    if (dev->type && dev->type->remove) {
         dev->type->remove(dev);
-    else
+    } else {
         free(dev->data);
+    }
 }
 
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
 {
     rvvm_pause_machine(machine);
+
+    // Shut down the eventloop if needed
+    rvvm_reconfigure_eventloop();
 
     // Clean up devices in reversed order, something may reference older devices
     vector_foreach_back(machine->mmio, i) {
@@ -704,7 +715,7 @@ static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t add
         struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
         if (dev->data == NULL && dev->mapping == NULL && dev->type == NULL) {
             // This is a leftover device which was removed from running VM
-            rvvm_detach_mmio(machine, i, true);
+            rvvm_detach_mmio(machine, i);
         } else if (addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
             addr = dev->addr + dev->size;
         }
@@ -754,14 +765,12 @@ PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_m
     return ret;
 }
 
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle, bool cleanup)
+PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle)
 {
     if (handle >= 0 && (size_t)handle < vector_size(machine->mmio)) {
         bool was_running = rvvm_pause_machine(machine);
         struct rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, handle);
-
-        // Keep the placeholder device in vector so that the handles remain valid
-        if (cleanup) rvvm_cleanup_mmio(dev);
+        rvvm_cleanup_mmio(dev);
 
         // It's a shared memory mapping, flush each hart TLB
         if (dev->mapping) {
@@ -771,6 +780,7 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle,
             }
         }
 
+        // Keep the placeholder device in vector so that the handles remain valid
         dev->data = NULL;
         dev->type = NULL;
         dev->mapping = NULL;
@@ -785,18 +795,19 @@ PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle,
     }
 }
 
-PUBLIC void rvvm_enable_builtin_eventloop(bool enabled)
+static void rvvm_set_manual_eventloop(bool manual)
 {
-    spin_lock_slow(&global_lock);
-    builtin_eventloop_enabled = enabled;
-    setup_eventloop();
+    spin_lock(&global_lock);
+    global_manual = manual;
     spin_unlock(&global_lock);
+    rvvm_reconfigure_eventloop();
 }
 
 PUBLIC void rvvm_run_eventloop()
 {
-    rvvm_enable_builtin_eventloop(false);
+    rvvm_set_manual_eventloop(true);
     rvvm_eventloop((void*)(size_t)1);
+    rvvm_set_manual_eventloop(false);
 }
 
 //
@@ -836,7 +847,7 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
     rvjit_set_native_ptrs(&vm->jit, true);
 #endif
     riscv_switch_priv(vm, PRIVILEGE_USER);
-    spin_lock_slow(&global_lock);
+    spin_lock(&global_lock);
     vector_push_back(machine->harts, vm);
     spin_unlock(&global_lock);
     return (rvvm_cpu_handle_t)vm;
@@ -845,7 +856,7 @@ PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
 PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
 {
     rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
-    spin_lock_slow(&global_lock);
+    spin_lock(&global_lock);
     vector_foreach(vm->machine->harts, i) {
         if (vector_at(vm->machine->harts, i) == vm) {
             vector_erase(vm->machine->harts, i);
