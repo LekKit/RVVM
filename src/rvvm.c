@@ -294,21 +294,15 @@ static void* rvvm_eventloop(void* manual)
     return NULL;
 }
 
-static void reap_running_machines()
+static void builtin_eventloop_shutdown()
 {
     // Check for any leftover machines (Invalid API usage)
-    while (true) {
-        rvvm_machine_t* machine = NULL;
-        spin_lock(&global_lock);
-        vector_foreach(global_machines, m) {
-            machine = vector_at(global_machines, m);
-            break;
-        }
-        spin_unlock(&global_lock);
-        if (machine == NULL) break;
-        rvvm_warn("Reaping leftover machine %p", (void*)machine);
-        rvvm_free_machine(machine);
+    spin_lock(&global_lock);
+    if (vector_size(global_machines)) {
+        rvvm_warn("Invalid API usage detected: Leaking machine state!");
     }
+    spin_unlock(&global_lock);
+
     // Join on the eventloop thread
     condvar_wake(builtin_eventloop_cond);
     thread_join(builtin_eventloop_thread);
@@ -319,7 +313,7 @@ static void setup_eventloop()
 {
     DO_ONCE({
         builtin_eventloop_cond = condvar_create();
-        call_at_deinit(reap_running_machines);
+        call_at_deinit(builtin_eventloop_shutdown);
     });
     if (builtin_eventloop_enabled && vector_size(global_machines) && !builtin_eventloop_running) {
         builtin_eventloop_running = true;
