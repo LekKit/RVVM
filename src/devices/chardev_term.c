@@ -90,6 +90,7 @@ typedef struct {
     uint32_t flags;
     int rfd, wfd;
     ringbuf_t rx, tx;
+    bool ctrl_a;
 } chardev_term_t;
 
 static uint32_t term_update_flags(chardev_term_t* term)
@@ -149,20 +150,37 @@ static void term_push_io(chardev_term_t* term, char* buffer, size_t* rx_size, si
 #endif
 }
 
+// Handles VM-related hotkeys
+static void term_process_input(chardev_term_t* term, char* buffer, size_t size)
+{
+    for (size_t i=0; i<size; ++i) {
+        if (term->ctrl_a) {
+            if (buffer[i] == 'x') {
+                // Exit on Ctrl+A, x
+                _exit(0);
+            }
+        }
+
+        // Ctrl+A (SOH VT code)
+        term->ctrl_a = buffer[i] == 1;
+    }
+}
+
 static void term_update(chardev_t* dev)
 {
     chardev_term_t* term = dev->data;
     uint32_t flags = 0;
-    char buffer[257] = {0};
+    char buffer[256] = {0};
     size_t rx_size = 0, tx_size = 0;
 
     spin_lock(&term->io_lock);
     spin_lock(&term->lock);
     rx_size = EVAL_MIN(ringbuf_space(&term->rx), sizeof(buffer));
-    tx_size = ringbuf_peek(&term->tx, buffer, 256);
+    tx_size = ringbuf_peek(&term->tx, buffer, sizeof(buffer));
     spin_unlock(&term->lock);
 
     term_push_io(term, buffer, &rx_size, &tx_size);
+    term_process_input(term, buffer, rx_size);
 
     spin_lock(&term->lock);
     ringbuf_write(&term->rx, buffer, rx_size);
