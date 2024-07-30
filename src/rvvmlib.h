@@ -67,13 +67,14 @@ RVVM_EXTERN_C_BEGIN
 #define RVVM_OPT_MEM_SIZE       0x80000002U // Physical RAM size
 #define RVVM_OPT_HART_COUNT     0x80000003U // Amount of harts
 
+// Forward-declare FDT node
+struct fdt_node;
+
 typedef struct rvvm_machine_t rvvm_machine_t;
 
 typedef struct plic    plic_ctx_t;
 typedef struct pci_bus pci_bus_t;
 typedef struct i2c_bus i2c_bus_t;
-
-struct fdt_node;
 
 typedef uint64_t rvvm_addr_t;
 
@@ -121,8 +122,6 @@ struct rvvm_mmio_dev_t {
     uint8_t max_op_size;
 };
 
-typedef bool (*rvvm_reset_handler_t)(rvvm_machine_t* machine, void* data, bool reset);
-
 // Memory starts at 0x80000000 by default, machine boots from there as well
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64);
 
@@ -158,10 +157,6 @@ PUBLIC void rvvm_append_cmdline(rvvm_machine_t* machine, const char* str);
 // Machine configuration
 PUBLIC rvvm_addr_t rvvm_get_opt(rvvm_machine_t* machine, uint32_t opt);
 PUBLIC bool        rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val);
-
-// Set up handler & userdata to be called when the VM performs reset/shutdown
-// Returning false from handler cancels reset
-PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data);
 
 // Load bootrom, kernel, device tree binaries into RAM (Handles reset as well)
 PUBLIC bool rvvm_load_bootrom(rvvm_machine_t* machine, const char* path);

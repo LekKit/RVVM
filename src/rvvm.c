@@ -181,13 +181,10 @@ static rvvm_addr_t rvvm_pass_dtb(rvvm_machine_t* machine)
     return 0;
 }
 
-static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
+static void rvvm_reset_machine_state(rvvm_machine_t* machine)
 {
     atomic_store_uint32(&machine->power_state, RVVM_POWER_ON);
-    // Call reset callback
-    if (machine->on_reset && !machine->on_reset(machine, machine->reset_data, true)) {
-        return false;
-    }
+
     // Reset devices
     vector_foreach(machine->mmio, i) {
         rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
@@ -219,7 +216,6 @@ static bool rvvm_reset_machine_state(rvvm_machine_t* machine)
         riscv_switch_priv(vm, PRIVILEGE_MACHINE);
         riscv_jit_flush_cache(vm);
     }
-    return true;
 }
 
 static void* rvvm_eventloop(void* manual)
@@ -268,15 +264,13 @@ static void* rvvm_eventloop(void* manual)
                     riscv_hart_pause(vector_at(machine->harts, i));
                 }
                 // Call reset/poweroff handler
-                if (power_state == RVVM_POWER_RESET && rvvm_reset_machine_state(machine)) {
+                if (power_state == RVVM_POWER_RESET) {
                     rvvm_info("Machine %p resetting", machine);
+                    rvvm_reset_machine_state(machine);
                     vector_foreach(machine->harts, i) {
                         riscv_hart_spawn(vector_at(machine->harts, i));
                     }
                 } else {
-                    if (machine->on_reset) {
-                        machine->on_reset(machine, machine->reset_data, false);
-                    }
                     rvvm_info("Machine %p shutting down", machine);
                     atomic_store_uint32(&machine->running, false);
                     vector_erase(global_machines, m);
@@ -528,12 +522,6 @@ PUBLIC bool rvvm_set_opt(rvvm_machine_t* machine, uint32_t opt, rvvm_addr_t val)
     if (opt >= RVVM_MAX_OPTS) return false;
     atomic_store_uint64_ex(&machine->opts[opt], val, ATOMIC_RELAXED);
     return true;
-}
-
-PUBLIC void rvvm_set_reset_handler(rvvm_machine_t* machine, rvvm_reset_handler_t handler, void* data)
-{
-    machine->on_reset = handler;
-    machine->reset_data = data;
 }
 
 static bool file_reopen_check_size(rvfile_t** dest, const char* path, size_t size)

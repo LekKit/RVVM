@@ -240,9 +240,6 @@ struct rvvm_machine_t {
     rvfile_t* kernel_file;
     rvfile_t* dtb_file;
 
-    rvvm_reset_handler_t on_reset;
-    void* reset_data;
-
     plic_ctx_t* plic;
     pci_bus_t*  pci_bus;
     i2c_bus_t*  i2c_bus;
