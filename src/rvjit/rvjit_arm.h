@@ -1,6 +1,7 @@
 /*
 rvjit_arm.h - RVJIT ARM Backend
 Copyright (C) 2022  cerg2010cerg2010 <github.com/cerg2010cerg2010>
+                    LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -29,28 +30,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RVJIT_ARM_H
 #define RVJIT_ARM_H
 
-#ifndef NDEBUG
-#define rvjit_a32_assert(expr) (void)((expr) ? 0 : (rvvm_fatal("Assertion failed: " #expr), 0))
-#else
-#define rvjit_a32_assert(expr) (void)0
-#endif
+#define rvjit_a32_assert(expr) \
+do { \
+    if (unlikely(!(expr))) rvvm_fatal("Assertion (" #expr ") failed at " SOURCE_LINE); \
+} while (0)
 
-#ifdef GNU_EXTS
-// Builtin math functions
-extern int __aeabi_idiv(int, int);
-extern unsigned __aeabi_uidiv(unsigned, unsigned);
-#define rvjit_a32_soft_idiv __aeabi_idiv
-#define rvjit_a32_soft_uidiv __aeabi_uidiv
-#else
-static int rvjit_a32_soft_idiv(int a, int b)
+static int32_t rvjit_a32_soft_idiv(int32_t a, int32_t b)
 {
     return a / b;
 }
-extern unsigned rvjit_a32_soft_uidiv(unsigned a, unsigned b)
+
+extern uint32_t rvjit_a32_soft_uidiv(uint32_t a, uint32_t b)
 {
     return a / b;
 }
-#endif
 
 #define RVJIT_ARM_IDIVA (1 << 17)
 
@@ -58,30 +51,27 @@ static uint32_t rvjit_a32_hwcaps = 0;
 
 static inline void rvjit_a32_test_cpu()
 {
-    static bool init = false;
-    if (!init) {
-        init = true;
 #ifdef __linux__
-        rvjit_a32_hwcaps = getauxval(AT_HWCAP);
-        if (rvjit_a32_hwcaps & RVJIT_ARM_IDIVA)
-            rvvm_info("RVJIT detected ARM IDIV/UDIV instructions extension");
+    rvjit_a32_hwcaps = getauxval(AT_HWCAP);
 #endif
+    if (rvjit_a32_hwcaps & RVJIT_ARM_IDIVA) {
+        rvvm_info("RVJIT detected ARM IDIV/UDIV extension");
     }
 }
 
 static bool rvjit_a32_check_div()
 {
-    rvjit_a32_test_cpu();
+    DO_ONCE(rvjit_a32_test_cpu());
     return !!(rvjit_a32_hwcaps & RVJIT_ARM_IDIVA);
 }
 
-static bool check_imm_bits(int32_t val, bitcnt_t bits)
+static inline bool check_imm_bits(int32_t val, bitcnt_t bits)
 {
-    return (((int32_t)(((uint32_t)val) << (32 - bits))) >> (32 - bits)) == val;
+    return sign_extend(val, bits) == val;
 }
 
 #ifdef RVJIT_ABI_SYSV
-#define VM_PTR_REG 0 /* argument/scratch reg 1 */
+#define VM_PTR_REG 0 // Argument/scratch reg 1
 #endif
 
 static inline size_t rvjit_native_default_hregmask()
@@ -122,7 +112,7 @@ enum a32_cc
     A32_HI, A32_LS,
     A32_GE, A32_LT,
     A32_GT, A32_LE,
-    A32_AL, A32_UNCOND 
+    A32_AL, A32_UNCOND
 };
 typedef uint32_t a32_cc_t;
 
@@ -173,21 +163,21 @@ enum a32_ma_opcs
 {
     A32_MUL  =   (0 << 21) | (0 << 20),
     A32_MULS =   (0 << 21) | (1 << 20),
-    /*NOTE: MLA/MLAS use rdlo as ra and rdhi as rds*/
+    // NOTE: MLA/MLAS use rdlo as ra and rdhi as rds
     A32_MLA  =   (1 << 21) | (0 << 20),
     A32_MLAS =   (1 << 21) | (1 << 20),
-    /*NOTE: UMAAL use rdhi and rdlo for accumulate accumulate*/
+    // NOTE: UMAAL use rdhi and rdlo for accumulate accumulate
     A32_UMAAL =  (2 << 21) | (0 << 20),
-    /*NOTE: MLS use rdlo as ra and rdhi as rds*/
+    // NOTE: MLS use rdlo as ra and rdhi as rds
     A32_MLS =    (3 << 21) | (0 << 20),
     A32_UMULL =  (4 << 21) | (0 << 20),
     A32_UMULLS = (4 << 21) | (1 << 20),
-    /*NOTE: UMLAL/UMLALS use rdhi:rdlo for accumulate*/
+    // NOTE: UMLAL/UMLALS use rdhi:rdlo for accumulate
     A32_UMLAL =  (5 << 21) | (0 << 20),
     A32_UMLALS = (5 << 21) | (1 << 20),
     A32_SMULL =  (6 << 21) | (0 << 20),
     A32_SMULLS = (6 << 21) | (1 << 20),
-    /*NOTE: SMLAL/SMLALS use rdhi:rdlo for accumulate*/
+    // NOTE: SMLAL/SMLALS use rdhi:rdlo for accumulate
     A32_SMLAL =  (7 << 21) | (0 << 20),
     A32_SMLALS = (7 << 21) | (0 << 20),
 };
@@ -207,46 +197,35 @@ static inline void rvjit_a32_insn32(rvjit_block_t* block, uint32_t insn)
     rvjit_put_code(block, code, sizeof(code));
 }
 
-static inline uint32_t rvjit_a32_rol(uint32_t imm, bitcnt_t bits)
-{
-    return (imm << bits) | (imm >> (32 - bits));
-}
-
-static inline uint32_t rvjit_a32_ror(uint32_t imm, bitcnt_t bits)
-{
-    return (imm >> bits) | (imm << (32 - bits));
-}
-
-static inline bool rvjit_a32_encode_imm(uint32_t imm, uint8_t *pimm, uint8_t *prot)
+static inline bool rvjit_a32_encode_imm(uint32_t imm, uint8_t* pimm, uint8_t* prot)
 {
     uint8_t rotation = 0;
 
-    /* no rotation required */
+    // No rotation required
     if ((imm & 0xff) == imm) {
         *pimm = imm;
         *prot = 0;
         return true;
     }
 
-    /* if the value is split between top and the bottom
-     * part of the register, rotate it out */
+    // If the value is split between top and the bottom part of the register, rotate it out
     if ((imm & 0xFFFF) && (imm & 0xFFFF0000)) {
-        imm = rvjit_a32_ror(imm, 8);
+        imm = bit_rotr32(imm, 8);
         rotation = 8;
     }
 
-    uint8_t ctz = __builtin_ctz(imm);
+    uint8_t ctz = bit_ctz32(imm);
     rotation += ctz;
     rotation &= 31;
-    imm = rvjit_a32_ror(imm, ctz);
+    imm = bit_rotr32(imm, ctz);
 
-    /* rotation must be an even number, lower amount preferred */
+    // Rotation must be an even number, lower amount preferred
     if (rotation & 1) {
         --rotation;
-        imm = rvjit_a32_rol(imm, 1);
+        imm = bit_rotl32(imm, 1);
     }
 
-    /* immediate must fit in one byte */
+    // Immediate must fit in one byte
     if (imm & ~0xff) {
         return false;
     }
@@ -302,7 +281,7 @@ static inline void rvjit_a32_ma2(rvjit_block_t *block, a32_ma_opcs_t op, a32_cc_
     rvjit_a32_insn32(block, (cc << 28) | op | (rd << 16) | (ra << 12) | (rm << 8) | (1 << 7) | (1 << 4) | rn);
 }
 
-//NOTE: work only with udiv and sdiv
+// NOTE: Work only with udiv and sdiv
 static inline void rvjit_a32_md(rvjit_block_t *block, a32_md_opcs_t op, a32_cc_t cc, regid_t rd, regid_t ra, regid_t rn, regid_t rm)
 {
     rvjit_a32_assert((rd & ~15) == 0);
@@ -338,9 +317,9 @@ typedef uint32_t a32_mem_opcs_t;
 
 enum a32_addrmode
 {
-    A32_POSTINDEX = (0 << 24) | (0 << 21), /* use value, modify it and write it to the register */
-    A32_OFFSET    = (1 << 24) | (0 << 21), /* just use the value */
-    A32_PREINDEX  = (1 << 24) | (1 << 21)  /* modify the value, write it to the register and use it */
+    A32_POSTINDEX = (0 << 24) | (0 << 21), // Use value, modify it and write it to the register
+    A32_OFFSET    = (1 << 24) | (0 << 21), // Just use the value
+    A32_PREINDEX  = (1 << 24) | (1 << 21)  // Modify the value, write it to the register and use it
 };
 typedef uint32_t a32_addrmode_t;
 
@@ -373,7 +352,7 @@ static inline uint32_t rvjit_a32_addrmode3_reg(bool add, regid_t rm, a32_addrmod
 
 static inline uint32_t rvjit_a32_addrmode_multiple_reg(a32_addrmode_t am, uint16_t regsmask)
 {
-    rvjit_a32_assert(__builtin_popcount(regsmask) > 1); // one register in mask is undefined behavor
+    rvjit_a32_assert(bit_popcnt32(regsmask) > 1); // One register in mask is undefined behavor
     rvjit_a32_assert((regsmask & (1u << 13)) == 0);
     rvjit_a32_assert((regsmask & (1u << 15)) == 0);
     return (0 << 22) | am | regsmask;
@@ -407,16 +386,8 @@ static inline void rvjit_native_pop(rvjit_block_t* block, regid_t reg)
 
 static inline void rvjit_native_ret(rvjit_block_t* block)
 {
-    /* b lr */
-    //rvjit_a32_dp(block, A32_MOV, A32_AL, A32_PC, 0, rvjit_a32_shifter_reg_imm(A32_LR, A32_LSL, 0));
-
-    /* bx lr */
+    // bx lr
     rvjit_a32_bx_reg(block, A32_AL, A32_LR);
-
-    /*for (size_t i=0; i<block->size; ++i) {
-        printf("%02x", ((uint8_t*)block->code)[i]);
-    }
-    printf("\n\n\n");*/
 }
 
 static inline void rvjit_native_zero_reg(rvjit_block_t* block, regid_t reg)
@@ -436,7 +407,7 @@ static inline void rvjit_native_setreg32(rvjit_block_t* block, regid_t reg, uint
         return;
     }
 
-    /* XXX: this can be optimized with popcnt if count of 1's is greater that 0's */
+    // XXX: This can be optimized with popcnt if count of 1's is greater that 0's
     bool wasneg = (int32_t)imm < 0;
     if (wasneg) {
         imm = ~imm;
@@ -478,7 +449,7 @@ static inline void rvjit_native_setreg32s(rvjit_block_t* block, regid_t reg, int
 
 static inline void rvjit_a32_b_reloc(void *addr, bool link, a32_cc_t cond, uint32_t offset)
 {
-    /* ARM PC is offseted by 8 */
+    // ARM PC is offseted by 8
     offset -= 8;
     rvjit_a32_assert((offset & 3) == 0);
     rvjit_a32_assert(check_imm_bits(offset, 26));
@@ -602,7 +573,7 @@ static inline void rvjit32_native_addi(rvjit_block_t* block, regid_t hrds, regid
     }
 }
 
-/* Set native register reg to wide imm */
+// Set native register reg to wide imm
 static inline void rvjit_native_setregw(rvjit_block_t* block, regid_t reg, uintptr_t imm)
 {
     rvjit_native_setreg32(block, reg, imm);
@@ -878,7 +849,7 @@ static inline void rvjit_a32_soft_div_divu(rvjit_block_t* block, a32_md_opcs_t o
     }
 }
 
-//NOTE: aarch32 generate for overflow same behavor just need to check for divide by zero
+// NOTE: aarch32 generate for overflow same behavor just need to check for divide by zero
 static inline void rvjit32_native_div(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2)
 {
     bool need_allocate = (hrds == hrs1 || hrds == hrs2);
