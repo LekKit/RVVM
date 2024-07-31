@@ -30,12 +30,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Simple bit operations (sign-extend, etc) for internal usage
 
 /*
-* Sign-extend bits in the lower part of val into signed long
-* usage:
-*     long ext = sign_extend(val, 20);
-*
-*     [ext is now equal to signed lower 20 bits of val]
-*/
+ * Sign-extend bits in the lower part of val into signed i64
+ * Usage:
+ *     int ext = sign_extend(val, 20);
+ *
+ *     [ext is now equal to signed lower 20 bits of val]
+ */
 static forceinline int64_t sign_extend(uint64_t val, bitcnt_t bits)
 {
     return ((int64_t)(val << (64 - bits))) >> (64 - bits);
