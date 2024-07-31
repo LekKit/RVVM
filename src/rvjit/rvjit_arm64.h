@@ -202,9 +202,9 @@ enum a64_dp_3src
     A64_UMULH   = (1u << 31) | (0 << 29) | (6 << 21) | (0 << 15),
 };
 
-static bool check_imm_bits(int32_t val, bitcnt_t bits)
+static inline bool check_imm_bits(int32_t val, bitcnt_t bits)
 {
-    return (((int32_t)(((uint32_t)val) << (32 - bits))) >> (32 - bits)) == val;
+    return sign_extend(val, bits) == val;
 }
 
 static inline size_t rvjit_native_default_hregmask()
@@ -449,15 +449,15 @@ bool rvjit_a64_check_logical_imm64(uint64_t val, unsigned *rot, unsigned *len)
     if ((int64_t)val < 0) {
         val = ~val;
         if (val == 0) return false;
-        rotation = __builtin_clzll(val);
-        count = rotation + __builtin_ctzll(val);
+        rotation = bit_clz64(val);
+        count = rotation + bit_ctz64(val);
         if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1)) {
             return false;
         }
     } else {
         if (val == 0) return false;
-        rotation = (sizeof(val) * 8 - __builtin_ctzll(val));
-        count = rotation - __builtin_clzll(val);
+        rotation = (sizeof(val) * 8 - bit_ctz64(val));
+        count = rotation - bit_clz64(val);
         rotation &= sizeof(val) * 8 - 1;
         if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1)) {
             return false;
@@ -475,15 +475,15 @@ bool rvjit_a64_check_logical_imm32(uint32_t val, unsigned *rot, unsigned *len)
     if ((int32_t)val < 0) {
         val = ~val;
         if (val == 0) return false;
-        rotation = __builtin_clz(val);
-        count = rotation + __builtin_ctz(val);
+        rotation = bit_clz32(val);
+        count = rotation + bit_ctz32(val);
         if (!rvjit_a64_ispow2((val >> (count - rotation)) + 1)) {
             return false;
         }
     } else {
         if (val == 0) return false;
-        rotation = (sizeof(val) * 8 - __builtin_ctz(val));
-        count = rotation - __builtin_clz(val);
+        rotation = (sizeof(val) * 8 - bit_ctz32(val));
+        count = rotation - bit_clz32(val);
         rotation &= sizeof(val) * 8 - 1;
         if (!rvjit_a64_ispow2((val >> (sizeof(val) * 8 - rotation)) + 1)) {
             return false;
