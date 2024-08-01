@@ -28,27 +28,80 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "atomics.h"
 
 static uint32_t qpc_crit = 0;
-static uint64_t qpc_last = 0, qpc_freq = 0;
+static uint64_t qpc_off = 0, qpc_last = 0, qpc_freq = 0;
+static uint64_t qpc_last_checked = 0, uit_last_checked = 0;
+
+static BOOL (*query_uit)(PULONGLONG) = NULL;
+
+static uint64_t qpc_get_frequency()
+{
+    LARGE_INTEGER qpc = {0};
+    QueryPerformanceFrequency(&qpc);
+    if (qpc.QuadPart == 0) {
+        rvvm_fatal("QueryPerformanceFrequency() failed!");
+    }
+    return qpc.QuadPart;
+}
+
+static uint64_t qpc_get_clock()
+{
+    LARGE_INTEGER qpc = {0};
+    if (!QueryPerformanceCounter(&qpc)) {
+        rvvm_fatal("QueryPerformanceCounter() failed!");
+    }
+    return qpc.QuadPart;
+}
+
+static uint64_t uit_get_clock()
+{
+    ULONGLONG uit = 0;
+    if (query_uit) query_uit(&uit);
+    return uit;
+}
 
 uint64_t rvtimer_clocksource(uint64_t freq)
 {
     // Read the latest cached timer value from userspace
     uint64_t qpc_val = atomic_load_uint64_ex(&qpc_last, ATOMIC_ACQUIRE);
+
     if (!atomic_swap_uint32_ex(&qpc_crit, 1, ATOMIC_ACQUIRE)) {
-        // Claimed the QPC lock, actually query the timer
-        LARGE_INTEGER qpc = {0};
+        // Claimed the QPC lock, obtain new clock timestamp
         if (qpc_freq == 0) {
-            QueryPerformanceFrequency(&qpc);
-            qpc_freq = qpc.QuadPart;
-            if (qpc_freq == 0) rvvm_fatal("QueryPerformanceFrequency() failed!");
+            // Initialize the clock frequency once
+            qpc_freq = qpc_get_frequency();
+#ifndef UNDER_CE
+            // Initialize unbiased backup clock if present
+            query_uit = (void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryUnbiasedInterruptTime");
+#endif
         }
-        QueryPerformanceCounter(&qpc);
-        if ((uint64_t)qpc.QuadPart < qpc_val) {
+
+        uint64_t qpc_new = qpc_get_clock() + qpc_off;
+        if (qpc_new < qpc_val) {
+            // Sometimes TSC drifts back on obscure hardware, Windows doesn't fix this up
             DO_ONCE(rvvm_warn("Unstable clocksource (backward drift observed)"));
         } else {
-            qpc_val = qpc.QuadPart;
+            if (query_uit) {
+                // Check unbiased backup clock to compensate for suspend & forward jumps
+                uint64_t qpc_delta = qpc_new - qpc_last_checked;
+                if (qpc_delta > qpc_freq) {
+                    uint64_t uit_new = uit_get_clock();
+                    uint64_t uit_delta = (uit_new - uit_last_checked) * qpc_freq / 10000000U;
+                    if (qpc_delta > uit_delta + qpc_freq && qpc_last_checked) {
+                        uint64_t compensate = EVAL_MIN(qpc_delta - uit_delta, qpc_new - qpc_val);
+                        qpc_off -= compensate;
+                        qpc_new -= compensate;
+                    }
+
+                    qpc_last_checked = qpc_new;
+                    uit_last_checked = uit_new;
+                }
+            }
+
+            // Cache the new timer value
+            qpc_val = qpc_new;
             atomic_store_uint64_ex(&qpc_last, qpc_val, ATOMIC_RELEASE);
         }
+
         atomic_store_uint32_ex(&qpc_crit, 0, ATOMIC_RELEASE);
     }
 
