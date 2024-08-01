@@ -181,7 +181,8 @@ static inline bool rvjit_page_needs_flush(rvjit_block_t* block, phys_addr_t addr
     size_t offset = (addr >> 17) & block->heap.dirty_mask;
     uint32_t mask = 1U << ((addr >> 12) & 0x1F);
     if (block->heap.dirty_pages == NULL) return false;
-    return atomic_and_uint32_ex(block->heap.dirty_pages + offset, ~mask, ATOMIC_RELAXED) & mask;
+    return (atomic_load_uint32_ex(block->heap.dirty_pages + offset, ATOMIC_RELAXED) & mask)
+        && (atomic_and_uint32(block->heap.dirty_pages + offset, ~mask) & mask);
 }
 
 void rvjit_block_init(rvjit_block_t* block)
@@ -254,7 +255,7 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 
 rvjit_func_t rvjit_block_lookup(rvjit_block_t* block, phys_addr_t phys_pc)
 {
-    if (rvjit_page_needs_flush(block, phys_pc)) {
+    if (unlikely(rvjit_page_needs_flush(block, phys_pc))) {
         vector_t(uint8_t*)* linked_blocks;
         phys_pc &= ~0xFFFULL;
 
