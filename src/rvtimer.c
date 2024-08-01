@@ -108,6 +108,27 @@ uint64_t rvtimer_clocksource(uint64_t freq)
     return rvtimer_convert_freq(qpc_val, qpc_freq, freq);
 }
 
+#elif defined(__APPLE__)
+// Use mach_absolute_time() on Mac OS
+#include <unistd.h>
+#include <mach/mach_time.h>
+
+static mach_timebase_info_data_t mach_clk_info = {0};
+static uint64_t mach_clk_freq = 0;
+
+uint64_t rvtimer_clocksource(uint64_t freq)
+{
+    DO_ONCE({
+        mach_timebase_info(&mach_clk_info);
+        if (mach_clk_info.numer == 0 || mach_clk_info.denom == 0) {
+            rvvm_fatal("mach_timebase_info() failed!");
+        }
+        // Calculate Mach timer frequency
+        mach_clk_freq = (mach_clk_info.denom * 1000000000ULL) / mach_clk_info.numer;
+    });
+    return rvtimer_convert_freq(mach_absolute_time(), mach_clk_freq, freq);
+}
+
 #elif defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
 // Use POSIX clock_gettime(), with a fast monotonic clock if possible
 #include <unistd.h>
@@ -125,22 +146,6 @@ uint64_t rvtimer_clocksource(uint64_t freq)
     struct timespec now = {0};
     clock_gettime(CHOSEN_POSIX_CLOCK, &now);
     return (now.tv_sec * freq) + (now.tv_nsec * freq / 1000000000ULL);
-}
-
-#elif defined(__APPLE__)
-// Use mach_absolute_time() on older Mac OS
-#include <unistd.h>
-#include <mach/mach_time.h>
-
-static mach_timebase_info_data_t mach_clk_freq = {0};
-
-uint64_t rvtimer_clocksource(uint64_t freq)
-{
-    if (mach_clk_freq.denom == 0) {
-        mach_timebase_info(&mach_clk_freq);
-        if (mach_clk_freq.denom == 0) rvvm_fatal("mach_timebase_info() failed!");
-    }
-    return mach_absolute_time() * freq / mach_clk_freq.denom * mach_clk_freq.numer;
 }
 
 #else
