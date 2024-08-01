@@ -22,6 +22,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <time.h>
 
+#ifdef _POSIX_PRIORITY_SCHEDULING
+#include <sched.h> // For sched_yield()
+#endif
+
 #ifdef _WIN32
 // Use QueryPerformanceCounter()
 #include <windows.h>
@@ -110,7 +114,6 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 
 #elif defined(__APPLE__)
 // Use mach_absolute_time() on Mac OS
-#include <unistd.h>
 #include <mach/mach_time.h>
 
 static mach_timebase_info_data_t mach_clk_info = {0};
@@ -131,10 +134,14 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 
 #elif defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
 // Use POSIX clock_gettime(), with a fast monotonic clock if possible
-#include <unistd.h>
+
+// Use CLOCK_MONOTONIC_COARSE on Serenity for perf reasons
 #if defined(CLOCK_MONOTONIC_COARSE) && defined(__serenity__)
-// Use coarse clocksource on Serenity for perf reasons
 #define CHOSEN_POSIX_CLOCK CLOCK_MONOTONIC_COARSE
+// Use CLOCK_UPTIME on OpenBSD to skip suspend time
+#elif defined(CLOCK_UPTIME)
+#define CHOSEN_POSIX_CLOCK CLOCK_UPTIME
+// Use CLOCK_MONOTONIC on Linux, FreeBSD, etc
 #elif defined(CLOCK_MONOTONIC)
 #define CHOSEN_POSIX_CLOCK CLOCK_MONOTONIC
 #else
@@ -157,10 +164,6 @@ uint64_t rvtimer_clocksource(uint64_t freq)
     return time(0) * freq;
 }
 
-#endif
-
-#ifdef _POSIX_PRIORITY_SCHEDULING
-#include <sched.h> // For sched_yield()
 #endif
 
 void rvtimer_init(rvtimer_t* timer, uint64_t freq)
@@ -201,6 +204,7 @@ void sleep_ms(uint32_t ms)
     }
 #endif
     Sleep(ms);
+
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
     if (ms) {
         struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000, };
@@ -211,7 +215,9 @@ void sleep_ms(uint32_t ms)
     // Yield this thread time slice, as does Win32 Sleep(0)
     sched_yield();
 #endif
+
 #else
     UNUSED(ms);
+    DO_ONCE(rvvm_warn("Unimplemented sleep_ms() for current platform!"));
 #endif
 }
