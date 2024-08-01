@@ -19,6 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef RISCV_JIT_H
 #define RISCV_JIT_H
 
+#if defined(USE_JIT) && (!defined(RV64) || defined(RVJIT_NATIVE_64BIT))
+
 #include "rvjit/rvjit_emit.h"
 
 // Block unrolling configuration
@@ -70,8 +72,6 @@ static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
 /*
  * RVJIT tracing helpers
  */
-
-#if defined(USE_JIT) && (!defined(RV64) || defined(RVJIT_NATIVE_64BIT))
 
 // Wraps trace-compile-trace-execute
 #define RVVM_RVJIT_TRACE(intrinsic, insn_size) \
