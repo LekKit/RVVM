@@ -29,6 +29,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RISCV_AMO_MINU 0x18
 #define RISCV_AMO_MAXU 0x1C
 
+static void riscv_invalidate_lrsc(rvvm_hart_t *vm)
+{
+    vector_foreach(vm->machine->harts, i) {
+        rvvm_hart_t* hart = vector_at(vm->machine->harts, i);
+        if (hart != vm) {
+            atomic_store_uint32(&hart->lrsc, false);
+        }
+    }
+}
+
 static forceinline void riscv_emulate_atomic_w(rvvm_hart_t *vm, const uint32_t insn)
 {
     const uint32_t op = insn >> 27;
@@ -49,17 +59,24 @@ static forceinline void riscv_emulate_atomic_w(rvvm_hart_t *vm, const uint32_t i
 
     switch (op) {
         case RISCV_AMO_LR:
-            vm->lrsc = true;
+            // Mark our reservation
+            atomic_store_uint32(&vm->lrsc, true);
             vm->lrsc_cas = atomic_load_uint32_le(ptr);
             riscv_write_reg(vm, rds, (int32_t)vm->lrsc_cas);
             break;
         case RISCV_AMO_SC:
-            if (vm->lrsc && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
+            // Invalidate all other reservations
+            riscv_invalidate_lrsc(vm);
+
+            // If our reservation is valid, perform a CAS
+            if (atomic_load_uint32(&vm->lrsc) && atomic_cas_uint32_le(ptr, vm->lrsc_cas, val)) {
                 riscv_write_reg(vm, rds, 0);
             } else {
                 riscv_write_reg(vm, rds, 1);
             }
-            vm->lrsc = false;
+
+            // Invalidate this hart reservation
+            atomic_store_uint32(&vm->lrsc, false);
             break;
         case RISCV_AMO_SWAP:
             riscv_write_reg(vm, rds, (int32_t)atomic_swap_uint32_le(ptr, val));
@@ -120,17 +137,24 @@ static forceinline void riscv_emulate_atomic_d(rvvm_hart_t *vm, const uint32_t i
 
     switch (op) {
         case RISCV_AMO_LR:
-            vm->lrsc = true;
+            // Mark our reservation
+            atomic_store_uint32(&vm->lrsc, true);
             vm->lrsc_cas = atomic_load_uint64_le(ptr);
             vm->registers[rds] = vm->lrsc_cas;
             break;
         case RISCV_AMO_SC:
-            if (vm->lrsc && atomic_cas_uint64_le(ptr, vm->lrsc_cas, val)) {
+            // Invalidate all other reservations
+            riscv_invalidate_lrsc(vm);
+
+            // If our reservation is valid, perform a CAS
+            if (atomic_load_uint32(&vm->lrsc) && atomic_cas_uint64_le(ptr, vm->lrsc_cas, val)) {
                 riscv_write_reg(vm, rds, 0);
             } else {
                 riscv_write_reg(vm, rds, 1);
             }
-            vm->lrsc = false;
+
+            // Invalidate this hart reservation
+            atomic_store_uint32(&vm->lrsc, false);
             break;
         case RISCV_AMO_SWAP:
             vm->registers[rds] = atomic_swap_uint64_le(ptr, val);

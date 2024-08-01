@@ -192,7 +192,7 @@ struct rvvm_hart_t {
 
     bool user_traps;
 
-    bool lrsc;
+    uint32_t lrsc;
     maxlen_t lrsc_cas;
 
     struct {
