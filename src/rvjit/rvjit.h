@@ -20,11 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVJIT_H
 
 #include "rvvm_types.h"
-#include "compiler.h"
-#include "utils.h"
 #include "hashmap.h"
 #include "vector.h"
-#include <string.h>
 
 // RISC-V register allocator details
 #define RVJIT_REGISTERS 32
@@ -114,7 +111,6 @@ typedef struct {
     uint32_t* dirty_pages;
     size_t    dirty_mask;
 } rvjit_heap_t;
-
 
 typedef struct {
     uint32_t last_used; // Last usage of register for LRU reclaim

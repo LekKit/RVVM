@@ -16,17 +16,17 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RVJIT_X86_H
+#define RVJIT_X86_H
+
 #include "rvjit.h"
 #include "mem_ops.h"
 #include "compiler.h"
 #include "utils.h"
 
 #if defined(RVJIT_NATIVE_64BIT) && defined(_MSC_VER)
-#include <intrin.h>
+#include <intrin.h> // For cpuid
 #endif
-
-#ifndef RVJIT_X86_H
-#define RVJIT_X86_H
 
 #define X86_EAX 0x0
 #define X86_ECX 0x1
