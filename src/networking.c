@@ -27,10 +27,6 @@ typedef SOCKET net_handle_t;
 typedef int net_addrlen_t;
 #define NET_HANDLE_INVALID INVALID_SOCKET
 
-// Experimental WSAEventSelect implementation for net_poll
-// Basically emulates epoll() on Win32. Needs testing!
-//#define WSA_NET_IMPL
-
 #else
 
 #define _GNU_SOURCE
@@ -64,7 +60,7 @@ typedef socklen_t net_addrlen_t;
 
 #endif
 
-#if !(defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL) || defined(WSA_NET_IMPL))
+#if !(defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL))
 // Use select() for net_poll
 // Scales poorly, but it's a fairly portable fallback.
 // Thread safety & other epoll-like features are well emulated.
@@ -92,20 +88,8 @@ typedef struct {
 } net_monitor_t;
 #endif
 
-#if defined(WSA_NET_IMPL)
-typedef struct {
-    net_poll_t* poll;
-    void*       data;
-    uint32_t    flags;
-} net_watch_t;
-#endif
-
 struct net_sock {
-#if defined(WSA_NET_IMPL)
-    HANDLE event;
-    HANDLE wait;
-    vector_t(net_watch_t) watchers;
-#elif defined(SELECT_NET_IMPL)
+#if defined(SELECT_NET_IMPL)
     vector_t(net_poll_t*) watchers;
 #endif
     net_handle_t fd;
@@ -115,10 +99,6 @@ struct net_sock {
 struct net_poll {
 #if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
     net_handle_t fd;
-#elif defined(WSA_NET_IMPL)
-    spinlock_t lock;
-    hashmap_t  events;
-    cond_var_t cond;
 #else
     spinlock_t lock;
     vector_t(net_monitor_t) events;
@@ -686,16 +666,6 @@ void net_sock_close(net_sock_t* sock)
     vector_free(sock->watchers);
 #endif
     net_close_handle(sock->fd);
-#if defined(WSA_NET_IMPL)
-    if (sock->event != NULL && sock->event != WSA_INVALID_EVENT) {
-        UnregisterWaitEx(sock->wait, WSA_INVALID_EVENT);
-        WSACloseEvent(sock->event);
-        vector_foreach_back(sock->watchers, i) {
-            net_poll_remove(vector_at(sock->watchers, i).poll, sock);
-        }
-        vector_free(sock->watchers);
-    }
-#endif
     free(sock);
 }
 
@@ -719,9 +689,6 @@ net_poll_t* net_poll_create()
         return NULL;
     }
     net_handle_set_cloexec(poll->fd);
-#elif defined(WSA_NET_IMPL)
-    hashmap_init(&poll->events, 16);
-    poll->cond = condvar_create();
 #else
     vector_init(poll->events);
     FD_ZERO(&poll->r_set);
@@ -730,30 +697,6 @@ net_poll_t* net_poll_create()
 #endif
     return poll;
 }
-
-#if defined(WSA_NET_IMPL)
-static void CALLBACK wsa_callback(void* param, BOOLEAN timeout)
-{
-    if (timeout) return;
-    net_sock_t* sock = (net_sock_t*)param;
-
-    WSANETWORKEVENTS ev;
-    if (WSAEnumNetworkEvents(sock->fd, sock->event, &ev) == 0) {
-        vector_foreach(sock->watchers, i) {
-            net_watch_t* watch = &vector_at(sock->watchers, i);
-            net_poll_t* poll = watch->poll;
-            uint32_t flags = watch->flags & ev.lNetworkEvents;
-            if (flags) {
-                spin_lock(&poll->lock);
-                size_t tmp = hashmap_get(&poll->events, (size_t)watch->data);
-                hashmap_put(&poll->events, (size_t)watch->data, tmp | flags);
-                spin_unlock(&poll->lock);
-                condvar_wake(poll->cond);
-            }
-        }
-    }
-}
-#endif
 
 bool net_poll_add(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
 {
@@ -770,23 +713,6 @@ bool net_poll_add(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
     EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
     return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
-#elif defined(WSA_NET_IMPL)
-    net_watch_t watch = {
-        .poll = poll,
-        .data = event->data,
-        .flags = FD_READ | FD_ACCEPT | FD_CLOSE | (poll_wr ? (FD_WRITE | FD_CONNECT) : 0),
-    };
-    if (sock->event == NULL || sock->event == WSA_INVALID_EVENT) {
-        sock->event = WSACreateEvent();
-        // We cannot attach multiple events to socket, thus it's slightly inefficient
-        WSAEventSelect(sock->fd, sock->event, FD_READ | FD_ACCEPT | FD_CLOSE | FD_WRITE | FD_CONNECT);
-        RegisterWaitForSingleObject(&sock->wait, sock->event, wsa_callback, sock, INFINITE, 0);
-    }
-    vector_foreach(sock->watchers, i) {
-        if (vector_at(sock->watchers, i).poll == poll) return false;
-    }
-    vector_push_back(sock->watchers, watch);
-    return true;
 #else
     net_monitor_t monitor = {
         .sock = sock,
@@ -838,17 +764,6 @@ bool net_poll_mod(net_poll_t* poll, net_sock_t* sock, const net_event_t* event)
     EV_SET(&ev[0], sock->fd, EVFILT_READ, EV_ADD, 0, 0, event->data);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, poll_wr ? EV_ADD : EV_DELETE, 0, 0, event->data);
     return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
-#elif defined(WSA_NET_IMPL)
-    vector_foreach(sock->watchers, i) {
-        net_watch_t* watch = &vector_at(sock->watchers, i);
-        if (watch->poll == poll) {
-            watch->data = event->data;
-            watch->flags = FD_READ | FD_ACCEPT | FD_CLOSE
-             | (poll_wr ? (FD_WRITE | FD_CONNECT) : 0);
-            return true;
-        }
-    }
-    return false;
 #else
     spin_lock(&poll->lock);
     vector_foreach(poll->events, i) {
@@ -881,18 +796,6 @@ bool net_poll_remove(net_poll_t* poll, net_sock_t* sock)
     EV_SET(&ev[0], sock->fd, EVFILT_READ,  EV_DELETE, 0, 0, NULL);
     EV_SET(&ev[1], sock->fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
     return kevent(poll->fd, ev, 2, NULL, 0, NULL) != -1 || errno == ENOENT;
-#elif defined(WSA_NET_IMPL)
-    vector_foreach(sock->watchers, i) {
-        net_watch_t* watch = &vector_at(sock->watchers, i);
-        if (watch->poll == poll) {
-            spin_lock(&watch->poll->lock);
-            hashmap_remove(&watch->poll->events, (size_t)watch->data);
-            spin_unlock(&watch->poll->lock);
-            vector_erase(sock->watchers, i);
-            return true;
-        }
-    }
-    return false;
 #else
     spin_lock(&poll->lock);
     vector_foreach(poll->events, i) {
@@ -960,49 +863,6 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
             events[ret++].flags = NET_POLL_SEND;
         }
     }
-#elif defined(WSA_NET_IMPL)
-    size_t ret = 0;
-    do {
-        // Try consuming existing events
-        spin_lock(&poll->lock);
-        hashmap_foreach(&poll->events, k, v) {
-            events[ret].data = (void*)k;
-            events[ret].flags = v;
-            if (++ret >= size) break;
-        }
-        if (ret) {
-            // Clear consumed event flags
-            for (size_t i=0; i<ret; ++i) {
-                uint32_t flags = events[i].flags;
-                if (flags & (FD_READ | FD_ACCEPT)) {
-                    flags &= ~(FD_READ | FD_ACCEPT);
-                    events[i].flags = NET_POLL_RECV;
-                } else if (flags & (FD_WRITE | FD_CONNECT)) {
-                    flags &= ~(FD_WRITE | FD_CONNECT);
-                    events[i].flags = NET_POLL_SEND;
-                } else if (flags & FD_CLOSE) {
-                    flags = FD_CLOSE;
-                    events[i].flags = NET_POLL_RECV;
-                } else {
-                    rvvm_warn("Unknown watch flags %x in net_poll_wait()!", flags);
-                    flags = 0;
-                    events[i].flags = 0;
-                }
-                if (flags) {
-                    hashmap_put(&poll->events, (size_t)events[i].data, flags);
-                } else {
-                    hashmap_remove(&poll->events, (size_t)events[i].data);
-                }
-            }
-        }
-        spin_unlock(&poll->lock);
-        // If no events are available, wait for a condvar signal
-        if (ret == 0 && wait_ms) {
-            if (!condvar_wait(poll->cond, wait_ms)) {
-                wait_ms = 0;
-            }
-        } else break;
-    } while (ret == 0);
 #else
     size_t ret = 0;
 
@@ -1060,9 +920,6 @@ void net_poll_close(net_poll_t* poll)
     if (poll == NULL) return;
 #if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
     net_close_handle(poll->fd);
-#elif defined(WSA_NET_IMPL)
-    hashmap_destroy(&poll->events);
-    condvar_free(poll->cond);
 #else
     // Unlink watcher from related sockets
     vector_foreach(poll->events, i) {
