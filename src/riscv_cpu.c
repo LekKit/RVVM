@@ -1,5 +1,5 @@
 /*
-riscv_cpu.c - RISC-V CPU Emulation
+riscv_cpu.c - RISC-V CPU Interfaces
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This program is free software: you can redistribute it and/or modify
@@ -17,11 +17,35 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "riscv_cpu.h"
-#include "riscv_mmu.h"
+#include "riscv_hart.h"
+
+void riscv_run_till_event(rvvm_hart_t* vm)
+{
+    #ifdef USE_RV64
+    if (vm->rv64) {
+        riscv64_run_interpreter(vm);
+        return;
+    }
+    #endif
+    riscv32_run_interpreter(vm);
+}
 
 void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn)
 {
     riscv_trap(vm, TRAP_ILL_INSTR, insn);
+}
+
+void riscv_jit_flush_cache(rvvm_hart_t* vm)
+{
+#ifdef USE_JIT
+    if (vm->jit_enabled) {
+        riscv_jit_discard(vm);
+        riscv_jit_tlb_flush(vm);
+        rvjit_flush_cache(&vm->jit);
+    }
+#else
+    UNUSED(vm);
+#endif
 }
 
 #ifdef USE_JIT
@@ -29,7 +53,7 @@ void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn)
 /*
  * When returning from recompiled blocks, hart state
  * stays consistent, thus allowing to switch between
- * trace-interpret-compile and trace-execute states
+ * interpret-trace-compile and trace-execute states
  */
 
 static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, virt_addr_t vaddr, rvjit_func_t block)
@@ -94,14 +118,3 @@ NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm)
 }
 
 #endif
-
-void riscv_run_till_event(rvvm_hart_t* vm)
-{
-#ifdef USE_RV64
-    if (vm->rv64) {
-        riscv64_run_interpreter(vm);
-        return;
-    }
-#endif
-    riscv32_run_interpreter(vm);
-}

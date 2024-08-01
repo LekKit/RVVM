@@ -1,5 +1,5 @@
 /*
-riscv_interp.c - RISC-V Template interpreter
+riscv_interpreter.c - RISC-V Template interpreter
 Copyright (C) 2024  LekKit <github.com/LekKit>
 
 This Source Code Form is subject to the terms of the Mozilla Public
@@ -16,4 +16,4 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define riscv_run_interpreter riscv32_run_interpreter
 
-#include "riscv_interp.h"
+#include "riscv_interpreter.h"

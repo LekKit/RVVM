@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 void rvjit_linker_patch_jmp(void* addr, int32_t offset);
 void rvjit_linker_patch_ret(void* addr);
 
+// RV32IC
 void rvjit32_add(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_sub(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_or(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -63,6 +64,7 @@ void rvjit32_bge(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit32_bltu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit32_bgeu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 
+// RV32M
 void rvjit32_mul(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_mulh(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_mulhu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -73,10 +75,10 @@ void rvjit32_divu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_rem(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_remu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 
-// Zba
+// RV32 Zba
 void rvjit32_shadd(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2, uint8_t shift);
 
-// Zbb
+// RV32 Zbb
 #ifdef RVJIT_NATIVE_BITMANIP
 void rvjit32_orc_b(rvjit_block_t* block, regid_t rds, regid_t rs1);
 void rvjit32_clz(rvjit_block_t* block, regid_t rds, regid_t rs1);
@@ -97,7 +99,7 @@ void rvjit32_minu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_sext_b(rvjit_block_t* block, regid_t rds, regid_t rs1);
 void rvjit32_sext_h(rvjit_block_t* block, regid_t rds, regid_t rs1);
 
-// Zbs
+// RV32 Zbs
 void rvjit32_bext(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit32_bexti(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 void rvjit32_bclr(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -113,6 +115,7 @@ void rvjit32_binvi(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
  * RV64-only intrinsics
  */
 
+// RV64IC
 void rvjit64_add(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_sub(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_or(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -165,6 +168,7 @@ void rvjit64_bge(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit64_bltu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 void rvjit64_bgeu(rvjit_block_t* block, regid_t rs1, regid_t rs2);
 
+// RV64M
 void rvjit64_mul(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_mulh(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_mulhu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
@@ -180,12 +184,12 @@ void rvjit64_divuw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_remw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_remuw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 
-// Zba
+// RV64 Zba
 void rvjit64_shadd(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2, uint8_t shift);
 void rvjit64_shadd_uw(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2, uint8_t shift);
 void rvjit64_slli_uw(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 
-// Zbb
+// RV64 Zbb
 #ifdef RVJIT_NATIVE_BITMANIP
 void rvjit64_orc_b(rvjit_block_t* block, regid_t rds, regid_t rs1);
 void rvjit64_clz(rvjit_block_t* block, regid_t rds, regid_t rs1);
@@ -212,7 +216,7 @@ void rvjit64_minu(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_sext_b(rvjit_block_t* block, regid_t rds, regid_t rs1);
 void rvjit64_sext_h(rvjit_block_t* block, regid_t rds, regid_t rs1);
 
-// Zbs
+// RV64 Zbs
 void rvjit64_bext(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);
 void rvjit64_bexti(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm);
 void rvjit64_bclr(rvjit_block_t* block, regid_t rds, regid_t rs1, regid_t rs2);

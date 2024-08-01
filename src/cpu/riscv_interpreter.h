@@ -1,5 +1,5 @@
 /*
-riscv_interp.h - RISC-V Template interpreter
+riscv_interpreter.h - RISC-V Template interpreter
 Copyright (C) 2024  LekKit <github.com/LekKit>
 
 This Source Code Form is subject to the terms of the Mozilla Public
@@ -14,10 +14,60 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef RISCV_INTERP_H
-#define RISCV_INTERP_H
+#ifndef RISCV_INTERPRETER_H
+#define RISCV_INTERPRETER_H
 
+#include "rvvm.h"
+#include "riscv_cpu.h"
+#include "riscv_hart.h"
+#include "riscv_mmu.h"
+#include "riscv_jit.h"
+#include "compiler.h"
+#include "bit_ops.h"
+
+/*
+ * Interpreter helpers
+ */
+
+#ifdef RV64
+
+typedef uint64_t xlen_t;
+typedef int64_t sxlen_t;
+typedef uint64_t xaddr_t;
+#define SHAMT_BITS 6
+#define DIV_OVERFLOW_RS1 ((sxlen_t)0x8000000000000000ULL)
+
+#else
+
+typedef uint32_t xlen_t;
+typedef int32_t sxlen_t;
+typedef uint32_t xaddr_t;
+#define SHAMT_BITS 5
+#define DIV_OVERFLOW_RS1 ((sxlen_t)0x80000000U)
+
+#endif
+
+static forceinline xlen_t riscv_read_reg(rvvm_hart_t* vm, regid_t reg)
+{
+    return vm->registers[reg];
+}
+
+static forceinline sxlen_t riscv_read_reg_s(rvvm_hart_t* vm, regid_t reg)
+{
+    return vm->registers[reg];
+}
+
+static forceinline void riscv_write_reg(rvvm_hart_t* vm, regid_t reg, sxlen_t data)
+{
+    vm->registers[reg] = data;
+}
+
+// Provides entry point to riscv_emulate_insn()
 #include "riscv_compressed.h"
+
+/*
+ * JIT glue
+ */
 
 NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm);
 
@@ -44,6 +94,7 @@ static forceinline void riscv_emulate(rvvm_hart_t *vm, const uint32_t instructio
  * Attention: Any TLB flush must clear vm->wait_event to
  * restart dispatch loop, otherwise it will continue executing current page
  */
+
 TSAN_SUPPRESS void riscv_run_interpreter(rvvm_hart_t* vm)
 {
     size_t inst_ptr = 0;  // Updated before any read
