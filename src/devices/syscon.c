@@ -43,7 +43,7 @@ static rvvm_mmio_type_t syscon_dev_type = {
     .name = "syscon",
 };
 
-PUBLIC rvvm_mmio_handle_t syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
+PUBLIC rvvm_mmio_dev_t* syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     rvvm_mmio_dev_t syscon = {
         .addr = base_addr,
@@ -54,21 +54,21 @@ PUBLIC rvvm_mmio_handle_t syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_
         .max_op_size = 2,
         .type = &syscon_dev_type,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &syscon);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &syscon);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* test = fdt_node_create_reg("test", base_addr);
     fdt_node_add_prop_reg(test, "reg", base_addr, 0x1000);
     fdt_node_add_prop(test, "compatible", "sifive,test1\0sifive,test0\0syscon\0", 33);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), test);
-    
+
     struct fdt_node* poweroff = fdt_node_create("poweroff");
     fdt_node_add_prop_str(poweroff, "compatible", "syscon-poweroff");
     fdt_node_add_prop_u32(poweroff, "value", SYSCON_POWEROFF);
     fdt_node_add_prop_u32(poweroff, "offset", 0);
     fdt_node_add_prop_u32(poweroff, "regmap", fdt_node_get_phandle(test));
     fdt_node_add_child(rvvm_get_fdt_soc(machine), poweroff);
-    
+
     struct fdt_node* reboot = fdt_node_create("reboot");
     fdt_node_add_prop_str(reboot, "compatible", "syscon-reboot");
     fdt_node_add_prop_u32(reboot, "value", SYSCON_RESET);
@@ -76,10 +76,10 @@ PUBLIC rvvm_mmio_handle_t syscon_init(rvvm_machine_t* machine, rvvm_addr_t base_
     fdt_node_add_prop_u32(reboot, "regmap", fdt_node_get_phandle(test));
     fdt_node_add_child(rvvm_get_fdt_soc(machine), reboot);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t syscon_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_dev_t* syscon_init_auto(rvvm_machine_t* machine)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, SYSCON_DEFAULT_MMIO, 0x1000);
     return syscon_init(machine, addr);
