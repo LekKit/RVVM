@@ -195,7 +195,7 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
             return;
         case 0x1: // fence.i
 #ifdef USE_JIT
-            if (rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
+            if (rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARVARD)) {
                 riscv_jit_flush_cache(vm);
             } else {
                 // This eliminates possible dangling dirty blocks in JTLB
@@ -209,6 +209,7 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
                     case 0x0: // cbo.inval
                     case 0x1: // cbo.clean
                     case 0x2: // cbo.flush
+                        // Simply use a fence, all emulated devices are coherent
                         atomic_fence();
                         return;
                     case 0x4: { // cbo.zero
