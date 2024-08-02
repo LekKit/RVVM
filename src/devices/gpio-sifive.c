@@ -269,7 +269,7 @@ static rvvm_mmio_type_t gpio_sifive_dev_type = {
     .update = gpio_sifive_update,
 };
 
-PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
+PUBLIC rvvm_mmio_dev_t* gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
                                            rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t* irqs)
 {
     gpio_sifive_dev_t* bus = safe_new_obj(gpio_sifive_dev_t);
@@ -299,8 +299,8 @@ PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_de
         .max_op_size = 4,
     };
 
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &gpio_sifive);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &gpio_sifive);
+    if (mmio == NULL) return mmio;
 
 #ifdef USE_FDT
     struct fdt_node* gpio_fdt = fdt_node_create_reg("gpio", base_addr);
@@ -316,10 +316,10 @@ PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_de
     fdt_node_add_prop_str(gpio_fdt, "status", "okay");
     fdt_node_add_child(rvvm_get_fdt_soc(machine), gpio_fdt);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio)
+PUBLIC rvvm_mmio_dev_t* gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, GPIO_SIFIVE_DEFAULT_MMIO, GPIO_SIFIVE_MMIO_SIZE);

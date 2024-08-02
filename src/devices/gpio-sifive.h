@@ -26,9 +26,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define GPIO_SIFIVE_DEFAULT_MMIO 0x10060000
 
-PUBLIC rvvm_mmio_handle_t gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
-                                           rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t* irqs);
+PUBLIC rvvm_mmio_dev_t* gpio_sifive_init(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio,
+                                         rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t* irqs);
 
-PUBLIC rvvm_mmio_handle_t gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio);
+PUBLIC rvvm_mmio_dev_t* gpio_sifive_init_auto(rvvm_machine_t* machine, rvvm_gpio_dev_t* gpio);
 
 #endif
