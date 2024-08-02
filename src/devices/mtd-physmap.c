@@ -57,7 +57,7 @@ static bool mtd_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset, uint
     return blk_write(mtd->blk, data, size, offset) == size;
 }
 
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_addr_t addr, void* blk_dev)
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_addr_t addr, void* blk_dev)
 {
     mtd_dev_t* mtd = safe_new_obj(mtd_dev_t);
     mtd->blk = blk_dev;
@@ -72,8 +72,8 @@ PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_add
         .data = mtd,
         .type = &mtd_type,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &mtd_mmio);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &mtd_mmio);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* mtd_fdt = fdt_node_create_reg("flash", mtd_mmio.addr);
     fdt_node_add_prop_reg(mtd_fdt, "reg", mtd_mmio.addr, mtd_mmio.size);
@@ -90,17 +90,17 @@ PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_add
     }
     fdt_node_add_child(rvvm_get_fdt_soc(machine), mtd_fdt);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init(rvvm_machine_t* machine, rvvm_addr_t addr, const char* image_path, bool rw)
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init(rvvm_machine_t* machine, rvvm_addr_t addr, const char* image_path, bool rw)
 {
     blkdev_t* blk = blk_open(image_path, rw ? BLKDEV_RW : 0);
-    if (blk == NULL) return RVVM_INVALID_MMIO;
+    if (blk == NULL) return NULL;
     return mtd_physmap_init_blk(machine, addr, blk);
 }
 
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw)
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw)
 {
     return mtd_physmap_init(machine, MTD_PHYSMAP_DEFAULT_MMIO, image_path, rw);
 }

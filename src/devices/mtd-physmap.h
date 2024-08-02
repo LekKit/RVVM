@@ -28,9 +28,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define MTD_PHYSMAP_DEFAULT_MMIO 0x04000000
 
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_addr_t addr, void* blk_dev);
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init(rvvm_machine_t* machine, rvvm_addr_t addr, const char* image_path, bool rw);
-PUBLIC rvvm_mmio_handle_t mtd_physmap_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw);
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init_blk(rvvm_machine_t* machine, rvvm_addr_t addr, void* blk_dev);
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init(rvvm_machine_t* machine, rvvm_addr_t addr, const char* image_path, bool rw);
+PUBLIC rvvm_mmio_dev_t* mtd_physmap_init_auto(rvvm_machine_t* machine, const char* image_path, bool rw);
 
 #endif
 
