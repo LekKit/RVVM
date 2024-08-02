@@ -397,16 +397,17 @@ PUBLIC bool pci_vfio_init_auto(rvvm_machine_t* machine, const char* pci_id)
                 .read = rvvm_mmio_none,
                 .write = rvvm_mmio_none,
             };
-            rvvm_mmio_handle_t placeholder = rvvm_attach_mmio(machine, &vfio_dev_placeholder);
-
-            vfio->pci_dev = pci_bus_add_device(pci_bus, &vfio->pci_desc);
-            if (vfio->pci_dev) {
-                vfio->running = true;
-                vfio->thread = thread_create(vfio_irq_thread, vfio);
-                return true;
-            } else {
-                // Failed to attach to guest PCI bus
-                rvvm_detach_mmio(machine, placeholder);
+            rvvm_mmio_dev_t* placeholder = rvvm_attach_mmio(machine, &vfio_dev_placeholder);
+            if (placeholder != NULL) {
+                vfio->pci_dev = pci_bus_add_device(pci_bus, &vfio->pci_desc);
+                if (vfio->pci_dev) {
+                    vfio->running = true;
+                    vfio->thread = thread_create(vfio_irq_thread, vfio);
+                    return true;
+                } else {
+                    // Failed to attach to guest PCI bus
+                    rvvm_remove_mmio(placeholder);
+                }
             }
         } else {
             // Failed to attach to the host VFIO device
