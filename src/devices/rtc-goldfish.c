@@ -107,7 +107,7 @@ static rvvm_mmio_type_t rtc_goldfish_dev_type = {
     .name = "rtc_goldfish",
 };
 
-PUBLIC rvvm_mmio_handle_t rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC rvvm_mmio_dev_t* rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct rtc_goldfish_data* ptr = safe_new_obj(struct rtc_goldfish_data);
     ptr->plic = plic;
@@ -123,8 +123,8 @@ PUBLIC rvvm_mmio_handle_t rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t
         .max_op_size = 4,
         .type = &rtc_goldfish_dev_type,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &rtc_goldfish);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &rtc_goldfish);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* rtc = fdt_node_create_reg("rtc", base_addr);
     fdt_node_add_prop_reg(rtc, "reg", base_addr, RTC_REG_SIZE);
@@ -133,10 +133,10 @@ PUBLIC rvvm_mmio_handle_t rtc_goldfish_init(rvvm_machine_t* machine, rvvm_addr_t
     fdt_node_add_prop_u32(rtc, "interrupts", irq);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), rtc);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t rtc_goldfish_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_dev_t* rtc_goldfish_init_auto(rvvm_machine_t* machine)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_GOLDFISH_DEFAULT_MMIO, RTC_REG_SIZE);
