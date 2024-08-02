@@ -187,8 +187,8 @@ static void rvvm_reset_machine_state(rvvm_machine_t* machine)
     atomic_store_uint32(&machine->power_state, RVVM_POWER_ON);
 
     // Reset devices
-    vector_foreach(machine->mmio, i) {
-        rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
+    vector_foreach(machine->mmio_devs, i) {
+        rvvm_mmio_dev_t* dev = vector_at(machine->mmio_devs, i);
         if (dev->type && dev->type->reset) dev->type->reset(dev);
     }
     // Load bootrom, kernel, dtb into RAM if needed
@@ -252,8 +252,8 @@ static void* rvvm_eventloop(void* manual)
                     }
                 }
 
-                vector_foreach(machine->mmio, i) {
-                    rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, i);
+                vector_foreach(machine->mmio_devs, i) {
+                    rvvm_mmio_dev_t* dev = vector_at(machine->mmio_devs, i);
                     if (dev->type && dev->type->update) {
                         // Update device
                         dev->type->update(dev);
@@ -358,7 +358,7 @@ PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size
     // Default options
 #ifdef USE_JIT
     rvvm_set_opt(machine, RVVM_OPT_JIT, !rvvm_has_arg("nojit"));
-    rvvm_set_opt(machine, RVVM_OPT_JIT_HARWARD, rvvm_has_arg("rvjit_harward"));
+    rvvm_set_opt(machine, RVVM_OPT_JIT_HARVARD, rvvm_has_arg("rvjit_harvard"));
     if (rvvm_getarg_size("jitcache")) {
         rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, rvvm_getarg_size("jitcache"));
     } else {
@@ -654,16 +654,16 @@ PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine)
     return atomic_load_uint32(&machine->running);
 }
 
-static void rvvm_cleanup_mmio(rvvm_mmio_dev_t* dev)
+static void rvvm_mmio_free(rvvm_mmio_dev_t* dev)
 {
     rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
-    // Either device implements it's own cleanup routine,
-    // or we free it's data buffer
+    // Either device implements it's own cleanup routine, or we free it's data buffer
     if (dev->type && dev->type->remove) {
         dev->type->remove(dev);
     } else {
         free(dev->data);
     }
+    free(dev);
 }
 
 PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
@@ -674,8 +674,8 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     rvvm_reconfigure_eventloop();
 
     // Clean up devices in reversed order, something may reference older devices
-    vector_foreach_back(machine->mmio, i) {
-        rvvm_cleanup_mmio(&vector_at(machine->mmio, i));
+    vector_foreach_back(machine->mmio_devs, i) {
+        rvvm_mmio_free(vector_at(machine->mmio_devs, i));
     }
 
     vector_foreach(machine->harts, i) {
@@ -683,7 +683,7 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     }
 
     vector_free(machine->harts);
-    vector_free(machine->mmio);
+    vector_free(machine->mmio_devs);
     riscv_free_ram(&machine->mem);
     rvclose(machine->bootrom_file);
     rvclose(machine->kernel_file);
@@ -695,15 +695,6 @@ PUBLIC void rvvm_free_machine(rvvm_machine_t* machine)
     free(machine);
 }
 
-PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t *machine, rvvm_mmio_handle_t handle)
-{
-    if (handle < 0 || (size_t)handle >= vector_size(machine->mmio)) {
-        return NULL;
-    }
-
-    return &vector_at(machine->mmio, (size_t)handle);
-}
-
 // Returns addr if zone is free
 static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
@@ -711,12 +702,9 @@ static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t add
         addr = machine->mem.begin + machine->mem.size;
     }
 
-    vector_foreach(machine->mmio, i) {
-        struct rvvm_mmio_dev_t *dev = &vector_at(machine->mmio, i);
-        if (dev->data == NULL && dev->mapping == NULL && dev->type == NULL) {
-            // This is a leftover device which was removed from running VM
-            rvvm_detach_mmio(machine, i);
-        } else if (addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
+    vector_foreach(machine->mmio_devs, i) {
+        rvvm_mmio_dev_t *dev = vector_at(machine->mmio_devs, i);
+        if (addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
             addr = dev->addr + dev->size;
         }
     }
@@ -737,62 +725,61 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
     return ret;
 }
 
-PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
+PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
 {
-    rvvm_mmio_dev_t dev = *mmio;
-    dev.machine = machine;
-    if (mmio->min_op_size > mmio->max_op_size || mmio->min_op_size > 8) {
-        rvvm_warn("MMIO device \"%s\" has invalid op sizes: min %u, max %u",
-                  mmio->type ? mmio->type->name : "null", mmio->min_op_size, mmio->max_op_size);
-        rvvm_cleanup_mmio(&dev);
-        return RVVM_INVALID_MMIO;
-    }
-    if (rvvm_mmio_zone_auto(machine, mmio->addr, mmio->size) != mmio->addr) {
-        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"",
-                  mmio->type ? mmio->type->name : "null", mmio->addr);
-        rvvm_cleanup_mmio(&dev);
-        return RVVM_INVALID_MMIO;
-    }
-    bool was_running = rvvm_pause_machine(machine);
+    rvvm_mmio_dev_t* dev = safe_new_obj(rvvm_mmio_dev_t);
+    memcpy(dev, mmio, sizeof(rvvm_mmio_dev_t));
+    dev->machine = machine;
+
     // Normalize access properties: Power of two, default 1 - 8 bytes
-    dev.min_op_size = dev.min_op_size ? bit_next_pow2(dev.min_op_size) : 1;
-    dev.max_op_size = dev.max_op_size ? bit_next_pow2(dev.max_op_size) : 8;
-    vector_push_back(machine->mmio, dev);
-    rvvm_mmio_handle_t ret = vector_size(machine->mmio) - 1;
+    dev->min_op_size = dev->min_op_size ? bit_next_pow2(dev->min_op_size) : 1;
+    dev->max_op_size = dev->max_op_size ? bit_next_pow2(dev->max_op_size) : 8;
+
+    if (dev->min_op_size > dev->max_op_size || dev->min_op_size > 8) {
+        rvvm_warn("MMIO device \"%s\" has invalid op sizes: min %u, max %u",
+                  dev->type ? dev->type->name : "null", dev->min_op_size, dev->max_op_size);
+        rvvm_mmio_free(dev);
+        return NULL;
+    }
+    if (rvvm_mmio_zone_auto(machine, dev->addr, dev->size) != dev->addr) {
+        rvvm_warn("Cannot attach MMIO device \"%s\" to occupied region 0x%08"PRIx64"",
+                  dev->type ? dev->type->name : "null", dev->addr);
+        rvvm_mmio_free(dev);
+        return NULL;
+    }
+
+    bool was_running = rvvm_pause_machine(machine);
+    vector_push_back(machine->mmio_devs, dev);
     rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"",
-              dev.addr, dev.type ? dev.type->name : "null");
+              dev->addr, dev->type ? dev->type->name : "null");
     if (was_running) rvvm_start_machine(machine);
-    return ret;
+    return dev;
 }
 
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle)
+PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* dev)
 {
-    if (handle >= 0 && (size_t)handle < vector_size(machine->mmio)) {
-        bool was_running = rvvm_pause_machine(machine);
-        struct rvvm_mmio_dev_t* dev = &vector_at(machine->mmio, handle);
-        rvvm_cleanup_mmio(dev);
+    if (dev == NULL) return;
 
-        // It's a shared memory mapping, flush each hart TLB
-        if (dev->mapping) {
-            vector_foreach(machine->harts, i) {
-                rvvm_hart_t* vm = vector_at(machine->harts, i);
-                riscv_tlb_flush(vm);
-            }
+    rvvm_machine_t* machine = dev->machine;
+    bool was_running = rvvm_pause_machine(machine);
+
+    // Remove from machine device list
+    vector_foreach_back(machine->mmio_devs, i) {
+        if (vector_at(machine->mmio_devs, i) == dev) {
+            vector_erase(machine->mmio_devs, i);
         }
-
-        // Keep the placeholder device in vector so that the handles remain valid
-        dev->data = NULL;
-        dev->type = NULL;
-        dev->mapping = NULL;
-        dev->read = rvvm_mmio_none;
-        dev->write = rvvm_mmio_none;
-
-        // Tearing the device from running machine leaves a dummy range
-        // Experimentally confirmed this actually happens on real boards
-        if (!rvvm_machine_powered(machine)) dev->size = 0;
-
-        if (was_running) rvvm_start_machine(machine);
     }
+
+    // It's a shared memory mapping, flush each hart TLB
+    if (dev->mapping) {
+        vector_foreach(machine->harts, i) {
+            rvvm_hart_t* vm = vector_at(machine->harts, i);
+            riscv_tlb_flush(vm);
+        }
+    }
+
+    rvvm_mmio_free(dev);
+    if (was_running) rvvm_start_machine(machine);
 }
 
 static void rvvm_set_manual_eventloop(bool manual)
@@ -827,40 +814,39 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64)
     rvtimer_init(&machine->timer, 1000000);
 #ifdef USE_JIT
     rvvm_set_opt(machine, RVVM_OPT_JIT, true);
-    rvvm_set_opt(machine, RVVM_OPT_JIT_HARWARD, true);
+    rvvm_set_opt(machine, RVVM_OPT_JIT_HARVARD, true);
     rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, 16 << 20);
 #endif
     return machine;
 }
 
-PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine)
+PUBLIC rvvm_hart_t* rvvm_create_user_thread(rvvm_machine_t* machine)
 {
-    rvvm_hart_t* vm = riscv_hart_init(machine);
-    riscv_hart_prepare(vm);
+    rvvm_hart_t* thread = riscv_hart_init(machine);
+    riscv_hart_prepare(thread);
 #ifdef USE_FPU
     // Initialize FPU by writing to status CSR
     maxlen_t mstatus = (FS_INITIAL << 13);
-    riscv_csr_op(vm, 0x300, &mstatus, CSR_SETBITS);
+    riscv_csr_op(thread, 0x300, &mstatus, CSR_SETBITS);
 #endif
 #ifdef USE_JIT
     // Enable pointer optimization
-    rvjit_set_native_ptrs(&vm->jit, true);
+    rvjit_set_native_ptrs(&thread->jit, true);
 #endif
-    riscv_switch_priv(vm, PRIVILEGE_USER);
+    riscv_switch_priv(thread, PRIVILEGE_USER);
     spin_lock(&global_lock);
-    vector_push_back(machine->harts, vm);
+    vector_push_back(machine->harts, thread);
     spin_unlock(&global_lock);
-    return (rvvm_cpu_handle_t)vm;
+    return thread;
 }
 
-PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
+PUBLIC void rvvm_free_user_thread(rvvm_hart_t* thread)
 {
-    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
     spin_lock(&global_lock);
-    vector_foreach(vm->machine->harts, i) {
-        if (vector_at(vm->machine->harts, i) == vm) {
-            vector_erase(vm->machine->harts, i);
-            riscv_hart_free(vm);
+    vector_foreach(thread->machine->harts, i) {
+        if (vector_at(thread->machine->harts, i) == thread) {
+            vector_erase(thread->machine->harts, i);
+            riscv_hart_free(thread);
             spin_unlock(&global_lock);
             return;
         }
@@ -868,49 +854,47 @@ PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu)
     rvvm_fatal("Corrupted userland context!");
 }
 
-PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu)
+PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_hart_t* thread)
 {
-    return riscv_hart_run_userland((rvvm_hart_t*)cpu);
+    return riscv_hart_run_userland(thread);
 }
 
-PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id)
+PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_hart_t* thread, size_t reg_id)
 {
-    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
     if (reg_id < (RVVM_REGID_X0 + 32)) {
-        return vm->registers[reg_id - RVVM_REGID_X0];
+        return thread->registers[reg_id - RVVM_REGID_X0];
 #ifdef USE_FPU
     } else if (reg_id < (RVVM_REGID_F0 + 32)) {
         rvvm_addr_t ret;
-        memcpy(&ret, &vm->fpu_registers[reg_id - RVVM_REGID_F0], sizeof(ret));
+        memcpy(&ret, &thread->fpu_registers[reg_id - RVVM_REGID_F0], sizeof(ret));
         return ret;
 #endif
     } else if (reg_id == RVVM_REGID_PC) {
-        return vm->registers[REGISTER_PC];
+        return thread->registers[REGISTER_PC];
     } else if (reg_id == RVVM_REGID_CAUSE) {
-        return vm->csr.cause[PRIVILEGE_USER];
+        return thread->csr.cause[PRIVILEGE_USER];
     } else if (reg_id == RVVM_REGID_TVAL) {
-        return vm->csr.tval[PRIVILEGE_USER];
+        return thread->csr.tval[PRIVILEGE_USER];
     } else {
         rvvm_warn("Unknown register %d in rvvm_read_cpu_reg()!", (uint32_t)reg_id);
         return 0;
     }
 }
 
-PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg)
+PUBLIC void rvvm_write_cpu_reg(rvvm_hart_t* thread, size_t reg_id, rvvm_addr_t reg)
 {
-    rvvm_hart_t* vm = (rvvm_hart_t*)cpu;
     if (reg_id < (RVVM_REGID_X0 + 32)) {
-        vm->registers[reg_id - RVVM_REGID_X0] = reg;
+        thread->registers[reg_id - RVVM_REGID_X0] = reg;
 #ifdef USE_FPU
     } else if (reg_id < (RVVM_REGID_F0 + 32)) {
-        memcpy(&vm->fpu_registers[reg_id - RVVM_REGID_F0], &reg, sizeof(reg));
+        memcpy(&thread->fpu_registers[reg_id - RVVM_REGID_F0], &reg, sizeof(reg));
 #endif
     } else if (reg_id == RVVM_REGID_PC) {
-        vm->registers[REGISTER_PC] = reg;
+        thread->registers[REGISTER_PC] = reg;
     } else if (reg_id == RVVM_REGID_CAUSE) {
-        vm->csr.cause[PRIVILEGE_USER] = reg;
+        thread->csr.cause[PRIVILEGE_USER] = reg;
     } else if (reg_id == RVVM_REGID_TVAL) {
-        vm->csr.tval[PRIVILEGE_USER] = reg;
+        thread->csr.tval[PRIVILEGE_USER] = reg;
     } else {
         rvvm_warn("Unknown register %d in rvvm_write_cpu_reg()!", (uint32_t)reg_id);
     }
