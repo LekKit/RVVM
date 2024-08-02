@@ -196,8 +196,8 @@ static rvvm_mmio_type_t ns16550a_dev_type = {
     .remove = ns16550a_remove,
 };
 
-PUBLIC rvvm_mmio_handle_t ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
-                          rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC rvvm_mmio_dev_t* ns16550a_init(rvvm_machine_t* machine, chardev_t* chardev,
+                                      rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     ns16550a_dev_t* uart = safe_new_obj(ns16550a_dev_t);
     uart->chardev = chardev;
@@ -219,8 +219,8 @@ PUBLIC rvvm_mmio_handle_t ns16550a_init(rvvm_machine_t* machine, chardev_t* char
         .data = uart,
         .type = &ns16550a_dev_type,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &ns16550a);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &ns16550a);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* uart_fdt = fdt_node_create_reg("uart", ns16550a.addr);
     fdt_node_add_prop_reg(uart_fdt, "reg", ns16550a.addr, ns16550a.size);
@@ -234,25 +234,25 @@ PUBLIC rvvm_mmio_handle_t ns16550a_init(rvvm_machine_t* machine, chardev_t* char
     }
     fdt_node_add_child(rvvm_get_fdt_soc(machine), uart_fdt);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev)
+PUBLIC rvvm_mmio_dev_t* ns16550a_init_auto(rvvm_machine_t* machine, chardev_t* chardev)
 {
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, NS16550A_DEFAULT_MMIO, NS16550A_MMIO_SIZE);
-    rvvm_mmio_handle_t handle = ns16550a_init(machine, chardev, addr, plic, plic_alloc_irq(plic));
-    if (addr == NS16550A_DEFAULT_MMIO && handle != RVVM_INVALID_MMIO) {
+    rvvm_mmio_dev_t* mmio = ns16550a_init(machine, chardev, addr, plic, plic_alloc_irq(plic));
+    if (addr == NS16550A_DEFAULT_MMIO && mmio != NULL) {
         rvvm_append_cmdline(machine, "console=ttyS");
 #ifdef USE_FDT
         struct fdt_node* chosen = fdt_node_find(rvvm_get_fdt_root(machine), "chosen");
         fdt_node_add_prop_str(chosen, "stdout-path", "/soc/uart@10000000");
 #endif
     }
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t ns16550a_init_term_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_dev_t* ns16550a_init_term_auto(rvvm_machine_t* machine)
 {
     return ns16550a_init_auto(machine, chardev_term_create());
 }
