@@ -290,7 +290,7 @@ void riscv_hart_prepare(rvvm_hart_t *vm)
 
         if (vm->jit_enabled) {
             rvjit_set_rv64(&vm->jit, vm->rv64);
-            if (!rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARWARD)) {
+            if (!rvvm_get_opt(vm->machine, RVVM_OPT_JIT_HARVARD)) {
                 rvjit_init_memtracking(&vm->jit, vm->mem.size);
             }
         } else {
@@ -337,7 +337,7 @@ void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
 
 void riscv_hart_check_timer(rvvm_hart_t* vm)
 {
-    // The hard thread checks if the timer is actually pending
+    // The hart thread checks if the timer is actually pending
     atomic_or_uint32(&vm->pending_irqs, 1U << INTERRUPT_MTIMER);
     atomic_store_uint32(&vm->wait_event, HART_STOPPED);
 }
@@ -352,8 +352,7 @@ void riscv_hart_preempt(rvvm_hart_t* vm, uint32_t preempt_ms)
 
 void riscv_hart_pause(rvvm_hart_t* vm)
 {
-    atomic_or_uint32(&vm->pending_events, EXT_EVENT_PAUSE);
-    riscv_hart_notify(vm);
+    riscv_hart_queue_pause(vm);
 
     // Clear vm->thread before freeing it
     thread_ctx_t* thread = vm->thread;
