@@ -14,17 +14,21 @@ public class RVVMNative {
     // Do not crash the JVM if we failed to load native lib
     public static boolean loaded = false;
 
+    private static void checkABI() {
+        int abi = get_abi_version();
+        if (abi == 7) {
+            loaded = true;
+        } else {
+            System.out.println("ERROR: Invalid librvvm ABI version: " + Integer.toString(abi));
+        }
+    }
+
     // Manually load librvvm
     public static boolean loadLib(String path) {
         if (loaded) return true;
         try {
             System.load(path);
-            int abi = get_abi_version();
-            if (abi == 6) {
-                loaded = true;
-            } else {
-                System.out.println("ERROR: Invalid librvvm ABI version: " + Integer.toString(abi));
-            }
+            checkABI();
         } catch (Throwable e) {
             System.out.println("ERROR: Failed to load librvvm: " + e.toString());
         }
@@ -34,12 +38,7 @@ public class RVVMNative {
     static {
         try {
             System.loadLibrary("rvvm");
-            int abi = get_abi_version();
-            if (abi == 7) {
-                loaded = true;
-            } else {
-                System.out.println("ERROR: Invalid librvvm ABI version: " + Integer.toString(abi));
-            }
+            checkABI();
         } catch (Throwable e) {
             System.out.println("INFO: Failed to load system-wide librvvm: " + e.toString());
         }
