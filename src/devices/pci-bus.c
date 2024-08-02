@@ -56,7 +56,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 struct pci_func {
     struct pci_device* dev;
-    rvvm_mmio_handle_t bar_handle[PCI_FUNC_BARS];
+    rvvm_mmio_dev_t* bars[PCI_FUNC_BARS];
     spinlock_t lock;
     uint16_t status;
     uint16_t command;
@@ -94,7 +94,7 @@ struct pci_bus {
 static void pci_bus_remove(rvvm_mmio_dev_t* dev)
 {
     pci_bus_t* bus = (pci_bus_t*)dev->data;
-    for (size_t i=0; i <PCI_BUS_DEVS; ++i) {
+    for (size_t i=0; i<PCI_BUS_DEVS; ++i) {
         if (bus->dev[i]) free(bus->dev[i]);
     }
     free(bus);
@@ -156,7 +156,7 @@ static bool pci_bus_read(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, u
         case PCI_REG_BAR4:
         case PCI_REG_BAR5: {
             uint8_t bar_num = (reg - PCI_REG_BAR0) >> 2;
-            rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
+            rvvm_mmio_dev_t* bar = func->bars[bar_num];
             if (bar && bar->size) {
                 write_uint32_le(dest, (uint32_t)bar->addr | (pci_bar_is_io(bar) ? 1 : 0));
             } else {
@@ -207,7 +207,7 @@ static bool pci_bus_write(rvvm_mmio_dev_t* mmio_dev, void* dest, size_t offset, 
         case PCI_REG_BAR4:
         case PCI_REG_BAR5: {
             uint8_t bar_num = (reg - PCI_REG_BAR0) >> 2;
-            rvvm_mmio_dev_t* bar = rvvm_get_mmio(mmio_dev->machine, func->bar_handle[bar_num]);
+            rvvm_mmio_dev_t* bar = func->bars[bar_num];
             if (bar && bar->size) {
                 uint32_t addr = read_uint32_le(dest) & ~(uint32_t)15;
                 if (~(uint32_t)0 - addr < bar->size) {
@@ -385,13 +385,13 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
                     bus->mem_len -= (bar.addr + bar.size) - bus->mem_addr;
                     bus->mem_addr = bar.addr + bar.size;
                 }
-                func->bar_handle[bar_id] = rvvm_attach_mmio(bus->machine, &bar);
-                if (func->bar_handle[bar_id] < 0) {
+                func->bars[bar_id] = rvvm_attach_mmio(bus->machine, &bar);
+                if (func->bars[bar_id] == NULL) {
                     free(dev);
                     return NULL;
                 }
             } else {
-                func->bar_handle[bar_id] = RVVM_INVALID_MMIO;
+                func->bars[bar_id] = NULL;
             }
         }
     }
@@ -442,7 +442,7 @@ PUBLIC void pci_remove_device(pci_dev_t* dev)
     dev->bus->dev[dev->dev_id] = NULL;
     for (size_t func=0; func<PCI_DEV_FUNCS; ++func) {
         for (size_t bar=0; bar<PCI_FUNC_BARS; ++bar) {
-            rvvm_detach_mmio(dev->bus->machine, dev->func[func].bar_handle[bar]);
+            rvvm_remove_mmio(dev->func[func].bars[bar]);
         }
     }
     if (was_running) rvvm_start_machine(dev->bus->machine);
