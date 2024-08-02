@@ -23,8 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define RTC_DS1742_DEFAULT_MMIO 0x101000
 
-PUBLIC rvvm_mmio_handle_t rtc_ds1742_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
-PUBLIC rvvm_mmio_handle_t rtc_ds1742_init_auto(rvvm_machine_t* machine);
+PUBLIC rvvm_mmio_dev_t* rtc_ds1742_init(rvvm_machine_t* machine, rvvm_addr_t base_addr);
+PUBLIC rvvm_mmio_dev_t* rtc_ds1742_init_auto(rvvm_machine_t* machine);
 
 #endif
- 
+

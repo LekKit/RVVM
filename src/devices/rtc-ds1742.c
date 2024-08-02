@@ -88,7 +88,7 @@ static rvvm_mmio_type_t rtc_ds1742_dev_type = {
     .name = "rtc_ds1742",
 };
 
-PUBLIC rvvm_mmio_handle_t rtc_ds1742_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
+PUBLIC rvvm_mmio_dev_t* rtc_ds1742_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 {
     ds1742_dev_t* rtc = safe_new_obj(ds1742_dev_t);
     rvvm_mmio_dev_t rtc_ds1742 = {
@@ -102,18 +102,18 @@ PUBLIC rvvm_mmio_handle_t rtc_ds1742_init(rvvm_machine_t* machine, rvvm_addr_t b
         .max_op_size = 1,
     };
     rtc_ds1742_update_regs(rtc);
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &rtc_ds1742);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &rtc_ds1742);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* rtc_fdt = fdt_node_create_reg("rtc", base_addr);
     fdt_node_add_prop_reg(rtc_fdt, "reg", base_addr, DS1742_MMIO_SIZE);
     fdt_node_add_prop_str(rtc_fdt, "compatible", "maxim,ds1742");
     fdt_node_add_child(rvvm_get_fdt_soc(machine), rtc_fdt);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t rtc_ds1742_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_dev_t* rtc_ds1742_init_auto(rvvm_machine_t* machine)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, RTC_DS1742_DEFAULT_MMIO, DS1742_MMIO_SIZE);
     return rtc_ds1742_init(machine, addr);
