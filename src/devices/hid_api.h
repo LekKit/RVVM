@@ -15,43 +15,55 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
- 
+
 #ifndef RVVM_HID_API_H
 #define RVVM_HID_API_H
 
 #include "rvvmlib.h"
 
+//! Keyboard key
 typedef uint8_t hid_key_t;
-typedef uint8_t hid_btns_t; // Button states bitfield
+
+//! Mouse button states bitfield
+typedef uint8_t hid_btns_t;
+
+//! HID Keyboard handle
 typedef struct hid_keyboard hid_keyboard_t;
+
+//! HID Mouse handle
 typedef struct hid_mouse    hid_mouse_t;
 
-// Automatically initialize & attach HID devices to the machine
-// After rvvm_machine_free(), devices are cleaned up too,
-// and the handles are no longer valid
+//! \brief   Attach a HID keyboard to the machine
+//! \warning After rvvm_machine_free(), keyboard handle is no longer valid
 PUBLIC hid_keyboard_t* hid_keyboard_init_auto(rvvm_machine_t* machine);
+
+//! \brief   Attach a HID mouse to the machine
+//! \warning After rvvm_machine_free(), mouse handle is no longer valid
 PUBLIC hid_mouse_t*    hid_mouse_init_auto(rvvm_machine_t* machine);
 
-// These may be called from GUI or whatever
+//! \brief Press a keyboard key
 PUBLIC void hid_keyboard_press(hid_keyboard_t* kb, hid_key_t key);
+
+//! \brief Release a keyboard key
 PUBLIC void hid_keyboard_release(hid_keyboard_t* kb, hid_key_t key);
 
-// TODO: Keymap API to translate system keycodes transparently?
-// Sounds like we can simply use a hashmap internally, but can our users?
-
+//! \brief Press mouse buttons
 PUBLIC void hid_mouse_press(hid_mouse_t* mouse, hid_btns_t btns);
+
+//! \brief Release mouse buttons
 PUBLIC void hid_mouse_release(hid_mouse_t* mouse, hid_btns_t btns);
 
-// Mouse wheel scrolling
+//! \brief Scroll mouse wheel (Positive offset goes downwards)
 PUBLIC void hid_mouse_scroll(hid_mouse_t* mouse, int32_t offset);
 
-// Set workspace resolution, must be called before sending any cursor movement
+//! \brief Set tablet resolution, must be called before hid_mouse_place()
 PUBLIC void hid_mouse_resolution(hid_mouse_t* mouse, uint32_t x, uint32_t y);
 
-// Relative movement
+//! \brief Relative mouse movement
 PUBLIC void hid_mouse_move(hid_mouse_t* mouse, int32_t x, int32_t y);
 
-// Absolute movement (Seamless cursor integration for tablets, etc)
+//! \brief   Absolute mouse movement (Tablet mode for host cursor integration)
+//! \warning Set tablet resolution with hid_mouse_resolution() beforehand
 PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 
 /*
@@ -59,12 +71,12 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
  */
 
 #define HID_BTN_NONE    0x0
-#define HID_BTN_LEFT    0x1
-#define HID_BTN_RIGHT   0x2
-#define HID_BTN_MIDDLE  0x4
+#define HID_BTN_LEFT    0x1 //!< Left mouse button
+#define HID_BTN_RIGHT   0x2 //!< Right mouse button
+#define HID_BTN_MIDDLE  0x4 //!< Middle mouse button (Scrollwheel)
 
-#define HID_SCROLL_UP   -1
-#define HID_SCROLL_DOWN 1
+#define HID_SCROLL_UP   -1  //!< Scroll one unit upward
+#define HID_SCROLL_DOWN 1   //!< Scroll one unit downward
 
 /*
  * Keyboard keycode definitions
@@ -125,15 +137,15 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_SPACE      0x2c
 #define HID_KEY_MINUS      0x2d
 #define HID_KEY_EQUAL      0x2e
-#define HID_KEY_LEFTBRACE  0x2f // Button [ {
-#define HID_KEY_RIGHTBRACE 0x30 // Button ] }
+#define HID_KEY_LEFTBRACE  0x2f //!< Button [ {
+#define HID_KEY_RIGHTBRACE 0x30 //!< Button ] }
 #define HID_KEY_BACKSLASH  0x31
-#define HID_KEY_HASHTILDE  0x32 // Button # ~ (Huh? Never seen one.)
-#define HID_KEY_SEMICOLON  0x33 // Button ; :
-#define HID_KEY_APOSTROPHE 0x34 // Button ' "
-#define HID_KEY_GRAVE      0x35 // Button ` ~ (For dummies: Quake console button)
-#define HID_KEY_COMMA      0x36 // Button , <
-#define HID_KEY_DOT        0x37 // Button . >
+#define HID_KEY_HASHTILDE  0x32 //!< Button # ~ (Huh? Never seen one.)
+#define HID_KEY_SEMICOLON  0x33 //!< Button ; :
+#define HID_KEY_APOSTROPHE 0x34 //!< Button ' "
+#define HID_KEY_GRAVE      0x35 //!< Button ` ~ (For dummies: Quake console button)
+#define HID_KEY_COMMA      0x36 //!< Button , <
+#define HID_KEY_DOT        0x37 //!< Button . >
 #define HID_KEY_SLASH      0x38
 #define HID_KEY_CAPSLOCK   0x39
 
@@ -152,7 +164,7 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_F12 0x45
 
 // Editing keys
-#define HID_KEY_SYSRQ      0x46 // Print Screen (REISUB, anyone?)
+#define HID_KEY_SYSRQ      0x46 //!< Print Screen (REISUB, anyone?)
 #define HID_KEY_SCROLLLOCK 0x47
 #define HID_KEY_PAUSE      0x48
 #define HID_KEY_INSERT     0x49
@@ -161,15 +173,15 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_DELETE     0x4c
 #define HID_KEY_END        0x4d
 #define HID_KEY_PAGEDOWN   0x4e
-#define HID_KEY_RIGHT      0x4f // Right Arrow
-#define HID_KEY_LEFT       0x50 // Left Arrow
-#define HID_KEY_DOWN       0x51 // Down Arrow
-#define HID_KEY_UP         0x52 // Up Arrow
+#define HID_KEY_RIGHT      0x4f //!< Right Arrow
+#define HID_KEY_LEFT       0x50 //!< Left Arrow
+#define HID_KEY_DOWN       0x51 //!< Down Arrow
+#define HID_KEY_UP         0x52 //!< Up Arrow
 
 // Numpad keys
 #define HID_KEY_NUMLOCK    0x53
 #define HID_KEY_KPSLASH    0x54
-#define HID_KEY_KPASTERISK 0x55 // Button *
+#define HID_KEY_KPASTERISK 0x55 //!< Button *
 #define HID_KEY_KPMINUS    0x56
 #define HID_KEY_KPPLUS     0x57
 #define HID_KEY_KPENTER    0x58
@@ -186,10 +198,10 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_KPDOT      0x63
 
 // Non-US keyboard keys
-#define HID_KEY_102ND      0x64 // Non-US \ and |, also <> key on German-like keyboards
-#define HID_KEY_COMPOSE    0x65 // Compose key
-#define HID_KEY_POWER      0x66 // Poweroff key
-#define HID_KEY_KPEQUAL    0x67 // Keypad =
+#define HID_KEY_102ND      0x64 //!< Non-US \ and |, also <> key on German-like keyboards
+#define HID_KEY_COMPOSE    0x65 //!< Compose key
+#define HID_KEY_POWER      0x66 //!< Poweroff key
+#define HID_KEY_KPEQUAL    0x67 //!< Keypad =
 
 // Function keys (F13 - F24)
 #define HID_KEY_F13 0x68
@@ -206,11 +218,11 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_F24 0x73
 
 // Non-US Media/special keys
-#define HID_KEY_OPEN       0x74 // Execute
+#define HID_KEY_OPEN       0x74 //!< Execute
 #define HID_KEY_HELP       0x75
-#define HID_KEY_PROPS      0x76 // Context menu key (Near right Alt) - Linux evdev naming
-#define HID_KEY_MENU       0x76 // ^ Context menu key too, different naming
-#define HID_KEY_FRONT      0x77 // Select key
+#define HID_KEY_PROPS      0x76 //!< Context menu key (Near right Alt) - Linux evdev naming
+#define HID_KEY_MENU       0x76 //!< ^ Context menu key too, different naming
+#define HID_KEY_FRONT      0x77 //!< Select key
 #define HID_KEY_STOP       0x78
 #define HID_KEY_AGAIN      0x79
 #define HID_KEY_UNDO       0x7a
@@ -221,32 +233,32 @@ PUBLIC void hid_mouse_place(hid_mouse_t* mouse, int32_t x, int32_t y);
 #define HID_KEY_MUTE       0x7f
 #define HID_KEY_VOLUMEUP   0x80
 #define HID_KEY_VOLUMEDOWN 0x81
-#define HID_KEY_KPCOMMA    0x85 // Keypad Comma (Brazilian keypad period key?)
+#define HID_KEY_KPCOMMA    0x85 //!< Keypad Comma (Brazilian keypad period key?)
 
 // International keys
-#define HID_KEY_RO               0x87 // International1 (Japanese Ro, \\ key)
-#define HID_KEY_KATAKANAHIRAGANA 0x88 // International2 (Japanese Katakana/Hiragana, second key right to spacebar)
-#define HID_KEY_YEN              0x89 // International3 (Japanese Yen)
-#define HID_KEY_HENKAN           0x8a // International4 (Japanese Henkan, key right to spacebar)
-#define HID_KEY_MUHENKAN         0x8b // International5 (Japanese Muhenkan, key left to spacebar)
-#define HID_KEY_KPJPCOMMA        0x8c // International6 (Japanese Comma? See HID spec...)
+#define HID_KEY_RO               0x87 //!< International1 (Japanese Ro, \\ key)
+#define HID_KEY_KATAKANAHIRAGANA 0x88 //!< International2 (Japanese Katakana/Hiragana, second key right to spacebar)
+#define HID_KEY_YEN              0x89 //!< International3 (Japanese Yen)
+#define HID_KEY_HENKAN           0x8a //!< International4 (Japanese Henkan, key right to spacebar)
+#define HID_KEY_MUHENKAN         0x8b //!< International5 (Japanese Muhenkan, key left to spacebar)
+#define HID_KEY_KPJPCOMMA        0x8c //!< International6 (Japanese Comma? See HID spec...)
 
 // LANG keys
-#define HID_KEY_HANGEUL        0x90 // LANG1 (Korean Hangul/English toggle key)
-#define HID_KEY_HANJA          0x91 // LANG2 (Korean Hanja control key)
-#define HID_KEY_KATAKANA       0x92 // LANG3 (Japanese Katakana key)
-#define HID_KEY_HIRAGANA       0x93 // LANG4 (Japanese Hiragana key)
-#define HID_KEY_ZENKAKUHANKAKU 0x94 // LANG5 (Japanese Zenkaku/Hankaku key)
+#define HID_KEY_HANGEUL        0x90 //!< LANG1 (Korean Hangul/English toggle key)
+#define HID_KEY_HANJA          0x91 //!< LANG2 (Korean Hanja control key)
+#define HID_KEY_KATAKANA       0x92 //!< LANG3 (Japanese Katakana key)
+#define HID_KEY_HIRAGANA       0x93 //!< LANG4 (Japanese Hiragana key)
+#define HID_KEY_ZENKAKUHANKAKU 0x94 //!< LANG5 (Japanese Zenkaku/Hankaku key)
 
 // Additional keypad keys
-#define HID_KEY_KPLEFTPAREN  0xb6 // Keypad (
-#define HID_KEY_KPRIGHTPAREN 0xb7 // Keypad )
+#define HID_KEY_KPLEFTPAREN  0xb6 //!< Keypad (
+#define HID_KEY_KPRIGHTPAREN 0xb7 //!< Keypad )
 
 // Modifier keys
 #define HID_KEY_LEFTCTRL   0xe0
 #define HID_KEY_LEFTSHIFT  0xe1
 #define HID_KEY_LEFTALT    0xe2
-#define HID_KEY_LEFTMETA   0xe3 // The one with the ugly Windows icon
+#define HID_KEY_LEFTMETA   0xe3 //!< The one with the ugly Windows icon
 #define HID_KEY_RIGHTCTRL  0xe4
 #define HID_KEY_RIGHTSHIFT 0xe5
 #define HID_KEY_RIGHTALT   0xe6
