@@ -52,7 +52,7 @@ RVVM_EXTERN_C_BEGIN
 #endif
 
 // Increments on each API/ABI breakage
-#define RVVM_ABI_VERSION 6
+#define RVVM_ABI_VERSION 7
 
 // Default memory base address
 #define RVVM_DEFAULT_MEMBASE 0x80000000
@@ -61,7 +61,7 @@ RVVM_EXTERN_C_BEGIN
 #define RVVM_OPT_NONE           0
 #define RVVM_OPT_JIT            1 // Enable JIT
 #define RVVM_OPT_JIT_CACHE      2 // Amount of per-core JIT cache (In bytes)
-#define RVVM_OPT_JIT_HARWARD    3 // No dirty code tracking, explicit ifence, slower
+#define RVVM_OPT_JIT_HARVARD    3 // No dirty code tracking, explicit ifence, slower
 #define RVVM_OPT_VERBOSITY      4 // Verbosity level of internal logic
 #define RVVM_OPT_HW_IMITATE     5 // Imitate traits or identity of physical hardware
 #define RVVM_OPT_MAX_CPU_CENT   6 // Max CPU load % per guest/host CPUs
@@ -86,7 +86,6 @@ typedef struct pci_bus pci_bus_t;
 typedef struct i2c_bus i2c_bus_t;
 
 typedef struct rvvm_mmio_dev_t rvvm_mmio_dev_t;
-typedef int rvvm_mmio_handle_t;
 
 #define RVVM_INVALID_MMIO (-1)
 
@@ -203,19 +202,12 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 
 // Connect MMIO devices to the machine
 // Returns:
-// - Success: Non-negative (>= 0) device handle
-// - Invalid region: RVVM_INVALID_MMIO,
-//   frees the device state as if the machine was shut down
-PUBLIC rvvm_mmio_handle_t rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
+// - Success: Non-NULL device handle
+// - Fail: NULL, frees the device state
+PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
 
 // Detach MMIO device from the machine, free it's state
-PUBLIC void rvvm_detach_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
-
-// Manipulate attached MMIO device by handle, may be done on a running VM
-// Returns:
-// - Success: non-NULL pointer to the `rvvm_mmio_dev_t`
-// - Invalid handle: NULL pointer
-PUBLIC rvvm_mmio_dev_t* rvvm_get_mmio(rvvm_machine_t* machine, rvvm_mmio_handle_t handle);
+PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* mmio_dev);
 
 // Offload eventloop into current thread, returns when any machine stops
 // For self-contained VMs this should be used in main thread
@@ -225,7 +217,7 @@ PUBLIC void rvvm_run_eventloop();
  * Userland Emulation API (WIP)
  */
 
-typedef void* rvvm_cpu_handle_t;
+typedef struct rvvm_hart_t rvvm_hart_t;
 
 #define RVVM_REGID_X0    0
 // FP registers are operated on in their binary form
@@ -241,15 +233,15 @@ typedef void* rvvm_cpu_handle_t;
 PUBLIC rvvm_machine_t* rvvm_create_userland(bool rv64);
 
 // Manage userland threads (Internally, they are RVVM harts)
-PUBLIC rvvm_cpu_handle_t rvvm_create_user_thread(rvvm_machine_t* machine);
-PUBLIC void rvvm_free_user_thread(rvvm_cpu_handle_t cpu);
+PUBLIC rvvm_hart_t* rvvm_create_user_thread(rvvm_machine_t* machine);
+PUBLIC void rvvm_free_user_thread(rvvm_hart_t* thread);
 
 // Run a userland thread until a trap happens. Returns trap cause.
 // PC points to faulty instruction upon return.
-PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_cpu_handle_t cpu);
+PUBLIC rvvm_addr_t rvvm_run_user_thread(rvvm_hart_t* thread);
 
-PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id);
-PUBLIC void rvvm_write_cpu_reg(rvvm_cpu_handle_t cpu, size_t reg_id, rvvm_addr_t reg);
+PUBLIC rvvm_addr_t rvvm_read_cpu_reg(rvvm_hart_t* thread, size_t reg_id);
+PUBLIC void rvvm_write_cpu_reg(rvvm_hart_t* thread, size_t reg_id, rvvm_addr_t reg);
 
 RVVM_EXTERN_C_END
 
