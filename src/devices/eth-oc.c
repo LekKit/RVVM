@@ -510,8 +510,8 @@ static rvvm_mmio_type_t ethoc_dev_type = {
     .reset = ethoc_reset,
 };
 
-PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
-                                     rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
+PUBLIC rvvm_mmio_dev_t* ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
+                                   rvvm_addr_t base_addr, plic_ctx_t* plic, uint32_t irq)
 {
     struct ethoc_dev* eth = safe_new_obj(struct ethoc_dev);
     tap_net_dev_t nic = {
@@ -536,8 +536,8 @@ PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
         .size = 0x800,
         .data = eth,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &ethoc_dev);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &ethoc_dev);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* ethoc = fdt_node_create_reg("ethernet", base_addr);
     fdt_node_add_prop_reg(ethoc, "reg", base_addr, 0x800);
@@ -546,15 +546,15 @@ PUBLIC rvvm_mmio_handle_t ethoc_init(rvvm_machine_t* machine, tap_dev_t* tap,
     fdt_node_add_prop_u32(ethoc, "interrupts", irq);
     fdt_node_add_child(rvvm_get_fdt_soc(machine), ethoc);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t ethoc_init_auto(rvvm_machine_t* machine)
+PUBLIC rvvm_mmio_dev_t* ethoc_init_auto(rvvm_machine_t* machine)
 {
     tap_dev_t* tap = tap_open();
     if (tap == NULL) {
         rvvm_error("Failed to create TAP device!");
-        return RVVM_INVALID_MMIO;
+        return NULL;
     }
     plic_ctx_t* plic = rvvm_get_plic(machine);
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, ETHOC_DEFAULT_MMIO, 0x800);
