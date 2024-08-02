@@ -2,7 +2,9 @@
 #include "compiler.h"
 #include "utils.h"
 #include "spinlock.h"
+
 #include "rvvmlib.h"
+
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/pci-bus.h"
@@ -218,10 +220,10 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_attach_1mmio(JNIEnv* env, jcl
 }
 #endif
 
-JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_detach_1mmio(JNIEnv* env, jclass class, jlong machine, jint handle)
+JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_remove_1mmio(JNIEnv* env, jclass class, jlong mmio_dev)
 {
     UNUSED(env); UNUSED(class);
-    rvvm_detach_mmio((rvvm_machine_t*)(size_t)machine, handle);
+    rvvm_remove_mmio((rvvm_mmio_dev_t*)(size_t)mmio_dev);
 }
 
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_run_1eventloop(JNIEnv* env, jclass class)
@@ -254,22 +256,22 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_i2c_1bus_1init_1auto(JNIEnv*
     return (size_t)i2c_oc_init_auto((rvvm_machine_t*)(size_t)machine);
 }
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1init_1auto(JNIEnv* env, jclass class, jlong machine)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    return ns16550a_init_term_auto((rvvm_machine_t*)(size_t)machine);
+    return (size_t)ns16550a_init_term_auto((rvvm_machine_t*)(size_t)machine);
 }
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_rtc_1goldfish_1init_1auto(JNIEnv* env, jclass class, jlong machine)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_rtc_1goldfish_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    return rtc_goldfish_init_auto((rvvm_machine_t*)(size_t)machine);
+    return (size_t)rtc_goldfish_init_auto((rvvm_machine_t*)(size_t)machine);
 }
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_syscon_1init_1auto(JNIEnv* env, jclass class, jlong machine)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_syscon_1init_1auto(JNIEnv* env, jclass class, jlong machine)
 {
     UNUSED(env); UNUSED(class);
-    return syscon_init_auto((rvvm_machine_t*)(size_t)machine);
+    return (size_t)syscon_init_auto((rvvm_machine_t*)(size_t)machine);
 }
 
 JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_rtl8169_1init_1auto(JNIEnv* env, jclass class, jlong machine)
@@ -287,13 +289,13 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_nvme_1init_1auto(JNIEnv* env
     return (size_t)ret;
 }
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_mtd_1physmap_1init_1auto(JNIEnv* env, jclass class, jlong machine, jstring path, jboolean rw)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_mtd_1physmap_1init_1auto(JNIEnv* env, jclass class, jlong machine, jstring path, jboolean rw)
 {
     const char* u8_path = (*env)->GetStringUTFChars(env, path, NULL);
-    rvvm_mmio_handle_t ret = mtd_physmap_init_auto((rvvm_machine_t*)(size_t)machine, u8_path, rw);
+    rvvm_mmio_dev_t* mmio = mtd_physmap_init_auto((rvvm_machine_t*)(size_t)machine, u8_path, rw);
     UNUSED(class);
     (*env)->ReleaseStringUTFChars(env, path, u8_path);
-    return ret;
+    return (size_t)mmio;
 }
 
 // Share an object reference across threads safely
@@ -354,7 +356,7 @@ static rvvm_mmio_type_t jni_fb_cleanup_desc = {
     .remove = jni_framebuffer_remove,
 };
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEnv* env, jclass class, jlong machine, jobject fb, jint x, jint y, jint bpp)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEnv* env, jclass class, jlong machine, jobject fb, jint x, jint y, jint bpp)
 {
     size_t buf_size = (*env)->GetDirectBufferCapacity(env, fb);
     fb_ctx_t fb_ctx = {
@@ -369,12 +371,12 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_framebuffer_1init_1auto(JNIEn
     };
     UNUSED(class);
     if (fb_ctx.buffer && framebuffer_size(&fb_ctx) == buf_size) {
-        rvvm_mmio_handle_t handle = framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
-        if (handle != RVVM_INVALID_MMIO) rvvm_attach_mmio((rvvm_machine_t*)(size_t)machine, &jni_fb_cleaup);
-        return handle;
+        rvvm_mmio_dev_t* mmio = framebuffer_init_auto((rvvm_machine_t*)(size_t)machine, &fb_ctx);
+        if (mmio != NULL) rvvm_attach_mmio((rvvm_machine_t*)(size_t)machine, &jni_fb_cleaup);
+        return (size_t)mmio;
     } else {
         rvvm_warn("Invalid ByteBuffer passed to JNI framebuffer_init_auto()");
-        return RVVM_INVALID_MMIO;
+        return 0;
     }
 }
 
@@ -428,10 +430,10 @@ JNIEXPORT jboolean JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1write_1pins(JNIEnv*
     return gpio_write_pins((rvvm_gpio_dev_t*)(size_t)gpio, off, pins);
 }
 
-JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1sifive_1init_1auto(JNIEnv* env, jclass class, jlong machine, jlong gpio)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_gpio_1sifive_1init_1auto(JNIEnv* env, jclass class, jlong machine, jlong gpio)
 {
     UNUSED(env); UNUSED(class);
-    return gpio_sifive_init_auto((rvvm_machine_t*)(size_t)machine, (rvvm_gpio_dev_t*)(size_t)gpio);
+    return (size_t)gpio_sifive_init_auto((rvvm_machine_t*)(size_t)machine, (rvvm_gpio_dev_t*)(size_t)gpio);
 }
 
 JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1mouse_1resolution(JNIEnv* env, jclass class, jlong mice, jint x, jint y)

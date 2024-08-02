@@ -8,7 +8,7 @@ package lekkit.rvvm;
 
 import java.nio.ByteBuffer;
 
-// Regenerate C prototypes: $ javac -h . RvvmJni.java
+// Regenerate C prototypes: $ javac -h . RVVMNative.java
 
 public class RVVMNative {
     // Do not crash the JVM if we failed to load native lib
@@ -35,7 +35,7 @@ public class RVVMNative {
         try {
             System.loadLibrary("rvvm");
             int abi = get_abi_version();
-            if (abi == 6) {
+            if (abi == 7) {
                 loaded = true;
             } else {
                 System.out.println("ERROR: Invalid librvvm ABI version: " + Integer.toString(abi));
@@ -76,7 +76,7 @@ public class RVVMNative {
     public static native boolean    machine_powered(long machine);
     public static native void       free_machine(long machine);
     public static native long       mmio_zone_auto(long machine, long addr, long size);
-    public static native void       detach_mmio(long machine, int handle);
+    public static native void       remove_mmio(long mmio_dev);
     public static native void       run_eventloop();
 
     // TODO: MMIO API
@@ -87,13 +87,13 @@ public class RVVMNative {
     public static native long plic_init_auto(long machine);
     public static native long pci_bus_init_auto(long machine);
     public static native long i2c_bus_init_auto(long machine);
-    public static native int  ns16550a_init_auto(long machine);
-    public static native int  rtc_goldfish_init_auto(long machine);
-    public static native int  syscon_init_auto(long machine);
+    public static native long ns16550a_init_auto(long machine);
+    public static native long rtc_goldfish_init_auto(long machine);
+    public static native long syscon_init_auto(long machine);
     public static native long rtl8169_init_auto(long machine);
     public static native long nvme_init_auto(long machine, String image_path, boolean rw);
-    public static native int  mtd_physmap_init_auto(long machine, String image_path, boolean rw);
-    public static native int  framebuffer_init_auto(long machine, ByteBuffer fb, int x, int y, int bpp);
+    public static native long mtd_physmap_init_auto(long machine, String image_path, boolean rw);
+    public static native long framebuffer_init_auto(long machine, ByteBuffer fb, int x, int y, int bpp);
     public static native long hid_mouse_init_auto(long machine);
     public static native long hid_keyboard_init_auto(long machine);
 
@@ -101,7 +101,8 @@ public class RVVMNative {
     public static native void    gpio_dev_free(long gpio);
     public static native int     gpio_read_pins(long gpio, int off);
     public static native boolean gpio_write_pins(long gpio, int off, int pins);
-    public static native int     gpio_sifive_init_auto(long machine, long gpio);
+
+    public static native long    gpio_sifive_init_auto(long machine, long gpio);
 
     public static native void pci_remove_device(long dev);
 

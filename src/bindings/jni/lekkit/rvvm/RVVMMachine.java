@@ -14,7 +14,7 @@ public class RVVMMachine {
     public static final int RVVM_OPT_NONE = 0;
     public static final int RVVM_OPT_JIT = 1;          // Enable JIT
     public static final int RVVM_OPT_JIT_CACHE = 2;    // Amount of per-core JIT cache (In bytes)
-    public static final int RVVM_OPT_JIT_HARWARD = 3;  // No dirty code tracking, explicit ifence, slower
+    public static final int RVVM_OPT_JIT_HARVARD = 3;  // No dirty code tracking, explicit ifence, slower
     public static final int RVVM_OPT_VERBOSITY = 4;    // Verbosity level of internal logic
     public static final int RVVM_OPT_HW_IMITATE = 5;   // Imitate traits or identity of physical hardware
     public static final int RVVM_OPT_MAX_CPU_CENT = 6; // Max CPU load % per guest/host CPUs
@@ -153,4 +153,3 @@ public class RVVMMachine {
         free();
     }
 }
-
