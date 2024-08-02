@@ -376,8 +376,8 @@ TSAN_SUPPRESS static inline void atomic_memcpy_relaxed(void* dest, const void* s
 static bool riscv_mmio_scan(rvvm_hart_t* vm, virt_addr_t vaddr, phys_addr_t paddr, void* dest, uint8_t size, uint8_t access)
 {
     //rvvm_info("Scanning MMIO at 0x%08"PRIxXLEN, paddr);
-    vector_foreach(vm->machine->mmio, i) {
-        rvvm_mmio_dev_t* mmio = &vector_at(vm->machine->mmio, i);
+    vector_foreach(vm->machine->mmio_devs, i) {
+        rvvm_mmio_dev_t* mmio = vector_at(vm->machine->mmio_devs, i);
         rvvm_mmio_handler_t rwfunc = NULL;
         if (paddr >= mmio->addr && (paddr + size) <= (mmio->addr + mmio->size)) {
             // Found the device, access lies in range
