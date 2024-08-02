@@ -33,7 +33,7 @@ static rvvm_mmio_type_t fb_dev_type = {
     .remove = fb_remove,
 };
 
-PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb)
+PUBLIC rvvm_mmio_dev_t* framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb)
 {
     // Map the framebuffer into physical memory
     rvvm_mmio_dev_t fb_region = {
@@ -42,23 +42,23 @@ PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t 
         .size = framebuffer_size(fb),
         .type = &fb_dev_type,
     };
-    rvvm_mmio_handle_t handle = rvvm_attach_mmio(machine, &fb_region);
-    if (handle == RVVM_INVALID_MMIO) return handle;
+    rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &fb_region);
+    if (mmio == NULL) return mmio;
 #ifdef USE_FDT
     struct fdt_node* fb_fdt = fdt_node_create_reg("framebuffer", addr);
     fdt_node_add_prop_reg(fb_fdt, "reg", addr, fb_region.size);
     fdt_node_add_prop_str(fb_fdt, "compatible", "simple-framebuffer");
     switch (fb->format) {
-        case RGB_FMT_R5G6B5: 
+        case RGB_FMT_R5G6B5:
             fdt_node_add_prop_str(fb_fdt, "format", "r5g6b5");
             break;
-        case RGB_FMT_R8G8B8: 
+        case RGB_FMT_R8G8B8:
             fdt_node_add_prop_str(fb_fdt, "format", "r8g8b8");
             break;
-        case RGB_FMT_A8R8G8B8: 
+        case RGB_FMT_A8R8G8B8:
             fdt_node_add_prop_str(fb_fdt, "format", "a8r8g8b8");
             break;
-        case RGB_FMT_A8B8G8R8: 
+        case RGB_FMT_A8B8G8R8:
             fdt_node_add_prop_str(fb_fdt, "format", "a8b8g8r8");
             break;
         default:
@@ -71,12 +71,13 @@ PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t 
 
     fdt_node_add_child(rvvm_get_fdt_soc(machine), fb_fdt);
 #endif
-    return handle;
+    return mmio;
 }
 
-PUBLIC rvvm_mmio_handle_t framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb)
+PUBLIC rvvm_mmio_dev_t* framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb)
 {
     rvvm_addr_t addr = rvvm_mmio_zone_auto(machine, 0x28000000, framebuffer_size(fb));
-    rvvm_append_cmdline(machine, "console=tty0");
-    return framebuffer_init(machine, addr, fb);
+    rvvm_mmio_dev_t* mmio = framebuffer_init(machine, addr, fb);
+    if (mmio != NULL) rvvm_append_cmdline(machine, "console=tty0");
+    return mmio;
 }

@@ -15,7 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
- 
+
 #ifndef RVVM_FRAMEBUFFER_H
 #define RVVM_FRAMEBUFFER_H
 
@@ -77,7 +77,7 @@ static inline size_t framebuffer_size(const fb_ctx_t* fb)
 
 // Attach initialized framebuffer context to the machine
 // The buffer is not freed automatically
-PUBLIC rvvm_mmio_handle_t framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb);
-PUBLIC rvvm_mmio_handle_t framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb);
+PUBLIC rvvm_mmio_dev_t* framebuffer_init(rvvm_machine_t* machine, rvvm_addr_t addr, const fb_ctx_t* fb);
+PUBLIC rvvm_mmio_dev_t* framebuffer_init_auto(rvvm_machine_t* machine, const fb_ctx_t* fb);
 
 #endif
