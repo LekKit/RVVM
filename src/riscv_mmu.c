@@ -454,6 +454,12 @@ static bool riscv_mmu_op(rvvm_hart_t* vm, virt_addr_t addr, void* dest, uint8_t 
         if (riscv_mmio_scan(vm, addr, paddr, dest, size, access)) {
             return true;
         }
+        // Ignore writes and read zeroes on invalid memory regions
+        // Experimentally confirmed this actually happens on real hardware (VF2)
+        if (rvvm_get_opt(vm->machine, RVVM_OPT_HW_IMITATE)) {
+            memset(dest, 0, size);
+            return true;
+        }
         // Physical memory access fault (bad physical address)
         switch (access) {
             case MMU_WRITE:
