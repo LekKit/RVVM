@@ -212,7 +212,8 @@ PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t base_addr, pl
         .min_op_size = 1,
         .max_op_size = 4,
     };
-    if (rvvm_attach_mmio(machine, &i2c_oc) == RVVM_INVALID_MMIO) return NULL;
+    if (rvvm_attach_mmio(machine, &i2c_oc) == NULL) return NULL;
+
 #ifdef USE_FDT
     struct fdt_node* i2c_clock = fdt_node_find(rvvm_get_fdt_soc(machine), "i2c_oc_osc");
     if (i2c_clock == NULL) {
