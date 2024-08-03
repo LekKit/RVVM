@@ -362,7 +362,13 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
         .data = plic,
         .type = &plic_dev_type,
     };
-    rvvm_attach_mmio(machine, &plic_mmio);
+    if (!rvvm_attach_mmio(machine, &plic_mmio)) {
+        // Failed to attach PLIC
+        return NULL;
+    }
+
+    rvvm_set_plic(machine, plic);
+
 #ifdef USE_FDT
     struct fdt_node* cpus = fdt_node_find(rvvm_get_fdt_root(machine), "cpus");
     if (cpus == NULL) {
@@ -395,7 +401,6 @@ PUBLIC plic_ctx_t* plic_init(rvvm_machine_t* machine, rvvm_addr_t base_addr)
 
     plic->phandle = fdt_node_get_phandle(plic_node);
 #endif
-    rvvm_set_plic(machine, plic);
     return plic;
 }
 
