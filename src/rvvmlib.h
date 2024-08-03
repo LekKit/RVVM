@@ -235,10 +235,13 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
 //! \param   mmio MMIO region description, doesn't need to be kept
 //! \return  Valid MMIO region handle, or NULL on failure
 //! \warning Dereferencing rvvm_mmio_dev_t* is only safe when machine is paused/powered off
-PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio);
+PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio_desc);
 
 //! \brief Detach MMIO device from the owning machine, free it's state
-PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* mmio);
+PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* mmio_dev);
+
+//! \brief Clean up MMIO description state without ever attaching it to any machine
+PUBLIC void rvvm_cleanup_mmio_desc(const rvvm_mmio_dev_t* mmio_desc);
 
 //! \brief Run the event loop in the calling thread, returns when any machine stops
 PUBLIC void rvvm_run_eventloop();
