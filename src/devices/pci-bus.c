@@ -246,9 +246,9 @@ PUBLIC pci_bus_t* pci_bus_init(rvvm_machine_t* machine, plic_ctx_t* plic, uint32
 
     bus->machine = machine;
     bus->plic = plic;
-    for (size_t j=0; j<PCI_BUS_IRQS; ++j) {
+    for (size_t irq_pin = 0; irq_pin < PCI_BUS_IRQS; ++irq_pin) {
         // Allocate INTX IRQs
-        bus->irq[j] = irq ? irq : plic_alloc_irq(plic);
+        bus->irq[irq_pin] = irq ? irq : plic_alloc_irq(plic);
     }
     bus->io_addr = io_addr;
     bus->io_len = io_len;
@@ -385,12 +385,25 @@ static pci_func_t* pci_init_func(pci_dev_t* dev, const pci_func_desc_t* func_des
     return func;
 }
 
+static void pci_free_desc(const pci_dev_desc_t* desc)
+{
+    for (size_t func_id = 0; func_id < PCI_DEV_FUNCS; ++func_id) {
+        const pci_func_desc_t* func_desc = &desc->func[func_id];
+        for (size_t bar_id = 0; bar_id < PCI_FUNC_BARS; ++bar_id) {
+            rvvm_cleanup_mmio_desc(&func_desc->bar[bar_id]);
+        }
+    }
+}
+
 PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
 {
-    if (bus == NULL) return NULL;
+    if (bus == NULL) {
+        pci_free_desc(desc);
+        return NULL;
+    }
 
     uint8_t dev_id = 0xFF;
-    for (size_t i=0; i<PCI_BUS_DEVS; ++i) {
+    for (size_t i = 0; i < PCI_BUS_DEVS; ++i) {
         if (bus->dev[i] == NULL) {
             dev_id = i;
             break;
@@ -398,6 +411,7 @@ PUBLIC pci_dev_t* pci_bus_add_device(pci_bus_t* bus, const pci_dev_desc_t* desc)
     }
     if (dev_id == 0xFF) {
         rvvm_warn("Too much devices on a single PCI bus");
+        pci_free_desc(desc);
         return NULL;
     }
 
