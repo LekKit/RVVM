@@ -657,12 +657,7 @@ PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine)
 static void rvvm_mmio_free(rvvm_mmio_dev_t* dev)
 {
     rvvm_info("Removing MMIO device \"%s\"", dev->type ? dev->type->name : "null");
-    // Either device implements it's own cleanup routine, or we free it's data buffer
-    if (dev->type && dev->type->remove) {
-        dev->type->remove(dev);
-    } else {
-        free(dev->data);
-    }
+    rvvm_cleanup_mmio_desc(dev);
     free(dev);
 }
 
@@ -703,7 +698,7 @@ static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t add
     }
 
     vector_foreach(machine->mmio_devs, i) {
-        rvvm_mmio_dev_t *dev = vector_at(machine->mmio_devs, i);
+        rvvm_mmio_dev_t* dev = vector_at(machine->mmio_devs, i);
         if (addr >= dev->addr && (addr + size) <= (dev->addr + dev->size)) {
             addr = dev->addr + dev->size;
         }
@@ -725,10 +720,10 @@ PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr
     return ret;
 }
 
-PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio)
+PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio_desc)
 {
     rvvm_mmio_dev_t* dev = safe_new_obj(rvvm_mmio_dev_t);
-    memcpy(dev, mmio, sizeof(rvvm_mmio_dev_t));
+    memcpy(dev, mmio_desc, sizeof(rvvm_mmio_dev_t));
     dev->machine = machine;
 
     // Normalize access properties: Power of two, default 1 - 8 bytes
@@ -748,38 +743,51 @@ PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmi
         return NULL;
     }
 
-    bool was_running = rvvm_pause_machine(machine);
-    vector_push_back(machine->mmio_devs, dev);
     rvvm_info("Attached MMIO device at 0x%08"PRIx64", type \"%s\"",
               dev->addr, dev->type ? dev->type->name : "null");
+
+    bool was_running = rvvm_pause_machine(machine);
+    vector_push_back(machine->mmio_devs, dev);
     if (was_running) rvvm_start_machine(machine);
     return dev;
 }
 
-PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* dev)
+PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* mmio_dev)
 {
-    if (dev == NULL) return;
+    if (mmio_dev == NULL) return;
 
-    rvvm_machine_t* machine = dev->machine;
+    rvvm_machine_t* machine = mmio_dev->machine;
     bool was_running = rvvm_pause_machine(machine);
 
     // Remove from machine device list
     vector_foreach_back(machine->mmio_devs, i) {
-        if (vector_at(machine->mmio_devs, i) == dev) {
+        if (vector_at(machine->mmio_devs, i) == mmio_dev) {
             vector_erase(machine->mmio_devs, i);
         }
     }
 
     // It's a shared memory mapping, flush each hart TLB
-    if (dev->mapping) {
+    if (mmio_dev->mapping) {
         vector_foreach(machine->harts, i) {
             rvvm_hart_t* vm = vector_at(machine->harts, i);
             riscv_tlb_flush(vm);
         }
     }
 
-    rvvm_mmio_free(dev);
     if (was_running) rvvm_start_machine(machine);
+
+    rvvm_mmio_free(mmio_dev);
+}
+
+PUBLIC void rvvm_cleanup_mmio_desc(const rvvm_mmio_dev_t* mmio_desc)
+{
+    // Either device implements it's own cleanup routine, or we free it's data buffer
+    rvvm_mmio_dev_t tmp_dev = *mmio_desc;
+    if (tmp_dev.type && tmp_dev.type->remove) {
+        tmp_dev.type->remove(&tmp_dev);
+    } else {
+        free(tmp_dev.data);
+    }
 }
 
 static void rvvm_set_manual_eventloop(bool manual)
