@@ -710,14 +710,14 @@ static rvvm_addr_t rvvm_mmio_zone_check(rvvm_machine_t* machine, rvvm_addr_t add
 // Regions of size 0 are ignored (those are non-IO placeholders)
 PUBLIC rvvm_addr_t rvvm_mmio_zone_auto(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
 {
-    rvvm_addr_t ret = addr;
-    if (size == 0) return addr;
-
-    do {
-        ret = rvvm_mmio_zone_check(machine, addr, size);
-    } while (ret != addr);
-
-    return ret;
+    if (size) {
+        rvvm_addr_t tmp = addr;
+        do {
+            addr = tmp;
+            tmp = rvvm_mmio_zone_check(machine, addr, size);
+        } while (tmp != addr);
+    }
+    return addr;
 }
 
 PUBLIC rvvm_mmio_dev_t* rvvm_attach_mmio(rvvm_machine_t* machine, const rvvm_mmio_dev_t* mmio_desc)
