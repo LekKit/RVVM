@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifndef DLIB_DISABLED
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(UNDER_CE)
 #include <windows.h>
 #define DLIB_WIN32_IMPL
 #define DLIB_FILE_EXT ".dll"
@@ -51,29 +51,29 @@ struct dlib_ctx {
     uint32_t flags;
 };
 
-static dlib_ctx_t* dlib_open_internal(const char* path, uint32_t flags)
+static dlib_ctx_t* dlib_open_internal(const char* lib_name, uint32_t flags)
 {
 #if defined(DLIB_WIN32_IMPL)
-    size_t path_len = rvvm_strlen(path) + 1;
-    wchar_t* u16_path = safe_new_arr(wchar_t, path_len);
+    size_t name_len = rvvm_strlen(lib_name) + 1;
+    wchar_t* u16_name = safe_new_arr(wchar_t, name_len);
 
     // Try to get module from already loaded modules
-    MultiByteToWideChar(CP_UTF8, 0, path, -1, u16_path, path_len);
-    HMODULE handle = GetModuleHandleW(u16_path);
+    MultiByteToWideChar(CP_UTF8, 0, lib_name, -1, u16_name, name_len);
+    HMODULE handle = GetModuleHandleW(u16_name);
     if (handle) {
         // Prevent unloading an existing module
         flags &= ~DLIB_MAY_UNLOAD;
     } else {
-        handle = LoadLibraryExW(u16_path, NULL, 0);
+        handle = LoadLibraryExW(u16_name, NULL, 0);
     }
-    free(u16_path);
+    free(u16_name);
     if (handle == NULL) return NULL;
     dlib_ctx_t* lib = safe_new_obj(dlib_ctx_t);
     lib->handle = handle;
     lib->flags = flags;
     return lib;
 #elif defined(DLIB_POSIX_IMPL)
-    void* handle = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    void* handle = dlopen(lib_name, RTLD_LAZY | RTLD_GLOBAL);
     if (handle == NULL) return NULL;
     dlib_ctx_t* lib = safe_new_obj(dlib_ctx_t);
     lib->handle = handle;
@@ -81,28 +81,30 @@ static dlib_ctx_t* dlib_open_internal(const char* path, uint32_t flags)
     return lib;
 #else
     DO_ONCE(rvvm_warn("Dynamic library loading is not supported"));
-    UNUSED(path);
+    UNUSED(lib_name);
     UNUSED(flags);
     return NULL;
 #endif
 }
 
-
-dlib_ctx_t* dlib_open(const char* path, uint32_t flags)
+static dlib_ctx_t* dlib_open_named(const char* prefix, const char* lib_name, const char* suffix, uint32_t flags)
 {
-    dlib_ctx_t* lib = NULL;
-    if ((flags & DLIB_NAME_PROBE) && !rvvm_strfind(path, "/")) {
-        size_t name_len = rvvm_strlen("lib") + rvvm_strlen(path) + rvvm_strlen(DLIB_FILE_EXT) + 1;
-        char* name = safe_new_arr(char, name_len);
-        size_t off = rvvm_strlcpy(name, "lib", name_len);
-        off += rvvm_strlcpy(name + off, path, name_len - off);
-        rvvm_strlcpy(name + off, DLIB_FILE_EXT, name_len - off);
+    char name[256] = {0};
+    size_t off = rvvm_strlcpy(name, prefix, sizeof(name));
+    off += rvvm_strlcpy(name + off, lib_name, sizeof(name) - off);
+    rvvm_strlcpy(name + off, suffix, sizeof(name) - off);
+    return dlib_open_internal(name, flags);
+}
 
-        lib = dlib_open_internal(name, flags);
-        if (lib == NULL) lib = dlib_open_internal(name + rvvm_strlen("lib"), flags);
+dlib_ctx_t* dlib_open(const char* lib_name, uint32_t flags)
+{
+    if ((flags & DLIB_NAME_PROBE) && !rvvm_strfind(lib_name, "/")) {
+        dlib_ctx_t* lib = dlib_open_named("lib", lib_name, DLIB_FILE_EXT, flags);
+        if (lib) return lib;
+        lib = dlib_open_named("", lib_name, DLIB_FILE_EXT, flags);
+        if (lib) return lib;
     }
-    if (lib == NULL) lib = dlib_open_internal(path, flags);
-    return lib;
+    return dlib_open_internal(lib_name, flags);
 }
 
 void dlib_close(dlib_ctx_t* lib)
@@ -111,7 +113,7 @@ void dlib_close(dlib_ctx_t* lib)
     if (lib == NULL) return;
     if (lib->flags & DLIB_MAY_UNLOAD) {
         rvvm_info("Unloading a library");
-#ifdef DLIB_WIN32_IMPL
+#if defined(DLIB_WIN32_IMPL)
         FreeLibrary(lib->handle);
 #elif defined(DLIB_POSIX_IMPL)
         dlclose(lib->handle);
@@ -125,7 +127,7 @@ void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name)
     // Silently propagate load error
     if (lib == NULL) return NULL;
     void* ret = NULL;
-#ifdef DLIB_WIN32_IMPL
+#if defined(DLIB_WIN32_IMPL)
     ret = (void*)GetProcAddress(lib->handle, symbol_name);
 #elif defined(DLIB_POSIX_IMPL)
     ret = dlsym(lib->handle, symbol_name);
@@ -134,9 +136,9 @@ void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name)
     return ret;
 }
 
-bool dlib_load_weak(const char* path)
+bool dlib_load_weak(const char* lib_name)
 {
-    dlib_ctx_t* lib = dlib_open(path, DLIB_NAME_PROBE);
+    dlib_ctx_t* lib = dlib_open(lib_name, DLIB_NAME_PROBE);
     dlib_close(lib);
     return lib != NULL;
 }

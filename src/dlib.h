@@ -27,8 +27,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct dlib_ctx dlib_ctx_t;
 
-// Load the library
-dlib_ctx_t* dlib_open(const char* path, uint32_t flags);
+// Load a library by name
+dlib_ctx_t* dlib_open(const char* lib_name, uint32_t flags);
 
 // Drop the library handle. unload the library if DLIB_MAY_UNLOAD was set
 void dlib_close(dlib_ctx_t* lib);
@@ -37,6 +37,6 @@ void dlib_close(dlib_ctx_t* lib);
 void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name);
 
 // Resolve weak symbols provided by a lib (With name probing)
-bool dlib_load_weak(const char* path);
+bool dlib_load_weak(const char* lib_name);
 
 #endif
