@@ -18,8 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 extern "C" {
-#include "fb_window.h"
-#include "compiler.h"
+#include "gui_window.h"
+#include "utils.h"
 }
 
 #include <Application.h>
@@ -163,45 +163,46 @@ static hid_key_t haiku_key_to_hid(uint32_t haiku_key)
 
 class View: public BView {
 private:
-    ObjectDeleter<BBitmap> fBitmap;
-    fb_window_t* fData;
+    ObjectDeleter<BBitmap> m_bitmap;
+    gui_window_t* m_win;
 
 public:
-    View(BRect frame, const char* name, uint32 resizingMode, uint32 flags, fb_window_t* data);
-    virtual ~View();
+    View(BRect frame, const char* name, uint32 resizingMode, uint32 flags, gui_window_t* win);
+    virtual ~View() {}
 
     void AttachedToWindow() override;
     void Draw(BRect dirty) override;
-    void MessageReceived(BMessage *msg) override;
+    void MessageReceived(BMessage* msg) override;
+    void WindowActivated(bool active) override;
 
-    BBitmap *GetBitmap() {return fBitmap.Get();}
-    fb_window_t* GetData() {return fData;}
+    BBitmap* GetBitmap() {
+        return m_bitmap.Get();
+    }
 };
 
 class Window: public BWindow {
 private:
-    View *fView;
+    View* m_view;
+    gui_window_t* m_win;
 
 public:
-    Window(BRect frame, const char *title, fb_window_t* data);
-    virtual ~Window();
+    Window(BRect frame, const char *title, gui_window_t* win);
+    virtual ~Window() {}
 
     bool QuitRequested() override;
 
-    View *GetView() {return fView;}
+    View* GetView() {
+        return m_view;
+    }
 };
 
-View::View(BRect frame, const char* name, uint32 resizingMode, uint32 flags, fb_window_t* data):
+View::View(BRect frame, const char* name, uint32 resizingMode, uint32 flags, gui_window_t* win):
     BView(frame, name, resizingMode, flags | B_WILL_DRAW),
-    fData(data)
+    m_win(win)
 {
     SetViewColor(B_TRANSPARENT_COLOR);
     SetLowColor(0, 0, 0);
-    fBitmap.SetTo(new BBitmap(frame.OffsetToCopy(B_ORIGIN), B_RGBA32));
-}
-
-View::~View()
-{
+    m_bitmap.SetTo(new BBitmap(frame.OffsetToCopy(B_ORIGIN), B_RGBA32));
 }
 
 void View::AttachedToWindow()
@@ -213,12 +214,10 @@ void View::AttachedToWindow()
 void View::Draw(BRect dirty)
 {
     UNUSED(dirty);
-    if (fBitmap.IsSet()) {
-        DrawBitmap(fBitmap.Get());
-    }
+    DrawBitmap(GetBitmap());
 }
 
-void View::MessageReceived(BMessage *msg)
+void View::MessageReceived(BMessage* msg)
 {
     int32 key;
     BPoint point;
@@ -231,50 +230,54 @@ void View::MessageReceived(BMessage *msg)
             if (key == 0) {
                 // Ignore key repeat events
                 msg->FindInt32("key", &key);
-                hid_keyboard_press(fData->keyboard, haiku_key_to_hid(key));
+                m_win->on_key_press(m_win, haiku_key_to_hid(key));
             }
             return;
         case B_KEY_UP:
         case B_UNMAPPED_KEY_UP:
             msg->FindInt32("key", &key);
-            hid_keyboard_release(fData->keyboard, haiku_key_to_hid(key));
+            m_win->on_key_release(m_win, haiku_key_to_hid(key));
             return;
         case B_MOUSE_DOWN:
             SetMouseEventMask(B_POINTER_EVENTS);
             msg->FindInt32("buttons", &btns);
-            hid_mouse_press(fData->mouse, btns);
+            m_win->on_mouse_press(m_win, btns);
             return;
         case B_MOUSE_UP:
             msg->FindInt32("buttons", &btns);
-            hid_mouse_release(fData->mouse, ~btns);
+            m_win->on_mouse_release(m_win, ~btns);
             return;
         case B_MOUSE_MOVED:
             msg->FindPoint("where", &point);
-            hid_mouse_place(fData->mouse, point.x, point.y);
+            m_win->on_mouse_place(m_win, point.x, point.y);
             return;
         case B_MOUSE_WHEEL_CHANGED:
             msg->FindFloat("be:wheel_delta_y", &wheel);
-            hid_mouse_scroll(fData->mouse, wheel);
+            m_win->on_mouse_scroll(m_win, (int32_t)wheel);
             return;
     }
     return BView::MessageReceived(msg);
 }
 
-Window::Window(BRect frame, const char* title, fb_window_t* data):
-    BWindow(frame, title, B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL, B_NOT_ZOOMABLE | B_NOT_RESIZABLE)
+void View::WindowActivated(bool active)
 {
-    fView = new View(frame.OffsetToCopy(B_ORIGIN), "view", B_FOLLOW_ALL, 0, data);
-    AddChild(fView);
-    fView->MakeFocus();
+    if (!active) {
+        m_win->on_focus_lost(m_win);
+    }
 }
 
-Window::~Window()
+Window::Window(BRect frame, const char* title, gui_window_t* win):
+    BWindow(frame, title, B_TITLED_WINDOW_LOOK, B_NORMAL_WINDOW_FEEL, B_NOT_ZOOMABLE | B_NOT_RESIZABLE),
+    m_win(win)
 {
+    m_view = new View(frame.OffsetToCopy(B_ORIGIN), "view", B_FOLLOW_ALL, 0, win);
+    AddChild(m_view);
+    m_view->MakeFocus();
 }
 
 bool Window::QuitRequested()
 {
-    rvvm_reset_machine(fView->GetData()->machine, false);
+    m_win->on_close(m_win);
     return false;
 }
 
@@ -302,38 +305,56 @@ static status_t init_application()
     return B_OK;
 }
 
-struct win_data {
-    Window *wnd;
-};
-
-bool fb_window_create(fb_window_t* win)
+static void haiku_window_draw(gui_window_t* win)
 {
-    if (init_application() < B_OK) {
-        return false;
-    }
-
-    win->data = new win_data_t();
-    win->data->wnd = new Window(BRect(0, 0, win->fb.width - 1, win->fb.height - 1), "RVVM", win);
-    win->fb.format = RGB_FMT_A8R8G8B8;
-    win->fb.buffer = win->data->wnd->GetView()->GetBitmap()->Bits();
-
-    win->data->wnd->CenterOnScreen();
-    win->data->wnd->Show();
-    return true;
-}
-
-void fb_window_close(fb_window_t* win)
-{
-    View* view = win->data->wnd->GetView();
-    view->LockLooper();
-    win->data->wnd->Quit();
-    free(win->data);
-}
-
-void fb_window_update(fb_window_t* win)
-{
-    View* view = win->data->wnd->GetView();
+    Window* window = (Window*)win->win_data;
+    View* view = window->GetView();
     view->LockLooper();
     view->Invalidate();
     view->UnlockLooper();
+}
+
+static void haiku_window_poll(gui_window_t* win)
+{
+    // Input events handling done from window thread. TODO: Check thread safety.
+    // Other GUI backends could implement threaded input too for better latency
+    UNUSED(win);
+}
+
+static void haiku_window_set_title(gui_window_t* win, const char* title)
+{
+    Window* window = (Window*)win->win_data;
+    window->SetTitle(title);
+}
+
+static void haiku_window_remove(gui_window_t* win)
+{
+    Window* window = (Window*)win->win_data;
+    View* view = window->GetView();
+    view->LockLooper();
+    window->Quit(); // Also deletes window
+}
+
+bool haiku_window_init(gui_window_t* win)
+{
+    if (init_application() < B_OK) {
+        rvvm_error("Failed to initialize be_app thread!");
+        return false;
+    }
+
+    Window* window = new Window(BRect(0, 0, win->fb.width - 1, win->fb.height - 1), "RVVM", win);
+    window->CenterOnScreen();
+    window->Show();
+
+    win->win_data = window;
+    win->fb.format = RGB_FMT_A8R8G8B8;
+    win->fb.buffer = window->GetView()->GetBitmap()->Bits();
+
+    win->draw = haiku_window_draw;
+    win->poll = haiku_window_poll;
+    win->remove = haiku_window_remove;
+    // TODO: haiku_window_grab_input with relative mouse mode
+    win->set_title = haiku_window_set_title;
+
+    return true;
 }
