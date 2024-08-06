@@ -27,7 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "devices/clint.h"
 #include "devices/plic.h"
 #include "devices/ns16550a.h"
-#include "devices/fb_window.h"
+#include "devices/gui_window.h"
 #include "devices/syscon.h"
 #include "devices/rtc-goldfish.h"
 #include "devices/pci-bus.h"
@@ -190,7 +190,7 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, int argc, const char** a
                 rvvm_error("Invalid resoulution: %s, expects 640x480", arg_val);
                 return false;
             }
-            fb_window_init_auto(machine, fb_x, fb_y);
+            gui_window_init_auto(machine, fb_x, fb_y);
         } else if (cmp_arg(arg_name, "portfwd")) {
 #ifdef USE_NET
             if (!tap_portfwd(tap, arg_val)) return false;
@@ -255,7 +255,7 @@ static int rvvm_cli_main(int argc, const char** argv)
     rtc_goldfish_init_auto(machine);
     syscon_init_auto(machine);
     if (!rvvm_has_arg("serial")) ns16550a_init_term_auto(machine);
-    if (!rvvm_has_arg("nogui") && !rvvm_has_arg("res")) fb_window_init_auto(machine, 640, 480);
+    if (!rvvm_has_arg("nogui") && !rvvm_has_arg("res")) gui_window_init_auto(machine, 640, 480);
 #ifdef USE_NET
     if (!rvvm_has_arg("nonet")) {
         tap = tap_open();
