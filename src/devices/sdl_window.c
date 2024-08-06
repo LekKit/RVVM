@@ -44,6 +44,7 @@ WEAK_LINKAGE(SDL_DestroyWindow)
 WEAK_LINKAGE(SDL_UpdateWindowSurface)
 WEAK_LINKAGE(SDL_GetRelativeMouseState)
 WEAK_LINKAGE(SDL_SetWindowGrab)
+WEAK_LINKAGE(SDL_SetWindowKeyboardGrab)
 WEAK_LINKAGE(SDL_SetRelativeMouseMode)
 WEAK_LINKAGE(SDL_SetWindowTitle)
 WEAK_LINKAGE(SDL_GetCurrentVideoDriver)
@@ -430,6 +431,7 @@ static void sdl_window_grab_input(gui_window_t* win, bool grab)
     sdl_grabbed = grab;
 #if USE_SDL == 2
     SDL_SetWindowGrab(sdl_window, grab);
+    SDL_SetWindowKeyboardGrab(sdl_window, grab);
     SDL_SetRelativeMouseMode(grab);
 #else
     SDL_WM_GrabInput(grab ? SDL_GRAB_ON : SDL_GRAB_OFF);
