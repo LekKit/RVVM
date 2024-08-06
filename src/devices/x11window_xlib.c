@@ -16,8 +16,23 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "fb_window.h"
+#include "gui_window.h"
+#include "dlib.h"
 #include "utils.h"
+#include "compiler.h"
+
+// Check for X11 headers presence
+#if defined(USE_X11) && !(CHECK_INCLUDE(X11/Xlib.h) && CHECK_INCLUDE(X11/Xutil.h) && CHECK_INCLUDE(X11/keysym.h))
+#undef USE_X11
+#warning Disabling X11 support as <X11/Xlib.h> is unavailable
+#endif
+
+// Check for XShm header presence
+#if CHECK_INCLUDE(X11/extensions/XShm.h) && !defined(USE_XSHM)
+#define USE_XSHM
+#endif
+
+#ifdef USE_X11
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -27,40 +42,77 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <X11/extensions/XShm.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+
+WEAK_LINKAGE(XShmQueryExtension)
+WEAK_LINKAGE(XShmDetach)
+WEAK_LINKAGE(XShmCreateImage)
+WEAK_LINKAGE(XShmAttach)
+WEAK_LINKAGE(XShmPutImage)
+
 #endif
 
-enum key_mask {
-    KEY_MASK_LEFTCTRL = 1 << 0,
-    KEY_MASK_RIGHTCTRL = 1 << 1,
-    KEY_MASK_LEFTALT = 1 << 2,
-    KEY_MASK_RIGHTALT = 1 << 3,
-};
+// Weakly import X11 functions, resolve at runtime
+WEAK_LINKAGE(XGetKeyboardMapping)
+WEAK_LINKAGE(XFree)
+WEAK_LINKAGE(XListPixmapFormats)
+WEAK_LINKAGE(XSetErrorHandler)
+WEAK_LINKAGE(XSync)
+WEAK_LINKAGE(XPutImage)
+WEAK_LINKAGE(XWarpPointer)
+WEAK_LINKAGE(XFlush)
+WEAK_LINKAGE(XPending)
+WEAK_LINKAGE(XNextEvent)
+WEAK_LINKAGE(XPeekEvent)
+WEAK_LINKAGE(XGrabKeyboard)
+WEAK_LINKAGE(XGrabPointer)
+WEAK_LINKAGE(XQueryPointer)
+WEAK_LINKAGE(XUngrabKeyboard)
+WEAK_LINKAGE(XUngrabPointer)
+WEAK_LINKAGE(XStoreName)
+WEAK_LINKAGE(XFreeGC)
+WEAK_LINKAGE(XDestroyWindow)
+WEAK_LINKAGE(XCloseDisplay)
+WEAK_LINKAGE(XDisplayKeycodes)
+WEAK_LINKAGE(XSetWMNormalHints)
+WEAK_LINKAGE(XSetWMProtocols)
+WEAK_LINKAGE(XCreateBitmapFromData)
+WEAK_LINKAGE(XCreatePixmapCursor)
+WEAK_LINKAGE(XDefineCursor)
+WEAK_LINKAGE(XFreeCursor)
+WEAK_LINKAGE(XFreePixmap)
+WEAK_LINKAGE(XMapWindow)
+WEAK_LINKAGE(XCreateGC)
+WEAK_LINKAGE(XCreateImage)
+WEAK_LINKAGE(XOpenDisplay)
+WEAK_LINKAGE(XInternAtom)
+WEAK_LINKAGE(XCreateWindow)
 
-static const char x11_title[] = "RVVM";
-
-static const char x11_title_capture[] = "RVVM - Press Ctrl+Alt+G to release mouse/keyboard";
-
-struct win_data {
+typedef struct {
     Display* display;
     Window window;
     GC gc;
     XImage* ximage;
+
+#ifdef USE_XSHM
+    XShmSegmentInfo seginfo;
+#endif
+
+    // Keycode stuff
     KeySym* keycodemap;
     int min_keycode;
     int max_keycode;
     int keysyms_per_keycode;
-    Atom del_win;
-    enum key_mask pressed_modkeys;
+
+    // Handle window closing
+    Atom wm_delete;
+
     bool grabbed;
 
     // These are used to restore the original pointer position
     Window grab_root;
     int grab_pointer_x;
     int grab_pointer_y;
-#ifdef USE_XSHM
-    XShmSegmentInfo seginfo;
-#endif
-};
+} x11_data_t;
 
 static hid_key_t x11_keysym_to_hid(KeySym keysym)
 {
@@ -186,52 +238,43 @@ static hid_key_t x11_keysym_to_hid(KeySym keysym)
         case XK_Alt_R:        return HID_KEY_RIGHTALT;
         case XK_Super_R:      return HID_KEY_RIGHTMETA;
     }
-    //rvvm_warn("Unknown X11 keysym 0x%x!", (uint32_t)keysym);
     return HID_KEY_NONE;
 }
 
-static enum key_mask hid_to_key_mask(hid_key_t key)
+static hid_key_t x11_event_key_to_hid(x11_data_t* x11, int keycode)
 {
-    switch (key) {
-        case HID_KEY_LEFTCTRL:  return KEY_MASK_LEFTCTRL;
-        case HID_KEY_LEFTALT:   return KEY_MASK_LEFTALT;
-        case HID_KEY_RIGHTCTRL: return KEY_MASK_RIGHTCTRL;
-        case HID_KEY_RIGHTALT:  return KEY_MASK_RIGHTALT;
-        default:                return 0;
-    }
-}
-
-static hid_key_t x11_event_key_to_hid(fb_window_t* win, int keycode)
-{
-    if (win->data->keycodemap == NULL) {
+    if (x11->keycodemap == NULL) {
         rvvm_warn("XKeycodemap not initialized!");
         return HID_KEY_NONE;
-    } else if (keycode < win->data->min_keycode || keycode > win->data->max_keycode) {
+    } else if (keycode < x11->min_keycode || keycode > x11->max_keycode) {
         rvvm_warn("XEvent keycode out of keycodemap range!");
         return HID_KEY_NONE;
     } else {
-        uint32_t entry = (keycode - win->data->min_keycode) * win->data->keysyms_per_keycode;
-        return x11_keysym_to_hid(win->data->keycodemap[entry]);
+        uint32_t entry = (keycode - x11->min_keycode) * x11->keysyms_per_keycode;
+        return x11_keysym_to_hid(x11->keycodemap[entry]);
     }
 }
 
-static void x11_update_keymap(fb_window_t* win)
+static void x11_update_keymap(x11_data_t* x11)
 {
-    KeySym* keycodemap = XGetKeyboardMapping(win->data->display,
-                            win->data->min_keycode,
-                            win->data->max_keycode - win->data->min_keycode + 1,
-                            &win->data->keysyms_per_keycode);
+    KeySym* keycodemap = XGetKeyboardMapping(x11->display,
+                            x11->min_keycode, x11->max_keycode - x11->min_keycode + 1,
+                            &x11->keysyms_per_keycode);
     if (keycodemap) {
-        if (win->data->keycodemap) XFree(win->data->keycodemap);
-        win->data->keycodemap = keycodemap;
-    } else rvvm_warn("XGetKeyboardMapping() failed!");
+        if (x11->keycodemap) {
+            XFree(x11->keycodemap);
+        }
+        x11->keycodemap = keycodemap;
+    } else {
+        rvvm_warn("XGetKeyboardMapping() failed!");
+    }
 }
 
 static rgb_fmt_t x11_get_rgb_format(Display* display)
 {
     rgb_fmt_t format = RGB_FMT_INVALID;
     int nfmts = 0;
-    XPixmapFormatValues *fmts = XListPixmapFormats(display, &nfmts);
+    XPixmapFormatValues* fmts = XListPixmapFormats(display, &nfmts);
     if (fmts) {
         for (int i = 0; i < nfmts; ++i) {
             if (fmts[i].depth == DefaultDepth(display, DefaultScreen(display))) {
@@ -244,75 +287,10 @@ static rgb_fmt_t x11_get_rgb_format(Display* display)
     return format;
 }
 
-static void x11_restore_pointer(fb_window_t* win)
-{
-    if (win->data->grab_root) {
-        XWarpPointer(win->data->display, None, win->data->grab_root, 0, 0, 0, 0,
-                win->data->grab_pointer_x, win->data->grab_pointer_y);
-        win->data->grab_root = None;
-    }
-}
-
-static void x11_handle_keypress(fb_window_t* win, hid_key_t hid_key)
-{
-    Display* dsp = win->data->display;
-
-    if (hid_key == HID_KEY_G
-            && (win->data->pressed_modkeys & (KEY_MASK_LEFTCTRL | KEY_MASK_RIGHTCTRL))
-            && (win->data->pressed_modkeys & (KEY_MASK_LEFTALT | KEY_MASK_RIGHTALT))) {
-        win->data->grabbed = !win->data->grabbed;
-        if (win->data->grabbed) {
-            XStoreName(dsp, win->data->window, x11_title_capture);
-            XGrabKeyboard(dsp, win->data->window, True, GrabModeAsync,
-                    GrabModeAsync, CurrentTime);
-            XGrabPointer(dsp, win->data->window, True,
-                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                    GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
-
-            Window child;
-            int win_x = 0, win_y = 0;
-            unsigned int mask = 0;
-            win->data->grab_root = None;
-            XQueryPointer(dsp, win->data->window, &win->data->grab_root,
-                    &child, &win->data->grab_pointer_x, &win->data->grab_pointer_y,
-                    &win_x, &win_y, &mask);
-            XWarpPointer(dsp, None, win->data->window, 0, 0, 0, 0,
-                    win->fb.width / 2, win->fb.height / 2);
-        } else {
-            XUngrabKeyboard(dsp, CurrentTime);
-            XUngrabPointer(dsp, CurrentTime);
-            XStoreName(dsp, win->data->window, x11_title);
-            x11_restore_pointer(win);
-        }
-        return;
-    }
-
-    hid_keyboard_press(win->keyboard, hid_key);
-    win->data->pressed_modkeys |= hid_to_key_mask(hid_key);
-}
-
-static void x11_handle_mouse_motion(fb_window_t* win, XMotionEvent* xmotion)
-{
-    Display* dsp = win->data->display;
-    if (win->data->grabbed) {
-        int center_x = win->fb.width / 2;
-        int center_y = win->fb.height / 2;
-        int dx = xmotion->x - center_x;
-        int dy = xmotion->y - center_y;
-        if (dx == 0 && dy == 0) {
-            return;
-        }
-        XWarpPointer(dsp, None, win->data->window, 0, 0, 0, 0, center_x, center_y);
-        XFlush(dsp);
-        hid_mouse_move(win->mouse, dx, dy);
-    } else {
-        hid_mouse_place(win->mouse, xmotion->x, xmotion->y);
-    }
-}
-
 #ifdef USE_XSHM
+
 static bool xshm_error = false;
-static int x11_dummy_error_handler(Display *display, XErrorEvent *error)
+static int x11_dummy_error_handler(Display* display, XErrorEvent* error)
 {
     UNUSED(display);
     UNUSED(error);
@@ -320,215 +298,350 @@ static int x11_dummy_error_handler(Display *display, XErrorEvent *error)
     return 0;
 }
 
-static void* x11_xshm_init(fb_window_t* win)
+static void x11_free_xshm(x11_data_t* x11)
 {
-    Display* dsp = win->data->display;
-    int (*old_handler)(Display*, XErrorEvent*) = XSetErrorHandler(x11_dummy_error_handler);
-
-    if (XShmQueryExtension(dsp)) {
-        win->data->ximage = XShmCreateImage(dsp,
-                            DefaultVisual(dsp, DefaultScreen(dsp)),
-                            DefaultDepth(dsp, DefaultScreen(dsp)),
-                            ZPixmap, NULL, &win->data->seginfo,
-                            win->fb.width, win->fb.height);
-        if (win->data->ximage) {
-            win->data->seginfo.shmid = shmget(IPC_PRIVATE, framebuffer_size(&win->fb), IPC_CREAT | 0777);
-            if (win->data->seginfo.shmid > 0) {
-                win->data->seginfo.shmaddr = win->data->ximage->data = shmat(win->data->seginfo.shmid, NULL, 0);
-                if (win->data->seginfo.shmaddr != (void*)-1 && win->data->seginfo.shmaddr != NULL) {
-                    if (!XShmAttach(dsp, &win->data->seginfo)) rvvm_error("XShmAttach() failed");
-                } else {
-                    win->data->seginfo.shmaddr = NULL;
-                    rvvm_error("XShm shmat() failed");
-                }
-            } else rvvm_error("XShm shmget() failed");
-        } else rvvm_error("XShmCreateImage() failed");
-    } else rvvm_info("XShm extension not supported");
-    // Process errors, if any
-    XSync(dsp, False);
-    // Cleanup on error
-    if (win->data->seginfo.shmaddr == NULL || xshm_error) {
-        rvvm_info("XShm failed to initialize");
-        if (win->data->seginfo.shmaddr) shmdt(win->data->seginfo.shmaddr);
-        if (win->data->seginfo.shmid > 0) shmctl(win->data->seginfo.shmid, IPC_RMID, NULL);
-        if (win->data->ximage) XDestroyImage(win->data->ximage);
-        win->data->seginfo.shmaddr = NULL;
+    if (x11->seginfo.shmaddr) {
+        XShmDetach(x11->display, &x11->seginfo);
+        shmdt(x11->seginfo.shmaddr);
     }
+    x11->seginfo.shmaddr = NULL;
+}
+
+static void* x11_xshm_init(gui_window_t* win)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+
+    if (!XShmQueryExtension(dsp)) {
+        rvvm_info("XShm extension not supported");
+        return NULL;
+    }
+
+    x11->ximage = XShmCreateImage(dsp,
+                        DefaultVisual(dsp, DefaultScreen(dsp)),
+                        DefaultDepth(dsp, DefaultScreen(dsp)),
+                        ZPixmap, NULL, &x11->seginfo,
+                        win->fb.width, win->fb.height);
+    if (!x11->ximage) {
+        rvvm_error("XShmCreateImage() failed!");
+        return NULL;
+    }
+
+    x11->seginfo.shmid = shmget(IPC_PRIVATE, framebuffer_size(&win->fb), IPC_CREAT | 0777);
+    if (x11->seginfo.shmid < 0) {
+        rvvm_error("XShm shmget() failed!");
+        return NULL;
+    }
+
+    x11->seginfo.shmaddr = shmat(x11->seginfo.shmid, NULL, 0);
+    shmctl(x11->seginfo.shmid, IPC_RMID, NULL);
+    if (x11->seginfo.shmaddr == (void*)-1 || x11->seginfo.shmaddr == NULL) {
+        rvvm_error("XShm shmget() failed!");
+        return NULL;
+    }
+
+    x11->ximage->data = x11->seginfo.shmaddr;
+    if (!XShmAttach(dsp, &x11->seginfo)) {
+        rvvm_error("XShmAttach() failed!");
+        return NULL;
+    }
+
+    return x11->seginfo.shmaddr;
+}
+
+static void* x11_xshm_attach(gui_window_t* win)
+{
+    x11_data_t* x11 = win->win_data;
+    void* old_handler = XSetErrorHandler(x11_dummy_error_handler);
+    void* xshm = x11_xshm_init(win);
+
+    // Process errors, if any
+    XSync(x11->display, False);
 
     XSetErrorHandler(old_handler);
 
-    return win->data->seginfo.shmaddr;
-}
-#endif
-
-bool fb_window_create(fb_window_t* win)
-{
-    Display* dsp = XOpenDisplay(NULL);
-    if (dsp == NULL) {
-        rvvm_error("Could not open a connection to the X server");
-        return false;
+    // Cleanup on error
+    if (xshm == NULL || xshm_error) {
+        rvvm_info("XShm failed to initialize");
+        x11_free_xshm(x11);
+        if (x11->ximage) {
+            XDestroyImage(x11->ximage);
+            x11->ximage = NULL;
+        }
+        xshm = NULL;
     }
-
-    win->data = safe_new_obj(win_data_t);
-    win->data->display = dsp;
-    win->fb.format = x11_get_rgb_format(dsp);
-
-    XDisplayKeycodes(dsp, &win->data->min_keycode, &win->data->max_keycode);
-    x11_update_keymap(win);
-
-    XSetWindowAttributes attributes = {
-        .event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-    };
-    win->data->window = XCreateWindow(dsp, DefaultRootWindow(dsp),
-                            0, 0, win->fb.width, win->fb.height, 0,
-                            DefaultDepth(dsp, DefaultScreen(dsp)),
-                            InputOutput, CopyFromParent, CWEventMask, &attributes);
-
-    XSizeHints hints = {
-        .flags = PMinSize | PMaxSize,
-        .min_width = win->fb.width, .min_height = win->fb.height,
-        .max_width = win->fb.width, .max_height = win->fb.height,
-    };
-    XSetWMNormalHints(dsp, win->data->window, &hints);
-    XStoreName(dsp, win->data->window, "RVVM");
-    // Handle window close
-    win->data->del_win = XInternAtom(dsp, "WM_DELETE_WINDOW", False);
-    XSetWMProtocols(dsp, win->data->window, &win->data->del_win, 1);
-    // Hide cursor
-    XColor color = {0};
-    const char pixels[8] = {0};
-    Pixmap pixmap = XCreateBitmapFromData(dsp, win->data->window, pixels, 8, 8);
-    Cursor cursor = XCreatePixmapCursor(dsp, pixmap, pixmap, &color, &color, 0, 0);
-    XDefineCursor(dsp, win->data->window, cursor);
-    XFreeCursor(dsp, cursor);
-    XFreePixmap(dsp, pixmap);
-    // Show window
-    XMapWindow(dsp, win->data->window);
-
-    win->data->gc = XCreateGC(dsp, win->data->window, 0, NULL);
-
-#ifdef USE_XSHM
-    win->fb.buffer = x11_xshm_init(win);
-#endif
-    if (win->fb.buffer == NULL) {
-        win->data->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
-            DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
-            NULL, win->fb.width, win->fb.height, 8, 0);
-        win->data->ximage->data = safe_calloc(win->data->ximage->bytes_per_line, win->data->ximage->height);
-
-        win->fb.buffer = win->data->ximage->data;
-    }
-
-    XSync(dsp, False);
-    return true;
+    return xshm;
 }
 
-void fb_window_close(fb_window_t* win)
-{
-    Display* dsp = win->data->display;
-    x11_restore_pointer(win);
-#ifdef USE_XSHM
-    if (win->data->seginfo.shmaddr != NULL) {
-        XShmDetach(dsp, &win->data->seginfo);
-        shmdt(win->data->seginfo.shmaddr);
-        shmctl(win->data->seginfo.shmid, IPC_RMID, NULL);
-    }
 #endif
-    XDestroyImage(win->data->ximage);
-    XFreeGC(dsp, win->data->gc);
-    XDestroyWindow(dsp, win->data->window);
-    XFree(win->data->keycodemap);
-    XCloseDisplay(dsp);
 
-    free(win->data);
-}
-
-void fb_window_update(fb_window_t* win)
+static void x11_window_draw(gui_window_t* win)
 {
-    Display* dsp = win->data->display;
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
 #ifdef USE_XSHM
-    if (win->data->seginfo.shmaddr != NULL) {
+    if (x11->seginfo.shmaddr != NULL) {
         XShmPutImage(dsp,
-                win->data->window,
-                win->data->gc,
-                win->data->ximage,
-                0, 0, 0, 0, // src, dst x & y
-                win->data->ximage->width,
-                win->data->ximage->height,
-                False /* send_event */);
-    } else
-#endif
-    {
-        XPutImage(dsp,
-                win->data->window,
-                win->data->gc,
-                win->data->ximage,
-                0, 0, 0, 0, // src, dst x & y
-                win->data->ximage->width,
-                win->data->ximage->height);
+                     x11->window,
+                     x11->gc,
+                     x11->ximage,
+                     0, 0, 0, 0, // src, dst x & y
+                     x11->ximage->width,
+                     x11->ximage->height,
+                     False /* send_event */);
+        return;
     }
-    XSync(dsp, False);
+#endif
+    XPutImage(dsp,
+              x11->window,
+              x11->gc,
+              x11->ximage,
+              0, 0, 0, 0, // src, dst x & y
+              x11->ximage->width,
+              x11->ximage->height);
+}
 
-    for (int pending = XPending(dsp); pending != 0; --pending) {
-        XEvent ev;
+static void x11_handle_mouse_motion(gui_window_t* win, XMotionEvent* xmotion)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+
+    if (x11->grabbed) {
+        int center_x = win->fb.width / 2;
+        int center_y = win->fb.height / 2;
+        int dx = xmotion->x - center_x;
+        int dy = xmotion->y - center_y;
+        if (dx || dy) {
+            XWarpPointer(dsp, None, x11->window, 0, 0, 0, 0, center_x, center_y);
+            XFlush(dsp);
+            win->on_mouse_move(win, dx, dy);
+        }
+    } else {
+        win->on_mouse_place(win, xmotion->x, xmotion->y);
+    }
+}
+
+static void x11_window_poll(gui_window_t* win)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+    size_t pending = 0;
+
+    XSync(dsp, False);
+    while ((pending = XPending(dsp))) {
+        XEvent ev = {0};
         XNextEvent(dsp, &ev);
         switch (ev.type) {
             case ButtonPress:
                 if (ev.xbutton.button == Button1) {
-                    hid_mouse_press(win->mouse, HID_BTN_LEFT);
+                    win->on_mouse_press(win, HID_BTN_LEFT);
                 } else if (ev.xbutton.button == Button2) {
-                    hid_mouse_press(win->mouse, HID_BTN_MIDDLE);
+                    win->on_mouse_press(win, HID_BTN_MIDDLE);
                 } else if (ev.xbutton.button == Button3) {
-                    hid_mouse_press(win->mouse, HID_BTN_RIGHT);
+                    win->on_mouse_press(win, HID_BTN_RIGHT);
                 } else if (ev.xbutton.button == Button4) {
-                    hid_mouse_scroll(win->mouse, HID_SCROLL_UP);
+                    win->on_mouse_scroll(win, HID_SCROLL_UP);
                 } else if (ev.xbutton.button == Button5) {
-                    hid_mouse_scroll(win->mouse, HID_SCROLL_DOWN);
+                    win->on_mouse_scroll(win, HID_SCROLL_DOWN);
                 }
                 break;
             case ButtonRelease:
                 if (ev.xbutton.button == Button1) {
-                    hid_mouse_release(win->mouse, HID_BTN_LEFT);
+                    win->on_mouse_release(win, HID_BTN_LEFT);
                 } else if (ev.xbutton.button == Button2) {
-                    hid_mouse_release(win->mouse, HID_BTN_MIDDLE);
+                    win->on_mouse_release(win, HID_BTN_MIDDLE);
                 } else if (ev.xbutton.button == Button3) {
-                    hid_mouse_release(win->mouse, HID_BTN_RIGHT);
+                    win->on_mouse_release(win, HID_BTN_RIGHT);
                 }
                 break;
             case MotionNotify:
                 x11_handle_mouse_motion(win, &ev.xmotion);
                 break;
             case KeyPress:
-                x11_handle_keypress(win, x11_event_key_to_hid(win, ev.xkey.keycode));
+                win->on_key_press(win, x11_event_key_to_hid(x11, ev.xkey.keycode));
                 break;
             case KeyRelease:
                 if (pending > 1) {
-                    XEvent nev;
-                    XPeekEvent(dsp, &nev);
-                    if (nev.type == KeyPress && nev.xkey.time == ev.xkey.time && nev.xkey.keycode == ev.xkey.keycode) {
-                        // Skip the fake key press/release event
-                        XNextEvent(dsp, &nev);
-                        --pending;
+                    XEvent tmp = {0};
+                    XPeekEvent(dsp, &tmp);
+                    if (tmp.type == KeyPress && tmp.xkey.time == ev.xkey.time && tmp.xkey.keycode == ev.xkey.keycode) {
+                        // Skip the repeated key release event, repeated presses are filtered by hid_keyboard
                         break;
                     }
                 }
-                hid_key_t hid_key = x11_event_key_to_hid(win, ev.xkey.keycode);
-                hid_keyboard_release(win->keyboard, hid_key);
-                win->data->pressed_modkeys &= ~hid_to_key_mask(hid_key);
+                win->on_key_release(win, x11_event_key_to_hid(x11, ev.xkey.keycode));
                 break;
             case MappingNotify:
                 if (ev.xmapping.request == MappingKeyboard) {
-                    win->data->min_keycode = ev.xmapping.first_keycode;
-                    win->data->max_keycode = ev.xmapping.first_keycode + ev.xmapping.count - 1;
-                    x11_update_keymap(win);
+                    x11->min_keycode = ev.xmapping.first_keycode;
+                    x11->max_keycode = ev.xmapping.first_keycode + ev.xmapping.count - 1;
+                    x11_update_keymap(x11);
                 }
                 break;
             case ClientMessage:
-                if (((Atom)ev.xclient.data.l[0]) == win->data->del_win) {
-                    // Power down the machine that owns this window
-                    rvvm_reset_machine(win->machine, false);
+                if (((Atom)ev.xclient.data.l[0]) == x11->wm_delete) {
+                    // Attempted to close window
+                    win->on_close(win);
+                }
+                break;
+            case FocusOut:
+                if (ev.xfocus.mode == NotifyNormal) {
+                    win->on_focus_lost(win);
                 }
                 break;
         }
     }
 }
+
+static void x11_window_grab_input(gui_window_t* win, bool grab)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+
+    if (x11->grabbed != grab) {
+        x11->grabbed = grab;
+        if (x11->grabbed) {
+            // Grab the input
+            XGrabKeyboard(dsp, x11->window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+            XGrabPointer(dsp, x11->window, True,
+                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                    GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+
+            // Save the original cursor position
+            Window child = None;
+            int win_x = 0, win_y = 0;
+            unsigned int mask = 0;
+            x11->grab_root = None;
+            XQueryPointer(dsp, x11->window, &x11->grab_root,
+                    &child, &x11->grab_pointer_x, &x11->grab_pointer_y,
+                    &win_x, &win_y, &mask);
+            XWarpPointer(dsp, None, x11->window, 0, 0, 0, 0,
+                    win->fb.width / 2, win->fb.height / 2);
+        } else {
+            // Ungrab
+            XUngrabKeyboard(dsp, CurrentTime);
+            XUngrabPointer(dsp, CurrentTime);
+
+            // Restore the original cursor position
+            if (x11->grab_root) {
+                XWarpPointer(x11->display, None, x11->grab_root, 0, 0, 0, 0,
+                            x11->grab_pointer_x, x11->grab_pointer_y);
+                x11->grab_root = None;
+            }
+        }
+    }
+}
+
+static void x11_window_set_title(gui_window_t* win, const char* title)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+
+    XStoreName(dsp, x11->window, title);
+}
+
+static void x11_window_remove(gui_window_t* win)
+{
+    x11_data_t* x11 = win->win_data;
+    Display* dsp = x11->display;
+
+    // Restore input
+    x11_window_grab_input(win, false);
+#ifdef USE_XSHM
+    x11_free_xshm(x11);
+#endif
+    XDestroyImage(x11->ximage);
+    XFreeGC(dsp, x11->gc);
+    XDestroyWindow(dsp, x11->window);
+    XFree(x11->keycodemap);
+    XCloseDisplay(dsp);
+
+    free(x11);
+}
+
+bool x11_window_init(gui_window_t* win)
+{
+    if (!dlib_load_weak("X11") || !dlib_load_weak("Xext")) {
+        rvvm_info("Failed to load libX11!");
+        return false;
+    }
+
+    Display* dsp = XOpenDisplay(NULL);
+    if (dsp == NULL) {
+        rvvm_info("Could not open a connection to the X server!");
+        return false;
+    }
+
+    x11_data_t* x11 = safe_new_obj(x11_data_t);
+    x11->display = dsp;
+
+    // Initialize callbacks
+    win->win_data = x11;
+    win->fb.format = x11_get_rgb_format(dsp);
+    win->draw = x11_window_draw;
+    win->poll = x11_window_poll;
+    win->remove = x11_window_remove;
+    win->grab_input = x11_window_grab_input;
+    win->set_title = x11_window_set_title;
+
+    XDisplayKeycodes(dsp, &x11->min_keycode, &x11->max_keycode);
+    x11_update_keymap(x11);
+
+    XSetWindowAttributes attributes = {
+        .event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask,
+    };
+    x11->window = XCreateWindow(dsp, DefaultRootWindow(dsp),
+                                0, 0, win->fb.width, win->fb.height, 0,
+                                DefaultDepth(dsp, DefaultScreen(dsp)),
+                                InputOutput, CopyFromParent, CWEventMask, &attributes);
+
+    XSizeHints hints = {
+        .flags = PMinSize | PMaxSize,
+        .min_width = win->fb.width, .min_height = win->fb.height,
+        .max_width = win->fb.width, .max_height = win->fb.height,
+    };
+    XSetWMNormalHints(dsp, x11->window, &hints);
+    XStoreName(dsp, x11->window, "RVVM");
+
+    // Handle window close
+    x11->wm_delete = XInternAtom(dsp, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(dsp, x11->window, &x11->wm_delete, 1);
+
+    // Hide cursor
+    XColor color = {0};
+    const char pixels[8] = {0};
+    Pixmap pixmap = XCreateBitmapFromData(dsp, x11->window, pixels, 8, 8);
+    Cursor cursor = XCreatePixmapCursor(dsp, pixmap, pixmap, &color, &color, 0, 0);
+    XDefineCursor(dsp, x11->window, cursor);
+    XFreeCursor(dsp, cursor);
+    XFreePixmap(dsp, pixmap);
+
+    // Show window
+    XMapWindow(dsp, x11->window);
+
+    x11->gc = XCreateGC(dsp, x11->window, 0, NULL);
+
+#ifdef USE_XSHM
+    win->fb.buffer = x11_xshm_attach(win);
+#endif
+    if (win->fb.buffer == NULL) {
+        x11->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
+                                   DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
+                                   NULL, win->fb.width, win->fb.height, 8, 0);
+        x11->ximage->data = safe_calloc(x11->ximage->bytes_per_line, x11->ximage->height);
+        win->fb.buffer = x11->ximage->data;
+    }
+
+    XSync(dsp, False);
+    return true;
+}
+
+#else
+
+bool x11_window_init(gui_window_t* win)
+{
+    UNUSED(win);
+    return false;
+}
+
+#endif
