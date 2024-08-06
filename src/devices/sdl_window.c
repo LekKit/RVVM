@@ -14,11 +14,42 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "fb_window.h"
+#include "gui_window.h"
+#include "dlib.h"
 #include "utils.h"
+#include "compiler.h"
+
+// Check for SDL1 header presence
+#if USE_SDL == 1 && !CHECK_INCLUDE(SDL/SDL.h)
+#undef USE_SDL
+#warning Disabling USE_SDL as <SDL/SDL.h> is unavailable
+#endif
+
+// Check for SDL2 header presence
+#if USE_SDL == 2 && !CHECK_INCLUDE(SDL2/SDL.h)
+#undef USE_SDL
+#warning Disabling USE_SDL as <SDL2/SDL.h> is unavailable
+#endif
+
+#ifdef USE_SDL
+
 
 #if USE_SDL == 2
 #include <SDL2/SDL.h>
+
+#define SDL_LIB_NAME "SDL2"
+
+// Weakly import SDL functions, resolve at runtime
+WEAK_LINKAGE(SDL_DestroyWindow)
+WEAK_LINKAGE(SDL_UpdateWindowSurface)
+WEAK_LINKAGE(SDL_GetRelativeMouseState)
+WEAK_LINKAGE(SDL_SetWindowGrab)
+WEAK_LINKAGE(SDL_SetRelativeMouseMode)
+WEAK_LINKAGE(SDL_SetWindowTitle)
+WEAK_LINKAGE(SDL_GetCurrentVideoDriver)
+WEAK_LINKAGE(SDL_SetHint)
+WEAK_LINKAGE(SDL_CreateWindow)
+WEAK_LINKAGE(SDL_GetWindowSurface)
 
 static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDL_SCANCODE_A] = HID_KEY_A,
@@ -143,6 +174,14 @@ static const hid_key_t sdl_key_to_hid_byte_map[] = {
 #else
 #include <SDL/SDL.h>
 
+#define SDL_LIB_NAME "SDL"
+
+WEAK_LINKAGE(SDL_FreeSurface)
+WEAK_LINKAGE(SDL_Flip)
+WEAK_LINKAGE(SDL_WM_GrabInput)
+WEAK_LINKAGE(SDL_WM_SetCaption)
+WEAK_LINKAGE(SDL_SetVideoMode)
+
 static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDLK_a] = HID_KEY_A,
     [SDLK_b] = HID_KEY_B,
@@ -258,6 +297,13 @@ static const hid_key_t sdl_key_to_hid_byte_map[] = {
 
 #endif
 
+WEAK_LINKAGE(SDL_QuitSubSystem)
+WEAK_LINKAGE(SDL_LockSurface)
+WEAK_LINKAGE(SDL_UnlockSurface)
+WEAK_LINKAGE(SDL_PollEvent)
+WEAK_LINKAGE(SDL_Init)
+WEAK_LINKAGE(SDL_ShowCursor)
+
 static hid_key_t sdl_key_to_hid(uint32_t sdl_key)
 {
     if (sdl_key < sizeof(sdl_key_to_hid_byte_map)) {
@@ -295,12 +341,138 @@ static rgb_fmt_t sdl_get_rgb_format(const SDL_PixelFormat* format)
 static SDL_Window* sdl_window = NULL;
 #endif
 static SDL_Surface* sdl_surface = NULL;
+static bool sdl_grabbed = false;
 
-bool fb_window_create(fb_window_t* win)
+static void sdl_window_draw(gui_window_t* win)
 {
+    if (win->fb.buffer != sdl_surface->pixels) {
+        SDL_LockSurface(sdl_surface);
+        memcpy(sdl_surface->pixels, win->fb.buffer, framebuffer_size(&win->fb));
+        SDL_UnlockSurface(sdl_surface);
+    }
+#if USE_SDL == 2
+    SDL_UpdateWindowSurface(sdl_window);
+#else
+    SDL_Flip(sdl_surface);
+#endif
+}
+
+static void sdl_window_poll(gui_window_t* win)
+{
+    SDL_Event event = {0};
+    while (SDL_PollEvent(&event)) {
+        switch (event.type) {
+            case SDL_KEYDOWN:
+                win->on_key_press(win, sdl_event_to_hid(&event));
+                break;
+            case SDL_KEYUP:
+                win->on_key_release(win, sdl_event_to_hid(&event));
+                break;
+            case SDL_MOUSEMOTION:
+                if (sdl_grabbed) {
+                    win->on_mouse_move(win, event.motion.xrel, event.motion.yrel);
+                } else {
+                    win->on_mouse_place(win, event.motion.x, event.motion.y);
+                }
+                break;
+#if USE_SDL == 2
+            case SDL_MOUSEWHEEL:
+                win->on_mouse_scroll(win, event.wheel.y);
+                break;
+#endif
+            case SDL_MOUSEBUTTONDOWN:
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    win->on_mouse_press(win, HID_BTN_LEFT);
+                } else if (event.button.button == SDL_BUTTON_MIDDLE) {
+                    win->on_mouse_press(win, HID_BTN_MIDDLE);
+                } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                    win->on_mouse_press(win, HID_BTN_RIGHT);
+#if USE_SDL == 1
+                } else if (event.button.button == SDL_BUTTON_WHEELUP) {
+                    win->on_mouse_scroll(win, HID_SCROLL_UP);
+                } else if (event.button.button == SDL_BUTTON_WHEELDOWN) {
+                    win->on_mouse_scroll(win, HID_SCROLL_DOWN);
+#endif
+                }
+                break;
+            case SDL_MOUSEBUTTONUP:
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    win->on_mouse_release(win, HID_BTN_LEFT);
+                } else if (event.button.button == SDL_BUTTON_MIDDLE) {
+                    win->on_mouse_release(win, HID_BTN_MIDDLE);
+                } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                    win->on_mouse_release(win, HID_BTN_RIGHT);
+                }
+                break;
+            case SDL_QUIT:
+                win->on_close(win);
+                break;
+#if USE_SDL == 2
+            case SDL_WINDOWEVENT:
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                    win->on_focus_lost(win);
+                }
+                break;
+#else
+            case SDL_ACTIVEEVENT:
+                if (event.active.state == SDL_APPINPUTFOCUS && !event.active.gain) {
+                    win->on_focus_lost(win);
+                }
+                break;
+#endif
+        }
+    }
+}
+
+static void sdl_window_grab_input(gui_window_t* win, bool grab)
+{
+    UNUSED(win);
+    sdl_grabbed = grab;
+#if USE_SDL == 2
+    SDL_SetWindowGrab(sdl_window, grab);
+    SDL_SetRelativeMouseMode(grab);
+#else
+    SDL_WM_GrabInput(grab ? SDL_GRAB_ON : SDL_GRAB_OFF);
+#endif
+}
+
+static void sdl_window_set_title(gui_window_t* win, const char* title)
+{
+    UNUSED(win);
+#if USE_SDL == 2
+    SDL_SetWindowTitle(sdl_window, title);
+#else
+    SDL_WM_SetCaption(title, NULL);
+#endif
+}
+
+static void sdl_window_remove(gui_window_t* win)
+{
+    if (win->fb.buffer != sdl_surface->pixels) {
+        free(win->fb.buffer);
+    }
+    sdl_window_grab_input(win, false);
+#if USE_SDL == 2
+    SDL_DestroyWindow(sdl_window);
+    sdl_window = NULL;
+#else
+    SDL_FreeSurface(sdl_surface);
+#endif
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    sdl_surface = NULL;
+}
+
+bool sdl_window_init(gui_window_t* win)
+{
+    if (!dlib_load_weak(SDL_LIB_NAME)) {
+        rvvm_info("Failed to load libSDL!");
+        return false;
+    }
+
     DO_ONCE(setenv("SDL_DEBUG", "1", false));
+
     if (sdl_surface) {
-        // SDL_PollEvent is very inconvenient
+        // SDL_PollEvent is very inconvenient to use, SDL1 doesn't support multiwindow at all
         rvvm_error("SDL doesn't support multiple windows");
         return false;
     }
@@ -317,97 +489,50 @@ bool fb_window_create(fb_window_t* win)
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
     }
     sdl_window = SDL_CreateWindow("RVVM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        win->fb.width, win->fb.height, SDL_WINDOW_SHOWN);
-    if (sdl_window == NULL) return false;
+                                  win->fb.width, win->fb.height, SDL_WINDOW_SHOWN);
+    if (sdl_window == NULL) {
+        rvvm_error("SDL_CreateWindow() failed!");
+        return false;
+    }
     sdl_surface = SDL_GetWindowSurface(sdl_window);
-    if (sdl_surface == NULL) return false;
+    if (sdl_surface == NULL) {
+        rvvm_error("SDL_GetWindowSurface() failed!");
+        SDL_DestroyWindow(sdl_window);
+        return false;
+    }
 #else
     sdl_surface = SDL_SetVideoMode(win->fb.width, win->fb.height,
                     rgb_format_bpp(win->fb.format), SDL_ANYFORMAT);
-    if (sdl_surface == NULL) return false;
+    if (sdl_surface == NULL) {
+        rvvm_error("SDL_SetVideoMode() failed!");
+        return false;
+    }
     SDL_WM_SetCaption("RVVM", NULL);
 #endif
     SDL_ShowCursor(SDL_DISABLE);
     win->fb.format = sdl_get_rgb_format(sdl_surface->format);
     if (SDL_MUSTLOCK(sdl_surface)) {
-        rvvm_info("SDL surface is locking");
+        rvvm_info("SDL surface is locking. Expect lower perf.");
         win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
     } else {
         win->fb.buffer = sdl_surface->pixels;
     }
+
+    win->draw = sdl_window_draw;
+    win->poll = sdl_window_poll;
+    win->remove = sdl_window_remove;
+    win->grab_input = sdl_window_grab_input;
+    win->set_title = sdl_window_set_title;
+
     return true;
 }
 
-void fb_window_close(fb_window_t* win)
-{
-    if (win->fb.buffer != sdl_surface->pixels) free(win->fb.buffer);
-#if USE_SDL == 2
-    SDL_DestroyWindow(sdl_window);
-    sdl_window = NULL;
 #else
-    SDL_FreeSurface(sdl_surface);
-#endif
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    sdl_surface = NULL;
+
+bool sdl_window_init(gui_window_t* win)
+{
+    UNUSED(win);
+    return false;
 }
 
-void fb_window_update(fb_window_t* win)
-{
-    SDL_Event event;
-    if (win->fb.buffer != sdl_surface->pixels) {
-        SDL_LockSurface(sdl_surface);
-        memcpy(sdl_surface->pixels, win->fb.buffer, framebuffer_size(&win->fb));
-        SDL_UnlockSurface(sdl_surface);
-    }
-#if USE_SDL == 2
-    SDL_UpdateWindowSurface(sdl_window);
-#else
-    SDL_Flip(sdl_surface);
 #endif
-    while(SDL_PollEvent(&event)) {
-        switch (event.type) {
-            case SDL_KEYDOWN:
-                hid_keyboard_press(win->keyboard, sdl_event_to_hid(&event));
-                break;
-            case SDL_KEYUP:
-                hid_keyboard_release(win->keyboard, sdl_event_to_hid(&event));
-                break;
-            case SDL_MOUSEMOTION:
-                hid_mouse_place(win->mouse, event.motion.x, event.motion.y);
-                break;
-#if USE_SDL == 2
-            case SDL_MOUSEWHEEL:
-                hid_mouse_scroll(win->mouse, event.wheel.y);
-                break;
-#endif
-            case SDL_MOUSEBUTTONDOWN:
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    hid_mouse_press(win->mouse, HID_BTN_LEFT);
-                } else if (event.button.button == SDL_BUTTON_MIDDLE) {
-                    hid_mouse_press(win->mouse, HID_BTN_MIDDLE);
-                } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                    hid_mouse_press(win->mouse, HID_BTN_RIGHT);
-#if USE_SDL != 2
-                } else if (event.button.button == SDL_BUTTON_WHEELUP) {
-                    hid_mouse_scroll(win->mouse, HID_SCROLL_UP);
-                } else if (event.button.button == SDL_BUTTON_WHEELDOWN) {
-                    hid_mouse_scroll(win->mouse, HID_SCROLL_DOWN);
-#endif
-                }
-                break;
-            case SDL_MOUSEBUTTONUP:
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    hid_mouse_release(win->mouse, HID_BTN_LEFT);
-                } else if (event.button.button == SDL_BUTTON_MIDDLE) {
-                    hid_mouse_release(win->mouse, HID_BTN_MIDDLE);
-                } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                    hid_mouse_release(win->mouse, HID_BTN_RIGHT);
-                }
-                break;
-            case SDL_QUIT:
-                // Power down the machine that owns this window
-                rvvm_reset_machine(win->machine, false);
-                break;
-        }
-    }
-}
