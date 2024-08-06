@@ -3,9 +3,9 @@ NAME    := rvvm
 SRCDIR  := src
 VERSION := 0.7
 
-# Detect host features
+# Detect build host features
 ifeq ($(OS),Windows_NT)
-# Passed by MinGW/Cygwin Make on Windows hosts
+# Passed by MinGW/Cygwin Make on Windows build hosts
 override OS := $(CROSS_OS)
 HOST_WINDOWS := 1
 NULL_STDERR := 2>NUL
@@ -21,7 +21,7 @@ HOST_ARCH := i386
 endif
 endif
 else
-# Assuming the host is POSIX
+# Assuming the build host is POSIX
 HOST_POSIX := 1
 NULL_STDERR := 2>/dev/null
 HOST_UNAME := $(firstword $(shell uname -s 2>/dev/null) POSIX)
@@ -142,6 +142,9 @@ endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lrt 2>&1)))
 override LDFLAGS += -lrt
 endif
+ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -ldl 2>&1)))
+override LDFLAGS += -ldl
+endif
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -latomic 2>&1)))
 override LDFLAGS += -latomic
 else
@@ -149,12 +152,19 @@ override CFLAGS += -DNO_LIBATOMIC
 endif
 
 # Set some addiional options based on POSIX flavor
-ifeq ($(OS),darwin)
+ifneq (,$(findstring darwin, $(OS))$(findstring serenity, $(OS)))
+# Enable SDL2 on Darwin, Serenity
 USE_SDL ?= 2
+FORCE_LINK_LIBS ?= 1
+else
+
+ifneq ($(OS),haiku)
+# Not Darwin, Haiku or Serenity, enable X11
+USE_X11 ?= 1
+
 endif
-ifeq ($(OS),serenityos)
-USE_SDL ?= 1
 endif
+
 ifeq ($(OS),openbsd)
 override CFLAGS += -I/usr/X11R6/include -D_POSIX_C_SOURCE=200809L
 override LDFLAGS += -L/usr/X11R6/lib
@@ -168,23 +178,28 @@ CC_HELP := $(shell $(CC) --help $(NULL_STDERR))
 CC_VERSION := $(shell $(CC) -dumpversion $(NULL_STDERR))
 
 ifneq (,$(findstring clang,$(CC_HELP)))
+# LLVM Clang or derivatives (Zig CC, Emscripten)
 CC_TYPE := clang
 ifneq (,$(findstring Emscripten,$(CC_HELP)))
 $(info Detected CC: $(GREEN)LLVM Clang (EMCC $(CC_VERSION))$(RESET))
 else
 $(info Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
 endif
+
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
+# GNU GCC or derivatives (MinGW)
 CC_TYPE := gcc
 $(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
-else
-$(info Detected CC: $(RED)Unknown$(RESET))
-endif
-endif
 
-# Old / obscure compiler
+else
+# Toy compiler (TCC, Chibicc, Cproc)
+$(info Detected CC: $(RED)Unknown$(RESET))
 CC_TYPE ?= generic
+FORCE_LINK_LIBS ?= 1
+
+endif
+endif
 
 # Detect target arch
 ifndef ARCH
@@ -216,12 +231,12 @@ $(info Target arch: $(GREEN)$(ARCH)$(RESET))
 # Debugging options
 ifeq ($(USE_DEBUG_FULL),1)
 BUILD_TYPE := debug
-DEBUG_OPTS := -DDEBUG -Og -ggdb
+DEBUG_OPTS := -DDEBUG -Og -ggdb -fno-omit-frame-pointer
 else
 BUILD_TYPE := release
 ifeq ($(USE_DEBUG),1)
 # Release with debug info
-DEBUG_OPTS := -DNDEBUG -g
+DEBUG_OPTS := -DNDEBUG -g -fno-omit-frame-pointer
 else
 DEBUG_OPTS := -DNDEBUG
 endif
@@ -290,9 +305,8 @@ SRC := $(filter-out $(SRC_cond),$(SRC))
 USE_RV64 ?= 1
 USE_FPU ?= 1
 USE_JIT ?= 1
-USE_FB ?= 1
+USE_GUI ?= 1
 USE_SDL ?= 0
-USE_XSHM ?= 1
 USE_NET ?= 1
 USE_TAP_LINUX ?= 0
 USE_FDT ?= 1
@@ -338,82 +352,53 @@ override CFLAGS += -DUSE_JIT
 endif
 endif
 
-ifeq ($(USE_FB),1)
+# Framebuffer GUI
+ifeq ($(USE_GUI),1)
+override CFLAGS += -DUSE_GUI
+
 # SDL Window
+ifneq ($(USE_SDL),0)
+
 ifeq ($(USE_SDL),2)
 ifeq ($(OS),emscripten)
-SDL_CFLAGS := -DUSE_SDL=2 -s USE_SDL=2
+SDL_CFLAGS := -s USE_SDL=2
 else
 SDL_LDFLAGS := -lSDL2
-SDL_CFLAGS := -DUSE_SDL=2
 endif
 else
 SDL_LDFLAGS := -lSDL
-SDL_CFLAGS := -DUSE_SDL
 endif
 
-ifneq ($(USE_SDL),0)
-ifneq ($(OS),emscripten)
-ifeq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) $(SDL_LDFLAGS) 2>&1)))
-$(info [$(RED)WARN$(RESET)] SDL not found, ignoring USE_FB)
-override USE_SDL = 0
-endif
-endif
-ifneq ($(USE_SDL),0)
 SRC += $(SRCDIR)/devices/sdl_window.c
-override CFLAGS += -DUSE_FB $(SDL_CFLAGS)
+override CFLAGS += -DUSE_SDL=$(USE_SDL) $(SDL_CFLAGS)
+ifeq ($(FORCE_LINK_LIBS),1)
 override LDFLAGS += $(SDL_LDFLAGS)
 endif
-else
+endif
 
 # Haiku Window
 ifeq ($(OS),haiku)
 SRC_CXX += $(SRCDIR)/devices/haiku_window.cpp
-override CFLAGS += -DUSE_FB
 override LDFLAGS += -lbe
-else
+endif
 
 # WinAPI Window
 ifeq ($(OS),windows)
 SRC += $(SRCDIR)/devices/win32window.c
-override CFLAGS += -DUSE_FB
 ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(LDFLAGS) -lgdi32 2>&1)))
 override LDFLAGS += -lgdi32
 endif
-else
+endif
 
 # Xlib Window
-ifeq ($(OS),darwin)
-XLIB_CFLAGS := $(shell pkg-config x11 --cflags $(NULL_STDERR))
-XLIB_LDFLAGS := $(shell pkg-config x11 --libs $(NULL_STDERR) || echo -lx11-pkg-notfound)
-else
-XLIB_LDFLAGS := -lX11
-endif
-# Detect presence of libX11
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XLIB_CFLAGS) $(LDFLAGS) $(XLIB_LDFLAGS) 2>&1)))
+ifeq ($(USE_X11),1)
 SRC += $(SRCDIR)/devices/x11window_xlib.c
-override CFLAGS += -DUSE_FB -DUSE_X11 $(XLIB_CFLAGS)
-override LDFLAGS += $(XLIB_LDFLAGS)
-ifeq ($(USE_XSHM),1)
-ifeq ($(OS),darwin)
-XEXT_CFLAGS := $(shell pkg-config xext --cflags $(NULL_STDERR))
-XEXT_LDFLAGS := $(shell pkg-config xext --libs $(NULL_STDERR) || echo -lxext-pkg-notfound)
-else
-XEXT_LDFLAGS := -lXext
-endif
-ifneq (,$(findstring main, $(shell $(CC) $(CFLAGS) $(XEXT_CFLAGS) $(LDFLAGS) $(XEXT_LDFLAGS) 2>&1)))
-override CFLAGS += -DUSE_XSHM $(XEXT_CFLAGS)
-override LDFLAGS += $(XEXT_LDFLAGS)
-else
-$(info [$(RED)WARN$(RESET)] libXext not found, ignoring USE_XSHM)
+override CFLAGS += -DUSE_X11
+ifeq ($(FORCE_LINK_LIBS),1)
+override LDFLAGS += -lX11 -lXext
 endif
 endif
-else
-$(info [$(RED)WARN$(RESET)] libX11 not found, ignoring USE_FB)
-endif
-endif
-endif
-endif
+
 endif
 
 ifeq ($(USE_NET),1)
