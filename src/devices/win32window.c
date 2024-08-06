@@ -20,15 +20,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define UNICODE
 #endif
 
-#include <windows.h>
-
-#include "fb_window.h"
+#include "gui_window.h"
 #include "utils.h"
 
-struct win_data {
+#include <windows.h>
+
+typedef struct {
     HWND hwnd;
     HDC  hdc;
-};
+} win32_data_t;
 
 static ATOM winclass_atom = 0;
 
@@ -156,62 +156,34 @@ static hid_key_t win32_key_to_hid(uint32_t win32_key)
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    if (uMsg == WM_CLOSE) {
-        PostQuitMessage(0);
-        return 0;
+    switch (uMsg) {
+        case WM_CLOSE:
+            PostMessage(hwnd, WM_QUIT, wParam, lParam);
+            return 0;
+        case WM_KILLFOCUS:
+            // This is an ugly fucking way to handle WM_KILLFOCUS via PeekMessage()
+            PostMessage(hwnd, uMsg, wParam, lParam);
+            return 0;
     }
+
     if (uMsg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT) SetCursor(NULL);
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-bool fb_window_create(fb_window_t* win)
+static void win32_window_remove(gui_window_t* win)
 {
-    if (winclass_atom == 0) {
-        WNDCLASSW wc = {0};
-        wc.lpfnWndProc   = WindowProc;
-        wc.hInstance     = GetModuleHandle(NULL);
-        wc.lpszClassName = L"RVVM_window";
-        winclass_atom = RegisterClassW(&wc);
-        if (winclass_atom == 0) {
-            MessageBoxW(NULL, L"Failed to register window class!", L"RVVM Error", MB_OK | MB_ICONERROR);
-            return false;
-        }
-    }
-    RECT rect = {
-        .right = win->fb.width,
-        .bottom = win->fb.height,
-    };
-    AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, false, 0);
-    HWND hwnd = CreateWindowW(L"RVVM_window", L"RVVM",
-        WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
-        NULL, NULL, GetModuleHandle(NULL), NULL);
-    if (hwnd == NULL) return false;
-
-    win->fb.format = RGB_FMT_A8R8G8B8;
-    win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
-    win->data = safe_new_obj(win_data_t);
-    win->data->hwnd = hwnd;
-    win->data->hdc = GetDC(hwnd);
-
-#ifndef UNDER_CE
-    SetStretchBltMode(win->data->hdc, STRETCH_HALFTONE);
-#endif
-    return true;
-}
-
-void fb_window_close(fb_window_t* win)
-{
-    if (win->data->hwnd) {
-        DestroyWindow(win->data->hwnd);
-        ReleaseDC(win->data->hwnd, win->data->hdc);
+    win32_data_t* data = win->win_data;
+    if (data->hwnd) {
+        ReleaseDC(data->hwnd, data->hdc);
+        DestroyWindow(data->hwnd);
     }
     free(win->fb.buffer);
-    free(win->data);
+    free(data);
 }
 
-void fb_window_update(fb_window_t* win)
+static void win32_window_draw(gui_window_t* win)
 {
+    win32_data_t* data = win->win_data;
     BITMAPINFO bmi = {
         .bmiHeader = {
             .biSize = sizeof(BITMAPINFOHEADER),
@@ -221,59 +193,118 @@ void fb_window_update(fb_window_t* win)
             .biBitCount = 32,
         },
     };
-    StretchDIBits(win->data->hdc, 0, 0, win->fb.width, win->fb.height,
-                                  0, 0, win->fb.width, win->fb.height,
-                    win->fb.buffer, &bmi, 0, SRCCOPY);
-    SwapBuffers(win->data->hdc);
+    StretchDIBits(data->hdc, 0, 0, win->fb.width, win->fb.height,
+                             0, 0, win->fb.width, win->fb.height,
+                             win->fb.buffer, &bmi, 0, SRCCOPY);
+    SwapBuffers(data->hdc);
+}
 
+static void win32_window_poll(gui_window_t* win)
+{
+    win32_data_t* data = win->win_data;
     MSG Msg = {0};
-    while (PeekMessage(&Msg, win->data->hwnd, 0, 0, PM_REMOVE)) {
+    while (PeekMessage(&Msg, data->hwnd, 0, 0, PM_REMOVE)) {
         switch (Msg.message) {
             case WM_MOUSEMOVE: {
                 POINTS cur = MAKEPOINTS(Msg.lParam);
-                hid_mouse_place(win->mouse, cur.x, cur.y);
+                win->on_mouse_place(win, cur.x, cur.y);
                 break;
             }
             case WM_KEYDOWN:
             case WM_SYSKEYDOWN: // For handling F10
                 // Disable autorepeat keypresses
                 if ((Msg.lParam & KF_REPEAT) == 0) {
-                    hid_keyboard_press(win->keyboard, win32_key_to_hid(Msg.wParam));
+                    win->on_key_press(win, win32_key_to_hid(Msg.wParam));
                 }
                 break;
             case WM_KEYUP:
             case WM_SYSKEYUP:
                 if ((Msg.lParam & KF_REPEAT) == 0) {
-                    hid_keyboard_release(win->keyboard, win32_key_to_hid(Msg.wParam));
+                    win->on_key_release(win, win32_key_to_hid(Msg.wParam));
                 }
                 break;
             case WM_LBUTTONDOWN:
-                hid_mouse_press(win->mouse, HID_BTN_LEFT);
+                win->on_mouse_press(win, HID_BTN_LEFT);
                 break;
             case WM_LBUTTONUP:
-                hid_mouse_release(win->mouse, HID_BTN_LEFT);
+                win->on_mouse_release(win, HID_BTN_LEFT);
                 break;
             case WM_RBUTTONDOWN:
-                hid_mouse_press(win->mouse, HID_BTN_RIGHT);
+                win->on_mouse_press(win, HID_BTN_RIGHT);
                 break;
             case WM_RBUTTONUP:
-                hid_mouse_release(win->mouse, HID_BTN_RIGHT);
+                win->on_mouse_release(win, HID_BTN_RIGHT);
                 break;
             case WM_MBUTTONDOWN:
-                hid_mouse_press(win->mouse, HID_BTN_MIDDLE);
+                win->on_mouse_press(win, HID_BTN_MIDDLE);
                 break;
             case WM_MBUTTONUP:
-                hid_mouse_release(win->mouse, HID_BTN_MIDDLE);
+                win->on_mouse_release(win, HID_BTN_MIDDLE);
                 break;
             case WM_MOUSEWHEEL:
-                hid_mouse_scroll(win->mouse, -GET_WHEEL_DELTA_WPARAM(Msg.wParam) / WHEEL_DELTA);
+                win->on_mouse_scroll(win, -GET_WHEEL_DELTA_WPARAM(Msg.wParam) / WHEEL_DELTA);
                 break;
             case WM_QUIT:
-                rvvm_reset_machine(win->machine, false);
+                win->on_close(win);
+                break;
+            case WM_KILLFOCUS:
+                win->on_focus_lost(win);
                 break;
             default:
                 DispatchMessage(&Msg);
                 break;
         }
     }
+}
+
+bool win32_window_init(gui_window_t* win)
+{
+    DO_ONCE({
+        // Initialize window atom
+        WNDCLASSW wc = {0};
+        wc.lpfnWndProc   = WindowProc;
+        wc.hInstance     = GetModuleHandle(NULL);
+        wc.lpszClassName = L"RVVM_window";
+        winclass_atom = RegisterClassW(&wc);
+        if (winclass_atom == 0) {
+            MessageBoxW(NULL, L"Failed to register window class!", L"RVVM Error", MB_OK | MB_ICONERROR);
+            return false;
+        }
+    });
+
+    // Adjust window size
+    RECT rect = {
+        .right = win->fb.width,
+        .bottom = win->fb.height,
+    };
+    AdjustWindowRectEx(&rect, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, false, 0);
+
+    // Create window
+    HWND hwnd = CreateWindowW(L"RVVM_window", L"RVVM",
+        WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
+        NULL, NULL, GetModuleHandle(NULL), NULL);
+    if (hwnd == NULL) return false;
+
+    // Initialize structures
+    win32_data_t* data = safe_new_obj(win32_data_t);
+    data->hwnd = hwnd;
+    data->hdc = GetDC(hwnd);
+
+    win->win_data = data;
+    win->fb.format = RGB_FMT_A8R8G8B8;
+    win->fb.buffer = safe_new_arr(uint8_t, framebuffer_size(&win->fb));
+
+    // Initialize callbacks
+    win->draw = win32_window_draw;
+    win->poll = win32_window_poll;
+    win->remove = win32_window_remove;
+    // TODO: win32_window_grab_input, win32_window_set_title, relative mouse mode
+
+#ifndef UNDER_CE
+    // Set smooth scaling on HiDPI
+    SetStretchBltMode(data->hdc, STRETCH_HALFTONE);
+#endif
+
+    return true;
 }
