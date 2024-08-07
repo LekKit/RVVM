@@ -40,17 +40,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SDL_LIB_NAME "SDL2"
 
 // Weakly import SDL functions, resolve at runtime
-WEAK_LINKAGE(SDL_DestroyWindow)
 WEAK_LINKAGE(SDL_UpdateWindowSurface)
+WEAK_LINKAGE(SDL_UpdateTexture)
+WEAK_LINKAGE(SDL_RenderCopy)
+WEAK_LINKAGE(SDL_RenderPresent)
 WEAK_LINKAGE(SDL_GetRelativeMouseState)
 WEAK_LINKAGE(SDL_SetWindowGrab)
 WEAK_LINKAGE(SDL_SetWindowKeyboardGrab)
 WEAK_LINKAGE(SDL_SetRelativeMouseMode)
 WEAK_LINKAGE(SDL_SetWindowTitle)
+WEAK_LINKAGE(SDL_DestroyTexture)
+WEAK_LINKAGE(SDL_DestroyRenderer)
+WEAK_LINKAGE(SDL_DestroyWindow)
 WEAK_LINKAGE(SDL_GetCurrentVideoDriver)
 WEAK_LINKAGE(SDL_SetHint)
 WEAK_LINKAGE(SDL_CreateWindow)
 WEAK_LINKAGE(SDL_GetWindowSurface)
+WEAK_LINKAGE(SDL_CreateRenderer)
+WEAK_LINKAGE(SDL_CreateTexture)
 
 static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDL_SCANCODE_A] = HID_KEY_A,
@@ -340,19 +347,29 @@ static rgb_fmt_t sdl_get_rgb_format(const SDL_PixelFormat* format)
 
 #if USE_SDL == 2
 static SDL_Window* sdl_window = NULL;
+static SDL_Renderer* sdl_renderer = NULL;
+static SDL_Texture* sdl_texture = NULL;
 #endif
 static SDL_Surface* sdl_surface = NULL;
 static bool sdl_grabbed = false;
 
 static void sdl_window_draw(gui_window_t* win)
 {
-    if (win->fb.buffer != sdl_surface->pixels) {
+    if (sdl_surface && win->fb.buffer != sdl_surface->pixels) {
+        // Copy the framebuffer onto a locking surface
         SDL_LockSurface(sdl_surface);
         memcpy(sdl_surface->pixels, win->fb.buffer, framebuffer_size(&win->fb));
         SDL_UnlockSurface(sdl_surface);
     }
 #if USE_SDL == 2
-    SDL_UpdateWindowSurface(sdl_window);
+    if (sdl_surface) {
+        SDL_UpdateWindowSurface(sdl_window);
+    } else {
+        // Load the framebuffer into a texture and draw onto the screen
+        SDL_UpdateTexture(sdl_texture, NULL, win->fb.buffer, framebuffer_stride(&win->fb));
+        SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+        SDL_RenderPresent(sdl_renderer);
+    }
 #else
     SDL_Flip(sdl_surface);
 #endif
@@ -450,13 +467,17 @@ static void sdl_window_set_title(gui_window_t* win, const char* title)
 
 static void sdl_window_remove(gui_window_t* win)
 {
-    if (win->fb.buffer != sdl_surface->pixels) {
+    if (sdl_surface == NULL || win->fb.buffer != sdl_surface->pixels) {
         free(win->fb.buffer);
     }
     sdl_window_grab_input(win, false);
 #if USE_SDL == 2
-    SDL_DestroyWindow(sdl_window);
+    if (sdl_texture) SDL_DestroyTexture(sdl_texture);
+    if (sdl_renderer) SDL_DestroyRenderer(sdl_renderer);
+    if (sdl_window) SDL_DestroyWindow(sdl_window);
     sdl_window = NULL;
+    sdl_renderer = NULL;
+    sdl_texture = NULL;
 #else
     SDL_FreeSurface(sdl_surface);
 #endif
@@ -498,9 +519,11 @@ bool sdl_window_init(gui_window_t* win)
     }
     sdl_surface = SDL_GetWindowSurface(sdl_window);
     if (sdl_surface == NULL) {
-        rvvm_error("SDL_GetWindowSurface() failed!");
-        SDL_DestroyWindow(sdl_window);
-        return false;
+        rvvm_info("No SDL framebuffer surface, using SDL renderer. Expect higher CPU use.");
+        sdl_renderer = SDL_CreateRenderer(sdl_window, -1, 0);
+        sdl_texture = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_ARGB8888,
+                                        SDL_TEXTUREACCESS_STREAMING, win->fb.width, win->fb.height);
+        win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
     }
 #else
     sdl_surface = SDL_SetVideoMode(win->fb.width, win->fb.height,
@@ -512,12 +535,15 @@ bool sdl_window_init(gui_window_t* win)
     SDL_WM_SetCaption("RVVM", NULL);
 #endif
     SDL_ShowCursor(SDL_DISABLE);
-    win->fb.format = sdl_get_rgb_format(sdl_surface->format);
-    if (SDL_MUSTLOCK(sdl_surface)) {
-        rvvm_info("SDL surface is locking. Expect lower perf.");
-        win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
-    } else {
-        win->fb.buffer = sdl_surface->pixels;
+    if (sdl_surface) {
+        win->fb.format = sdl_get_rgb_format(sdl_surface->format);
+        if (SDL_MUSTLOCK(sdl_surface)) {
+            rvvm_info("SDL surface is locking. Expect higher CPU use.");
+            win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
+        } else {
+            // Direct framebuffer surface, like XShm
+            win->fb.buffer = sdl_surface->pixels;
+        }
     }
 
     win->draw = sdl_window_draw;
