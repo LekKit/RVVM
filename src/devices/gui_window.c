@@ -125,7 +125,13 @@ static const rvvm_mmio_type_t gui_window_dev_type = {
 static void gui_on_close(gui_window_t* win)
 {
     gui_window_data_t* data = win->data;
-    rvvm_reset_machine(data->machine, false);
+    if (rvvm_has_arg("poweroff_key")) {
+        // Send poweroff request to the guest via keyboard key
+        hid_keyboard_press(data->keyboard, HID_KEY_POWER);
+        hid_keyboard_release(data->keyboard, HID_KEY_POWER);
+    } else {
+        rvvm_reset_machine(data->machine, false);
+    }
 }
 
 static void gui_on_focus_lost(gui_window_t* win)
