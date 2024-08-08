@@ -79,8 +79,8 @@ BUILD_ASSERT(TLB_SIZE && !((TLB_SIZE - 1) & TLB_SIZE));
 #define FPU_REGISTERS_MAX 32
 
 #define PRIVILEGE_USER       0
-#define PRIVILEGE_SUPERVISOR 1
-#define PRIVILEGE_HYPERVISOR 2
+#define PRIVILEGE_SUPERVISOR 1 // VS-mode supervisor
+#define PRIVILEGE_HYPERVISOR 2 // HS-mode supervisor
 #define PRIVILEGE_MACHINE    3
 
 #define PRIVILEGES_MAX       4
@@ -94,10 +94,6 @@ BUILD_ASSERT(TLB_SIZE && !((TLB_SIZE - 1) & TLB_SIZE));
 #define INTERRUPT_UEXTERNAL    0x8
 #define INTERRUPT_SEXTERNAL    0x9
 #define INTERRUPT_MEXTERNAL    0xB
-
-// Internal events delivered to the hart
-#define EXT_EVENT_PAUSE        0x1 // Pause the hart in a consistent state
-#define EXT_EVENT_PREEMPT      0x2 // Preempt the hart
 
 #define TRAP_INSTR_MISALIGN    0x0
 #define TRAP_INSTR_FETCH       0x1
@@ -113,8 +109,6 @@ BUILD_ASSERT(TLB_SIZE && !((TLB_SIZE - 1) & TLB_SIZE));
 #define TRAP_INSTR_PAGEFAULT   0xC
 #define TRAP_LOAD_PAGEFAULT    0xD
 #define TRAP_STORE_PAGEFAULT   0xF
-
-typedef struct rvvm_hart_t rvvm_hart_t;
 
 /*
  * Address translation cache
@@ -158,17 +152,6 @@ typedef struct {
     vmptr_t data;      // Pointer to memory data
 } rvvm_ram_t;
 
-typedef struct {
-    // Virtual page number per each op type (vaddr >> 12)
-    virt_addr_t r;
-    virt_addr_t w;
-    virt_addr_t e;
-    // Physical address of the page mapped to the device
-    phys_addr_t phys;
-    // The device itself
-    const rvvm_mmio_dev_t* mmio;
-} rvvm_mmio_tlb_t;
-
 struct rvvm_hart_t {
     uint32_t wait_event;
     maxlen_t registers[REGISTERS_MAX];
@@ -190,7 +173,7 @@ struct rvvm_hart_t {
     bool trap;
     maxlen_t trap_pc;
 
-    bool user_traps;
+    bool userland;
 
     uint32_t lrsc;
     maxlen_t lrsc_cas;
@@ -210,6 +193,7 @@ struct rvvm_hart_t {
         maxlen_t ip;
         maxlen_t fcsr;
     } csr;
+
 #ifdef USE_JIT
     rvjit_block_t jit;
     bool jit_enabled;
@@ -217,12 +201,14 @@ struct rvvm_hart_t {
     bool block_ends;
     bool ldst_trace;
 #endif
+
     thread_ctx_t* thread;
     cond_var_t* wfi_cond;
     rvtimer_t timer;
     uint32_t pending_irqs;
     uint32_t pending_events;
     uint32_t preempt_ms;
+
     // Cacheline alignment
     uint8_t align[64];
 };
