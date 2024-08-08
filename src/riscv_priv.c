@@ -94,7 +94,7 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
                             condvar_wait_ns(vm->wfi_cond, timestamp);
                         }
                         // Hint interrupt dispatcher to check actual timer expiration
-                        vm->csr.ip |= (1 << INTERRUPT_MTIMER);
+                        riscv_hart_check_timer(vm);
                         break;
                     } else {
                         // Timer IRQs disabled, wait for external IRQs
