@@ -58,7 +58,7 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
 
     spin_cond_init();
 
-    rvtimer_t timer;
+    rvtimer_t timer = {0};
     rvtimer_init(&timer, 1000);
     do {
         uint32_t flag = atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE);
