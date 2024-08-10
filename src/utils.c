@@ -185,7 +185,7 @@ void call_at_deinit(void (*function)())
 {
     bool call_func = false;
 
-    spin_lock(&deinit_lock);
+    while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
     if (!deinit_happened) {
         vector_push_back(deinit_funcs, function);
     } else {
@@ -202,7 +202,7 @@ static deinit_func_t dequeue_func(void)
 {
     deinit_func_t ret = NULL;
 
-    spin_lock(&deinit_lock);
+    while (!spin_try_lock(&deinit_lock)) sleep_ms(1);
     deinit_happened = true;
     if (vector_size(deinit_funcs) == 0) {
         vector_free(deinit_funcs);
