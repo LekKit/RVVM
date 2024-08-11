@@ -152,17 +152,15 @@ override CFLAGS += -DNO_LIBATOMIC
 endif
 
 # Set some addiional options based on POSIX flavor
+
 ifneq (,$(findstring darwin, $(OS))$(findstring serenity, $(OS)))
 # Enable SDL2 on Darwin, Serenity
 USE_SDL ?= 2
-FORCE_LINK_LIBS ?= 1
-else
-
-ifneq ($(OS),haiku)
-# Not Darwin, Haiku or Serenity, enable X11
-USE_X11 ?= 1
-
 endif
+
+ifeq (,$(findstring darwin, $(OS))$(findstring haiku, $(OS))$(findstring serenity, $(OS))$(findstring android, $(OS)))
+# Not Darwin, Haiku, Serenity or Android - enable X11
+USE_X11 ?= 1
 endif
 
 ifeq ($(OS),openbsd)
@@ -194,9 +192,8 @@ $(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
 
 else
 # Toy compiler (TCC, Chibicc, Cproc)
-$(info Detected CC: $(RED)Unknown$(RESET))
 CC_TYPE ?= generic
-FORCE_LINK_LIBS ?= 1
+$(info Detected CC: $(RED)Unknown$(RESET))
 
 endif
 endif
@@ -359,21 +356,15 @@ override CFLAGS += -DUSE_GUI
 # SDL Window
 ifneq ($(USE_SDL),0)
 
+# Beware: SDL2 on Emscripten is VERY BROKEN at the moment
 ifeq ($(USE_SDL),2)
 ifeq ($(OS),emscripten)
 SDL_CFLAGS := -s USE_SDL=2
-else
-SDL_LDFLAGS := -lSDL2
 endif
-else
-SDL_LDFLAGS := -lSDL
 endif
 
 SRC += $(SRCDIR)/devices/sdl_window.c
 override CFLAGS += -DUSE_SDL=$(USE_SDL) $(SDL_CFLAGS)
-ifeq ($(FORCE_LINK_LIBS),1)
-override LDFLAGS += $(SDL_LDFLAGS)
-endif
 endif
 
 # Haiku Window
@@ -394,9 +385,6 @@ endif
 ifeq ($(USE_X11),1)
 SRC += $(SRCDIR)/devices/x11window_xlib.c
 override CFLAGS += -DUSE_X11
-ifeq ($(FORCE_LINK_LIBS),1)
-override LDFLAGS += -lX11 -lXext
-endif
 endif
 
 endif
