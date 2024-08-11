@@ -48,7 +48,7 @@ struct hid_keyboard {
     chardev_t chardev;
     spinlock_t lock;
     uint8_t key_state[32]; // State of all keys to prevent spurious repeat
-    
+
     uint8_t state;  // The keyboard is a state machine
     uint8_t rate;   // Typematic rate in command encoding
     uint8_t delay;  // Typematic delay in command encoding (0.25sec * (delay + 1))
@@ -57,10 +57,11 @@ struct hid_keyboard {
     // Last key pressed, used for typematic input
     const uint8_t* lastkey;
     size_t lastkey_size;
-    
+
     // Used in IRQ handling for typematic (repeated) input
     rvtimer_t sample_timer;
-    
+    uint64_t sample_timecmp;
+
     ringbuf_t cmdbuf;
 };
 
@@ -91,7 +92,7 @@ static const uint8_t hid_to_ps2_byte_map[] = {
     [HID_KEY_X] = 0x22,
     [HID_KEY_Y] = 0x35,
     [HID_KEY_Z] = 0x1A,
-    
+
     [HID_KEY_1] = 0x16,
     [HID_KEY_2] = 0x1E,
     [HID_KEY_3] = 0x26,
@@ -164,7 +165,7 @@ static void ps2_keyboard_set_rate(hid_keyboard_t* kb, uint8_t rate)
     kb->delay = rate & 3;
 
     rvtimer_init(&kb->sample_timer, 1000);
-    kb->sample_timer.timecmp = (kb->delay + 1) * 250;
+    kb->sample_timecmp = (kb->delay + 1) * 250;
 }
 
 static void ps2_keyboard_defaults(hid_keyboard_t* kb)
@@ -321,9 +322,9 @@ static void ps2_keyboard_update(chardev_t* dev)
     // Handle typematic
     hid_keyboard_t* kb = dev->data;
     spin_lock(&kb->lock);
-    if (kb->reporting && kb->lastkey_size && rvtimer_pending(&kb->sample_timer)) {
+    if (kb->reporting && kb->lastkey_size && rvtimer_get(&kb->sample_timer) >= kb->sample_timecmp) {
         rvtimer_init(&kb->sample_timer, ps2kb_rate2realrate[kb->rate]);
-        kb->sample_timer.timecmp = 10;
+        kb->sample_timecmp = 10;
         ringbuf_put(&kb->cmdbuf, kb->lastkey, kb->lastkey_size);
         chardev_notify(&kb->chardev, CHARDEV_RX);
     }
@@ -341,10 +342,10 @@ PUBLIC hid_keyboard_t* hid_keyboard_init_auto_ps2(rvvm_machine_t* machine)
     kb->chardev.remove = ps2_keyboard_remove;
     kb->chardev.update = ps2_keyboard_update;
     kb->chardev.data = kb;
-    
+
     ringbuf_create(&kb->cmdbuf, 1024);
     ringbuf_put_u8(&kb->cmdbuf, 0xAA);
-    
+
     altps2_init(machine, addr, plic, plic_alloc_irq(plic), &kb->chardev);
     return kb;
 }
@@ -435,10 +436,10 @@ static void ps2_handle_keyboard(hid_keyboard_t* kb, hid_key_t key, bool pressed)
                 kb->key_state[key >> 3] |= (1 << (key & 0x7));
                 kb->lastkey = keycode;
                 kb->lastkey_size = keycode_size;
-                
+
                 ringbuf_put(&kb->cmdbuf, keycode, keycode_size);
                 rvtimer_init(&kb->sample_timer, 1000);
-                kb->sample_timer.timecmp = (kb->delay + 1) * 250;
+                kb->sample_timecmp = (kb->delay + 1) * 250;
             } else {
                 uint8_t keycmd[8];
                 uint8_t keylen = 0;
