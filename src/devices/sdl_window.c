@@ -19,6 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "compiler.h"
 
+#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER)
+#define SDL_DYNAMIC_LOADING
+#endif
+
+// Resolve symbols at runtime
+#define SDL_DLIB_SYM(sym) static typeof(sym)* sym##_dlib = NULL;
+
 // Check for SDL1 header presence
 #if USE_SDL == 1 && !CHECK_INCLUDE(SDL/SDL.h)
 #undef USE_SDL
@@ -39,25 +46,45 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define SDL_LIB_NAME "SDL2"
 
-// Weakly import SDL functions, resolve at runtime
-WEAK_LINKAGE(SDL_UpdateWindowSurface)
-WEAK_LINKAGE(SDL_UpdateTexture)
-WEAK_LINKAGE(SDL_RenderCopy)
-WEAK_LINKAGE(SDL_RenderPresent)
-WEAK_LINKAGE(SDL_GetRelativeMouseState)
-WEAK_LINKAGE(SDL_SetWindowGrab)
-WEAK_LINKAGE(SDL_SetWindowKeyboardGrab)
-WEAK_LINKAGE(SDL_SetRelativeMouseMode)
-WEAK_LINKAGE(SDL_SetWindowTitle)
-WEAK_LINKAGE(SDL_DestroyTexture)
-WEAK_LINKAGE(SDL_DestroyRenderer)
-WEAK_LINKAGE(SDL_DestroyWindow)
-WEAK_LINKAGE(SDL_GetCurrentVideoDriver)
-WEAK_LINKAGE(SDL_SetHint)
-WEAK_LINKAGE(SDL_CreateWindow)
-WEAK_LINKAGE(SDL_GetWindowSurface)
-WEAK_LINKAGE(SDL_CreateRenderer)
-WEAK_LINKAGE(SDL_CreateTexture)
+#ifdef SDL_DYNAMIC_LOADING
+SDL_DLIB_SYM(SDL_UpdateWindowSurface)
+SDL_DLIB_SYM(SDL_UpdateTexture)
+SDL_DLIB_SYM(SDL_RenderCopy)
+SDL_DLIB_SYM(SDL_RenderPresent)
+SDL_DLIB_SYM(SDL_GetRelativeMouseState)
+SDL_DLIB_SYM(SDL_SetWindowGrab)
+SDL_DLIB_SYM(SDL_SetWindowKeyboardGrab)
+SDL_DLIB_SYM(SDL_SetRelativeMouseMode)
+SDL_DLIB_SYM(SDL_SetWindowTitle)
+SDL_DLIB_SYM(SDL_DestroyTexture)
+SDL_DLIB_SYM(SDL_DestroyRenderer)
+SDL_DLIB_SYM(SDL_DestroyWindow)
+SDL_DLIB_SYM(SDL_GetCurrentVideoDriver)
+SDL_DLIB_SYM(SDL_SetHint)
+SDL_DLIB_SYM(SDL_CreateWindow)
+SDL_DLIB_SYM(SDL_GetWindowSurface)
+SDL_DLIB_SYM(SDL_CreateRenderer)
+SDL_DLIB_SYM(SDL_CreateTexture)
+
+#define SDL_UpdateWindowSurface SDL_UpdateWindowSurface_dlib
+#define SDL_UpdateTexture SDL_UpdateTexture_dlib
+#define SDL_RenderCopy SDL_RenderCopy_dlib
+#define SDL_RenderPresent SDL_RenderPresent_dlib
+#define SDL_GetRelativeMouseState SDL_GetRelativeMouseState_dlib
+#define SDL_SetWindowGrab SDL_SetWindowGrab_dlib
+#define SDL_SetWindowKeyboardGrab SDL_SetWindowKeyboardGrab_dlib
+#define SDL_SetRelativeMouseMode SDL_SetRelativeMouseMode_dlib
+#define SDL_SetWindowTitle SDL_SetWindowTitle_dlib
+#define SDL_DestroyTexture SDL_DestroyTexture_dlib
+#define SDL_DestroyRenderer SDL_DestroyRenderer_dlib
+#define SDL_DestroyWindow SDL_DestroyWindow_dlib
+#define SDL_GetCurrentVideoDriver SDL_GetCurrentVideoDriver_dlib
+#define SDL_SetHint SDL_SetHint_dlib
+#define SDL_CreateWindow SDL_CreateWindow_dlib
+#define SDL_GetWindowSurface SDL_GetWindowSurface_dlib
+#define SDL_CreateRenderer SDL_CreateRenderer_dlib
+#define SDL_CreateTexture SDL_CreateTexture_dlib
+#endif
 
 static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDL_SCANCODE_A] = HID_KEY_A,
@@ -184,11 +211,19 @@ static const hid_key_t sdl_key_to_hid_byte_map[] = {
 
 #define SDL_LIB_NAME "SDL"
 
-WEAK_LINKAGE(SDL_FreeSurface)
-WEAK_LINKAGE(SDL_Flip)
-WEAK_LINKAGE(SDL_WM_GrabInput)
-WEAK_LINKAGE(SDL_WM_SetCaption)
-WEAK_LINKAGE(SDL_SetVideoMode)
+#ifdef SDL_DYNAMIC_LOADING
+SDL_DLIB_SYM(SDL_FreeSurface)
+SDL_DLIB_SYM(SDL_Flip)
+SDL_DLIB_SYM(SDL_WM_GrabInput)
+SDL_DLIB_SYM(SDL_WM_SetCaption)
+SDL_DLIB_SYM(SDL_SetVideoMode)
+
+#define SDL_FreeSurface SDL_FreeSurface_dlib
+#define SDL_Flip SDL_Flip_dlib
+#define SDL_WM_GrabInput SDL_WM_GrabInput_dlib
+#define SDL_WM_SetCaption SDL_WM_SetCaption_dlib
+#define SDL_SetVideoMode SDL_SetVideoMode_dlib
+#endif
 
 static const hid_key_t sdl_key_to_hid_byte_map[] = {
     [SDLK_a] = HID_KEY_A,
@@ -305,12 +340,21 @@ static const hid_key_t sdl_key_to_hid_byte_map[] = {
 
 #endif
 
-WEAK_LINKAGE(SDL_QuitSubSystem)
-WEAK_LINKAGE(SDL_LockSurface)
-WEAK_LINKAGE(SDL_UnlockSurface)
-WEAK_LINKAGE(SDL_PollEvent)
-WEAK_LINKAGE(SDL_Init)
-WEAK_LINKAGE(SDL_ShowCursor)
+#ifdef SDL_DYNAMIC_LOADING
+SDL_DLIB_SYM(SDL_QuitSubSystem)
+SDL_DLIB_SYM(SDL_LockSurface)
+SDL_DLIB_SYM(SDL_UnlockSurface)
+SDL_DLIB_SYM(SDL_PollEvent)
+SDL_DLIB_SYM(SDL_Init)
+SDL_DLIB_SYM(SDL_ShowCursor)
+
+#define SDL_QuitSubSystem SDL_QuitSubSystem_dlib
+#define SDL_LockSurface SDL_LockSurface_dlib
+#define SDL_UnlockSurface SDL_UnlockSurface_dlib
+#define SDL_PollEvent SDL_PollEvent_dlib
+#define SDL_Init SDL_Init_dlib
+#define SDL_ShowCursor SDL_ShowCursor_dlib
+#endif
 
 static hid_key_t sdl_key_to_hid(uint32_t sdl_key)
 {
@@ -485,9 +529,57 @@ static void sdl_window_remove(gui_window_t* win)
     sdl_surface = NULL;
 }
 
+#define SDL_DLIB_RESOLVE(lib, sym) \
+do { \
+    sym = dlib_resolve(lib, #sym);\
+    if (sym == NULL) return false; \
+} while (0)
+
+static bool sdl_init_libs(void)
+{
+#ifdef SDL_DYNAMIC_LOADING
+    dlib_ctx_t* libsdl = dlib_open(SDL_LIB_NAME, DLIB_NAME_PROBE);
+#if USE_SDL == 2
+    SDL_DLIB_RESOLVE(libsdl, SDL_UpdateWindowSurface);
+    SDL_DLIB_RESOLVE(libsdl, SDL_UpdateTexture);
+    SDL_DLIB_RESOLVE(libsdl, SDL_RenderCopy);
+    SDL_DLIB_RESOLVE(libsdl, SDL_RenderPresent);
+    SDL_DLIB_RESOLVE(libsdl, SDL_GetRelativeMouseState);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetWindowGrab);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetWindowKeyboardGrab);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetRelativeMouseMode);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetWindowTitle);
+    SDL_DLIB_RESOLVE(libsdl, SDL_DestroyTexture);
+    SDL_DLIB_RESOLVE(libsdl, SDL_DestroyRenderer);
+    SDL_DLIB_RESOLVE(libsdl, SDL_DestroyWindow);
+    SDL_DLIB_RESOLVE(libsdl, SDL_GetCurrentVideoDriver);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetHint);
+    SDL_DLIB_RESOLVE(libsdl, SDL_CreateWindow);
+    SDL_DLIB_RESOLVE(libsdl, SDL_GetWindowSurface);
+    SDL_DLIB_RESOLVE(libsdl, SDL_CreateRenderer);
+    SDL_DLIB_RESOLVE(libsdl, SDL_CreateTexture);
+#else
+    SDL_DLIB_RESOLVE(libsdl, SDL_FreeSurface);
+    SDL_DLIB_RESOLVE(libsdl, SDL_Flip);
+    SDL_DLIB_RESOLVE(libsdl, SDL_WM_GrabInput);
+    SDL_DLIB_RESOLVE(libsdl, SDL_WM_SetCaption);
+    SDL_DLIB_RESOLVE(libsdl, SDL_SetVideoMode);
+#endif
+    SDL_DLIB_RESOLVE(libsdl, SDL_QuitSubSystem);
+    SDL_DLIB_RESOLVE(libsdl, SDL_LockSurface);
+    SDL_DLIB_RESOLVE(libsdl, SDL_UnlockSurface);
+    SDL_DLIB_RESOLVE(libsdl, SDL_PollEvent);
+    SDL_DLIB_RESOLVE(libsdl, SDL_Init);
+    SDL_DLIB_RESOLVE(libsdl, SDL_ShowCursor);
+#endif
+    return true;
+}
+
 bool sdl_window_init(gui_window_t* win)
 {
-    if (!dlib_load_weak(SDL_LIB_NAME)) {
+    static bool libsdl_avail = false;
+    DO_ONCE(libsdl_avail = sdl_init_libs());
+    if (!libsdl_avail) {
         rvvm_info("Failed to load libSDL!");
         return false;
     }
