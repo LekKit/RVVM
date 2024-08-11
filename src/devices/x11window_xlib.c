@@ -21,6 +21,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "compiler.h"
 
+#define X11_DYNAMIC_LOADING
+
+// Resolve symbols at runtime
+#define X11_DLIB_SYM(sym) static typeof(sym)* sym##_dlib = NULL;
+
 // Check for X11 headers presence
 #if defined(USE_X11) && !(CHECK_INCLUDE(X11/Xlib.h) && CHECK_INCLUDE(X11/Xutil.h) && CHECK_INCLUDE(X11/keysym.h))
 #undef USE_X11
@@ -43,49 +48,93 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
-WEAK_LINKAGE(XShmQueryExtension)
-WEAK_LINKAGE(XShmDetach)
-WEAK_LINKAGE(XShmCreateImage)
-WEAK_LINKAGE(XShmAttach)
-WEAK_LINKAGE(XShmPutImage)
+#ifdef X11_DYNAMIC_LOADING
+X11_DLIB_SYM(XShmQueryExtension)
+X11_DLIB_SYM(XShmDetach)
+X11_DLIB_SYM(XShmCreateImage)
+X11_DLIB_SYM(XShmAttach)
+X11_DLIB_SYM(XShmPutImage)
+
+#define XShmQueryExtension XShmQueryExtension_dlib
+#define XShmDetach XShmDetach_dlib
+#define XShmCreateImage XShmCreateImage_dlib
+#define XShmAttach XShmAttach_dlib
+#define XShmPutImage XShmPutImage_dlib
+#endif
 
 #endif
 
-// Weakly import X11 functions, resolve at runtime
-WEAK_LINKAGE(XGetKeyboardMapping)
-WEAK_LINKAGE(XFree)
-WEAK_LINKAGE(XListPixmapFormats)
-WEAK_LINKAGE(XSetErrorHandler)
-WEAK_LINKAGE(XSync)
-WEAK_LINKAGE(XPutImage)
-WEAK_LINKAGE(XWarpPointer)
-WEAK_LINKAGE(XFlush)
-WEAK_LINKAGE(XPending)
-WEAK_LINKAGE(XNextEvent)
-WEAK_LINKAGE(XPeekEvent)
-WEAK_LINKAGE(XGrabKeyboard)
-WEAK_LINKAGE(XGrabPointer)
-WEAK_LINKAGE(XQueryPointer)
-WEAK_LINKAGE(XUngrabKeyboard)
-WEAK_LINKAGE(XUngrabPointer)
-WEAK_LINKAGE(XStoreName)
-WEAK_LINKAGE(XFreeGC)
-WEAK_LINKAGE(XDestroyWindow)
-WEAK_LINKAGE(XCloseDisplay)
-WEAK_LINKAGE(XDisplayKeycodes)
-WEAK_LINKAGE(XSetWMNormalHints)
-WEAK_LINKAGE(XSetWMProtocols)
-WEAK_LINKAGE(XCreateBitmapFromData)
-WEAK_LINKAGE(XCreatePixmapCursor)
-WEAK_LINKAGE(XDefineCursor)
-WEAK_LINKAGE(XFreeCursor)
-WEAK_LINKAGE(XFreePixmap)
-WEAK_LINKAGE(XMapWindow)
-WEAK_LINKAGE(XCreateGC)
-WEAK_LINKAGE(XCreateImage)
-WEAK_LINKAGE(XOpenDisplay)
-WEAK_LINKAGE(XInternAtom)
-WEAK_LINKAGE(XCreateWindow)
+#ifdef X11_DYNAMIC_LOADING
+X11_DLIB_SYM(XGetKeyboardMapping)
+X11_DLIB_SYM(XFree)
+X11_DLIB_SYM(XListPixmapFormats)
+X11_DLIB_SYM(XSetErrorHandler)
+X11_DLIB_SYM(XSync)
+X11_DLIB_SYM(XPutImage)
+X11_DLIB_SYM(XWarpPointer)
+X11_DLIB_SYM(XFlush)
+X11_DLIB_SYM(XPending)
+X11_DLIB_SYM(XNextEvent)
+X11_DLIB_SYM(XPeekEvent)
+X11_DLIB_SYM(XGrabKeyboard)
+X11_DLIB_SYM(XGrabPointer)
+X11_DLIB_SYM(XQueryPointer)
+X11_DLIB_SYM(XUngrabKeyboard)
+X11_DLIB_SYM(XUngrabPointer)
+X11_DLIB_SYM(XStoreName)
+X11_DLIB_SYM(XFreeGC)
+X11_DLIB_SYM(XDestroyWindow)
+X11_DLIB_SYM(XCloseDisplay)
+X11_DLIB_SYM(XDisplayKeycodes)
+X11_DLIB_SYM(XSetWMNormalHints)
+X11_DLIB_SYM(XSetWMProtocols)
+X11_DLIB_SYM(XCreateBitmapFromData)
+X11_DLIB_SYM(XCreatePixmapCursor)
+X11_DLIB_SYM(XDefineCursor)
+X11_DLIB_SYM(XFreeCursor)
+X11_DLIB_SYM(XFreePixmap)
+X11_DLIB_SYM(XMapWindow)
+X11_DLIB_SYM(XCreateGC)
+X11_DLIB_SYM(XCreateImage)
+X11_DLIB_SYM(XOpenDisplay)
+X11_DLIB_SYM(XInternAtom)
+X11_DLIB_SYM(XCreateWindow)
+
+#define XGetKeyboardMapping XGetKeyboardMapping_dlib
+#define XFree XFree_dlib
+#define XListPixmapFormats XListPixmapFormats_dlib
+#define XSetErrorHandler XSetErrorHandler_dlib
+#define XSync XSync_dlib
+#define XPutImage XPutImage_dlib
+#define XWarpPointer XWarpPointer_dlib
+#define XFlush XFlush_dlib
+#define XPending XPending_dlib
+#define XNextEvent XNextEvent_dlib
+#define XPeekEvent XPeekEvent_dlib
+#define XGrabKeyboard XGrabKeyboard_dlib
+#define XGrabPointer XGrabPointer_dlib
+#define XQueryPointer XQueryPointer_dlib
+#define XUngrabKeyboard XUngrabKeyboard_dlib
+#define XUngrabPointer XUngrabPointer_dlib
+#define XStoreName XStoreName_dlib
+#define XFreeGC XFreeGC_dlib
+#define XDestroyWindow XDestroyWindow_dlib
+#define XCloseDisplay XCloseDisplay_dlib
+#define XDisplayKeycodes XDisplayKeycodes_dlib
+#define XSetWMNormalHints XSetWMNormalHints_dlib
+#define XSetWMProtocols XSetWMProtocols_dlib
+#define XCreateBitmapFromData XCreateBitmapFromData_dlib
+#define XCreatePixmapCursor XCreatePixmapCursor_dlib
+#define XDefineCursor XDefineCursor_dlib
+#define XFreeCursor XFreeCursor_dlib
+#define XFreePixmap XFreePixmap_dlib
+#define XMapWindow XMapWindow_dlib
+#define XCreateGC XCreateGC_dlib
+#define XCreateImage XCreateImage_dlib
+#define XOpenDisplay XOpenDisplay_dlib
+#define XInternAtom XInternAtom_dlib
+#define XCreateWindow XCreateWindow_dlib
+#endif
 
 typedef struct {
     Display* display;
@@ -559,9 +608,71 @@ static void x11_window_remove(gui_window_t* win)
     free(x11);
 }
 
+#define X11_DLIB_RESOLVE(lib, sym) \
+do { \
+    sym = dlib_resolve(lib, #sym);\
+    if (sym == NULL) return false; \
+} while (0)
+
+static bool x11_init_libs(void)
+{
+#ifdef X11_DYNAMIC_LOADING
+    dlib_ctx_t* libx11 = dlib_open("X11", DLIB_NAME_PROBE);
+
+    X11_DLIB_RESOLVE(libx11, XGetKeyboardMapping);
+    X11_DLIB_RESOLVE(libx11, XFree);
+    X11_DLIB_RESOLVE(libx11, XListPixmapFormats);
+    X11_DLIB_RESOLVE(libx11, XSetErrorHandler);
+    X11_DLIB_RESOLVE(libx11, XSync);
+    X11_DLIB_RESOLVE(libx11, XPutImage);
+    X11_DLIB_RESOLVE(libx11, XWarpPointer);
+    X11_DLIB_RESOLVE(libx11, XFlush);
+    X11_DLIB_RESOLVE(libx11, XPending);
+    X11_DLIB_RESOLVE(libx11, XNextEvent);
+    X11_DLIB_RESOLVE(libx11, XPeekEvent);
+    X11_DLIB_RESOLVE(libx11, XGrabKeyboard);
+    X11_DLIB_RESOLVE(libx11, XGrabPointer);
+    X11_DLIB_RESOLVE(libx11, XQueryPointer);
+    X11_DLIB_RESOLVE(libx11, XUngrabKeyboard);
+    X11_DLIB_RESOLVE(libx11, XUngrabPointer);
+    X11_DLIB_RESOLVE(libx11, XStoreName);
+    X11_DLIB_RESOLVE(libx11, XFreeGC);
+    X11_DLIB_RESOLVE(libx11, XDestroyWindow);
+    X11_DLIB_RESOLVE(libx11, XCloseDisplay);
+    X11_DLIB_RESOLVE(libx11, XDisplayKeycodes);
+    X11_DLIB_RESOLVE(libx11, XSetWMNormalHints);
+    X11_DLIB_RESOLVE(libx11, XSetWMProtocols);
+    X11_DLIB_RESOLVE(libx11, XCreateBitmapFromData);
+    X11_DLIB_RESOLVE(libx11, XCreatePixmapCursor);
+    X11_DLIB_RESOLVE(libx11, XDefineCursor);
+    X11_DLIB_RESOLVE(libx11, XFreeCursor);
+    X11_DLIB_RESOLVE(libx11, XFreePixmap);
+    X11_DLIB_RESOLVE(libx11, XMapWindow);
+    X11_DLIB_RESOLVE(libx11, XCreateGC);
+    X11_DLIB_RESOLVE(libx11, XCreateImage);
+    X11_DLIB_RESOLVE(libx11, XOpenDisplay);
+    X11_DLIB_RESOLVE(libx11, XInternAtom);
+    X11_DLIB_RESOLVE(libx11, XCreateWindow);
+
+    dlib_ctx_t* libxext = dlib_open("Xext", DLIB_NAME_PROBE);
+
+    X11_DLIB_RESOLVE(libxext, XShmQueryExtension);
+    X11_DLIB_RESOLVE(libxext, XShmDetach);
+    X11_DLIB_RESOLVE(libxext, XShmCreateImage);
+    X11_DLIB_RESOLVE(libxext, XShmAttach);
+    X11_DLIB_RESOLVE(libxext, XShmPutImage);
+
+    dlib_close(libx11);
+    dlib_close(libxext);
+#endif
+    return true;
+}
+
 bool x11_window_init(gui_window_t* win)
 {
-    if (!dlib_load_weak("X11") || !dlib_load_weak("Xext")) {
+    static bool libx11_avail = false;
+    DO_ONCE(libx11_avail = x11_init_libs());
+    if (!libx11_avail) {
         rvvm_info("Failed to load libX11!");
         return false;
     }
