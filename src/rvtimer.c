@@ -169,24 +169,55 @@ uint64_t rvtimer_clocksource(uint64_t freq)
 void rvtimer_init(rvtimer_t* timer, uint64_t freq)
 {
     timer->freq = freq;
-    // Some dumb rv32 OSes may ignore higher timecmp bits
-    timer->timecmp = 0xFFFFFFFFU;
     rvtimer_rebase(timer, 0);
+}
+
+uint64_t rvtimer_freq(rvtimer_t* timer)
+{
+    return timer->freq;
 }
 
 uint64_t rvtimer_get(rvtimer_t* timer)
 {
-    return rvtimer_clocksource(timer->freq) - timer->begin;
+    return rvtimer_clocksource(timer->freq) - atomic_load_uint64_ex(&timer->begin, ATOMIC_RELAXED);
 }
 
 void rvtimer_rebase(rvtimer_t* timer, uint64_t time)
 {
-    timer->begin = rvtimer_clocksource(timer->freq) - time;
+    atomic_store_uint64(&timer->begin, rvtimer_clocksource(timer->freq) - time);
 }
 
-bool rvtimer_pending(rvtimer_t* timer)
+void rvtimecmp_init(rvtimecmp_t* cmp, rvtimer_t* timer)
 {
-    return rvtimer_get(timer) >= timer->timecmp;
+    cmp->timer = timer;
+    rvtimecmp_set(cmp, -1);
+}
+
+void rvtimecmp_set(rvtimecmp_t* cmp, uint64_t timecmp)
+{
+    atomic_store_uint64_ex(&cmp->timecmp, timecmp, ATOMIC_RELAXED);
+}
+
+uint64_t rvtimecmp_swap(rvtimecmp_t* cmp, uint64_t timecmp)
+{
+    return atomic_swap_uint64_ex(&cmp->timecmp, timecmp, ATOMIC_RELAXED);
+}
+
+uint64_t rvtimecmp_get(rvtimecmp_t* cmp)
+{
+    return atomic_load_uint64_ex(&cmp->timecmp, ATOMIC_RELAXED);
+}
+
+bool rvtimecmp_pending(rvtimecmp_t* cmp)
+{
+    return rvtimer_get(cmp->timer) >= rvtimecmp_get(cmp);
+}
+
+uint64_t rvtimecmp_delay(rvtimecmp_t* cmp)
+{
+    uint64_t timer = rvtimer_get(cmp->timer);
+    uint64_t timecmp = rvtimecmp_get(cmp);
+    return (timer < timecmp) ? (timecmp - timer) : 0;
 }
 
 void sleep_ms(uint32_t ms)
