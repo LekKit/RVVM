@@ -58,6 +58,9 @@ rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine)
         vm->csr.isa = CSR_MISA_RV32;
     }
 
+    rvtimecmp_init(&vm->mtimecmp, &vm->machine->timer);
+    rvtimecmp_init(&vm->stimecmp, &vm->machine->timer);
+
     riscv_tlb_flush(vm);
     DO_ONCE(riscv_csr_global_init());
     return vm;
@@ -124,9 +127,7 @@ void riscv_update_xlen(rvvm_hart_t* vm)
         case PRIVILEGE_MACHINE:
             rv64 = !!(vm->csr.isa & CSR_MISA_RV64);
             break;
-        case PRIVILEGE_HYPERVISOR:
-            rv64 = bit_check(vm->csr.status, 37);
-            break;
+        case PRIVILEGE_HYPERVISOR: // TODO
         case PRIVILEGE_SUPERVISOR:
             rv64 = bit_check(vm->csr.status, 35);
             break;
@@ -215,9 +216,16 @@ static void riscv_hart_notify(rvvm_hart_t* vm)
     condvar_wake(vm->wfi_cond);
 }
 
+// Set IRQ bit, return true if it wasn't already set
+static inline bool riscv_interrupt_set(rvvm_hart_t* vm, bitcnt_t irq)
+{
+    uint64_t mask = (1ULL << irq);
+    return !!(~atomic_or_uint64_ex(&vm->pending_irqs, mask, ATOMIC_RELAXED) & mask);
+}
+
 void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)
 {
-    if (~atomic_or_uint32(&vm->pending_irqs, 1U << irq) & (1U << irq)) {
+    if (riscv_interrupt_set(vm, irq)) {
         riscv_hart_notify(vm);
     }
 }
@@ -225,19 +233,29 @@ void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq)
 void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq)
 {
     // Discard pending irq
-    atomic_and_uint32(&vm->pending_irqs, ~(1U << irq));
-#ifdef USE_RV64
-    atomic_and_uint64(&vm->csr.ip, ~(1U << irq));
-#else
-    atomic_and_uint32(&vm->csr.ip, ~(1U << irq));
-#endif
+    atomic_and_uint64_ex(&vm->pending_irqs, ~(1U << irq), ATOMIC_RELAXED);
+}
+
+void riscv_hart_check_interrupts(rvvm_hart_t* vm)
+{
+    if (riscv_interrupts_pending(vm)) {
+        riscv_restart_dispatch(vm);
+    }
 }
 
 void riscv_hart_check_timer(rvvm_hart_t* vm)
 {
-    // The hart thread checks if the timer is actually pending
-    atomic_or_uint32(&vm->pending_irqs, 1U << INTERRUPT_MTIMER);
-    riscv_restart_dispatch(vm);
+    // Raise IRQ and kick hart if it's not sleeping in WFI
+    // WFI precisely checks timers by itself
+    if (!condvar_waiters(vm->wfi_cond)) {
+        uint64_t timer = rvtimer_get(&vm->machine->timer);
+        if (timer >= rvtimecmp_get(&vm->mtimecmp) && riscv_interrupt_set(vm, INTERRUPT_MTIMER)) {
+            riscv_restart_dispatch(vm);
+        }
+        if (timer >= rvtimecmp_get(&vm->stimecmp) && riscv_interrupt_set(vm, INTERRUPT_STIMER)) {
+            riscv_restart_dispatch(vm);
+        }
+    }
 }
 
 void riscv_hart_preempt(rvvm_hart_t* vm, uint32_t preempt_ms)
@@ -266,7 +284,7 @@ static inline maxlen_t riscv_cause_irq_mask(rvvm_hart_t* vm)
 static void riscv_handle_irqs(rvvm_hart_t* vm)
 {
     // IRQs that are pending & enabled by mie
-    uint32_t pending_irqs = vm->csr.ip & vm->csr.ie;
+    uint32_t pending_irqs = riscv_interrupts_pending(vm);
     if (unlikely(pending_irqs)) {
         // Target privilege mode
         uint8_t priv = PRIVILEGE_MACHINE;
@@ -315,13 +333,7 @@ void riscv_hart_run(rvvm_hart_t* vm)
         atomic_store_uint32_ex(&vm->wait_event, HART_RUNNING, ATOMIC_RELAXED);
 
         // Handle events
-        vm->csr.ip |= atomic_swap_uint32(&vm->pending_irqs, 0);
         uint32_t events = atomic_swap_uint32(&vm->pending_events, 0);
-
-        if ((vm->csr.ip & (1U << INTERRUPT_MTIMER)) && !rvtimer_pending(&vm->timer)) {
-            vm->csr.ip &= ~(1U << INTERRUPT_MTIMER);
-        }
-
         if (unlikely(events)) {
             if (events & HART_EVENT_PAUSE) {
                 rvvm_info("Hart %p stopped", vm);

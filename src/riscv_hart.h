@@ -35,19 +35,6 @@ void riscv_hart_prepare(rvvm_hart_t* vm);
 void riscv_hart_free(rvvm_hart_t* vm);
 
 /*
- * Hart operations, may be called ONLY on hart thread
- */
-
-// Correctly applies side-effects of switching privileges
-void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode);
-
-// Correctly applies side-effects of switching XLEN
-void riscv_update_xlen(rvvm_hart_t* vm);
-
-// Traps the hart. Should be the last operation before returning to dispatch.
-void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval);
-
-/*
  * Hart operations, may be called on any thread
  */
 
@@ -61,11 +48,39 @@ void riscv_interrupt(rvvm_hart_t* vm, bitcnt_t irq);
 // Clears interrupt in IP csr of the hart
 void riscv_interrupt_clear(rvvm_hart_t* vm, bitcnt_t irq);
 
+// Hart interrupts that are raised externally
+static inline uint64_t riscv_interrupts_raised(rvvm_hart_t* vm)
+{
+    return atomic_load_uint64_ex(&vm->pending_irqs, ATOMIC_RELAXED);
+}
+
 // Signal the vCPU to check for timer interrupts
 void riscv_hart_check_timer(rvvm_hart_t* vm);
 
 // Preempt the hart vCPU thread from consuming CPU for preempt_ms
 void riscv_hart_preempt(rvvm_hart_t* vm, uint32_t preempt_ms);
+
+/*
+ * Hart operations, may be called ONLY on hart thread
+ */
+
+// Hart interrupts that are pending & enabled by ie CSR
+static inline uint64_t riscv_interrupts_pending(rvvm_hart_t* vm)
+{
+    return (riscv_interrupts_raised(vm) | vm->csr.ip) & vm->csr.ie;
+}
+
+// Check interrupts after writing to ie/ip/status CSRs, or after sret/mret
+void riscv_hart_check_interrupts(rvvm_hart_t* vm);
+
+// Correctly applies side-effects of switching privileges
+void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode);
+
+// Correctly applies side-effects of switching XLEN
+void riscv_update_xlen(rvvm_hart_t* vm);
+
+// Traps the hart. Should be the last operation before returning to dispatch.
+void riscv_trap(rvvm_hart_t* vm, bitcnt_t cause, maxlen_t tval);
 
 /*
  * Running the hart
