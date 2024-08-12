@@ -40,7 +40,7 @@ static bool aclint_mswi_read(rvvm_mmio_dev_t* device, void* data, size_t offset,
 
     if (hartid < vector_size(device->machine->harts)) {
         rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
-        write_uint32_le_m(data, bit_cut(vm->csr.ip, 3, 1));
+        write_uint32_le_m(data, (riscv_interrupts_raised(vm) >> INTERRUPT_MSOFTWARE) & 1);
         return true;
     }
 
@@ -54,7 +54,7 @@ static bool aclint_mswi_write(rvvm_mmio_dev_t* device, void* data, size_t offset
 
     if (hartid < vector_size(device->machine->harts)) {
         rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
-        if (read_uint32_le_m(data)) {
+        if (read_uint32_le_m(data) & 1) {
             riscv_interrupt(vm, INTERRUPT_MSOFTWARE);
         } else {
             riscv_interrupt_clear(vm, INTERRUPT_MSOFTWARE);
@@ -77,7 +77,7 @@ static bool aclint_mtimer_read(rvvm_mmio_dev_t* device, void* data, size_t offse
 
     if (hartid < vector_size(device->machine->harts)) {
         rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
-        write_uint64_le_m(data, vm->timer.timecmp);
+        write_uint64_le_m(data, rvtimecmp_get(&vm->mtimecmp));
         return true;
     }
 
@@ -91,15 +91,17 @@ static bool aclint_mtimer_write(rvvm_mmio_dev_t* device, void* data, size_t offs
 
     if (offset == 0x7FF8) {
         rvtimer_rebase(&device->machine->timer, read_uint64_le_m(data));
-        vector_foreach(device->machine->harts, i) {
-            vector_at(device->machine->harts, i)->timer = device->machine->timer;
-        }
         return true;
     }
 
     if (hartid < vector_size(device->machine->harts)) {
         rvvm_hart_t* vm = vector_at(device->machine->harts, hartid);
-        vm->timer.timecmp = read_uint64_le_m(data);
+        rvtimecmp_set(&vm->mtimecmp, read_uint64_le_m(data));
+        if (rvtimecmp_pending(&vm->mtimecmp)) {
+            riscv_interrupt(vm, INTERRUPT_MTIMER);
+        } else {
+            riscv_interrupt_clear(vm, INTERRUPT_MTIMER);
+        }
         return true;
     }
 
