@@ -206,7 +206,6 @@ static void rvvm_reset_machine_state(rvvm_machine_t* machine)
     rvtimer_init(&machine->timer, 10000000); // 10 MHz timer
     vector_foreach(machine->harts, i) {
         rvvm_hart_t* vm = vector_at(machine->harts, i);
-        vm->timer = machine->timer;
         // a0 register & mhartid csr contain hart ID
         vm->csr.hartid = i;
         vm->registers[REGISTER_X10] = i;
@@ -242,10 +241,8 @@ static void* rvvm_eventloop(void* manual)
             if (power_state == RVVM_POWER_ON) {
                 vector_foreach(machine->harts, i) {
                     rvvm_hart_t* vm = vector_at(machine->harts, i);
-                    // Wake hart thread to check timer interrupt.
-                    if ((vm->csr.ie & INTERRUPT_MTIMER) && rvtimer_pending(&vm->timer)) {
-                        riscv_hart_check_timer(vector_at(machine->harts, i));
-                    }
+                    // Сheck hart timer interrupts
+                    riscv_hart_check_timer(vector_at(machine->harts, i));
                     if (rvvm_get_opt(machine, RVVM_OPT_MAX_CPU_CENT) < 100) {
                         uint32_t preempt = 10 - ((10 * rvvm_get_opt(machine, RVVM_OPT_MAX_CPU_CENT) + 9) / 100);
                         riscv_hart_preempt(vm, preempt);
