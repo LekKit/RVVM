@@ -182,16 +182,20 @@ struct rvvm_hart_t {
         maxlen_t hartid;
         maxlen_t isa;
         maxlen_t status;
+        maxlen_t fcsr;
+
+        maxlen_t ie;
+        maxlen_t ip;
+
         maxlen_t edeleg[PRIVILEGES_MAX];
         maxlen_t ideleg[PRIVILEGES_MAX];
-        maxlen_t ie;
         maxlen_t tvec[PRIVILEGES_MAX];
         maxlen_t scratch[PRIVILEGES_MAX];
         maxlen_t epc[PRIVILEGES_MAX];
         maxlen_t cause[PRIVILEGES_MAX];
         maxlen_t tval[PRIVILEGES_MAX];
-        maxlen_t ip;
-        maxlen_t fcsr;
+        uint64_t envcfg[PRIVILEGES_MAX];
+        uint32_t counteren[PRIVILEGES_MAX];
     } csr;
 
 #ifdef USE_JIT
@@ -204,8 +208,11 @@ struct rvvm_hart_t {
 
     thread_ctx_t* thread;
     cond_var_t* wfi_cond;
-    rvtimer_t timer;
-    uint32_t pending_irqs;
+
+    rvtimecmp_t mtimecmp;
+    rvtimecmp_t stimecmp;
+
+    uint64_t pending_irqs;
     uint32_t pending_events;
     uint32_t preempt_ms;
 
