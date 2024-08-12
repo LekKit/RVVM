@@ -584,7 +584,9 @@ bool sdl_window_init(gui_window_t* win)
         return false;
     }
 
+#ifndef _WIN32
     DO_ONCE(setenv("SDL_DEBUG", "1", false));
+#endif
 
     if (sdl_surface) {
         // SDL_PollEvent is very inconvenient to use, SDL1 doesn't support multiwindow at all
