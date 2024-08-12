@@ -33,8 +33,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 // Check for XShm header presence
-#if CHECK_INCLUDE(X11/extensions/XShm.h) && !defined(USE_XSHM)
+#if CHECK_INCLUDE(X11/extensions/XShm.h) && CHECK_INCLUDE(sys/ipc.h) && CHECK_INCLUDE(sys/shm.h)
 #define USE_XSHM
+#else
+#warning Disabling XShm support as <X11/extensions/XShm.h> is unavailable
 #endif
 
 #ifdef USE_X11
@@ -654,6 +656,8 @@ static bool x11_init_libs(void)
     X11_DLIB_RESOLVE(libx11, XInternAtom);
     X11_DLIB_RESOLVE(libx11, XCreateWindow);
 
+    dlib_close(libx11);
+#ifdef USE_XSHM
     dlib_ctx_t* libxext = dlib_open("Xext", DLIB_NAME_PROBE);
 
     X11_DLIB_RESOLVE(libxext, XShmQueryExtension);
@@ -662,8 +666,8 @@ static bool x11_init_libs(void)
     X11_DLIB_RESOLVE(libxext, XShmAttach);
     X11_DLIB_RESOLVE(libxext, XShmPutImage);
 
-    dlib_close(libx11);
     dlib_close(libxext);
+#endif
 #endif
     return true;
 }
