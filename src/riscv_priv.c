@@ -57,10 +57,10 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
                 // Set PC to csr.sepc
                 vm->registers[REGISTER_PC] = vm->csr.epc[PRIVILEGE_SUPERVISOR];
                 // Set privilege mode to SPP
-                if (vm->csr.ip & vm->csr.ie) riscv_restart_dispatch(vm);
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
+                riscv_hart_check_interrupts(vm);
                 return;
             }
             break;
@@ -74,24 +74,30 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
                 // Set PC to csr.mepc
                 vm->registers[REGISTER_PC] = vm->csr.epc[PRIVILEGE_MACHINE];
                 // Set privilege mode to MPP
-                if (vm->csr.ip & vm->csr.ie) riscv_restart_dispatch(vm);
                 riscv_switch_priv(vm, next_priv);
                 // If we aren't unwinded to dispatch decrement PC by instruction size
                 vm->registers[REGISTER_PC] -= 4;
+                riscv_hart_check_interrupts(vm);
                 return;
             }
             break;
         case RV_PRIV_S_WFI:
             // Resume execution for locally enabled interrupts pending at any privilege level
-            if (!(vm->csr.ip & vm->csr.ie)) {
+            if (!riscv_interrupts_pending(vm)) {
                 // Stall the hart until an interrupt might need servicing
                 while (atomic_load_uint32(&vm->wait_event)) {
-                    if (vm->csr.ie & (1 << INTERRUPT_MTIMER)) {
+                    if (vm->csr.ie & ((1 << INTERRUPT_MTIMER) | (1 << INTERRUPT_STIMER))) {
                         // Calculate sleep period
-                        uint64_t timestamp = rvtimer_get(&vm->timer);
-                        if (vm->timer.timecmp > timestamp) {
-                            timestamp = (vm->timer.timecmp - timestamp) * 1000000000 / vm->timer.freq;
-                            condvar_wait_ns(vm->wfi_cond, timestamp);
+                        uint64_t delay = -1;
+                        if (vm->csr.ie & (1 << INTERRUPT_MTIMER)) {
+                            delay = EVAL_MIN(delay, rvtimecmp_delay(&vm->mtimecmp));
+                        }
+                        if (vm->csr.ie & (1 << INTERRUPT_STIMER)) {
+                            delay = EVAL_MIN(delay, rvtimecmp_delay(&vm->stimecmp));
+                        }
+                        if (delay) {
+                            delay = delay * 1000000000 / rvtimer_freq(&vm->machine->timer);
+                            condvar_wait_ns(vm->wfi_cond, delay);
                         }
                         // Hint interrupt dispatcher to check actual timer expiration
                         riscv_hart_check_timer(vm);
@@ -102,7 +108,6 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
                     }
                 }
             }
-            riscv_restart_dispatch(vm);
             return;
     }
 
@@ -214,7 +219,7 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
                         return;
                     case 0x4: { // cbo.zero
                         const regid_t rs1 = bit_cut(insn, 15, 5);
-                        virt_addr_t addr = vm->registers[rs1] & ~63ULL;
+                        const virt_addr_t addr = vm->registers[rs1] & ~63ULL;
                         void* ptr = riscv_vma_translate_w(vm, addr, NULL, 64);
                         if (ptr) memset(ptr, 0, 64);
                         return;
