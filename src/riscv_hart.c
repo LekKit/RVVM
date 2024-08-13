@@ -109,13 +109,11 @@ rvvm_addr_t riscv_hart_run_userland(rvvm_hart_t* vm)
 
 void riscv_switch_priv(rvvm_hart_t* vm, uint8_t priv_mode)
 {
-    // true if one is S/U, other is M/H
-    bool mmu_toggle = (vm->priv_mode & 2) != (priv_mode & 2);
-    vm->priv_mode = priv_mode;
-    riscv_update_xlen(vm);
-
-    // May unwind to dispatch
-    if (mmu_toggle) riscv_tlb_flush(vm);
+    if (vm->priv_mode != priv_mode) {
+        vm->priv_mode = priv_mode;
+        riscv_update_xlen(vm);
+        riscv_tlb_flush(vm);
+    }
 }
 
 void riscv_update_xlen(rvvm_hart_t* vm)
