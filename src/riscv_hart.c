@@ -42,21 +42,8 @@ rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine)
     vm->mem = machine->mem;
     vm->rv64 = machine->rv64;
     vm->priv_mode = PRIVILEGE_MACHINE;
-    // Delegate exceptions from M to S
-    vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
-    vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
 
-    if (vm->rv64) {
-#ifdef USE_RV64
-        // 0x2A00000000 for H-mode
-        vm->csr.status = 0xA00000000;
-        vm->csr.isa = CSR_MISA_RV64;
-#else
-        rvvm_warn("Requested RV64 in RV32-only build");
-#endif
-    } else {
-        vm->csr.isa = CSR_MISA_RV32;
-    }
+    riscv_csr_init(vm);
 
     rvtimecmp_init(&vm->mtimecmp, &vm->machine->timer);
     rvtimecmp_init(&vm->stimecmp, &vm->machine->timer);
