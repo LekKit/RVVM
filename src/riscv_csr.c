@@ -669,6 +669,11 @@ bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op)
         return false;
     }
 
+    if (!vm->rv64) {
+        // Zero upper input bits on CSR access
+        // TODO: Make this better somehow
+        *dest = (uint32_t)*dest;
+    }
     bool ret = riscv_csr_op_internal(vm, csr_id, dest, op);
     if (!vm->rv64) {
         // Sign-extend the result into the register
