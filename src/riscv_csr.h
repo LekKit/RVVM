@@ -291,6 +291,8 @@ static inline bool riscv_csr_readonly(uint32_t csr_id)
 // Returns false on failure (To raise exception afterwards)
 bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op);
 
+void riscv_csr_init(rvvm_hart_t* vm);
+
 /*
  * Feature enablement checks
  */

@@ -708,3 +708,20 @@ bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op)
     return ret;
 }
 
+void riscv_csr_init(rvvm_hart_t* vm)
+{
+    // Delegate exceptions from M to S
+    vm->csr.edeleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
+    vm->csr.ideleg[PRIVILEGE_HYPERVISOR] = 0xFFFFFFFF;
+
+    if (vm->rv64) {
+#ifdef USE_RV64
+        vm->csr.status = 0xA00000000;
+        vm->csr.isa = CSR_MISA_RV64;
+#else
+        rvvm_warn("Requested RV64 in RV32-only build");
+#endif
+    } else {
+        vm->csr.isa = CSR_MISA_RV32;
+    }
+}
