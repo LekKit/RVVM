@@ -15,7 +15,7 @@ RISC-V CPU & System software implementation written in С
 - Networking
 
 ## 💡 Tell me more...
-- Feature-complete RV64IMAFDC instruction set
+- Feature-complete **rv64imafdcb** instruction set, Zkr/Zicbom/Zicboz/Sstc extensions
 - Multicore support (SMP), SV32/SV39/SV48/SV57 MMU
 - Tracing RVJIT with x86_64, ARM64, RISC-V, i386, ARM backends
   (faster than QEMU, yay!)
@@ -123,10 +123,11 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 | [**nebulka1**](https://github.com/nebulka1)                 | Relative input mode | |
 
 ## 🔍 TODO
-- Implement Sstimecmp, Svpbmt, Svnapot extensions
+- Implement Svpbmt, Svnapot extensions
 - Sparse block image format with compression/deduplication
 - Suspend/resume to file, VM migration
 - Linux userspace binary emulation (WIP)
+- USB3.0 XHCI, USB passthrough
 - Sound (HD Audio or else)
 - More RVJIT optimizations, shared caches
 - FPU JIT (Complicated AF to make a conformant one)
