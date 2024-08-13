@@ -358,9 +358,9 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 
 #ifdef USE_FPU
 
-static int fpu_get_exceptions()
+static uint32_t fpu_get_exceptions()
 {
-    int ret = 0;
+    uint32_t ret = 0;
     int exc = fetestexcept(FE_ALL_EXCEPT);
     if (exc & FE_INEXACT)   ret |= FFLAG_NX;
     if (exc & FE_UNDERFLOW) ret |= FFLAG_UF;
@@ -382,13 +382,8 @@ static void fpu_set_exceptions(uint32_t flags)
     if (exc != 0) feraiseexcept(exc);
 }
 
-uint8_t fpu_set_rm(rvvm_hart_t* vm, uint8_t newrm)
+static void fpu_set_rm(uint8_t newrm)
 {
-    if (likely(newrm == RM_DYN)) {
-        /* do nothing - rounding mode should be already set with csr */
-        return RM_DYN;
-    }
-
     switch (newrm) {
         case RM_RNE:
             fesetround(FE_TONEAREST);
@@ -403,18 +398,25 @@ uint8_t fpu_set_rm(rvvm_hart_t* vm, uint8_t newrm)
             fesetround(FE_UPWARD);
             break;
         case RM_RMM:
-            /* TODO: handle this somehow? */
+            // TODO: Handle this somehow?
             fesetround(FE_TONEAREST);
             break;
-        default:
-            return RM_INVALID;
     }
+}
 
-    uint8_t oldrm = bit_cut(vm->csr.fcsr, 5, 3);
-    if (unlikely(oldrm > RM_RMM)) {
-        return RM_INVALID;
+static void riscv_csr_set_fcsr(rvvm_hart_t* vm, maxlen_t fcsr)
+{
+    if (fcsr != vm->csr.fcsr) {
+        if (~bit_cut(fcsr, 0, 5) & fpu_get_exceptions()) {
+            // Clear host-set FPU exceptions
+            fpu_set_exceptions(bit_cut(fcsr, 0, 5));
+        }
+        if (bit_cut(fcsr, 5, 3) != bit_cut(vm->csr.fcsr, 5, 3)) {
+            // Set host rounding mode
+            fpu_set_rm(bit_cut(fcsr, 5, 3));
+        }
+        vm->csr.fcsr = fcsr;
     }
-    return oldrm;
 }
 
 static bool riscv_csr_fflags(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
@@ -422,17 +424,10 @@ static bool riscv_csr_fflags(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     if (!fpu_is_enabled(vm)) {
         return false;
     }
-    maxlen_t val = fpu_get_exceptions();
-    maxlen_t oldval = val;
-    riscv_csr_helper(vm, &val, dest, op);
-    if (val != oldval) {
-        fpu_set_fs(vm, FS_DIRTY);
-        fpu_set_exceptions(val);
-    }
-    vm->csr.fcsr &= ~((1 << 5) - 1);
-    vm->csr.fcsr |= val;
-    vm->csr.fcsr &= 0xff;
-    *dest &= 0x1f;
+    vm->csr.fcsr |= fpu_get_exceptions();
+    maxlen_t fcsr = vm->csr.fcsr;
+    riscv_csr_helper_masked(vm, &fcsr, dest, 0x1F, op);
+    riscv_csr_set_fcsr(vm, fcsr);
     return true;
 }
 
@@ -441,16 +436,11 @@ static bool riscv_csr_frm(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     if (!fpu_is_enabled(vm)) {
         return false;
     }
-    maxlen_t val = vm->csr.fcsr >> 5;
-    maxlen_t oldval = val;
-    riscv_csr_helper(vm, &val, dest, op);
-    if (val != oldval) {
-        fpu_set_fs(vm, FS_DIRTY);
-        fpu_set_rm(vm, val & ((1 << 3) - 1));
-    }
-    vm->csr.fcsr = (vm->csr.fcsr & ((1 << 5) - 1)) | (val << 5);
-    vm->csr.fcsr &= 0xff;
-    *dest &= 0x7;
+    maxlen_t fcsr = vm->csr.fcsr;
+    maxlen_t frm = fcsr >> 5;
+    riscv_csr_helper_masked(vm, &frm, dest, 0x7, op);
+    fcsr = bit_replace(fcsr, 5, 3, frm);
+    riscv_csr_set_fcsr(vm, fcsr);
     return true;
 }
 
@@ -459,17 +449,10 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     if (!fpu_is_enabled(vm)) {
         return false;
     }
-    maxlen_t val = vm->csr.fcsr | fpu_get_exceptions();
-    maxlen_t oldval = val;
-    riscv_csr_helper(vm, &val, dest, op);
-    if (val != oldval) {
-        fpu_set_fs(vm, FS_DIRTY);
-        fpu_set_rm(vm, bit_cut(val, 5, 3));
-        fpu_set_exceptions(val);
-    }
-    vm->csr.fcsr = val;
-    vm->csr.fcsr &= 0xff;
-    *dest &= 0xff;
+    vm->csr.fcsr |= fpu_get_exceptions();
+    maxlen_t fcsr = vm->csr.fcsr;
+    riscv_csr_helper_masked(vm, &fcsr, dest, 0xFF, op);
+    riscv_csr_set_fcsr(vm, fcsr);
     return true;
 }
 

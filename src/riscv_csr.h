@@ -254,8 +254,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RM_DYN 7 // Round to instruction's rm field
 #define RM_INVALID 255 // Invalid rounding mode was specified - should cause a trap
 
-uint8_t fpu_set_rm(rvvm_hart_t* vm, uint8_t newrm);
-
 static forceinline bool fpu_is_enabled(rvvm_hart_t* vm)
 {
     return bit_cut(vm->csr.status, 13, 2) != FS_OFF;
