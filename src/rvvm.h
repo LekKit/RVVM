@@ -194,8 +194,9 @@ struct rvvm_hart_t {
         maxlen_t epc[PRIVILEGES_MAX];
         maxlen_t cause[PRIVILEGES_MAX];
         maxlen_t tval[PRIVILEGES_MAX];
+        maxlen_t counteren[PRIVILEGES_MAX];
         uint64_t envcfg[PRIVILEGES_MAX];
-        uint32_t counteren[PRIVILEGES_MAX];
+        uint64_t mseccfg;
     } csr;
 
 #ifdef USE_JIT
