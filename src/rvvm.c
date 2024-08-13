@@ -74,20 +74,22 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
         fdt_node_add_prop_u32(cpu, "reg", i);
         fdt_node_add_prop(cpu, "compatible", "lekkit,rvvm\0riscv\0", 18);
         fdt_node_add_prop_u32(cpu, "clock-frequency", 3000000000);
+        fdt_node_add_prop_u32(cpu, "riscv,cboz-block-size", 64);
+        fdt_node_add_prop_u32(cpu, "riscv,cbom-block-size", 64);
 #ifdef USE_RV64
         if (vector_at(machine->harts, i)->rv64) {
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdc_zicsr_zifencei");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imafdcb_zicsr_zifencei_zkr_zicboz_zicbom_svadu_sstc");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imac_zicsr_zifencei");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv64imacb_zicsr_zifencei_zkr_zicboz_zicbom_svadu_sstc");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv39");
         } else {
 #endif
 #ifdef USE_FPU
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdc_zicsr_zifencei");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imafdcb_zicsr_zifencei_zkr_zicboz_zicbom_svadu_sstc");
 #else
-            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imac_zicsr_zifencei");
+            fdt_node_add_prop_str(cpu, "riscv,isa", "rv32imacb_zicsr_zifencei_zkr_zicboz_zicbom_svadu_sstc");
 #endif
             fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv32");
 #ifdef USE_RV64
