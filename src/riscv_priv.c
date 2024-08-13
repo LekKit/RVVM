@@ -67,6 +67,10 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         case RV_PRIV_S_MRET:
             if (vm->priv_mode >= PRIVILEGE_MACHINE) {
                 uint8_t next_priv = bit_cut(vm->csr.status, 11, 2);
+                if (next_priv < PRIVILEGE_MACHINE) {
+                    // Clear MPRV when returning to less privileged mode
+                    vm->csr.status &= ~CSR_STATUS_MPRV;
+                }
                 // Set MPP to U
                 vm->csr.status = bit_replace(vm->csr.status, 11, 2, PRIVILEGE_USER);
                 // Set MIE to MPIE
@@ -212,18 +216,29 @@ void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
             if (likely(!bit_cut(insn, 7, 5))) {
                 switch (insn >> 20) {
                     case 0x0: // cbo.inval
+                        if (riscv_csr_cbi_enabled(vm)) {
+                            // Simply use a fence, all emulated devices are coherent
+                            atomic_fence();
+                            return;
+                        }
+                        break;
                     case 0x1: // cbo.clean
                     case 0x2: // cbo.flush
-                        // Simply use a fence, all emulated devices are coherent
-                        atomic_fence();
-                        return;
-                    case 0x4: { // cbo.zero
-                        const regid_t rs1 = bit_cut(insn, 15, 5);
-                        const virt_addr_t addr = vm->registers[rs1] & ~63ULL;
-                        void* ptr = riscv_vma_translate_w(vm, addr, NULL, 64);
-                        if (ptr) memset(ptr, 0, 64);
-                        return;
-                    }
+                        if (riscv_csr_cbcf_enabled(vm)) {
+                            // Simply use a fence, all emulated devices are coherent
+                            atomic_fence();
+                            return;
+                        }
+                        break;
+                    case 0x4: // cbo.zero
+                        if (riscv_csr_cbz_enabled(vm)) {
+                            const regid_t rs1 = bit_cut(insn, 15, 5);
+                            const virt_addr_t addr = vm->registers[rs1] & ~63ULL;
+                            void* ptr = riscv_vma_translate_w(vm, addr, NULL, 64);
+                            if (ptr) memset(ptr, 0, 64);
+                            return;
+                        }
+                        break;
                 }
             }
             break;
