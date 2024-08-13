@@ -27,53 +27,169 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "fpu_ops.h"
 #endif
 
-riscv_csr_handler_t riscv_csr_list[4096];
-
-// No N extension, U_x bits are hardwired to 0
-#define CSR_MSTATUS_MASK 0x7E79AA
-#define CSR_SSTATUS_MASK 0x0C6122
-
-#define CSR_STATUS_FS_MASK 0x6000
-
-#define CSR_MEIP_MASK    0xAAA
-#define CSR_SEIP_MASK    0x222
-
-static inline void csr_helper(maxlen_t* csr, maxlen_t* dest, uint8_t op)
+// Get RVVM commit in a mimpid hex form
+static uint32_t rvvm_mimpid(void)
 {
-    maxlen_t tmp = *csr;
-    switch (op) {
-    case CSR_SWAP:
-        *csr = *dest;
-        break;
-    case CSR_SETBITS:
-        *csr |= *dest;
-        break;
-    case CSR_CLEARBITS:
-        *csr &= (~*dest);
-        break;
+    const char* version_string = RVVM_VERSION;
+    const char* dash = rvvm_strfind(version_string, "-");
+    if (dash) {
+        uint32_t commit_hex = str_to_uint_base(dash + 1, NULL, 16) << 4;
+        if (rvvm_strfind(version_string, "dirty")) {
+            commit_hex |= 0xD;
+        }
+        return commit_hex;
     }
-    *dest = tmp;
+    return 0;
 }
 
-static inline void csr_helper_masked(maxlen_t* csr, maxlen_t* dest, maxlen_t mask, uint8_t op)
+// Make a misa CSR value from ISA string
+static uint64_t riscv_mkmisa(const char* str)
+{
+    uint64_t ret = 0;
+    if (rvvm_strfind(str, "rv64")) {
+        ret |= CSR_MISA_RV64;
+        str += 4;
+    } else if (rvvm_strfind(str, "rv32")) {
+        ret |= CSR_MISA_RV32;
+        str += 4;
+    }
+    while (*str && *str != '_') {
+        if (*str >= 'a' && *str <= 'z') {
+            ret |= (1 << (*str - 'a'));
+        }
+        str++;
+    }
+    return ret;
+}
+
+static inline bool riscv_csr_helper_masked(maxlen_t* csr, maxlen_t* dest, maxlen_t mask, uint8_t op)
 {
     maxlen_t tmp = *csr;
     switch (op) {
-    case CSR_SWAP:
-        *csr &= (~mask);
-        *csr |= (*dest & mask);
-        break;
-    case CSR_SETBITS:
-        *csr |= (*dest & mask);
-        break;
-    case CSR_CLEARBITS:
-        *csr &= (~(*dest & mask));
-        break;
+        case CSR_SWAP:
+            *csr &= (~mask);
+            *csr |= (*dest & mask);
+            break;
+        case CSR_SETBITS:
+            *csr |= (*dest & mask);
+            break;
+        case CSR_CLEARBITS:
+            *csr &= (~(*dest & mask));
+            break;
     }
     *dest = tmp & mask;
+    return true;
 }
 
-static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
+static inline bool riscv_csr_helper(maxlen_t* csr, maxlen_t* dest, uint8_t op)
+{
+    maxlen_t tmp = *csr;
+    switch (op) {
+        case CSR_SWAP:
+            *csr = *dest;
+            break;
+        case CSR_SETBITS:
+            *csr |= *dest;
+            break;
+        case CSR_CLEARBITS:
+            *csr &= ~(*dest);
+            break;
+    }
+    *dest = tmp;
+    return true;
+}
+
+static inline bool riscv_csr_helper_l(rvvm_hart_t* vm, uint64_t* csr, maxlen_t* dest, uint64_t mask, uint8_t op)
+{
+    maxlen_t tmp = *csr;
+    riscv_csr_helper_masked(&tmp, dest, mask, op);
+    if (vm->rv64) {
+        *csr = tmp;
+    } else {
+        *csr = bit_replace(*csr, 0, 32, tmp);
+    }
+    return true;
+}
+
+static inline bool riscv_csr_helper_h(rvvm_hart_t* vm, uint64_t* csr, maxlen_t* dest, uint64_t mask, uint8_t op)
+{
+    if (!vm->rv64) {
+        maxlen_t tmp = (*csr >> 32);
+        riscv_csr_helper_masked(&tmp, dest, mask >> 32, op);
+        *csr = bit_replace(*csr, 32, 32, tmp);
+        return true;
+    }
+    return false;
+}
+
+static inline bool riscv_csr_const(maxlen_t* dest, maxlen_t val)
+{
+    *dest = val;
+    return true;
+}
+
+static inline bool riscv_csr_zero(maxlen_t* dest)
+{
+    return riscv_csr_const(dest, 0);
+}
+
+static inline bool riscv_csr_zero_h(rvvm_hart_t* vm, maxlen_t* dest)
+{
+    if (!vm->rv64) {
+        return riscv_csr_const(dest, 0);
+    }
+    return false;
+}
+
+static inline bool riscv_csr_time(rvvm_hart_t* vm, maxlen_t* dest)
+{
+    if (riscv_csr_timer_enabled(vm)) {
+        return riscv_csr_const(dest, rvtimer_get(&vm->machine->timer));
+    }
+    return false;
+}
+
+static inline bool riscv_csr_timeh(rvvm_hart_t* vm, maxlen_t* dest)
+{
+    if (!vm->rv64 && riscv_csr_timer_enabled(vm)) {
+        return riscv_csr_const(dest, rvtimer_get(&vm->machine->timer) >> 32);
+    }
+    return false;
+}
+
+static inline bool riscv_csr_seed(rvvm_hart_t* vm, maxlen_t* dest)
+{
+    if (riscv_csr_seed_enabled(vm)) {
+        uint16_t seed = 0;
+        rvvm_randombytes(&seed, sizeof(seed));
+        return riscv_csr_const(dest, seed);
+    }
+    return false;
+}
+
+static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+{
+    UNUSED(op);
+#ifdef USE_RV64
+    if (vm->rv64 && (*dest & CSR_MISA_RV32)) {
+        vm->csr.isa &= (~CSR_MISA_RV64);
+        vm->csr.isa |= CSR_MISA_RV32;
+        riscv_update_xlen(vm);
+    } else if (!vm->rv64 && (*dest & (CSR_MISA_RV64 >> 32))) {
+        vm->csr.isa &= (~CSR_MISA_RV32);
+        vm->csr.isa |= CSR_MISA_RV64;
+        riscv_update_xlen(vm);
+    }
+#endif
+#ifdef USE_FPU
+    *dest = vm->csr.isa | riscv_mkmisa("imafdcbsu");
+#else
+    *dest = vm->csr.isa | riscv_mkmisa("imacbsu");
+#endif
+    return true;
+}
+
+static bool riscv_csr_status(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
 {
     maxlen_t new_status = *dest;
 #ifdef USE_FPU
@@ -116,246 +232,63 @@ static void csr_status_helper(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, ui
         riscv_update_xlen(vm);
     }
 #endif
-    csr_helper_masked(&vm->csr.status, dest, mask, op);
+    riscv_csr_helper_masked(&vm->csr.status, dest, mask, op);
     maxlen_t old_status = *dest;
 #ifdef USE_RV64
     if (vm->rv64) *dest |= vm->csr.status & 0x3F00000000ULL;
 #endif
     if (bit_cut(new_status, 0, 4) & ~bit_cut(old_status, 0, 4)) {
         // IRQ enable bits were set
-        riscv_restart_dispatch(vm);
+        riscv_hart_check_interrupts(vm);
+    }
+    return true;
+}
+
+static inline bool riscv_csr_ie(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
+{
+    riscv_csr_helper_masked(&vm->csr.ie, dest, mask, op);
+    riscv_hart_check_interrupts(vm);
+    return true;
+}
+
+static inline bool riscv_csr_ip(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
+{
+    riscv_csr_helper_masked(&vm->csr.ip, dest, mask, op);
+    *dest |= (riscv_interrupts_raised(vm) & mask);
+    riscv_hart_check_interrupts(vm);
+    return true;
+}
+
+static void riscv_csr_stimecmp_set(rvvm_hart_t* vm, uint64_t stimecmp)
+{
+    rvtimecmp_set(&vm->stimecmp, stimecmp);
+    if (rvtimecmp_pending(&vm->stimecmp)) {
+        riscv_interrupt(vm, INTERRUPT_STIMER);
+    } else {
+        riscv_interrupt_clear(vm, INTERRUPT_STIMER);
     }
 }
 
-static bool riscv_csr_illegal(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+static inline bool riscv_csr_stimecmp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
-    UNUSED(vm);
-    UNUSED(dest);
-    UNUSED(op);
+    if (riscv_csr_sstc_enabled(vm)) {
+        uint64_t stimecmp = rvtimecmp_get(&vm->stimecmp);
+        riscv_csr_helper_l(vm, &stimecmp, dest, -1ULL, op);
+        riscv_csr_stimecmp_set(vm, stimecmp);
+        return true;
+    }
     return false;
 }
 
-// For zero-hardwired registers we did not yet implement
-static bool riscv_csr_zero(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+static inline bool riscv_csr_stimecmph(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
-    UNUSED(vm);
-    bool csr_read = false;
-    // Writing a hardwired zero CSR should trap
-    switch (op) {
-        case CSR_SWAP:
-            csr_read = false;
-            break;
-        case CSR_SETBITS:
-            csr_read = (*dest == 0);
-            break;
-        case CSR_CLEARBITS:
-            csr_read = true;
-            break;
+    if (!vm->rv64 && riscv_csr_sstc_enabled(vm)) {
+        uint64_t stimecmp = rvtimecmp_get(&vm->stimecmp);
+        riscv_csr_helper_h(vm, &stimecmp, dest, -1ULL, op);
+        riscv_csr_stimecmp_set(vm, stimecmp);
+        return true;
     }
-    *dest = 0;
-    return csr_read;
-}
-
-static bool riscv_csr_zero_rw(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(vm);
-    UNUSED(op);
-    *dest = 0;
-    return true;
-}
-
-/*
- * Machine CSRs
- */
-
-static uint32_t riscv_mkmisa(const char* str)
-{
-    uint32_t ret = 0;
-    while (*str) {
-        ret |= (1 << (*str - 'A'));
-        str++;
-    }
-    return ret;
-}
-
-static bool riscv_csr_marchid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(vm);
-    UNUSED(op);
-    *dest = 0x5256564D; // 'RVVM'
-    return true;
-}
-
-static bool riscv_csr_mimpid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    const char* str = RVVM_VERSION;
-    uint32_t tmp = 0;
-    UNUSED(vm);
-    UNUSED(op);
-    for (size_t i=0; str[i]; ++i) if (str[i] == '-') {
-        for (size_t j = i + 1; str[j] && str[j] != '-'; ++j) {
-            tmp <<= 4;
-            if (str[j] >= '0' && str[j] <= '9') {
-                tmp |= str[j] - '0';
-            } else if (str[j] >= 'a' && str[j] <= 'f') {
-                tmp |= str[j] - 'a' + 0xA;
-            } else if (str[j] >= 'A' && str[j] <= 'F') {
-                tmp |= str[j] - 'A' + 0xA;
-            } else {
-                if (str[j] != '-') tmp = 0;
-                break;
-            }
-        }
-        break;
-    }
-    *dest = tmp;
-    return true;
-}
-
-static bool riscv_csr_mhartid(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(vm);
-    UNUSED(op);
-    *dest = vm->csr.hartid;
-    return true;
-}
-
-static bool riscv_csr_mstatus(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_status_helper(vm, dest, CSR_MSTATUS_MASK, op);
-    return true;
-}
-
-static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(op);
-#ifdef USE_RV64
-    if (vm->rv64 && (*dest & CSR_MISA_RV32)) {
-        vm->csr.isa &= (~CSR_MISA_RV64);
-        vm->csr.isa |= CSR_MISA_RV32;
-        riscv_update_xlen(vm);
-    } else if (!vm->rv64 && (*dest & (CSR_MISA_RV64 >> 32))) {
-        vm->csr.isa &= (~CSR_MISA_RV32);
-        vm->csr.isa |= CSR_MISA_RV64;
-        riscv_update_xlen(vm);
-    }
-#endif
-#ifdef USE_FPU
-    *dest = vm->csr.isa | riscv_mkmisa("IMAFDCSU");
-#else
-    *dest = vm->csr.isa | riscv_mkmisa("IMACSU");
-#endif
-    return true;
-}
-
-static bool riscv_csr_medeleg(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.edeleg[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mideleg(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.ideleg[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper_masked(&vm->csr.ie, dest, CSR_MEIP_MASK, op);
-    riscv_restart_dispatch(vm);
-    return true;
-}
-
-static bool riscv_csr_mtvec(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.tvec[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mscratch(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.scratch[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mepc(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.epc[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mcause(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.cause[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mtval(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.tval[PRIVILEGE_MACHINE], dest, op);
-    return true;
-}
-
-static bool riscv_csr_mip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper_masked(&vm->csr.ip, dest, CSR_MEIP_MASK, op);
-    riscv_restart_dispatch(vm);
-    return true;
-}
-
-/*
- * Supervisor CSRs
- */
-
-static bool riscv_csr_sstatus(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_status_helper(vm, dest, CSR_SSTATUS_MASK, op);
-    return true;
-}
-
-static bool riscv_csr_sie(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper_masked(&vm->csr.ie, dest, CSR_SEIP_MASK, op);
-    riscv_restart_dispatch(vm);
-    return true;
-}
-
-static bool riscv_csr_stvec(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.tvec[PRIVILEGE_SUPERVISOR], dest, op);
-    return true;
-}
-
-static bool riscv_csr_sscratch(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.scratch[PRIVILEGE_SUPERVISOR], dest, op);
-    return true;
-}
-
-static bool riscv_csr_sepc(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.epc[PRIVILEGE_SUPERVISOR], dest, op);
-    return true;
-}
-
-static bool riscv_csr_scause(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.cause[PRIVILEGE_SUPERVISOR], dest, op);
-    return true;
-}
-
-static bool riscv_csr_stval(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper(&vm->csr.tval[PRIVILEGE_SUPERVISOR], dest, op);
-    return true;
-}
-
-static bool riscv_csr_sip(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    csr_helper_masked(&vm->csr.ip, dest, CSR_SEIP_MASK, op);
-    riscv_restart_dispatch(vm);
-    return true;
+    return false;
 }
 
 static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
@@ -365,7 +298,7 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 #ifdef USE_RV64
     if (vm->rv64) {
         maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 60) | (vm->root_page_table >> MMU_PAGE_SHIFT);
-        csr_helper(&satp, dest, op);
+        riscv_csr_helper(&satp, dest, op);
         vm->mmu_mode = satp >> 60;
         if (vm->mmu_mode < CSR_SATP_MODE_SV39
          || vm->mmu_mode > CSR_SATP_MODE_SV57
@@ -377,7 +310,7 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     } else {
 #endif
         maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 31) | (vm->root_page_table >> MMU_PAGE_SHIFT);
-        csr_helper(&satp, dest, op);
+        riscv_csr_helper(&satp, dest, op);
         vm->mmu_mode = satp >> 31;
         vm->root_page_table = (satp & bit_mask(22)) << MMU_PAGE_SHIFT;
 #ifdef USE_RV64
@@ -386,15 +319,11 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     /*
     * We currently cache physical addresses in TLB as well, so switching
     * between bare/virtual modes will pollute the address space with illegal entries
-    * Hence, a TLB flush is required on switch
+    * Hence, a TLB flush is required on MMU switch
     */
     if (!!vm->mmu_mode != !!prev_mmu) riscv_tlb_flush(vm);
     return true;
 }
-
-/*
- * Userspace CSRs
- */
 
 #ifdef USE_FPU
 
@@ -464,7 +393,7 @@ static bool riscv_csr_fflags(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     }
     maxlen_t val = fpu_get_exceptions();
     maxlen_t oldval = val;
-    csr_helper(&val, dest, op);
+    riscv_csr_helper(&val, dest, op);
     if (val != oldval) {
         fpu_set_fs(vm, FS_DIRTY);
         fpu_set_exceptions(val);
@@ -483,7 +412,7 @@ static bool riscv_csr_frm(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     }
     maxlen_t val = vm->csr.fcsr >> 5;
     maxlen_t oldval = val;
-    csr_helper(&val, dest, op);
+    riscv_csr_helper(&val, dest, op);
     if (val != oldval) {
         fpu_set_fs(vm, FS_DIRTY);
         fpu_set_rm(vm, val & ((1 << 3) - 1));
@@ -501,7 +430,7 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     }
     maxlen_t val = vm->csr.fcsr | fpu_get_exceptions();
     maxlen_t oldval = val;
-    csr_helper(&val, dest, op);
+    riscv_csr_helper(&val, dest, op);
     if (val != oldval) {
         fpu_set_fs(vm, FS_DIRTY);
         fpu_set_rm(vm, bit_cut(val, 5, 3));
@@ -515,132 +444,236 @@ static bool riscv_csr_fcsr(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 
 #endif
 
-static bool riscv_csr_seed(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
+static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op)
 {
-    UNUSED(op); UNUSED(vm);
-    *dest = 0;
-    rvvm_randombytes(dest, 2);
-    return true;
-}
-
-static bool riscv_csr_time(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(op);
-    *dest = rvtimer_get(&vm->machine->timer);
-    return true;
-}
-
-static bool riscv_csr_timeh(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
-{
-    UNUSED(op);
-    if (vm->rv64) return false;
-    *dest = rvtimer_get(&vm->machine->timer) >> 32;
-    return true;
-}
-
-void riscv_csr_global_init()
-{
-    for (size_t i=0; i<4096; ++i) riscv_csr_list[i] = riscv_csr_illegal;
-
-    // Machine Information Registers
-    riscv_csr_list[0xF11] = riscv_csr_zero;     // mvendorid
-    riscv_csr_list[0xF12] = riscv_csr_marchid;  // marchid
-    riscv_csr_list[0xF13] = riscv_csr_mimpid;   // mimpid
-    riscv_csr_list[0xF14] = riscv_csr_mhartid;  // mhartid
-
-    // Machine Trap Setup
-    riscv_csr_list[0x300] = riscv_csr_mstatus;  // mstatus
-    riscv_csr_list[0x301] = riscv_csr_misa;     // misa
-    riscv_csr_list[0x302] = riscv_csr_medeleg;  // medeleg
-    riscv_csr_list[0x303] = riscv_csr_mideleg;  // mideleg
-    riscv_csr_list[0x304] = riscv_csr_mie;      // mie
-    riscv_csr_list[0x305] = riscv_csr_mtvec;    // mtvec
-    riscv_csr_list[0x306] = riscv_csr_zero_rw;  // mcounteren
-
-    // Machine Trap Handling
-    riscv_csr_list[0x340] = riscv_csr_mscratch; // mscratch
-    riscv_csr_list[0x341] = riscv_csr_mepc;     // mepc
-    riscv_csr_list[0x342] = riscv_csr_mcause;   // mcause
-    riscv_csr_list[0x343] = riscv_csr_mtval;    // mtval
-    riscv_csr_list[0x344] = riscv_csr_mip;      // mip
-
-    // Machine Memory Protection
-    for (size_t i=0x3A0; i<0x3A4; ++i)
-        riscv_csr_list[i] = riscv_csr_zero_rw;  // pmpcfg
-    for (size_t i=0x3B0; i<0x3C0; ++i)
-        riscv_csr_list[i] = riscv_csr_zero_rw;  // pmpaddr
-
-    // Machine Counter/Timers
-    riscv_csr_list[0xB00] = riscv_csr_zero;     // mcycle
-    riscv_csr_list[0xB02] = riscv_csr_zero;     // minstret
-    riscv_csr_list[0xB80] = riscv_csr_zero;     // mcycleh
-    riscv_csr_list[0xB82] = riscv_csr_zero;     // minstreth
-    for (size_t i=0xB03; i<0xB20; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // mhpmcounter
-    for (size_t i=0xB83; i<0xBA0; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // mhpmcounterh
-
-    // Machine Counter Setup
-    riscv_csr_list[0x320] = riscv_csr_zero_rw;  // mcountinhibit
-    for (size_t i=0x323; i<0x340; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // mhpmevent
-
-
-
-    // Supervisor Trap Setup
-    riscv_csr_list[0x100] = riscv_csr_sstatus;  // sstatus
-    riscv_csr_list[0x102] = riscv_csr_illegal;  // sedeleg
-    riscv_csr_list[0x103] = riscv_csr_illegal;  // sideleg
-    riscv_csr_list[0x104] = riscv_csr_sie;      // sie
-    riscv_csr_list[0x105] = riscv_csr_stvec;    // stvec
-    riscv_csr_list[0x106] = riscv_csr_zero_rw;  // scounteren
-
-    riscv_csr_list[0x10A] = riscv_csr_zero_rw;     // senvcfg
-
-
-    // Supervisor Trap Handling
-    riscv_csr_list[0x140] = riscv_csr_sscratch; // sscratch
-    riscv_csr_list[0x141] = riscv_csr_sepc;     // sepc
-    riscv_csr_list[0x142] = riscv_csr_scause;   // scause
-    riscv_csr_list[0x143] = riscv_csr_stval;    // stval
-    riscv_csr_list[0x144] = riscv_csr_sip;      // sip
-
-    // Supervisor Protection and Translation
-    riscv_csr_list[0x180] = riscv_csr_satp;     // satp
-
-
-
-    // User Trap Setup
-    riscv_csr_list[0x000] = riscv_csr_illegal;  // ustatus
-    riscv_csr_list[0x004] = riscv_csr_illegal;  // uie
-    riscv_csr_list[0x005] = riscv_csr_illegal;  // utvec
-
-    // User Trap Handling
-    riscv_csr_list[0x040] = riscv_csr_illegal;  // uscratch
-    riscv_csr_list[0x041] = riscv_csr_illegal;  // uepc
-    riscv_csr_list[0x042] = riscv_csr_illegal;  // ucause
-    riscv_csr_list[0x043] = riscv_csr_illegal;  // utval
-    riscv_csr_list[0x044] = riscv_csr_illegal;  // uip
-
+    switch (csr_id) {
 #ifdef USE_FPU
-    // User Floating-Point CSRs
-    riscv_csr_list[0x001] = riscv_csr_fflags;   // fflags
-    riscv_csr_list[0x002] = riscv_csr_frm;      // frm
-    riscv_csr_list[0x003] = riscv_csr_fcsr;     // fcsr
+        // User Floating-Point CSRs
+        case CSR_FFLAGS:
+            return riscv_csr_fflags(vm, dest, op);
+        case CSR_FRM:
+            return riscv_csr_frm(vm, dest, op);
+        case CSR_FCSR:
+            return riscv_csr_fcsr(vm, dest, op);
 #endif
 
-    riscv_csr_list[0x015] = riscv_csr_seed;     // seed (Zkr)
+        // Unprivileged Entropy Source CSR
+        case CSR_SEED:
+            return riscv_csr_seed(vm, dest);
 
-    // User Counter/Timers
-    riscv_csr_list[0xC00] = riscv_csr_zero;     // cycle
-    riscv_csr_list[0xC01] = riscv_csr_time;     // time
-    riscv_csr_list[0xC02] = riscv_csr_zero;     // instret
-    riscv_csr_list[0xC80] = riscv_csr_zero;     // cycleh
-    riscv_csr_list[0xC81] = riscv_csr_timeh;    // timeh
-    riscv_csr_list[0xC82] = riscv_csr_zero;     // instreth
+        // User Counters / Timers
+        case CSR_CYCLE:
+            return riscv_csr_zero(dest);
+        case CSR_CYCLEH:
+            return riscv_csr_zero_h(vm, dest);
+        case CSR_TIME:
+            return riscv_csr_time(vm, dest);
+        case CSR_TIMEH:
+            return riscv_csr_timeh(vm, dest);
+        case CSR_INSTRET:
+            return riscv_csr_zero(dest);
+        case CSR_INSTRETH:
+            return riscv_csr_zero_h(vm, dest);
 
-    for (size_t i=0xC03; i<0xC20; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // hpmcounter
-    for (size_t i=0xC83; i<0xCA0; ++i)
-        riscv_csr_list[i] = riscv_csr_zero;     // hpmcounterh
+        // Supervisor Trap Setup
+        case CSR_SSTATUS:
+            return riscv_csr_status(vm, dest, CSR_SSTATUS_MASK, op);
+        case CSR_SIE:
+            return riscv_csr_ie(vm, dest, CSR_SEIP_MASK, op);
+        case CSR_STVEC:
+            return riscv_csr_helper(&vm->csr.tvec[PRIVILEGE_SUPERVISOR], dest, op);
+        case CSR_SCOUNTEREN:
+            return riscv_csr_helper_masked(&vm->csr.counteren[PRIVILEGE_SUPERVISOR], dest, CSR_COUNTEREN_MASK, op);
+
+        // Supervisor Configuration
+        case CSR_SENVCFG:
+            return riscv_csr_helper_l(vm, &vm->csr.envcfg[PRIVILEGE_SUPERVISOR], dest, CSR_SENVCFG_MASK, op);
+
+        // Supervisor Trap Handling
+        case CSR_SSCRATCH:
+            return riscv_csr_helper(&vm->csr.scratch[PRIVILEGE_SUPERVISOR], dest, op);
+        case CSR_SEPC:
+            return riscv_csr_helper(&vm->csr.epc[PRIVILEGE_SUPERVISOR], dest, op);
+        case CSR_SCAUSE:
+            return riscv_csr_helper(&vm->csr.cause[PRIVILEGE_SUPERVISOR], dest, op);
+        case CSR_STVAL:
+            return riscv_csr_helper(&vm->csr.tval[PRIVILEGE_SUPERVISOR], dest, op);
+        case CSR_SIP:
+            return riscv_csr_ip(vm, dest, CSR_SEIP_MASK, op);
+        case CSR_STIMECMP:
+            return riscv_csr_stimecmp(vm, dest, op);
+        case CSR_STIMECMPH:
+            return riscv_csr_stimecmph(vm, dest, op);
+
+        // Supervisor Protection and Translation
+        case CSR_SATP:
+            return riscv_csr_satp(vm, dest, op);
+
+        // Machine Information Registers
+        case CSR_MVENDORID:
+            return riscv_csr_zero(dest); // Not a commercial implementation
+        case CSR_MARCHID:
+            return riscv_csr_const(dest, 0x5256564D); // 'RVVM' in hex
+        case CSR_MIMPID:
+            return riscv_csr_const(dest, rvvm_mimpid());
+        case CSR_MHARTID:
+            return riscv_csr_const(dest, vm->csr.hartid);
+
+        // Machine Trap Setup
+        case CSR_MSTATUS:
+            return riscv_csr_status(vm, dest, CSR_MSTATUS_MASK, op);
+        case CSR_MSTATUSH:
+            return riscv_csr_zero(dest); // We don't need upper half on rv32 for now
+        case CSR_MISA:
+            return riscv_csr_misa(vm, dest, op);
+        case CSR_MEDELEG:
+            return riscv_csr_helper_masked(&vm->csr.edeleg[PRIVILEGE_MACHINE], dest, CSR_MEDELEG_MASK, op);
+        case CSR_MIDELEG:
+            return riscv_csr_helper_masked(&vm->csr.ideleg[PRIVILEGE_MACHINE], dest, CSR_MIDELEG_MASK, op);
+        case CSR_MIE:
+            return riscv_csr_ie(vm, dest, CSR_MEIP_MASK, op);
+        case CSR_MTVEC:
+            return riscv_csr_helper(&vm->csr.tvec[PRIVILEGE_MACHINE], dest, op);
+        case CSR_MCOUNTEREN:
+            return riscv_csr_helper_masked(&vm->csr.counteren[PRIVILEGE_MACHINE], dest, CSR_COUNTEREN_MASK, op);
+
+        // Machine Trap Handling
+        case CSR_MSCRATCH:
+            return riscv_csr_helper(&vm->csr.scratch[PRIVILEGE_MACHINE], dest, op);
+        case CSR_MEPC:
+            return riscv_csr_helper(&vm->csr.epc[PRIVILEGE_MACHINE], dest, op);
+        case CSR_MCAUSE:
+            return riscv_csr_helper(&vm->csr.cause[PRIVILEGE_MACHINE], dest, op);
+        case CSR_MTVAL:
+            return riscv_csr_helper(&vm->csr.tval[PRIVILEGE_MACHINE], dest, op);
+        case CSR_MIP:
+            return riscv_csr_ip(vm, dest, CSR_MEIP_MASK, op);
+
+        // Machine Configuration
+        case CSR_MENVCFG:
+            return riscv_csr_helper_l(vm, &vm->csr.envcfg[PRIVILEGE_MACHINE], dest, CSR_MENVCFG_MASK, op);
+        case CSR_MENVCFGH:
+            return riscv_csr_helper_h(vm, &vm->csr.envcfg[PRIVILEGE_MACHINE], dest, CSR_MENVCFG_MASK, op);
+        case CSR_MSECCFG:
+            return riscv_csr_helper_l(vm, &vm->csr.mseccfg, dest, CSR_MSECCFG_MASK, op);
+        case CSR_MSECCFGH:
+            return riscv_csr_helper_h(vm, &vm->csr.mseccfg, dest, CSR_MSECCFG_MASK, op);
+
+        // Machine Memory Protection
+        case 0x3A0: // pmpcfg0
+        case 0x3A1: // pmpcfg1
+        case 0x3A2: // pmpcfg2
+        case 0x3A3: // pmpcfg3
+            return riscv_csr_zero(dest); // TODO: PMP
+        case 0x3B0: // pmpaddr0
+        case 0x3B1: // pmpaddr1
+        case 0x3B2: // pmpaddr2
+        case 0x3B3: // pmpaddr3
+        case 0x3B4: // pmpaddr4
+        case 0x3B5: // pmpaddr5
+        case 0x3B6: // pmpaddr6
+        case 0x3B7: // pmpaddr7
+        case 0x3B8: // pmpaddr8
+        case 0x3B9: // pmpaddr9
+        case 0x3BA: // pmpaddr10
+        case 0x3BB: // pmpaddr11
+        case 0x3BC: // pmpaddr12
+        case 0x3BD: // pmpaddr13
+        case 0x3BE: // pmpaddr14
+        case 0x3BF: // pmpaddr15
+            return riscv_csr_zero(dest); // TODO: PMP
+
+        // Machine Counters/Timers
+        case CSR_MCYCLE:
+        case CSR_MINSTRET:
+        case 0xB03: // mhpmcounter3
+        case 0xB04: // mhpmcounter4
+        case 0xB05: // mhpmcounter5
+        case 0xB06: // mhpmcounter6
+        case 0xB07: // mhpmcounter7
+        case 0xB08: // mhpmcounter8
+        case 0xB09: // mhpmcounter9
+        case 0xB0A: // mhpmcounter10
+        case 0xB0B: // mhpmcounter11
+        case 0xB0C: // mhpmcounter12
+        case 0xB0D: // mhpmcounter13
+        case 0xB0E: // mhpmcounter14
+        case 0xB0F: // mhpmcounter15
+        case 0xB10: // mhpmcounter16
+        case 0xB11: // mhpmcounter17
+        case 0xB12: // mhpmcounter18
+        case 0xB13: // mhpmcounter19
+        case 0xB14: // mhpmcounter20
+        case 0xB15: // mhpmcounter21
+        case 0xB16: // mhpmcounter22
+        case 0xB17: // mhpmcounter23
+        case 0xB18: // mhpmcounter24
+        case 0xB19: // mhpmcounter25
+        case 0xB1A: // mhpmcounter26
+        case 0xB1B: // mhpmcounter27
+        case 0xB1C: // mhpmcounter28
+        case 0xB1D: // mhpmcounter29
+        case 0xB1E: // mhpmcounter30
+        case 0xB1F: // mhpmcounter31
+            return riscv_csr_zero(dest);
+        case CSR_MCYCLEH:
+        case CSR_MINSTRETH:
+        case 0xB83: // mhpmcounter3h
+        case 0xB84: // mhpmcounter4h
+        case 0xB85: // mhpmcounter5h
+        case 0xB86: // mhpmcounter6h
+        case 0xB87: // mhpmcounter7h
+        case 0xB88: // mhpmcounter8h
+        case 0xB89: // mhpmcounter9h
+        case 0xB8A: // mhpmcounter10h
+        case 0xB8B: // mhpmcounter11h
+        case 0xB8C: // mhpmcounter12h
+        case 0xB8D: // mhpmcounter13h
+        case 0xB8E: // mhpmcounter14h
+        case 0xB8F: // mhpmcounter15h
+        case 0xB90: // mhpmcounter16h
+        case 0xB91: // mhpmcounter17h
+        case 0xB92: // mhpmcounter18h
+        case 0xB93: // mhpmcounter19h
+        case 0xB94: // mhpmcounter20h
+        case 0xB95: // mhpmcounter21h
+        case 0xB96: // mhpmcounter22h
+        case 0xB97: // mhpmcounter23h
+        case 0xB98: // mhpmcounter24h
+        case 0xB99: // mhpmcounter25h
+        case 0xB9A: // mhpmcounter26h
+        case 0xB9B: // mhpmcounter27h
+        case 0xB9C: // mhpmcounter28h
+        case 0xB9D: // mhpmcounter29h
+        case 0xB9E: // mhpmcounter30h
+        case 0xB9F: // mhpmcounter31h
+            return riscv_csr_zero_h(vm, dest);
+
+        // Machine Counter Setup
+        case CSR_MCOUNTINHIBIT:
+            return riscv_csr_zero(dest);
+    }
+
+    return false;
 }
+
+bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, maxlen_t* dest, uint8_t op)
+{
+    if (riscv_csr_readonly(csr_id)) {
+        // This is a readonly CSR, only set/clear zero bits is allowed
+        if (unlikely(op == CSR_SWAP || *dest != 0)) return false;
+    }
+
+    if (unlikely(riscv_csr_privilege(csr_id) > vm->priv_mode)) {
+        // Not privileged enough to access this CSR
+        return false;
+    }
+
+    bool ret = riscv_csr_op_internal(vm, csr_id, dest, op);
+    if (!vm->rv64) {
+        // Sign-extend the result into the register
+        *dest = (int32_t)*dest;
+    }
+    return ret;
+}
+
