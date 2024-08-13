@@ -214,8 +214,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  * CSR Masks (For WARL behavior of CSRs)
  */
 
-#define CSR_MSTATUS_MASK 0x7E79AA
-#define CSR_SSTATUS_MASK 0x0C6122
+#define CSR_MSTATUS_MASK 0xF007FFFAAULL
+#define CSR_SSTATUS_MASK 0x3000DE7A2ULL
 #define CSR_STATUS_FS_MASK 0x6000
 
 #define CSR_MEDELEG_MASK 0xB109

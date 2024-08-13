@@ -197,56 +197,83 @@ static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
     return true;
 }
 
-static bool riscv_csr_status(rvvm_hart_t* vm, maxlen_t* dest, maxlen_t mask, uint8_t op)
+static inline maxlen_t riscv_csr_sd_bit(rvvm_hart_t* vm)
 {
-    maxlen_t new_status = *dest;
+    if (vm->rv64) {
+        return (maxlen_t)0x8000000000000000ULL;
+    } else {
+        return 0x80000000U;
+    }
+}
+
+static bool riscv_csr_status(rvvm_hart_t* vm, maxlen_t* dest, uint64_t mask, uint8_t op)
+{
+    maxlen_t status = vm->csr.status;
+    maxlen_t old_status = status;
+
+    riscv_csr_helper_masked(vm, &status, dest, mask, op);
+
+    // Validate status fields
+    if (vm->machine->rv64) {
+        // Validate UXL, SXL if machine is 64-bit
+        uint8_t uxl = bit_cut(status, 32, 2);
+        if (uxl != 1 && uxl != 2) {
+            uxl = 2;
+            status = bit_replace(status, 32, 2, uxl);
+        }
+
+        uint8_t sxl = bit_cut(status, 34, 2);
+        if (sxl != 1 && sxl != 2) {
+            sxl = 2;
+            status = bit_replace(status, 34, 2, sxl);
+        }
+    }
+
+    uint8_t mpp = bit_cut(status, 11, 2);
+    if (mpp == 2) {
+        mpp = 0;
+        status = bit_replace(status, 11, 2, mpp);
+    }
+
+    uint8_t fs = bit_cut(status, 13, 2);
 #ifdef USE_FPU
 #ifndef USE_PRECISE_FS
-    bool fpu_was_enabled = bit_cut(vm->csr.status, 13, 2) != FS_OFF;
-    if (fpu_was_enabled) {
-        vm->csr.status = bit_replace(vm->csr.status, 13, 2, FS_DIRTY);
+    if (fs != FS_OFF && fs != FS_DIRTY) {
+        // FPU was enabled, make it dirty immediately
+        fs = FS_DIRTY;
+        status = bit_replace(status, 13, 2, fs);
     }
 #endif
-    maxlen_t sd_mask = 0x80000000U;
-#ifdef USE_RV64
-    if (vm->rv64) {
-        sd_mask = 0x8000000000000000ULL;
-    }
-#endif
-    mask |= sd_mask;
-
-    // Set SD bit
-    if (bit_cut(vm->csr.status, 13, 2) == FS_DIRTY) {
-        vm->csr.status |= sd_mask;
-    } else {
-        vm->csr.status &= ~sd_mask;
-    }
 #else
-    mask = bit_replace(mask, 13, 2, 0);
-#endif
-
-#ifdef USE_RV64
-    if (vm->rv64 && unlikely(bit_cut(new_status, 32, 6) ^ (bit_cut(new_status, 32, 6) >> 1))) {
-        // Changed XLEN somewhere
-        if (bit_cut(new_status, 32, 2) ^ (bit_cut(new_status, 32, 2) >> 1)) {
-            mask |= 0x300000000ULL;
-        }
-        if (bit_cut(new_status, 34, 2) ^ (bit_cut(new_status, 34, 2) >> 1)) {
-            mask |= 0xC00000000ULL;
-        }
-        if (bit_cut(new_status, 36, 2) ^ (bit_cut(new_status, 36, 2) >> 1)) {
-            mask |= 0x3000000000ULL;
-        }
-        riscv_update_xlen(vm);
+    if (fs != FS_OFF) {
+        fs = FS_OFF;
+        status = bit_replace(status, 13, 2, fs);
     }
 #endif
-    riscv_csr_helper_masked(vm, &vm->csr.status, dest, mask, op);
-    maxlen_t old_status = *dest;
-#ifdef USE_RV64
-    if (vm->rv64) *dest |= vm->csr.status & 0x3F00000000ULL;
+
+    uint8_t vs = bit_cut(status, 9, 2);
+#ifdef USE_RVV
+    // TODO: Vector extension state handling
+#else
+    if (vs != FS_OFF) {
+        vs = FS_OFF;
+        status = bit_replace(status, 9, 2, vs);
+    }
 #endif
-    if (bit_cut(new_status, 0, 4) & ~bit_cut(old_status, 0, 4)) {
-        // IRQ enable bits were set
+
+    // Set XS
+    uint8_t xs = EVAL_MAX(fs, vs);
+    status = bit_replace(status, 15, 2, xs);
+
+    vm->csr.status = status;
+
+    if (bit_cut(old_status, 15, 2) == FS_DIRTY) {
+        // XS is dirty, set SD bit
+        *dest |= riscv_csr_sd_bit(vm);
+    }
+
+    if (bit_cut(status, 0, 4) & ~bit_cut(old_status, 0, 4)) {
+        // IRQ enable bits were set, check interrupts
         riscv_hart_check_interrupts(vm);
     }
     return true;
