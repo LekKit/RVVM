@@ -330,11 +330,10 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
     uint8_t prev_mmu = vm->mmu_mode;
     if (vm->csr.status & CSR_STATUS_TVM) return false; // TVM should trap on acces to satp
-#ifdef USE_RV64
     if (vm->rv64) {
-        maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 60) | (vm->root_page_table >> MMU_PAGE_SHIFT);
+        maxlen_t satp = (((uint64_t)vm->mmu_mode) << 60) | (vm->root_page_table >> MMU_PAGE_SHIFT);
         riscv_csr_helper(vm, &satp, dest, op);
-        vm->mmu_mode = satp >> 60;
+        vm->mmu_mode = bit_cut(satp, 60, 4);
         if (vm->mmu_mode < CSR_SATP_MODE_SV39
          || vm->mmu_mode > CSR_SATP_MODE_SV57
          || (vm->mmu_mode == CSR_SATP_MODE_SV48 && !rvvm_has_arg("sv48"))
@@ -343,14 +342,11 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
         }
         vm->root_page_table = (satp & bit_mask(44)) << MMU_PAGE_SHIFT;
     } else {
-#endif
         maxlen_t satp = (((maxlen_t)vm->mmu_mode) << 31) | (vm->root_page_table >> MMU_PAGE_SHIFT);
         riscv_csr_helper(vm, &satp, dest, op);
-        vm->mmu_mode = satp >> 31;
+        vm->mmu_mode = bit_cut(satp, 31, 1);
         vm->root_page_table = (satp & bit_mask(22)) << MMU_PAGE_SHIFT;
-#ifdef USE_RV64
     }
-#endif
     /*
     * We currently cache physical addresses in TLB as well, so switching
     * between bare/virtual modes will pollute the address space with illegal entries
