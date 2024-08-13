@@ -62,7 +62,6 @@ rvvm_hart_t* riscv_hart_init(rvvm_machine_t* machine)
     rvtimecmp_init(&vm->stimecmp, &vm->machine->timer);
 
     riscv_tlb_flush(vm);
-    DO_ONCE(riscv_csr_global_init());
     return vm;
 }
 
