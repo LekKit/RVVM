@@ -176,23 +176,24 @@ static inline bool riscv_csr_seed(rvvm_hart_t* vm, maxlen_t* dest)
 
 static bool riscv_csr_misa(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 {
-    UNUSED(op);
-#ifdef USE_RV64
-    if (vm->rv64 && (*dest & CSR_MISA_RV32)) {
-        vm->csr.isa &= (~CSR_MISA_RV64);
-        vm->csr.isa |= CSR_MISA_RV32;
-        riscv_update_xlen(vm);
-    } else if (!vm->rv64 && (*dest & (CSR_MISA_RV64 >> 32))) {
-        vm->csr.isa &= (~CSR_MISA_RV32);
-        vm->csr.isa |= CSR_MISA_RV64;
-        riscv_update_xlen(vm);
-    }
-#endif
+    maxlen_t misa = vm->csr.isa;
 #ifdef USE_FPU
-    *dest = vm->csr.isa | riscv_mkmisa("imafdcbsu");
+    misa |= riscv_mkmisa("imafdcbsu");
 #else
-    *dest = vm->csr.isa | riscv_mkmisa("imacbsu");
+    misa |= riscv_mkmisa("imacbsu");
 #endif
+    riscv_csr_helper(vm, &misa, dest, op);
+
+    if ((vm->csr.isa & CSR_MISA_RV64) && (misa & CSR_MISA_RV32)) {
+        vm->csr.isa = CSR_MISA_RV32;
+        riscv_update_xlen(vm);
+    } else if ((vm->csr.isa & CSR_MISA_RV32) && (misa & (CSR_MISA_RV64 >> 32))) {
+        // Switch to RV64 if machine allows
+        if (vm->machine->rv64) {
+            vm->csr.isa = (maxlen_t)CSR_MISA_RV64;
+            riscv_update_xlen(vm);
+        }
+    }
     return true;
 }
 
