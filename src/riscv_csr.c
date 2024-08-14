@@ -361,25 +361,13 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 static uint32_t fpu_get_exceptions()
 {
     uint32_t ret = 0;
-    int exc = fetestexcept(FE_ALL_EXCEPT);
+    uint32_t exc = fetestexcept(FE_ALL_EXCEPT);
     if (exc & FE_INEXACT)   ret |= FFLAG_NX;
     if (exc & FE_UNDERFLOW) ret |= FFLAG_UF;
     if (exc & FE_OVERFLOW)  ret |= FFLAG_OF;
     if (exc & FE_DIVBYZERO) ret |= FFLAG_DZ;
     if (exc & FE_INVALID)   ret |= FFLAG_NV;
     return ret;
-}
-
-static void fpu_set_exceptions(uint32_t flags)
-{
-    int exc = 0;
-    feclearexcept(FE_ALL_EXCEPT);
-    if (flags & FFLAG_NX) exc |= FE_INEXACT;
-    if (flags & FFLAG_UF) exc |= FE_UNDERFLOW;
-    if (flags & FFLAG_OF) exc |= FE_OVERFLOW;
-    if (flags & FFLAG_DZ) exc |= FE_DIVBYZERO;
-    if (flags & FFLAG_NV) exc |= FE_INVALID;
-    if (exc != 0) feraiseexcept(exc);
 }
 
 static void fpu_set_rm(uint8_t newrm)
@@ -408,8 +396,8 @@ static void riscv_csr_set_fcsr(rvvm_hart_t* vm, maxlen_t fcsr)
 {
     if (fcsr != vm->csr.fcsr) {
         if (~bit_cut(fcsr, 0, 5) & fpu_get_exceptions()) {
-            // Clear host-set FPU exceptions
-            fpu_set_exceptions(bit_cut(fcsr, 0, 5));
+            // Clear host-set FPU exceptions, anything needed is left in fcsr
+            feclearexcept(FE_ALL_EXCEPT);
         }
         if (bit_cut(fcsr, 5, 3) != bit_cut(vm->csr.fcsr, 5, 3)) {
             // Set host rounding mode
