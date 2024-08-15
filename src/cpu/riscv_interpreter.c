@@ -1,5 +1,5 @@
 /*
-riscv_interpreter.c - RISC-V Template interpreter
+riscv_interpreter.c - RISC-V 32-bit template interpreter
 Copyright (C) 2024  LekKit <github.com/LekKit>
 
 This Source Code Form is subject to the terms of the Mozilla Public
