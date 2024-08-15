@@ -27,49 +27,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define UNROLL_MAX_BLOCK_SIZE 256
 
 /*
- * Block lookup and linking internals
- */
-
-NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm);
-
-#ifndef RVJIT_NATIVE_LINKER
-
-static inline bool riscv_jtlb_lookup(rvvm_hart_t* vm)
-{
-    // Try to find & execute a block
-    virt_addr_t pc = vm->registers[REGISTER_PC];
-    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
-    virt_addr_t tpc = vm->jtlb[entry].pc;
-    if (likely(pc == tpc)) {
-        vm->jtlb[entry].block(vm);
-        return true;
-    } else {
-        return false;
-    }
-}
-
-#endif
-
-static inline bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
-{
-    if (unlikely(!vm->jit_enabled)) return false;
-
-    virt_addr_t pc = vm->registers[REGISTER_PC];
-    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
-    virt_addr_t tpc = vm->jtlb[entry].pc;
-    if (likely(pc == tpc)) {
-        vm->jtlb[entry].block(vm);
-#ifndef RVJIT_NATIVE_LINKER
-        // Try to execute more blocks if they aren't linked
-        for (size_t i=0; i<10 && riscv_jtlb_lookup(vm); ++i);
-#endif
-        return true;
-    } else {
-        return riscv_jit_lookup(vm);
-    }
-}
-
-/*
  * RVJIT tracing helpers
  */
 
