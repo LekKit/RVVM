@@ -80,7 +80,7 @@ do { \
         vm->registers[REGISTER_PC] -= insn_size; \
         return; \
     } \
-    if (vm->jit_compiling) { \
+    if (unlikely(vm->jit_compiling)) { \
         intrinsic; \
         vm->jit.pc_off += insn_size; \
         vm->block_ends = false; \
@@ -104,7 +104,7 @@ do { \
         return; \
     } \
     vm->ldst_trace = true; \
-    if (vm->jit_compiling) { \
+    if (unlikely(vm->jit_compiling)) { \
         intrinsic; \
         vm->jit.pc_off += insn_size; \
         vm->block_ends = false; \
@@ -119,7 +119,7 @@ do { \
         vm->registers[REGISTER_PC] -= insn_size; \
         return; \
     } \
-    if (vm->jit_compiling) { \
+    if (unlikely(vm->jit_compiling)) { \
         intrinsic; \
         vm->jit.pc_off += offset; \
         vm->block_ends = vm->jit.size > UNROLL_MAX_BLOCK_SIZE; \
@@ -129,7 +129,7 @@ do { \
 // Blocks immediately ends upon indirect jump (thus no need to trace it)
 #define RVVM_RVJIT_TRACE_JALR(intrinsic) \
 do { \
-    if (vm->jit_compiling) { \
+    if (unlikely(vm->jit_compiling)) { \
         intrinsic; \
     } \
 } while (0)
@@ -141,7 +141,7 @@ do { \
         vm->registers[REGISTER_PC] -= insn_size; \
         return; \
     } \
-    if (vm->jit_compiling) { \
+    if (unlikely(vm->jit_compiling)) { \
         vm->jit.pc_off += falthrough_off; \
         intrinsic; \
         vm->jit.pc_off += (target_off - falthrough_off); \
