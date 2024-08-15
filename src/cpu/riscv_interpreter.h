@@ -69,16 +69,12 @@ static forceinline void riscv_write_reg(rvvm_hart_t* vm, regid_t reg, sxlen_t da
  * JIT glue
  */
 
-NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm);
-
 static forceinline void riscv_emulate(rvvm_hart_t *vm, const uint32_t instruction)
 {
 #if defined(USE_JIT) && (defined(RVJIT_NATIVE_64BIT) || !defined(RV64))
     if (unlikely(vm->jit_compiling)) {
-        // If we hit non-compilable instruction or cross page boundaries,
-        // the block is finalized.
-        if (vm->block_ends
-        || (vm->jit.virt_pc >> MMU_PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> MMU_PAGE_SHIFT)) {
+        // If we hit non-compilable instruction or cross page boundaries, the block is finalized.
+        if (vm->block_ends || (vm->jit.virt_pc >> MMU_PAGE_SHIFT) != (vm->registers[REGISTER_PC] >> MMU_PAGE_SHIFT)) {
             riscv_jit_finalize(vm);
         }
         vm->block_ends = true;
