@@ -32,6 +32,10 @@ void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn);
 void riscv32_run_interpreter(rvvm_hart_t* vm);
 void riscv64_run_interpreter(rvvm_hart_t* vm);
 
+/*
+ * JIT infrastructure
+ */
+
 // Flush the JIT cache (Kinda like instruction cache)
 void riscv_jit_flush_cache(rvvm_hart_t* vm);
 
@@ -65,5 +69,13 @@ static inline void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t
     UNUSED(size);
 }
 #endif
+
+/*
+ * Interpreter JIT glue
+ */
+
+slow_path bool riscv_jit_tlb_lookup(rvvm_hart_t* vm);
+
+slow_path void riscv_jit_finalize(rvvm_hart_t* vm);
 
 #endif
