@@ -46,7 +46,7 @@ static void spin_cond_init()
     });
 }
 
-NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
+slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
 {
     for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
         // Read lock flag until there's any chance to grab it
@@ -89,7 +89,7 @@ NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location)
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
 }
 
-NOINLINE void spin_lock_wake(spinlock_t* lock)
+slow_path void spin_lock_wake(spinlock_t* lock)
 {
     UNUSED(lock);
     spin_cond_init();

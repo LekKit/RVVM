@@ -30,8 +30,8 @@ typedef struct {
 } spinlock_t;
 
 // Internal locking operations
-NOINLINE void spin_lock_wait(spinlock_t* lock, const char* location);
-NOINLINE void spin_lock_wake(spinlock_t* lock);
+slow_path void spin_lock_wait(spinlock_t* lock, const char* location);
+slow_path void spin_lock_wake(spinlock_t* lock);
 
 // Static initialization
 #define SPINLOCK_INIT {0}
