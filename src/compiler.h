@@ -95,11 +95,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define GNU_CONSTRUCTOR
 #endif
 
-// Attribute __preserve_most__ is broken on Clang (Doesn't work with RVJIT, apparently invoking func pointers is broken)
-// This is intented to remove unnecessary spills from algorithm fast path
-// Hopefully one day similar thing will appear in GCC
-#if CLANG_CHECK_VER(13, 0) && GNU_ATTRIBUTE(__no_caller_saved_registers__)
-#define slow_path __attribute__((__no_caller_saved_registers__,__noinline__,__target__("general-regs-only")))
+/*
+ * This is used to remove unnecessary register spills from algorithm fast path
+ * when a slow path call is present. Hopefully one day similar thing will appear in GCC.
+ *
+ * This attribute is BROKEN before Clang 17 and generates broken binaries if used <17!!!
+ */
+#if CLANG_CHECK_VER(17, 0) && GNU_ATTRIBUTE(__preserve_most__)
+#define slow_path __attribute__((__preserve_most__,__noinline__))
 #else
 #define slow_path NOINLINE
 #endif
