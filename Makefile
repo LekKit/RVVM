@@ -249,12 +249,12 @@ WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-
 ifeq ($(CC_TYPE),gcc)
 CC_STD := -std=gnu11
 CXX_STD := -std=gnu++11
-override CFLAGS := -O3 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+override CFLAGS := -O2 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
 CC_STD := -std=gnu11
 CXX_STD := -std=gnu++11
-override CFLAGS := -O3 -flto=thin -fvisibility=hidden -fno-math-errno -Wno-unknown-warning-option $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+override CFLAGS := -O2 -flto=thin -fvisibility=hidden -fno-math-errno -Wno-unknown-warning-option $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 # Whatever compiler that might be, use conservative options
 CC_STD := -std=gnu99
