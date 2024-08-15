@@ -50,6 +50,13 @@ void riscv_jit_flush_cache(rvvm_hart_t* vm)
 
 #ifdef USE_JIT
 
+void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
+{
+    vector_foreach(machine->harts, i) {
+        rvjit_mark_dirty_mem(&vector_at(machine->harts, i)->jit, addr, size);
+    }
+}
+
 /*
  * When returning from recompiled blocks, hart state
  * stays consistent, thus allowing to switch between
@@ -63,7 +70,7 @@ static inline void riscv_jit_tlb_put(rvvm_hart_t* vm, virt_addr_t vaddr, rvjit_f
     vm->jtlb[entry].block = block;
 }
 
-NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
+static bool riscv_jit_lookup(rvvm_hart_t* vm)
 {
     // Translate virtual PC into physical, JIT operates on phys_pc
     virt_addr_t virt_pc = vm->registers[REGISTER_PC];
@@ -93,14 +100,44 @@ NOINLINE bool riscv_jit_lookup(rvvm_hart_t* vm)
     return false;
 }
 
-void riscv_jit_mark_dirty_mem(rvvm_machine_t* machine, rvvm_addr_t addr, size_t size)
+#ifndef RVJIT_NATIVE_LINKER
+
+static inline bool riscv_jtlb_lookup(rvvm_hart_t* vm)
 {
-    vector_foreach(machine->harts, i) {
-        rvjit_mark_dirty_mem(&vector_at(machine->harts, i)->jit, addr, size);
+    // Try to find & execute a block
+    virt_addr_t pc = vm->registers[REGISTER_PC];
+    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    virt_addr_t tpc = vm->jtlb[entry].pc;
+    if (likely(pc == tpc)) {
+        vm->jtlb[entry].block(vm);
+        return true;
+    } else {
+        return false;
     }
 }
 
-NOINLINE void riscv_jit_finalize(rvvm_hart_t* vm)
+#endif
+
+slow_path bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
+{
+    if (unlikely(!vm->jit_enabled)) return false;
+
+    virt_addr_t pc = vm->registers[REGISTER_PC];
+    virt_addr_t entry = (pc >> 1) & (TLB_SIZE - 1);
+    virt_addr_t tpc = vm->jtlb[entry].pc;
+    if (likely(pc == tpc)) {
+        vm->jtlb[entry].block(vm);
+#ifndef RVJIT_NATIVE_LINKER
+        // Try to execute more blocks if they aren't linked
+        for (size_t i=0; i<10 && riscv_jtlb_lookup(vm); ++i);
+#endif
+        return true;
+    } else {
+        return riscv_jit_lookup(vm);
+    }
+}
+
+slow_path void riscv_jit_finalize(rvvm_hart_t* vm)
 {
     if (rvjit_block_nonempty(&vm->jit)) {
         rvjit_func_t block = rvjit_block_finalize(&vm->jit);
