@@ -36,6 +36,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Get host page size
 size_t vma_page_size();
 
+// Create anonymous memory-backed FD (POSIX only!)
+int vma_anon_memfd(size_t size);
+
 // Allocate VMA, force needed address using VMA_FIXED
 void* vma_alloc(void* addr, size_t size, uint32_t flags);
 

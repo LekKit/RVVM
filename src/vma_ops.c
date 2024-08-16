@@ -80,10 +80,56 @@ static inline int vma_native_flags(uint32_t flags)
     return mmap_flags ? mmap_flags : PROT_NONE;
 }
 
-// TODO: CreateFileMapping
-static int vma_anon_memfd(size_t size)
+#else
+#include <stdlib.h>
+#warning No native VMA support!
+
+#endif
+
+static size_t host_pagesize = 0;
+
+size_t vma_page_size()
+{
+    if (!host_pagesize) {
+#if defined(VMA_WIN32_IMPL)
+        SYSTEM_INFO info = { .dwPageSize = 0x1000, };
+        GetSystemInfo(&info);
+        host_pagesize = info.dwPageSize;
+#elif defined(VMA_MMAP_IMPL)
+        host_pagesize = sysconf(_SC_PAGESIZE);
+#else
+        // Non-paging fallback via malloc/free, disable alignment
+        host_pagesize = 1;
+#endif
+    }
+    return host_pagesize;
+}
+
+static inline size_t vma_page_mask()
+{
+    return vma_page_size() - 1;
+}
+
+// Align VMA size/address to page boundaries
+static inline size_t size_to_page(size_t size)
+{
+    return (size + vma_page_mask()) & (~vma_page_mask());
+}
+
+static inline void* ptr_to_page(void* ptr)
+{
+    return (void*)(size_t)(((size_t)ptr) & (~vma_page_mask()));
+}
+
+static inline size_t ptrsize_to_page(void* ptr, size_t size)
+{
+    return size_to_page(size + (((size_t)ptr) & vma_page_mask()));
+}
+
+int vma_anon_memfd(size_t size)
 {
     int memfd = -1;
+#if defined(VMA_MMAP_IMPL)
 #if defined(__NR_memfd_create)
     // If we are running on older kernel, should return -ENOSYS
     signal(SIGSYS, SIG_IGN);
@@ -149,53 +195,11 @@ static int vma_anon_memfd(size_t size)
         close(memfd);
         memfd = -1;
     }
+#else
+    UNUSED(size);
+    rvvm_warn("anonymous memfd is not supported!");
+#endif
     return memfd;
-}
-
-#else
-#include <stdlib.h>
-#warning No native VMA support!
-
-#endif
-
-static size_t host_pagesize = 0;
-
-size_t vma_page_size()
-{
-    if (!host_pagesize) {
-#if defined(VMA_WIN32_IMPL)
-        SYSTEM_INFO info = { .dwPageSize = 0x1000, };
-        GetSystemInfo(&info);
-        host_pagesize = info.dwPageSize;
-#elif defined(VMA_MMAP_IMPL)
-        host_pagesize = sysconf(_SC_PAGESIZE);
-#else
-        // Non-paging fallback via malloc/free, disable alignment
-        host_pagesize = 1;
-#endif
-    }
-    return host_pagesize;
-}
-
-static inline size_t vma_page_mask()
-{
-    return vma_page_size() - 1;
-}
-
-// Align VMA size/address to page boundaries
-static inline size_t size_to_page(size_t size)
-{
-    return (size + vma_page_mask()) & (~vma_page_mask());
-}
-
-static inline void* ptr_to_page(void* ptr)
-{
-    return (void*)(size_t)(((size_t)ptr) & (~vma_page_mask()));
-}
-
-static inline size_t ptrsize_to_page(void* ptr, size_t size)
-{
-    return size_to_page(size + (((size_t)ptr) & vma_page_mask()));
 }
 
 void* vma_alloc(void* addr, size_t size, uint32_t flags)
