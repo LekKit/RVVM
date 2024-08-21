@@ -409,8 +409,6 @@ static void* x11_xshm_attach(gui_window_t* win)
     // Process errors, if any
     XSync(x11->display, False);
 
-    XSetErrorHandler(old_handler);
-
     // Cleanup on error
     if (xshm == NULL || xshm_error) {
         rvvm_info("XShm failed to initialize");
@@ -421,6 +419,9 @@ static void* x11_xshm_attach(gui_window_t* win)
         }
         xshm = NULL;
     }
+
+    XSync(x11->display, False);
+    XSetErrorHandler(old_handler);
     return xshm;
 }
 
