@@ -16,6 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "gui_window.h"
 #include "dlib.h"
+#include "vma_ops.h"
 #include "utils.h"
 #include "compiler.h"
 
@@ -512,7 +513,7 @@ static void sdl_window_set_title(gui_window_t* win, const char* title)
 static void sdl_window_remove(gui_window_t* win)
 {
     if (sdl_surface == NULL || win->fb.buffer != sdl_surface->pixels) {
-        free(win->fb.buffer);
+        vma_free(win->fb.buffer, framebuffer_size(&win->fb));
     }
     sdl_window_grab_input(win, false);
 #if USE_SDL == 2
@@ -617,7 +618,7 @@ bool sdl_window_init(gui_window_t* win)
         sdl_renderer = SDL_CreateRenderer(sdl_window, -1, 0);
         sdl_texture = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_ARGB8888,
                                         SDL_TEXTUREACCESS_STREAMING, win->fb.width, win->fb.height);
-        win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
+        win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
     }
 #else
     sdl_surface = SDL_SetVideoMode(win->fb.width, win->fb.height,
@@ -633,9 +634,12 @@ bool sdl_window_init(gui_window_t* win)
         win->fb.format = sdl_get_rgb_format(sdl_surface->format);
         if (SDL_MUSTLOCK(sdl_surface)) {
             rvvm_info("SDL surface is locking. Expect higher CPU use.");
-            win->fb.buffer = safe_calloc(framebuffer_size(&win->fb), 1);
+            win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
+        } else if (((size_t)sdl_surface->pixels) & 0xFFF) {
+            rvvm_info("SDL surface is misaligned. Expect higher CPU use.");
+            win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
         } else {
-            // Direct framebuffer surface, like XShm
+            // Direct page-aligned framebuffer surface, like XShm
             win->fb.buffer = sdl_surface->pixels;
         }
     }
