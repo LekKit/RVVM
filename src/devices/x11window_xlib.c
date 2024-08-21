@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "gui_window.h"
 #include "dlib.h"
+#include "vma_ops.h"
 #include "utils.h"
 #include "compiler.h"
 
@@ -143,6 +144,7 @@ typedef struct {
     Window window;
     GC gc;
     XImage* ximage;
+    void* image_buffer;
 
 #ifdef USE_XSHM
     XShmSegmentInfo seginfo;
@@ -602,6 +604,11 @@ static void x11_window_remove(gui_window_t* win)
 #ifdef USE_XSHM
     x11_free_xshm(x11);
 #endif
+    if (x11->image_buffer) {
+        // Free framebuffer VMA
+        vma_free(x11->image_buffer,  x11->ximage->bytes_per_line * x11->ximage->height);
+        x11->ximage->data = NULL;
+    }
     XDestroyImage(x11->ximage);
     XFreeGC(dsp, x11->gc);
     XDestroyWindow(dsp, x11->window);
@@ -744,8 +751,9 @@ bool x11_window_init(gui_window_t* win)
         x11->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
                                    DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
                                    NULL, win->fb.width, win->fb.height, 8, 0);
-        x11->ximage->data = safe_calloc(x11->ximage->bytes_per_line, x11->ximage->height);
-        win->fb.buffer = x11->ximage->data;
+        x11->image_buffer = vma_alloc(NULL, x11->ximage->bytes_per_line * x11->ximage->height, VMA_RDWR);
+        x11->ximage->data = x11->image_buffer;
+        win->fb.buffer = x11->image_buffer;
     }
 
     XSync(dsp, False);
