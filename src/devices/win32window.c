@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "gui_window.h"
 #include "utils.h"
+#include "vma_ops.h"
 
 #include <windows.h>
 
@@ -177,7 +178,7 @@ static void win32_window_remove(gui_window_t* win)
         ReleaseDC(data->hwnd, data->hdc);
         DestroyWindow(data->hwnd);
     }
-    free(win->fb.buffer);
+    vma_free(win->fb.buffer, framebuffer_size(&win->fb));
     free(data);
 }
 
@@ -293,7 +294,7 @@ bool win32_window_init(gui_window_t* win)
 
     win->win_data = data;
     win->fb.format = RGB_FMT_A8R8G8B8;
-    win->fb.buffer = safe_new_arr(uint8_t, framebuffer_size(&win->fb));
+    win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
 
     // Initialize callbacks
     win->draw = win32_window_draw;
