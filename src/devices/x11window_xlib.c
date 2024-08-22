@@ -606,7 +606,7 @@ static void x11_window_remove(gui_window_t* win)
 #endif
     if (x11->image_buffer) {
         // Free framebuffer VMA
-        vma_free(x11->image_buffer,  x11->ximage->bytes_per_line * x11->ximage->height);
+        vma_free(x11->image_buffer, framebuffer_size(&win->fb));
         x11->ximage->data = NULL;
     }
     XDestroyImage(x11->ximage);
@@ -700,7 +700,7 @@ bool x11_window_init(gui_window_t* win)
 
     // Initialize callbacks
     win->win_data = x11;
-    win->fb.format = x11_get_rgb_format(dsp);
+
     win->draw = x11_window_draw;
     win->poll = x11_window_poll;
     win->remove = x11_window_remove;
@@ -744,6 +744,7 @@ bool x11_window_init(gui_window_t* win)
 
     x11->gc = XCreateGC(dsp, x11->window, 0, NULL);
 
+    win->fb.format = x11_get_rgb_format(dsp);
 #ifdef USE_XSHM
     win->fb.buffer = x11_xshm_attach(win);
 #endif
@@ -751,7 +752,7 @@ bool x11_window_init(gui_window_t* win)
         x11->ximage = XCreateImage(dsp, DefaultVisual(dsp, DefaultScreen(dsp)),
                                    DefaultDepth(dsp, DefaultScreen(dsp)), ZPixmap, 0,
                                    NULL, win->fb.width, win->fb.height, 8, 0);
-        x11->image_buffer = vma_alloc(NULL, x11->ximage->bytes_per_line * x11->ximage->height, VMA_RDWR);
+        x11->image_buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
         x11->ximage->data = x11->image_buffer;
         win->fb.buffer = x11->image_buffer;
     }
