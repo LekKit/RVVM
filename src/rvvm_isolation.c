@@ -25,6 +25,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "compiler.h"
 
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__) || defined(__SANITIZE_MEMORY)
+#define SANITIZERS_PRESENT
+#endif
+
 #ifdef USE_ISOLATION
 
 #if defined(__linux__) || defined(__OpenBSD__) || defined(__FreeBSD__)
@@ -113,7 +117,7 @@ static void drop_root_user(void)
 #endif
 }
 
-#ifdef ISOLATION_SECCOMP_IMPL
+#if defined(ISOLATION_SECCOMP_IMPL) && !defined(SANITIZERS_PRESENT)
 
 #define BPF_SECCOMP_ALLOW_SYSCALL(syscall) \
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, syscall, 0, 1), \
@@ -541,7 +545,7 @@ void rvvm_restrict_this_thread(void)
 {
     drop_root_user();
     drop_thread_caps();
-#ifdef ISOLATION_SECCOMP_IMPL
+#if defined(ISOLATION_SECCOMP_IMPL) && !defined(SANITIZERS_PRESENT)
     seccomp_setup_syscall_filter(false);
 #endif
     // No per-thread pledge on OpenBSD :c
@@ -551,7 +555,9 @@ PUBLIC void rvvm_restrict_process(void)
 {
     drop_root_user();
     drop_thread_caps();
-#ifdef ISOLATION_SECCOMP_IMPL
+#if defined(SANITIZERS_PRESENT)
+    DO_ONCE(rvvm_info("Sanitizers are present, disabling isolation"));
+#elif defined(ISOLATION_SECCOMP_IMPL)
     seccomp_setup_syscall_filter(true);
 #elif defined(ISOLATION_PLEDGE_IMPL)
     if (pledge("stdio inet tty ioctl dns audio drm vmm error", "")) {
