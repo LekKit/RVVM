@@ -121,8 +121,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define flatten_calls
 #endif
 
-// Match GCC macro __SANITIZE_THREAD__ on Clang, provide __SANITIZE_MEMORY__
+// Match GCC macro __SANITIZE_THREAD__, __SANITIZE_ADDRESS__ on Clang, provide __SANITIZE_MEMORY__
 #if defined(__clang__) && defined(__has_feature)
+#if __has_feature(address_sanitizer) && !defined(__SANITIZE_ADDRESS__)
+#define __SANITIZE_ADDRESS__
+#endif
 #if __has_feature(thread_sanitizer) && !defined(__SANITIZE_THREAD__)
 #define __SANITIZE_THREAD__
 #endif
