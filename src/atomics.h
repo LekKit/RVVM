@@ -198,7 +198,19 @@ static forceinline uint32_t atomic_swap_uint32_ex(void* addr, uint32_t val, int 
 
 static forceinline bool atomic_cas_uint32_ex(void* addr, uint32_t exp, uint32_t val, bool weak, int succ, int fail)
 {
-#if C11_ATOMICS
+#if defined(__riscv_a) && defined(GNU_EXTS)
+    UNUSED(succ); UNUSED(fail);
+    uint32_t ret = 1, tmp = 0;
+    do {
+        __asm__ __volatile__ (
+            "lr.w.aq %1, (%4) \n\t"
+            "bne %1, %2, lrsc_cas_exit%= \n\t"
+            "sc.w.aq %0, %3, (%4) \n\t"
+            "lrsc_cas_exit%=:"
+            : "=&r" (ret), "=&r" (tmp) : "r" (exp), "r" (val), "p" (addr));
+    } while (ret && !weak && tmp == exp);
+    return !ret;
+#elif C11_ATOMICS
     if (weak) {
         return atomic_compare_exchange_weak_explicit((_Atomic uint32_t*)addr, &exp, val, succ, fail);
     } else {
@@ -410,7 +422,19 @@ static forceinline uint64_t atomic_swap_uint64_ex(void* addr, uint64_t val, int 
 
 static forceinline bool atomic_cas_uint64_ex(void* addr, uint64_t exp, uint64_t val, bool weak, int succ, int fail)
 {
-#if C11_ATOMICS
+#if defined(__riscv_a) && __riscv_xlen >= 64 && defined(GNU_EXTS)
+    UNUSED(succ); UNUSED(fail);
+    uint64_t ret = 1, tmp;
+    do {
+        __asm__ __volatile__ (
+            "lr.d.aq %1, (%4) \n\t"
+            "bne %1, %2, lrsc_cas_exit%= \n\t"
+            "sc.d.aq %0, %3, (%4) \n\t"
+            "lrsc_cas_exit%=:"
+            : "=&r" (ret), "=&r" (tmp) : "r" (exp), "r" (val), "p" (addr));
+    } while (ret && !weak && tmp == exp);
+    return !ret;
+#elif C11_ATOMICS
     if (weak) {
         return atomic_compare_exchange_weak_explicit((_Atomic uint64_t*)addr, &exp, val, succ, fail);
     } else {
