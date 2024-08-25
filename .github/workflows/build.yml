@@ -14,12 +14,16 @@ env:
 
 jobs:
   linux-build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout
       uses: actions/checkout@v4.1.1
+    - name: Install libX11
+      run: sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends libx11-dev libxext-dev
     - name: Build
       run: make lib all
+    - name: Run RISC-V Tests
+      run: timeout 600 make lib all test
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4.3.1
       with:
@@ -31,7 +35,7 @@ jobs:
           release.linux.x86_64/librvvm_static.a
 
   win32-build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout
       uses: actions/checkout@v4.1.1
@@ -48,7 +52,7 @@ jobs:
           release.windows.x86_64/rvvm_x86_64.exe
           release.windows.x86_64/librvvm.dll
           release.windows.x86_64/librvvm_static.a
-        
+
   macos-build:
     runs-on: macos-12
     steps:
