@@ -568,7 +568,7 @@ test: $(BINARY)
 	@for file in "$(BUILDDIR)/riscv-tests/rv32"*; do \
 		result=$$($(BINARY) $$file -nogui -rv32 | tr -d '\0'); \
 		result="$${result##* }"; \
-		if [[ "$$result" == "0" ]]; then \
+		if [ "$$result" -eq "0" ]; then \
 		echo "[$(GREEN)PASS$(RESET)] $$file"; \
 		else \
 		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
@@ -581,7 +581,7 @@ ifeq ($(USE_RV64),1)
 	@for file in "$(BUILDDIR)/riscv-tests/rv64"*; do \
 		result=$$($(BINARY) $$file -nogui -rv64 | tr -d '\0'); \
 		result="$${result##* }"; \
-		if [[ "$$result" == "0" ]]; then \
+		if [ "$$result" -eq "0" ]; then \
 		echo "[$(GREEN)PASS$(RESET)] $$file"; \
 		else \
 		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
