@@ -266,7 +266,7 @@ size_t uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base)
 
 uint64_t str_to_uint_base(const char* str, size_t* len, uint8_t base)
 {
-    int val = 0;
+    uint64_t val = 0;
     size_t size = 0;
     if (base == 0) {
         base = 10;
