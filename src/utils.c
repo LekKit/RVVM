@@ -20,6 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "vector.h"
 #include "spinlock.h"
+#include "stacktrace.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,6 +136,7 @@ PRINT_FORMAT void rvvm_fatal(const char* str, ...)
     va_start(args, str);
     log_print(log_has_colors() ? "\033[31;1mFATAL\033[37;1m: " : "FATAL: ", str, args);
     va_end(args);
+    stacktrace_print();
     abort();
 }
 
