@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "spinlock.h"
+#include "stacktrace.h"
 #include "threading.h"
 #include "rvtimer.h"
 #include "utils.h"
@@ -86,6 +87,9 @@ slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
 #ifdef RVVM_VERSION
     rvvm_warn("Version: RVVM v"RVVM_VERSION);
 #endif
+
+    stacktrace_print();
+
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
 }
 
