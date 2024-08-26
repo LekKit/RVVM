@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "threading.h"
 #include "spinlock.h"
 #include "elf_load.h"
+#include "stacktrace.h"
 
 static spinlock_t global_lock = SPINLOCK_INIT;
 static vector_t(rvvm_machine_t*) global_machines = {0};
@@ -327,6 +328,7 @@ PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint
 
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
+    stacktrace_init();
 #ifndef USE_RV64
     if (rv64) {
         rvvm_error("RV64 is disabled in this RVVM build");
