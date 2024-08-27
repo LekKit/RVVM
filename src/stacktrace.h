@@ -14,6 +14,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#ifndef RVVM_STACKTRACE_H
+#define RVVM_STACKTRACE_H
+
 void stacktrace_init(void);
 
 void stacktrace_print(void);
+
+#endif
