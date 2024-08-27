@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "compiler.h"
 #include "utils.h"
+#include "dlib.h"
 
 #include <time.h>
 
@@ -35,7 +36,7 @@ static uint32_t qpc_crit = 0;
 static uint64_t qpc_off = 0, qpc_last = 0, qpc_freq = 0;
 static uint64_t qpc_last_checked = 0, uit_last_checked = 0;
 
-static BOOL (*query_uit)(PULONGLONG) = NULL;
+static BOOL (__stdcall *query_uit)(PULONGLONG) = NULL;
 
 static uint64_t qpc_get_frequency()
 {
@@ -73,10 +74,8 @@ uint64_t rvtimer_clocksource(uint64_t freq)
         if (qpc_freq == 0) {
             // Initialize the clock frequency once
             qpc_freq = qpc_get_frequency();
-#ifndef UNDER_CE
             // Initialize unbiased backup clock if present
-            query_uit = (void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryUnbiasedInterruptTime");
-#endif
+            query_uit = dlib_get_symbol("kernel32.dll", "QueryUnbiasedInterruptTime");
         }
 
         uint64_t qpc_new = qpc_get_clock() + qpc_off;
@@ -220,20 +219,26 @@ uint64_t rvtimecmp_delay(rvtimecmp_t* cmp)
     return (timer < timecmp) ? (timecmp - timer) : 0;
 }
 
+static void sleep_low_latency_once(void)
+{
+#if defined(_WIN32) && !defined(UNDER_CE)
+    NTSTATUS (__stdcall *nt_set_timer_resolution)(ULONG, BOOLEAN, PULONG) = dlib_get_symbol("ntdll.dll", "NtSetTimerResolution");
+    if (nt_set_timer_resolution) {
+        ULONG cur = 0;
+        nt_set_timer_resolution(5000, TRUE, &cur); // Set system clock resolution to 500us
+    }
+#endif
+}
+
+void sleep_low_latency(void)
+{
+    DO_ONCE(sleep_low_latency_once());
+}
+
 void sleep_ms(uint32_t ms)
 {
 #ifdef _WIN32
-#ifndef UNDER_CE
-    static NTSTATUS (__stdcall *nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
-    DO_ONCE ({
-        nt_setTR = (void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetTimerResolution");
-    });
-    if (nt_setTR) {
-        ULONG cur;
-        nt_setTR(5000, TRUE, &cur); // Set system clock resolution to 500us
-        nt_setTR = NULL;
-    }
-#endif
+    sleep_low_latency();
     Sleep(ms);
 
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
