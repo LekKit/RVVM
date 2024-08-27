@@ -197,7 +197,9 @@ static void win32_window_draw(gui_window_t* win)
     StretchDIBits(data->hdc, 0, 0, win->fb.width, win->fb.height,
                              0, 0, win->fb.width, win->fb.height,
                              win->fb.buffer, &bmi, 0, SRCCOPY);
+#ifndef UNDER_CE
     SwapBuffers(data->hdc);
+#endif
 }
 
 static void win32_window_poll(gui_window_t* win)
@@ -268,7 +270,7 @@ bool win32_window_init(gui_window_t* win)
         wc.lpszClassName = L"RVVM_window";
         winclass_atom = RegisterClassW(&wc);
         if (winclass_atom == 0) {
-            MessageBoxW(NULL, L"Failed to register window class!", L"RVVM Error", MB_OK | MB_ICONERROR);
+            rvvm_error("Failed to register window class!");
             return false;
         }
     });
@@ -285,7 +287,10 @@ bool win32_window_init(gui_window_t* win)
         WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, (rect.right - rect.left), (rect.bottom - rect.top),
         NULL, NULL, GetModuleHandle(NULL), NULL);
-    if (hwnd == NULL) return false;
+    if (hwnd == NULL) {
+        rvvm_error("Failed to create window!");
+        return false;
+    }
 
     // Initialize structures
     win32_data_t* data = safe_new_obj(win32_data_t);
