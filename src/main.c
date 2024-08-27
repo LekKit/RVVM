@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvvmlib.h"
 #include "rvvm_isolation.h"
 #include "utils.h"
+#include "dlib.h"
 
 #include "devices/clint.h"
 #include "devices/plic.h"
@@ -43,10 +44,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #ifdef _WIN32
 // For unicode args/console
-#if     _WIN32_WINNT < 0x0500
-#undef  _WIN32_WINNT
-#define _WIN32_WINNT   0x0500
-#endif
 #include <windows.h>
 #endif
 
@@ -284,12 +281,15 @@ static int rvvm_cli_main(int argc, const char** argv)
 int main(int argc, char** argv)
 {
 #if defined(_WIN32) && !defined(UNDER_CE)
-    HWND console = GetConsoleWindow();
-    DWORD pid;
-    GetWindowThreadProcessId(console, &pid);
-    if (GetCurrentProcessId() == pid) {
-        // If we don't have a parent terminal, destroy our console
-        FreeConsole();
+    HWND (__stdcall *get_console_window)(void) = dlib_get_symbol("kernel32.dll", "GetConsoleWindow");
+    if (get_console_window) {
+        HWND console = get_console_window();
+        DWORD pid = 0;
+        GetWindowThreadProcessId(console, &pid);
+        if (GetCurrentProcessId() == pid) {
+            // If we don't have a parent terminal, destroy our console
+            FreeConsole();
+        }
     }
     // Use UTF-8 arguments
     LPWSTR* argv_u16 = CommandLineToArgvW(GetCommandLineW(), &argc);
