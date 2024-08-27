@@ -114,17 +114,18 @@ const net_addr_t net_ipv4_local_addr = { .type = NET_TYPE_IPV4, .ip[0] = 127, .i
 const net_addr_t net_ipv6_any_addr   = { .type = NET_TYPE_IPV6, };
 const net_addr_t net_ipv6_local_addr = { .type = NET_TYPE_IPV6, .ip[15] = 1, };
 
-static void net_init_once()
+static bool net_init_once()
 {
 #ifdef _WIN32
     WSADATA wsaData = {0};
     WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
         rvvm_warn("Failed to initialize WinSock");
+        return false;
     }
 #elif defined(SIGPIPE)
     // Ignore SIGPIPE (Do not crash on writes to closed socket)
-    void (*handler)(int) = signal(SIGPIPE, SIG_IGN);
+    void* handler = signal(SIGPIPE, SIG_IGN);
     if (handler != SIG_DFL) signal(SIGPIPE, handler);
 #endif
 #if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
@@ -138,12 +139,15 @@ static void net_init_once()
         }
     }
 #endif
+    return true;
 }
 
 // Initialize networking automatically
-static void net_init()
+static bool net_init()
 {
-    DO_ONCE(net_init_once());
+    static bool init = false;
+    DO_ONCE(init = net_init_once());
+    return init;
 }
 
 // Address types conversion (net_addr_t <-> sockaddr_in/sockaddr_in6)
@@ -270,7 +274,7 @@ static net_handle_t net_accept_ex(net_handle_t listener, void* sock_addr, net_ad
 static net_handle_t net_create_handle(int type, const net_addr_t* addr, bool nonblock)
 {
     net_handle_t fd = NET_HANDLE_INVALID;
-    net_init();
+    if (!net_init()) return fd;
     if (addr == NULL || addr->type == NET_TYPE_IPV4) {
         fd = net_socket_create_ex(AF_INET, type, nonblock);
 #if defined(IPV6_NET_IMPL)
@@ -673,7 +677,7 @@ void net_sock_close(net_sock_t* sock)
 
 net_poll_t* net_poll_create()
 {
-    net_init();
+    if (!net_init()) return NULL;
     net_poll_t* poll = safe_new_obj(net_poll_t);
 #if defined(EPOLL_NET_IMPL)
     poll->fd = epoll_create(16);
