@@ -80,7 +80,6 @@ static dlib_ctx_t* dlib_open_internal(const char* lib_name, uint32_t flags)
     lib->flags = flags;
     return lib;
 #else
-    DO_ONCE(rvvm_warn("Dynamic library loading is not supported"));
     UNUSED(lib_name);
     UNUSED(flags);
     return NULL;
@@ -110,8 +109,7 @@ dlib_ctx_t* dlib_open(const char* lib_name, uint32_t flags)
 void dlib_close(dlib_ctx_t* lib)
 {
     // Silently ignore load error
-    if (lib == NULL) return;
-    if (lib->flags & DLIB_MAY_UNLOAD) {
+    if (lib && (lib->flags & DLIB_MAY_UNLOAD)) {
         rvvm_info("Unloading a library");
 #if defined(DLIB_WIN32_IMPL)
         FreeLibrary(lib->handle);
@@ -131,9 +129,18 @@ void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name)
     ret = (void*)GetProcAddress(lib->handle, symbol_name);
 #elif defined(DLIB_POSIX_IMPL)
     ret = dlsym(lib->handle, symbol_name);
+#else
+    UNUSED(symbol_name);
 #endif
-    if (ret == NULL) rvvm_warn("Failed to resolve symbol %s!", symbol_name);
     return ret;
+}
+
+void* dlib_get_symbol(const char* lib_name, const char* symbol_name)
+{
+    dlib_ctx_t* lib = dlib_open(lib_name, 0);
+    void* symbol = dlib_resolve(lib, symbol_name);
+    dlib_close(lib);
+    return symbol;
 }
 
 bool dlib_load_weak(const char* lib_name)

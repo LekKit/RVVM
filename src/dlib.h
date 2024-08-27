@@ -36,6 +36,9 @@ void dlib_close(dlib_ctx_t* lib);
 // Resolve public library symbols
 void* dlib_resolve(dlib_ctx_t* lib, const char* symbol_name);
 
+// Get symbol from an explicitly named lib
+void* dlib_get_symbol(const char* lib_name, const char* symbol_name);
+
 // Resolve weak symbols provided by a lib (With name probing)
 bool dlib_load_weak(const char* lib_name);
 
