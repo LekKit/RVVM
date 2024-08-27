@@ -22,7 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 #include <stdio.h>
 
-#if (defined(__unix__) || defined(__APPLE__) || defined(__MINGW32__)) && !defined(NO_STACKTRACE)
+#if (defined(__unix__) || defined(__APPLE__) || defined(__MINGW32__)) \
+ && !defined(NO_STACKTRACE) && !defined(UNDER_CE)
 #define SIGNAL_IMPL
 #include <stdlib.h>
 #include <signal.h>
