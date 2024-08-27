@@ -80,6 +80,9 @@ else
 ifneq (,$(findstring windows, $(CC_TRIPLET)))
 override OS := Windows
 else
+ifneq (,$(findstring cygwin, $(CC_TRIPLET)))
+override OS := Cygwin
+else
 ifneq (,$(findstring darwin, $(CC_TRIPLET)))
 override OS := Darwin
 else
@@ -94,6 +97,7 @@ else
 ifndef OS
 # Use host OS as a target
 override OS := $(HOST_UNAME)
+endif
 endif
 endif
 endif
