@@ -371,7 +371,7 @@ bool vma_pageout(void* addr, size_t size, bool lazy)
     addr = ptr_to_page(addr);
 
     if (!lazy) {
-#if defined(VMA_WIN32_IMPL)
+#if defined(VMA_WIN32_IMPL) && !defined(UNDER_CE)
         return VirtualUnlock(addr, size) || GetLastError() == ERROR_NOT_LOCKED;
 #elif defined(VMA_MMAP_IMPL) && defined(__linux__) && defined(MADV_PAGEOUT)
         return madvise(addr, size, MADV_PAGEOUT) == 0;
