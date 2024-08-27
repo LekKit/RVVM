@@ -16,16 +16,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifdef _WIN32
-#include <windows.h>
-
-#else
 // Needed for pthread_condattr_setclock(),
 // pthread_cond_timedwait_relative_np() when not passing -std=gnu..
 #define _GNU_SOURCE
 #define _BSD_SOURCE
 #define _DEFAULT_SOURCE
 
+#include "threading.h"
+#include "atomics.h"
+#include "rvtimer.h"
+#include "utils.h"
+#include "dlib.h"
+
+#ifdef _WIN32
+#include <windows.h>
+
+#else
 #include <pthread.h>
 #include <time.h>
 
@@ -52,11 +58,6 @@ static void condvar_fill_timespec(struct timespec* ts)
 #endif
 #endif
 
-#include "threading.h"
-#include "atomics.h"
-#include "rvtimer.h"
-#include "utils.h"
-
 #define COND_FLAG_SIGNALED 0x1
 
 struct thread_ctx {
@@ -79,7 +80,7 @@ struct cond_var {
 #endif
 };
 
-#if defined(_WIN32) && (defined(__i386__) || defined(_M_IX86))
+#if defined(_WIN32) && !defined(HOST_64BIT)
 // Wrap our function call to hide calling convention details
 typedef struct { thread_func_t func; void* arg; } thread_win32_wrap_t;
 static __stdcall DWORD thread_win32_wrap(void* arg)
@@ -94,7 +95,7 @@ thread_ctx_t* thread_create(thread_func_t func, void *arg)
 {
     thread_ctx_t* thread = safe_new_obj(thread_ctx_t);
 #ifdef _WIN32
-#if defined(__i386__) || defined(_M_IX86)
+#if !defined(HOST_64BIT)
     thread_win32_wrap_t* wrap = safe_new_obj(thread_win32_wrap_t);
     wrap->func = func;
     wrap->arg = arg;
@@ -148,27 +149,15 @@ cond_var_t* condvar_create()
     cond_var_t* cond = safe_new_obj(cond_var_t);
 #ifdef _WIN32
 #ifndef UNDER_CE
-    static HANDLE (__stdcall *create_WTExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
-    static NTSTATUS (__stdcall *nt_setTR)(ULONG, BOOLEAN, PULONG) = NULL;
+    static HANDLE (__stdcall *create_waitable_timer)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
     DO_ONCE ({
-        create_WTExW = (void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateWaitableTimerExW");
-        nt_setTR = (void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetTimerResolution");
+        create_waitable_timer = dlib_get_symbol("kernel32.dll", "CreateWaitableTimerExW");
     });
-    if (nt_setTR) {
-        // Set system clock resolution to 500us
-        ULONG cur;
-        nt_setTR(5000, TRUE, &cur);
-        nt_setTR = NULL;
-    }
-    if (create_WTExW) {
+    if (create_waitable_timer) {
         // Create a high resolution, manual reset waitable timer (Win10 1803+)
-        cond->timer = create_WTExW(NULL, NULL, 0x3, TIMER_ALL_ACCESS);
-        if (cond->timer == NULL) create_WTExW = NULL;
+        cond->timer = create_waitable_timer(NULL, NULL, 0x3, TIMER_ALL_ACCESS);
     }
-    if (cond->timer == NULL) {
-        // Fallback to generic waitable timer
-        cond->timer = CreateWaitableTimerW(NULL, TRUE, NULL);
-    }
+    sleep_low_latency();
 #endif
     cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (cond->event) return cond;
