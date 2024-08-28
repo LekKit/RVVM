@@ -147,6 +147,7 @@ bool thread_detach(thread_ctx_t* thread)
 cond_var_t* condvar_create()
 {
     cond_var_t* cond = safe_new_obj(cond_var_t);
+    sleep_low_latency();
 #ifdef _WIN32
 #ifndef UNDER_CE
     static HANDLE (__stdcall *create_waitable_timer)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
@@ -157,7 +158,6 @@ cond_var_t* condvar_create()
         // Create a high resolution, manual reset waitable timer (Win10 1803+)
         cond->timer = create_waitable_timer(NULL, NULL, 0x3, TIMER_ALL_ACCESS);
     }
-    sleep_low_latency();
 #endif
     cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (cond->event) return cond;
