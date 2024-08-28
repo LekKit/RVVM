@@ -82,8 +82,8 @@ bool rvtimecmp_pending(rvtimecmp_t* cmp);
 // Get delay until the timer interrupt
 uint64_t rvtimecmp_delay(rvtimecmp_t* cmp);
 
-// Enable low-latency sleep
-void sleep_low_latency(void);
+// Set expected sleep latency (Internal use)
+void sleep_low_latency(bool enable);
 
 // Sleep for N ms
 void sleep_ms(uint32_t ms);

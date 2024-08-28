@@ -23,8 +23,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <time.h>
 
-#ifdef _POSIX_PRIORITY_SCHEDULING
+#ifdef __linux__
+#include <sys/prctl.h> // For PR_SET_TIMERSLACK
+#endif
+
+#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
 #include <sched.h> // For sched_yield()
+#define SCHED_YIELD_IMPL
 #endif
 
 #ifdef _WIN32
@@ -219,26 +224,48 @@ uint64_t rvtimecmp_delay(rvtimecmp_t* cmp)
     return (timer < timecmp) ? (timecmp - timer) : 0;
 }
 
+#if defined(_WIN32) && !defined(UNDER_CE)
+
+static NTSTATUS (__stdcall *nt_set_timer_resolution)(ULONG, BOOLEAN, PULONG) = NULL;
+static uint32_t low_latency = 0;
+static rvtimer_t latency_timer = {0};
+
+#endif
+
 static void sleep_low_latency_once(void)
 {
 #if defined(_WIN32) && !defined(UNDER_CE)
-    NTSTATUS (__stdcall *nt_set_timer_resolution)(ULONG, BOOLEAN, PULONG) = dlib_get_symbol("ntdll.dll", "NtSetTimerResolution");
-    if (nt_set_timer_resolution) {
-        ULONG cur = 0;
-        nt_set_timer_resolution(5000, TRUE, &cur); // Set system clock resolution to 500us
-    }
+    rvtimer_init(&latency_timer, 1000);
+    nt_set_timer_resolution = dlib_get_symbol("ntdll.dll", "NtSetTimerResolution");
+#elif defined(__linux__) && defined(PR_SET_TIMERSLACK)
+    // Slacking off
+    prctl(PR_SET_TIMERSLACK, 1, 0, 0, 0);
 #endif
 }
 
-void sleep_low_latency(void)
+void sleep_low_latency(bool enable)
 {
     DO_ONCE(sleep_low_latency_once());
+#if defined(_WIN32) && !defined(UNDER_CE)
+    if (nt_set_timer_resolution && (enable || rvtimer_get(&latency_timer) > 100)) {
+        bool was_enabled = !!atomic_swap_uint32(&low_latency, enable);
+        if (enable != was_enabled) {
+            ULONG cur = 0;
+            nt_set_timer_resolution(enable ? 5000 : 156250, TRUE, &cur);
+            if (enable) {
+                rvtimer_rebase(&latency_timer, 0);
+            }
+        }
+    }
+#else
+    UNUSED(enable);
+#endif
 }
 
 void sleep_ms(uint32_t ms)
 {
 #ifdef _WIN32
-    sleep_low_latency();
+    sleep_low_latency(ms < 15);
     Sleep(ms);
 
 #elif defined(CHOSEN_POSIX_CLOCK) || defined(__APPLE__)
@@ -247,7 +274,7 @@ void sleep_ms(uint32_t ms)
         while (nanosleep(&ts, &ts) < 0);
         return;
     }
-#ifdef _POSIX_PRIORITY_SCHEDULING
+#if defined(SCHED_YIELD_IMPL)
     // Yield this thread time slice, as does Win32 Sleep(0)
     sched_yield();
 #endif
