@@ -283,7 +283,7 @@ static void* rvvm_eventloop(void* manual)
             }
         }
         spin_unlock(&global_lock);
-        condvar_wait(eventloop_cond, 10);
+        condvar_wait(eventloop_cond, 16);
     }
 
     return NULL;
