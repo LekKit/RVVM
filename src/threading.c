@@ -147,7 +147,6 @@ bool thread_detach(thread_ctx_t* thread)
 cond_var_t* condvar_create()
 {
     cond_var_t* cond = safe_new_obj(cond_var_t);
-    sleep_low_latency();
 #ifdef _WIN32
 #ifndef UNDER_CE
     static HANDLE (__stdcall *create_waitable_timer)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD) = NULL;
@@ -216,12 +215,14 @@ bool condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns)
         return true;
     }
 
+    sleep_low_latency(timeout_ns < 15000000);
+
 #ifdef _WIN32
     if (timeout_ns == CONDVAR_INFINITE) {
         ret = WaitForSingleObject(cond->event, INFINITE) == WAIT_OBJECT_0;
 #ifndef UNDER_CE
     } else if (timeout_ns < 15000000 && cond->timer && !waiters) {
-        // Nanosecond precision timeout using WaitableTimer
+        // Nanosecond precision timeout using high-resolution WaitableTimer
         LARGE_INTEGER delay = { .QuadPart = -(timeout_ns / 100ULL), };
         HANDLE handles[2] = { cond->event, cond->timer };
         SetWaitableTimer(handles[1], &delay, 0, NULL, NULL, false);
