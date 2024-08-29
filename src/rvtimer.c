@@ -176,12 +176,12 @@ void rvtimer_init(rvtimer_t* timer, uint64_t freq)
     rvtimer_rebase(timer, 0);
 }
 
-uint64_t rvtimer_freq(rvtimer_t* timer)
+uint64_t rvtimer_freq(const rvtimer_t* timer)
 {
     return timer->freq;
 }
 
-uint64_t rvtimer_get(rvtimer_t* timer)
+uint64_t rvtimer_get(const rvtimer_t* timer)
 {
     return rvtimer_clocksource(timer->freq) - atomic_load_uint64_ex(&timer->begin, ATOMIC_RELAXED);
 }
@@ -202,26 +202,26 @@ void rvtimecmp_set(rvtimecmp_t* cmp, uint64_t timecmp)
     atomic_store_uint64_ex(&cmp->timecmp, timecmp, ATOMIC_RELAXED);
 }
 
-uint64_t rvtimecmp_swap(rvtimecmp_t* cmp, uint64_t timecmp)
-{
-    return atomic_swap_uint64_ex(&cmp->timecmp, timecmp, ATOMIC_RELAXED);
-}
-
-uint64_t rvtimecmp_get(rvtimecmp_t* cmp)
+uint64_t rvtimecmp_get(const rvtimecmp_t* cmp)
 {
     return atomic_load_uint64_ex(&cmp->timecmp, ATOMIC_RELAXED);
 }
 
-bool rvtimecmp_pending(rvtimecmp_t* cmp)
+bool rvtimecmp_pending(const rvtimecmp_t* cmp)
 {
     return rvtimer_get(cmp->timer) >= rvtimecmp_get(cmp);
 }
 
-uint64_t rvtimecmp_delay(rvtimecmp_t* cmp)
+uint64_t rvtimecmp_delay(const rvtimecmp_t* cmp)
 {
     uint64_t timer = rvtimer_get(cmp->timer);
     uint64_t timecmp = rvtimecmp_get(cmp);
     return (timer < timecmp) ? (timecmp - timer) : 0;
+}
+
+uint64_t rvtimecmp_delay_ns(const rvtimecmp_t* cmp)
+{
+    return rvtimer_convert_freq(rvtimecmp_delay(cmp), rvtimer_freq(cmp->timer), 1000000000ULL);
 }
 
 #if defined(_WIN32) && !defined(UNDER_CE)
