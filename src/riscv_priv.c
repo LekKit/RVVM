@@ -88,28 +88,19 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         case RV_PRIV_S_WFI:
             // Resume execution for locally enabled interrupts pending at any privilege level
             if (!riscv_interrupts_pending(vm)) {
-                // Stall the hart until an interrupt might need servicing
                 while (atomic_load_uint32(&vm->wait_event)) {
-                    if (vm->csr.ie & ((1 << INTERRUPT_MTIMER) | (1 << INTERRUPT_STIMER))) {
-                        // Calculate sleep period
-                        uint64_t delay = -1;
-                        if (vm->csr.ie & (1 << INTERRUPT_MTIMER)) {
-                            delay = EVAL_MIN(delay, rvtimecmp_delay(&vm->mtimecmp));
-                        }
-                        if (vm->csr.ie & (1 << INTERRUPT_STIMER)) {
-                            delay = EVAL_MIN(delay, rvtimecmp_delay(&vm->stimecmp));
-                        }
-                        if (delay) {
-                            delay = delay * 1000000000 / rvtimer_freq(&vm->machine->timer);
-                            condvar_wait_ns(vm->wfi_cond, delay);
-                        }
-                        // Hint interrupt dispatcher to check actual timer expiration
-                        riscv_hart_check_timer(vm);
-                        break;
-                    } else {
-                        // Timer IRQs disabled, wait for external IRQs
-                        condvar_wait(vm->wfi_cond, CONDVAR_INFINITE);
+                    // Stall the hart until an interrupt might need servicing
+                    uint64_t delay = CONDVAR_INFINITE;
+                    if (vm->csr.ie & (1U << INTERRUPT_MTIMER)) {
+                        delay = rvtimecmp_delay_ns(&vm->mtimecmp);
                     }
+                    if (vm->csr.ie & (1U << INTERRUPT_STIMER)) {
+                        delay = EVAL_MIN(delay, rvtimecmp_delay_ns(&vm->stimecmp));
+                    }
+                    condvar_wait_ns(vm->wfi_cond, delay);
+
+                    // Check timer expiration
+                    riscv_hart_check_timer(vm);
                 }
             }
             return;
