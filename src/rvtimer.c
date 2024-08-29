@@ -221,7 +221,12 @@ uint64_t rvtimecmp_delay(const rvtimecmp_t* cmp)
 
 uint64_t rvtimecmp_delay_ns(const rvtimecmp_t* cmp)
 {
-    return rvtimer_convert_freq(rvtimecmp_delay(cmp), rvtimer_freq(cmp->timer), 1000000000ULL);
+    uint64_t delay = rvtimecmp_delay(cmp);
+    if (delay > 0x400000000ULL) {
+        // Approximate overflow for nanosecond conversion
+        delay = 0x400000000ULL;
+    }
+    return delay * 1000000000ULL / rvtimer_freq(cmp->timer);
 }
 
 #if defined(_WIN32) && !defined(UNDER_CE)
