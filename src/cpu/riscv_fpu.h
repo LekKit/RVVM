@@ -132,69 +132,6 @@ static forceinline uint8_t fpu_fclassd(double x)
     }
 }
 
-static forceinline float fpu_minf(float x, float y)
-{
-    if (isless(x, y)) {
-        // Raises exception only for signalling NaNs
-        return x;
-    } else if (isless(y, x)) {
-        return y;
-    } else if (fpu_isnan(x)) {
-        // If one of operands is NaN, return a different operand
-        return y;
-    } else if (fpu_isnan(y)) {
-        return x;
-    } else {
-        // -0.0 is less than 0.0, but not handled by isless/isgreater
-        return fpu_signbitf(x) ? x : y;
-    }
-}
-
-static forceinline float fpu_maxf(float x, float y)
-{
-    if (isgreater(x, y)) {
-        return x;
-    } else if (isgreater(y, x)) {
-        return y;
-    } else if (fpu_isnan(x)) {
-        return y;
-    } else if (fpu_isnan(y)) {
-        return x;
-    } else {
-        return fpu_signbitf(x) ? y : x;
-    }
-}
-
-static forceinline double fpu_mind(double x, double y)
-{
-    if (isless(x, y)) {
-        return x;
-    } else if (isless(y, x)) {
-        return y;
-    } else if (fpu_isnan(x)) {
-        return y;
-    } else if (fpu_isnan(y)) {
-        return x;
-    } else {
-        return fpu_signbitd(x) ? x : y;
-    }
-}
-
-static forceinline double fpu_maxd(double x, double y)
-{
-    if (isgreater(x, y)) {
-        return x;
-    } else if (isgreater(y, x)) {
-        return y;
-    } else if (fpu_isnan(x)) {
-        return y;
-    } else if (fpu_isnan(y)) {
-        return x;
-    } else {
-        return fpu_signbitd(x) ? y : x;
-    }
-}
-
 static forceinline float fpu_round_evenf(float val) {
     float even;
     float frac = modff(val, &even);
