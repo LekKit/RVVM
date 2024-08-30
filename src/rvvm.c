@@ -289,7 +289,7 @@ static void* rvvm_eventloop(void* manual)
     return NULL;
 }
 
-static void rvvm_reconfigure_eventloop()
+static void rvvm_reconfigure_eventloop(void)
 {
     spin_lock(&global_lock);
     bool needs_cond = global_manual || vector_size(global_machines);
@@ -804,7 +804,7 @@ static void rvvm_set_manual_eventloop(bool manual)
     rvvm_reconfigure_eventloop();
 }
 
-PUBLIC void rvvm_run_eventloop()
+PUBLIC void rvvm_run_eventloop(void)
 {
     rvvm_set_manual_eventloop(true);
     rvvm_eventloop((void*)(size_t)1);
