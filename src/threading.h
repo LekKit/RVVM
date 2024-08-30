@@ -36,7 +36,7 @@ bool          thread_detach(thread_ctx_t* handle);
 #define CONDVAR_INFINITE ((uint64_t)-1)
 
 // Conditional variables
-cond_var_t* condvar_create();
+cond_var_t* condvar_create(void);
 bool        condvar_wait(cond_var_t* cond, uint64_t timeout_ms);
 bool        condvar_wait_ns(cond_var_t* cond, uint64_t timeout_ns);
 bool        condvar_wake(cond_var_t* cond);

@@ -144,7 +144,7 @@ bool thread_detach(thread_ctx_t* thread)
     return ret;
 }
 
-cond_var_t* condvar_create()
+cond_var_t* condvar_create(void)
 {
     cond_var_t* cond = safe_new_obj(cond_var_t);
 #ifdef _WIN32
