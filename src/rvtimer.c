@@ -22,10 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define _DEFAULT_SOURCE
 
 #include "rvtimer.h"
-#include "compiler.h"
-#include "utils.h"
-#include "dlib.h"
-
 #include <time.h>
 
 #ifdef __linux__
@@ -37,10 +33,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SCHED_YIELD_IMPL
 #endif
 
+// RVVM internal headers come after system headers because of safe_free()
+#include "atomics.h"
+#include "compiler.h"
+#include "utils.h"
+#include "dlib.h"
+
 #ifdef _WIN32
 // Use QueryPerformanceCounter()
 #include <windows.h>
-#include "atomics.h"
 
 static uint32_t qpc_crit = 0;
 static uint64_t qpc_off = 0, qpc_last = 0, qpc_freq = 0;
