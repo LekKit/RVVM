@@ -136,7 +136,7 @@ static forceinline void atomic_fence_ex(int memorder)
 #endif
 }
 
-static forceinline void atomic_fence()
+static forceinline void atomic_fence(void)
 {
     atomic_fence_ex(ATOMIC_SEQ_CST);
 }
