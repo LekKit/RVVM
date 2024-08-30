@@ -207,7 +207,7 @@ static inline bool check_imm_bits(int32_t val, bitcnt_t bits)
     return sign_extend(val, bits) == val;
 }
 
-static inline size_t rvjit_native_default_hregmask()
+static inline size_t rvjit_native_default_hregmask(void)
 {
     // X0 - X15 registers are caller-saved
     // X0 is preserver as vmptr
@@ -215,7 +215,7 @@ static inline size_t rvjit_native_default_hregmask()
     return 0xFFFE;
 }
 
-static inline size_t rvjit_native_abireclaim_hregmask()
+static inline size_t rvjit_native_abireclaim_hregmask(void)
 {
     // We have enough caller-saved registers, no need for push/pop as well
     return 0;
