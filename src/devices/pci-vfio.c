@@ -16,6 +16,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Needed for pread()/pwrite()/readlink(), O_CLOEXEC when not passing -std=gnu..
+#define _GNU_SOURCE
+#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
+
 #include "pci-vfio.h"
 #include "compiler.h"
 #include "threading.h"
