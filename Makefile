@@ -251,17 +251,17 @@ WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-
 
 # Compiler-specific options
 ifeq ($(CC_TYPE),gcc)
-CC_STD := -std=gnu11
+CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
 CXX_STD := -std=gnu++11
 override CFLAGS := -O2 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
-CC_STD := -std=gnu11
+CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
 CXX_STD := -std=gnu++11
 override CFLAGS := -O2 -flto=thin -fvisibility=hidden -fno-math-errno -Wno-unknown-warning-option $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 # Whatever compiler that might be, use conservative options
-CC_STD := -std=gnu99
+CC_STD := -std=c99
 CXX_STD :=
 override CFLAGS := -O2 $(DEBUG_OPTS) $(CFLAGS)
 endif
