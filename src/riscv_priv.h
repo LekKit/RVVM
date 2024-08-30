@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "rvvm.h"
 
-NOINLINE void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn);
-NOINLINE void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn);
+slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn);
+slow_path void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn);
 
 #endif

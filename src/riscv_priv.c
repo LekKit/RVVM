@@ -37,7 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define RISCV_INSN_PAUSE 0x100000F // Instruction value for pause hint
 
-void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
+slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
 {
     switch (insn) {
         case RV_PRIV_S_ECALL:
@@ -180,7 +180,7 @@ void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
     riscv_illegal_insn(vm, insn);
 }
 
-void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
+slow_path void riscv_emulate_opc_misc_mem(rvvm_hart_t* vm, const uint32_t insn)
 {
     const uint32_t funct3 = bit_cut(insn, 12, 3);
     switch (funct3) {
