@@ -581,6 +581,7 @@ test: $(BINARY)
 		echo "$(WHITE)[$(GREEN)PASS$(WHITE)] $$file$(RESET)"; \
 		else \
 		echo "$(WHITE)[$(RED)FAIL: $$result$(WHITE)] $$file$(RESET)"; \
+		exit -1; \
 		fi; \
 	done
 ifeq ($(USE_RV64),1)
@@ -594,6 +595,7 @@ ifeq ($(USE_RV64),1)
 		echo "$(WHITE)[$(GREEN)PASS$(WHITE)] $$file$(RESET)"; \
 		else \
 		echo "$(WHITE)[$(RED)FAIL: $$result$(WHITE)] $$file$(RESET)"; \
+		exit -1; \
 		fi; \
 	done
 endif
