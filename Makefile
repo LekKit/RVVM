@@ -258,7 +258,7 @@ WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-
 ifeq ($(CC_TYPE),gcc)
 CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
 CXX_STD := -std=gnu++11
-override CFLAGS := -O2 -flto=auto -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
+override CFLAGS := -O2 -flto=auto -fno-plt -fvisibility=hidden -fno-math-errno $(WARN_OPTS) $(DEBUG_OPTS) $(CFLAGS)
 else
 ifeq ($(CC_TYPE),clang)
 CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
