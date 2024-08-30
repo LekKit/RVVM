@@ -578,9 +578,9 @@ test: $(BINARY)
 		result=$$($(BINARY) $$file -nogui -rv32 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [ "$$result" -eq "0" ]; then \
-		echo "[$(GREEN)PASS$(RESET)] $$file"; \
+		echo "$(WHITE)[$(GREEN)PASS$(WHITE)] $$file$(RESET)"; \
 		else \
-		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
+		echo "$(WHITE)[$(RED)FAIL: $$result$(WHITE)] $$file$(RESET)"; \
 		fi; \
 	done
 ifeq ($(USE_RV64),1)
@@ -591,9 +591,9 @@ ifeq ($(USE_RV64),1)
 		result=$$($(BINARY) $$file -nogui -rv64 | tr -d '\0'); \
 		result="$${result##* }"; \
 		if [ "$$result" -eq "0" ]; then \
-		echo "[$(GREEN)PASS$(RESET)] $$file"; \
+		echo "$(WHITE)[$(GREEN)PASS$(WHITE)] $$file$(RESET)"; \
 		else \
-		echo "[$(RED)FAIL: $$result$(RESET)] $$file"; \
+		echo "$(WHITE)[$(RED)FAIL: $$result$(WHITE)] $$file$(RESET)"; \
 		fi; \
 	done
 endif
