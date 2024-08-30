@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "dlib.h"
-#include "utils.h"
 
 #ifndef DLIB_DISABLED
 
@@ -41,6 +40,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef DLIB_FILE_EXT
 #define DLIB_FILE_EXT ""
 #endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "utils.h"
 
 struct dlib_ctx {
 #if defined(DLIB_WIN32_IMPL)
