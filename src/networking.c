@@ -72,6 +72,7 @@ typedef socklen_t net_addrlen_t;
 #define IPV6_NET_IMPL
 #endif
 
+// RVVM internal headers come after system headers because of safe_free() and winsock
 #include "networking.h"
 #include "utils.h"
 #include "mem_ops.h"
