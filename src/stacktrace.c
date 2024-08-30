@@ -93,7 +93,7 @@ static void signal_handler(int sig)
 static void set_signal_handler(int sig)
 {
     void* prev = signal(sig, signal_handler);
-    if (prev != NULL && prev != SIG_IGN) {
+    if (prev != NULL && prev != (void*)SIG_IGN) {
         // Signal already used
         signal(sig, prev);
     }
