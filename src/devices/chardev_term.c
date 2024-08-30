@@ -18,11 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "chardev.h"
-#include "spinlock.h"
-#include "rvtimer.h"
-#include "ringbuf.h"
-#include "utils.h"
-#include "mem_ops.h"
 
 #if (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(__EMSCRIPTEN__)
 #include <sys/types.h>
@@ -37,18 +32,45 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define POSIX_TERM_IMPL
 
-static struct termios orig_term_opts;
+#elif defined(_WIN32) && !defined(UNDER_CE)
+#include <windows.h>
+#include <conio.h>
+
+#define WIN32_TERM_IMPL
+
+#else
+#include <stdio.h>
+#warning No UART input support!
+
+#endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "spinlock.h"
+#include "rvtimer.h"
+#include "ringbuf.h"
+#include "utils.h"
+#include "mem_ops.h"
+
+#if defined(POSIX_TERM_IMPL)
+static struct termios orig_term_opts = {0};
+#elif defined(WIN32_TERM_IMPL)
+static DWORD orig_input_mode = 0;
+static DWORD orig_output_mode = 0;
+#endif
 
 static void term_origmode(void)
 {
+#if defined(POSIX_TERM_IMPL)
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term_opts);
+#elif defined(WIN32_TERM_IMPL)
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), orig_input_mode);
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), orig_output_mode);
+#endif
 }
 
 static void term_rawmode(void)
 {
-    tcgetattr(STDIN_FILENO, &orig_term_opts);
-    call_at_deinit(term_origmode);
-
+#if defined(POSIX_TERM_IMPL)
     struct termios term_opts = {
         .c_iflag = ICRNL,
         .c_oflag = OPOST | ONLCR,
@@ -56,32 +78,20 @@ static void term_rawmode(void)
         .c_lflag = 0,
         .c_cc[VMIN] = 1,
     };
+    tcgetattr(STDIN_FILENO, &orig_term_opts);
     tcsetattr(STDIN_FILENO, TCSANOW, &term_opts);
-}
-
-#elif defined(_WIN32) && !defined(UNDER_CE)
-#include <windows.h>
-#include <conio.h>
-
-#define WIN32_TERM_IMPL
-
-static void term_rawmode(void)
-{
-    //AttachConsole(ATTACH_PARENT_PROCESS);
+#elif defined(WIN32_TERM_IMPL)
     SetConsoleOutputCP(CP_UTF8);
+    GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &orig_input_mode);
+    GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &orig_output_mode);
+
     // ENABLE_VIRTUAL_TERMINAL_INPUT
     SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0x200);
     // ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
     SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), 0x5);
-}
-
-#else
-#include <stdio.h>
-#warning No UART input support!
-
-static void term_rawmode(void) {}
-
 #endif
+    call_at_deinit(term_origmode);
+}
 
 typedef struct {
     chardev_t chardev;
