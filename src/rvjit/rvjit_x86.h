@@ -79,7 +79,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VM_PTR_REG X86_ECX
 #endif
 
-static inline size_t rvjit_native_default_hregmask()
+static inline size_t rvjit_native_default_hregmask(void)
 {
 #ifdef RVJIT_NATIVE_64BIT
     return rvjit_hreg_mask(X64_RAX) |
@@ -101,7 +101,7 @@ static inline size_t rvjit_native_default_hregmask()
 #endif
 }
 
-static inline size_t rvjit_native_abireclaim_hregmask()
+static inline size_t rvjit_native_abireclaim_hregmask(void)
 {
 #ifdef RVJIT_NATIVE_64BIT
     return rvjit_hreg_mask(X64_RBX) |
@@ -124,7 +124,7 @@ static inline size_t rvjit_native_abireclaim_hregmask()
 #endif
 }
 
-static inline size_t rvjit_native_default_fpu_regmask()
+static inline size_t rvjit_native_default_fpu_regmask(void)
 {
 #ifdef RVJIT_ABI_SYSV
     return 0xFFFF; // All XMM registers are caller-saved
@@ -508,7 +508,7 @@ static void rvjit_x86_cpuid(uint32_t eax, uint32_t ecx, uint32_t* regs)
     }
 }
 
-static inline bool rvjit_x86_has_bmi2()
+static inline bool rvjit_x86_has_bmi2(void)
 {
     static bool bmi2 = false;
     DO_ONCE ({
