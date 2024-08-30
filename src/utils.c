@@ -85,7 +85,7 @@ void rvvm_set_loglevel(int level)
     loglevel = level;
 }
 
-static bool log_has_colors()
+static bool log_has_colors(void)
 {
     return getenv("TERM") != NULL;
 }
@@ -179,12 +179,12 @@ NOINLINE void do_once_finalize(uint32_t* ticket)
     }
 }
 
-typedef void (*deinit_func_t)();
+typedef void (*deinit_func_t)(void);
 static vector_t(deinit_func_t) deinit_funcs = {0};
 static spinlock_t deinit_lock = {0};
 static bool deinit_happened = false;
 
-void call_at_deinit(void (*function)())
+void call_at_deinit(void (*function)(void))
 {
     bool call_func = false;
 

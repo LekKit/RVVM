@@ -105,7 +105,7 @@ static inline size_t align_size_down(size_t x, size_t align)
     return x & ~(align - 1);
 }
 
-void call_at_deinit(void (*function)());
+void call_at_deinit(void (*function)(void));
 
 // Portable strtol/ltostr replacement
 size_t   uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base);
