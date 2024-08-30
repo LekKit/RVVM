@@ -25,7 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define DLIB_WIN32_IMPL
 #define DLIB_FILE_EXT ".dll"
 
-#elif defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
+#elif (defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)) && !defined(__EMSCRIPTEN__)
 #include <dlfcn.h>
 #define DLIB_POSIX_IMPL
 #ifdef __APPLE__
