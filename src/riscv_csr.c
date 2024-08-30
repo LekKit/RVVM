@@ -358,7 +358,7 @@ static bool riscv_csr_satp(rvvm_hart_t* vm, maxlen_t* dest, uint8_t op)
 
 #ifdef USE_FPU
 
-static uint32_t fpu_get_exceptions()
+static uint32_t fpu_get_exceptions(void)
 {
     uint32_t ret = 0;
     uint32_t exc = fetestexcept(FE_ALL_EXCEPT);
