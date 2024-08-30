@@ -351,9 +351,10 @@ static forceinline void riscv_emulate_c_misc_alu(rvvm_hart_t* vm, const uint16_t
                                 riscv_write_reg(vm, rds, ~reg1);
                                 return;
                         }
-                        break;;
+                        break;
                 }
             }
+            break;
         }
     }
     riscv_illegal_insn(vm, insn);
@@ -453,7 +454,7 @@ static forceinline void riscv_emulate_c_jr_mv(rvvm_hart_t* vm, const uint16_t in
     const regid_t rs2 = bit_cut(insn, 2, 5);
 
     if (bit_check(insn, 12)) {
-        if (rds != 0) {
+        if (likely(rds != 0)) {
             if (rs2 != 0) {
                 // c.add
                 const xlen_t reg1 = riscv_read_reg(vm, rds);
