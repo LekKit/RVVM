@@ -34,7 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_KSM   0x20 // Kernel same-page merging
 
 // Get host page size
-size_t vma_page_size();
+size_t vma_page_size(void);
 
 // Create anonymous memory-backed FD (POSIX only!)
 int vma_anon_memfd(size_t size);

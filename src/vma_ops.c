@@ -88,7 +88,7 @@ static inline int vma_native_flags(uint32_t flags)
 
 static size_t host_pagesize = 0;
 
-size_t vma_page_size()
+size_t vma_page_size(void)
 {
     if (!host_pagesize) {
 #if defined(VMA_WIN32_IMPL)
@@ -105,7 +105,7 @@ size_t vma_page_size()
     return host_pagesize;
 }
 
-static inline size_t vma_page_mask()
+static inline size_t vma_page_mask(void)
 {
     return vma_page_size() - 1;
 }
