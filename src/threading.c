@@ -23,10 +23,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define _DEFAULT_SOURCE
 
 #include "threading.h"
-#include "atomics.h"
-#include "rvtimer.h"
-#include "utils.h"
-#include "dlib.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -57,6 +53,12 @@ static void condvar_fill_timespec(struct timespec* ts)
 
 #endif
 #endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "atomics.h"
+#include "rvtimer.h"
+#include "utils.h"
+#include "dlib.h"
 
 #define COND_FLAG_SIGNALED 0x1
 
