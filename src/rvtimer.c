@@ -43,7 +43,7 @@ static uint64_t qpc_last_checked = 0, uit_last_checked = 0;
 
 static BOOL (__stdcall *query_uit)(PULONGLONG) = NULL;
 
-static uint64_t qpc_get_frequency()
+static uint64_t qpc_get_frequency(void)
 {
     LARGE_INTEGER qpc = {0};
     QueryPerformanceFrequency(&qpc);
@@ -53,7 +53,7 @@ static uint64_t qpc_get_frequency()
     return qpc.QuadPart;
 }
 
-static uint64_t qpc_get_clock()
+static uint64_t qpc_get_clock(void)
 {
     LARGE_INTEGER qpc = {0};
     if (!QueryPerformanceCounter(&qpc)) {
@@ -62,7 +62,7 @@ static uint64_t qpc_get_clock()
     return qpc.QuadPart;
 }
 
-static uint64_t uit_get_clock()
+static uint64_t uit_get_clock(void)
 {
     ULONGLONG uit = 0;
     if (query_uit) query_uit(&uit);
