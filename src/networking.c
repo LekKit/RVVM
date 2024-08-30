@@ -114,7 +114,7 @@ const net_addr_t net_ipv4_local_addr = { .type = NET_TYPE_IPV4, .ip[0] = 127, .i
 const net_addr_t net_ipv6_any_addr   = { .type = NET_TYPE_IPV6, };
 const net_addr_t net_ipv6_local_addr = { .type = NET_TYPE_IPV6, .ip[15] = 1, };
 
-static bool net_init_once()
+static bool net_init_once(void)
 {
 #ifdef _WIN32
     WSADATA wsaData = {0};
@@ -143,7 +143,7 @@ static bool net_init_once()
 }
 
 // Initialize networking automatically
-static bool net_init()
+static bool net_init(void)
 {
     static bool init = false;
     DO_ONCE(init = net_init_once());
@@ -313,7 +313,7 @@ static bool net_bind_handle(net_handle_t fd, const net_addr_t* addr)
     return false;
 }
 
-static bool net_conn_initiated()
+static inline bool net_conn_initiated(void)
 {
 #ifdef _WIN32
     return WSAGetLastError() == WSAEWOULDBLOCK;
@@ -373,7 +373,7 @@ static net_sock_t* net_init_localaddr(net_sock_t* sock, const net_addr_t* addr)
     return sock;
 }
 
-static int32_t net_last_error()
+static int32_t net_last_error(void)
 {
 #ifdef _WIN32
     int err = WSAGetLastError();
@@ -675,7 +675,7 @@ void net_sock_close(net_sock_t* sock)
 
 // Event polling
 
-net_poll_t* net_poll_create()
+net_poll_t* net_poll_create(void)
 {
     if (!net_init()) return NULL;
     net_poll_t* poll = safe_new_obj(net_poll_t);

@@ -105,7 +105,7 @@ typedef struct {
 
 #define NET_POLL_INF ((uint32_t)-1)
 
-net_poll_t* net_poll_create();
+net_poll_t* net_poll_create(void);
 
 bool        net_poll_add(net_poll_t* poll, net_sock_t* sock, const net_event_t* event);
 bool        net_poll_mod(net_poll_t* poll, net_sock_t* sock, const net_event_t* event);
