@@ -88,7 +88,7 @@ static void* tap_thread(void* arg)
     return arg;
 }
 
-tap_dev_t* tap_open()
+tap_dev_t* tap_open(void)
 {
     tap_dev_t* tap = safe_new_obj(tap_dev_t);
     // Open TUN
@@ -110,7 +110,7 @@ tap_dev_t* tap_open()
     }
     // TAP may be assigned a different name
     rvvm_strlcpy(tap->name, ifr.ifr_name, sizeof(tap->name));
-    
+
     // Create shutdown pipe
     if (pipe(tap->shut) < 0) {
         rvvm_error("pipe() failed: %s", strerror(errno));
@@ -122,7 +122,7 @@ tap_dev_t* tap_open()
     // Set the interface up
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     ioctl(sock, SIOCGIFFLAGS, &ifr);
-    ifr.ifr_flags |= IFF_UP;    
+    ifr.ifr_flags |= IFF_UP;
     ioctl(sock, SIOCSIFFLAGS, &ifr);
     close(sock);
 
@@ -175,7 +175,7 @@ void tap_close(tap_dev_t* tap)
     // Shut down the TAP thread
     close(tap->shut[1]);
     thread_join(tap->thread);
-    
+
     // Cleanup
     close(tap->fd);
     close(tap->shut[0]);
