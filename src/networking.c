@@ -126,7 +126,10 @@ static bool net_init_once(void)
 #elif defined(SIGPIPE)
     // Ignore SIGPIPE (Do not crash on writes to closed socket)
     void* handler = signal(SIGPIPE, SIG_IGN);
-    if (handler != SIG_DFL) signal(SIGPIPE, handler);
+    if (handler != (void*)SIG_DFL && handler != (void*)SIG_IGN) {
+        // Revert handler set by someone else
+        signal(SIGPIPE, handler);
+    }
 #endif
 #if defined(EPOLL_NET_IMPL) || defined(KQUEUE_NET_IMPL)
     struct rlimit rlim = {0};
