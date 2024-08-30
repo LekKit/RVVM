@@ -39,12 +39,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 static struct termios orig_term_opts;
 
-static void term_origmode()
+static void term_origmode(void)
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term_opts);
 }
 
-static void term_rawmode()
+static void term_rawmode(void)
 {
     tcgetattr(STDIN_FILENO, &orig_term_opts);
     call_at_deinit(term_origmode);
@@ -65,7 +65,7 @@ static void term_rawmode()
 
 #define WIN32_TERM_IMPL
 
-static void term_rawmode()
+static void term_rawmode(void)
 {
     //AttachConsole(ATTACH_PARENT_PROCESS);
     SetConsoleOutputCP(CP_UTF8);
@@ -79,7 +79,7 @@ static void term_rawmode()
 #include <stdio.h>
 #warning No UART input support!
 
-static void term_rawmode() {}
+static void term_rawmode(void) {}
 
 #endif
 
