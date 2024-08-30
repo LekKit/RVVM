@@ -20,8 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define _DEFAULT_SOURCE
 
 #include "vma_ops.h"
-#include "utils.h"
-#include <string.h>
 
 #ifdef _WIN32
 #define VMA_WIN32_IMPL
@@ -85,6 +83,10 @@ static inline int vma_native_flags(uint32_t flags)
 #warning No native VMA support!
 
 #endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "mem_ops.h"
+#include "utils.h"
 
 static size_t host_pagesize = 0;
 
