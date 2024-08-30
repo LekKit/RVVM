@@ -71,7 +71,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define FE_DFL_ENV 0
 #endif
 
-static inline int fenv_bogus_op()
+static inline int fenv_bogus_op(void)
 {
     return 0;
 }
