@@ -32,11 +32,12 @@ endif
 # Some eye-candy stuff
 SPACE   :=
 ifneq (,$(TERM))
+RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\e[0m" $(NULL_STDERR))
 BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\e[1m" $(NULL_STDERR))
-RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\e[0m" $(NULL_STDERR))$(BOLD)
 RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\e[31m" $(NULL_STDERR))$(BOLD)
 GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || printf "\\e[32m" $(NULL_STDERR))$(BOLD)
 YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || printf "\\e[33m" $(NULL_STDERR))$(BOLD)
+WHITE   := $(RESET)$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
@@ -54,6 +55,10 @@ $(info $(SPACE))
 endif
 endif
 
+# Message prefixes
+INFO_PREFIX := $(WHITE)[$(YELLOW)INFO$(WHITE)]
+WARN_PREFIX := $(WHITE)[$(RED)WARN$(WHITE)]
+
 # Automatically parallelize build
 JOBS ?= $(HOST_CPUS)
 override MAKEFLAGS += -j $(JOBS)
@@ -62,7 +67,7 @@ override MAKEFLAGS += -j $(JOBS)
 CC_TRIPLET := $(firstword $(shell $(CC) $(CFLAGS) -print-multiarch $(NULL_STDERR)) $(shell $(CC) $(CFLAGS) -dumpmachine $(NULL_STDERR)))
 ifeq (,$(findstring -,$(CC_TRIPLET)))
 CC_TRIPLET :=
-$(info [$(YELLOW)INFO$(RESET)] Invalid triplet, specify OS/ARCH manually if cross-compiling)
+$(info $(INFO_PREFIX) Invalid triplet, specify OS/ARCH manually if cross-compiling$(RESET))
 endif
 
 tolower = $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(subst G,g,$(subst H,h,$(subst I,i,$(subst J,j,$(subst K,k,$(subst L,l,$(subst M,m,$(subst N,n,$(subst O,o,$(subst P,p,$(subst Q,q,$(subst R,r,$(subst S,s,$(subst T,t,$(subst U,u,$(subst V,v,$(subst W,w,$(subst X,x,$(subst Y,y,$(subst Z,z,$1))))))))))))))))))))))))))
@@ -107,7 +112,7 @@ endif
 endif
 endif
 
-$(info Detected OS: $(GREEN)$(OS)$(RESET))
+$(info $(WHITE)Detected OS: $(GREEN)$(OS)$(RESET))
 override OS := $(call tolower,$(OS))
 
 # Windows-specific build options
@@ -183,21 +188,21 @@ ifneq (,$(findstring clang,$(CC_HELP)))
 # LLVM Clang or derivatives (Zig CC, Emscripten)
 CC_TYPE := clang
 ifneq (,$(findstring Emscripten,$(CC_HELP)))
-$(info Detected CC: $(GREEN)LLVM Clang (EMCC $(CC_VERSION))$(RESET))
+$(info $(WHITE)Detected CC: $(GREEN)LLVM Clang (EMCC $(CC_VERSION))$(RESET))
 else
-$(info Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
+$(info $(WHITE)Detected CC: $(GREEN)LLVM Clang $(CC_VERSION)$(RESET))
 endif
 
 else
 ifneq (,$(findstring gcc,$(CC_HELP)))
 # GNU GCC or derivatives (MinGW)
 CC_TYPE := gcc
-$(info Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
+$(info $(WHITE)Detected CC: $(GREEN)GCC $(CC_VERSION)$(RESET))
 
 else
 # Toy compiler (TCC, Chibicc, Cproc)
 CC_TYPE ?= generic
-$(info Detected CC: $(RED)Unknown$(RESET))
+$(info $(WHITE)Detected CC: $(RED)Unknown$(RESET))
 
 endif
 endif
@@ -227,7 +232,7 @@ override ARCH = i386
 endif
 endif
 
-$(info Target arch: $(GREEN)$(ARCH)$(RESET))
+$(info $(WHITE)Target arch: $(GREEN)$(ARCH)$(RESET))
 
 # Debugging options
 ifeq ($(USE_DEBUG_FULL),1)
@@ -271,11 +276,11 @@ endif
 GIT_COMMIT := $(firstword $(shell git describe --match=NeVeRmAtCh_TaG --always --dirty $(NULL_STDERR)) unknown)
 VERSION := $(VERSION)-$(GIT_COMMIT)
 
-$(info Version:     $(GREEN)RVVM $(VERSION)$(RESET))
+$(info $(WHITE)Version:     $(GREEN)RVVM $(VERSION)$(RESET))
 $(info $(SPACE))
 
 ifeq ($(GIT_COMMIT),unknown)
-$(info [$(RED)WARN$(RESET)] Unknown upstream git commit!)
+$(info $(WARN_PREFIX) Unknown upstream git commit!$(RESET))
 endif
 
 # Generic compiler flags
@@ -343,7 +348,7 @@ else
 ifneq (,$(findstring riscv, $(ARCH)))
 else
 override USE_JIT = 0
-$(info [$(YELLOW)INFO$(RESET)] No RVJIT support for current target)
+$(info $(INFO_PREFIX) No RVJIT support for current target$(RESET))
 endif
 endif
 endif
@@ -492,12 +497,12 @@ CURR_LDFLAGS := $(LD) $(LDFLAGS)
 sinclude $(CFLAGS_TXT) $(LDFLAGS_TXT)
 ifneq ($(CURR_CFLAGS),$(PREV_CFLAGS))
 ifneq ($(PREV_CFLAGS),)
-$(info [$(YELLOW)INFO$(RESET)] CFLAGS changed, doing a full rebuild)
+$(info $(INFO_PREFIX) CFLAGS changed, doing a full rebuild$(RESET))
 endif
 override MAKEFLAGS += -B
 else
 ifneq ($(CURR_LDFLAGS),$(PREV_LDFLAGS))
-$(info [$(YELLOW)INFO$(RESET)] LDFLAGS changed, relinking binaries)
+$(info $(INFO_PREFIX) LDFLAGS changed, relinking binaries$(RESET))
 $(shell rm $(BINARY) $(SHARED) $(NULL_STDERR))
 endif
 endif
@@ -514,7 +519,7 @@ ifeq (,$(findstring MMD, $(shell $(CC) -MMD 2>&1)))
 DO_CC = @$(CC) $(CC_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 DO_CXX = @$(CXX) $(CXX_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 else
-$(info [$(RED)WARN$(RESET)] No compiler support for header dependencies, forcing rebuild)
+$(info $(WARN_PREFIX) No compiler support for header dependencies, forcing rebuild$(RESET))
 override MAKEFLAGS += -B
 DO_CC = @$(CC) $(CC_STD) $(CFLAGS) -o $@ -c $<
 DO_CXX = @$(CXX) $(CXX_STD) $(CFLAGS) -o $@ -c $<
@@ -533,27 +538,27 @@ endif
 
 # C object files
 $(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
-	$(info [$(YELLOW)CC$(RESET)] $<)
+	$(info $(WHITE)[$(YELLOW)CC$(WHITE)] $< $(RESET))
 	$(DO_CC)
 
 # C++ object files
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
-	$(info [$(YELLOW)CXX$(RESET)] $<)
+	$(info $(WHITE)[$(YELLOW)CXX$(WHITE)] $< $(RESET))
 	$(DO_CXX)
 
 # Main binary
 $(BINARY): $(OBJS)
-	$(info [$(GREEN)LD$(RESET)] $@)
+	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
 
 # Shared library
 $(SHARED): $(LIB_OBJS)
-	$(info [$(GREEN)LD$(RESET)] $@)
+	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
 
 # Static library
 $(STATIC): $(LIB_OBJS)
-	$(info [$(GREEN)AR$(RESET)] $@)
+	$(info $(WHITE)[$(GREEN)AR$(WHITE)] $@ $(RESET))
 	@$(AR) -rcs $@ $(LIB_OBJS)
 
 .PHONY: all
@@ -606,7 +611,7 @@ endif
 
 .PHONY: cppcheck
 cppcheck:
-	$(info [$(YELLOW)INFO$(RESET)] Running Cppcheck analysis)
+	$(info $(INFO_PREFIX) Running Cppcheck analysis$(RESET))
 ifeq ($(CPPCHECK_ALL),1)
 	@cppcheck $(CPPCHECK_GENERIC_OPTIONS) $(CPPCHECK_SUPPRESS_OPTIONS) --enable=all --inconclusive $(SRCDIR)
 else
@@ -615,7 +620,7 @@ endif
 
 .PHONY: clean
 clean:
-	$(info [$(YELLOW)INFO$(RESET)] Cleaning up)
+	$(info $(INFO_PREFIX) Cleaning up$(RESET))
 ifeq ($(HOST_POSIX),1)
 	@-rm -f $(BINARY) $(SHARED)
 	@-rm -r $(OBJDIR)
@@ -641,7 +646,7 @@ datadir     ?= $(datarootdir)
 .PHONY: install
 install: all lib
 ifeq ($(HOST_POSIX),1)
-	@echo "[$(YELLOW)INFO$(RESET)] Installing to prefix $(DESTDIR)$(prefix)"
+	@echo "$(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET)"
 	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
 	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
 	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm_static.a
@@ -651,7 +656,7 @@ ifeq ($(HOST_POSIX),1)
 	@install -d                           $(DESTDIR)$(datadir)/licenses/rvvm/
 	@install -Dm644 LICENSE*              $(DESTDIR)$(datadir)/licenses/rvvm/
 else
-	@echo "[$(RED)WARN$(RESET)] Unsupported on non-POSIX!"
+	@echo "$(WARN_PREFIX) Unsupported on non-POSIX!$(RESET)"
 endif
 
 sinclude $(DEPS)
