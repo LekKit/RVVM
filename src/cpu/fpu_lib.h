@@ -123,4 +123,144 @@ static forceinline double fpu_fmad(double a, double b, double c)
 #endif
 }
 
+static forceinline float fpu_minf(float x, float y)
+{
+#if defined(__riscv_f)
+    // On real RISC-V, fmin/fmax actually behave the way we need
+    return fminf(x, y);
+#else
+#if defined(GNU_EXTS)
+    // isless/isgreater are non-signalling comparisons
+    if (isless(x, y)) {
+        return x;
+    } else if (likely(isless(y, x))) {
+        return y;
+    }
+#endif
+    if (unlikely(fpu_isnan(x))) {
+        // If one of operands is NaN, return a different operand
+        if (fpu_is_snanf(x) || fpu_is_snanf(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return y;
+    } else if (unlikely(fpu_isnan(y))) {
+        if (fpu_is_snanf(x) || fpu_is_snanf(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return x;
+#if !defined(GNU_EXTS)
+    } else if (x < y) {
+        return x;
+    } else if (y < x) {
+        return y;
+#endif
+    } else {
+        // -0.0 is less than 0.0, but not handled by isless/isgreater
+        return fpu_signbitf(x) ? x : y;
+    }
+#endif
+}
+
+static forceinline float fpu_maxf(float x, float y)
+{
+#if defined(__riscv_f)
+    return fmaxf(x, y);
+#else
+#if defined(GNU_EXTS)
+    if (isgreater(x, y)) {
+        return x;
+    } else if (likely(isgreater(y, x))) {
+        return y;
+    }
+#endif
+    if (unlikely(fpu_isnan(x))) {
+        if (fpu_is_snanf(x) || fpu_is_snanf(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return y;
+    } else if (unlikely(fpu_isnan(y))) {
+        if (fpu_is_snanf(x) || fpu_is_snanf(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return x;
+#if !defined(GNU_EXTS)
+    } else if (x > y) {
+        return x;
+    } else if (y > x) {
+        return y;
+#endif
+    } else {
+        return fpu_signbitf(x) ? y : x;
+    }
+#endif
+}
+
+static forceinline double fpu_mind(double x, double y)
+{
+#if defined(__riscv_d)
+    return fmin(x, y);
+#else
+#if defined(GNU_EXTS)
+    if (isless(x, y)) {
+        return x;
+    } else if (likely(isless(y, x))) {
+        return y;
+    }
+#endif
+    if (unlikely(fpu_isnan(x))) {
+        if (fpu_is_snand(x) || fpu_is_snand(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return y;
+    } else if (unlikely(fpu_isnan(y))) {
+        if (fpu_is_snand(x) || fpu_is_snand(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return x;
+#if !defined(GNU_EXTS)
+    } else if (x < y) {
+        return x;
+    } else if (y < x) {
+        return y;
+#endif
+    } else {
+        return fpu_signbitd(x) ? x : y;
+    }
+#endif
+}
+
+static forceinline double fpu_maxd(double x, double y)
+{
+#if defined(__riscv_d)
+    return fmax(x, y);
+#else
+#if defined(GNU_EXTS)
+    if (isgreater(x, y)) {
+        return x;
+    } else if (likely(isgreater(y, x))) {
+        return y;
+    }
+#endif
+    if (unlikely(fpu_isnan(x))) {
+        if (fpu_is_snand(x) || fpu_is_snand(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return y;
+    } else if (unlikely(fpu_isnan(y))) {
+        if (fpu_is_snand(x) || fpu_is_snand(y)) {
+            feraiseexcept(FE_INVALID);
+        }
+        return x;
+#if !defined(GNU_EXTS)
+    } else if (x > y) {
+        return x;
+    } else if (y > x) {
+        return y;
+#endif
+    } else {
+        return fpu_signbitd(x) ? y : x;
+    }
+#endif
+}
+
 #endif
