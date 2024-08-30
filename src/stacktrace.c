@@ -15,6 +15,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "stacktrace.h"
+#include "compiler.h"
 #include "utils.h"
 #include "dlib.h"
 
@@ -23,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdio.h>
 
 #if (defined(__unix__) || defined(__APPLE__) || defined(__MINGW32__)) \
- && !defined(NO_STACKTRACE) && !defined(UNDER_CE)
+ && !defined(NO_STACKTRACE) && !defined(UNDER_CE) && !defined(__SANITIZE_ADDRESS__)
 #define SIGNAL_IMPL
 #include <stdlib.h>
 #include <signal.h>
