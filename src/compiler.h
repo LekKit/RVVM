@@ -101,7 +101,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  * This attribute is BROKEN before Clang 17 and generates broken binaries if used <17!!!
  */
-#if CLANG_CHECK_VER(17, 0) && GNU_ATTRIBUTE(__preserve_most__)
+#if CLANG_CHECK_VER(17, 0) && GNU_ATTRIBUTE(__preserve_most__) && !defined(__EMSCRIPTEN__)
 #define slow_path __attribute__((__preserve_most__,__noinline__,__cold__))
 #else
 #define slow_path NOINLINE
