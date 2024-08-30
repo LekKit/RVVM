@@ -47,7 +47,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <windows.h>
 #endif
 
-static void print_help()
+static void print_help(void)
 {
 #if defined(_WIN32) && !defined(UNDER_CE)
     const wchar_t* help = L"\n"
