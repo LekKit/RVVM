@@ -1067,7 +1067,7 @@ static void* tap_thread(void* arg)
     return NULL;
 }
 
-tap_dev_t* tap_open()
+tap_dev_t* tap_open(void)
 {
     tap_dev_t* tap = safe_new_obj(tap_dev_t);
     // Generate a random local unicast MAC
