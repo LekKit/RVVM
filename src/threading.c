@@ -91,27 +91,44 @@ static __stdcall DWORD thread_win32_wrap(void* arg)
 }
 #endif
 
-thread_ctx_t* thread_create(thread_func_t func, void *arg)
+thread_ctx_t* thread_create_ex(thread_func_t func, void* arg, uint32_t stack_size)
 {
     thread_ctx_t* thread = safe_new_obj(thread_ctx_t);
 #ifdef _WIN32
 #if !defined(HOST_64BIT)
+    void* entry = thread_win32_wrap;
     thread_win32_wrap_t* wrap = safe_new_obj(thread_win32_wrap_t);
     wrap->func = func;
     wrap->arg = arg;
-    thread->handle = CreateThread(NULL, 0, thread_win32_wrap, wrap, 0, NULL);
 #else
-    thread->handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)(void*)func, arg, 0, NULL);
+    void* entry = func;
 #endif
+    thread->handle = CreateThread(NULL, stack_size, entry, arg, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (thread->handle) return thread;
 #else
-    if (pthread_create(&thread->pthread, NULL, func, arg) == 0) {
+    pthread_attr_t thread_attr = {0};
+    pthread_attr_t* pass_attr = &thread_attr;
+    if (pthread_attr_init(pass_attr)) {
+        pass_attr = NULL;
+    } else if (stack_size) {
+        pthread_attr_setstacksize(pass_attr, stack_size);
+    }
+    int ret = pthread_create(&thread->pthread, pass_attr, func, arg);
+    if (pass_attr) {
+        pthread_attr_destroy(pass_attr);
+    }
+    if (ret == 0) {
         return thread;
     }
 #endif
     rvvm_warn("Failed to spawn thread!");
     free(thread);
     return NULL;
+}
+
+thread_ctx_t* thread_create(thread_func_t func, void* arg)
+{
+    return thread_create_ex(func, arg, 65536);
 }
 
 void* thread_join(thread_ctx_t* thread)
@@ -161,7 +178,7 @@ cond_var_t* condvar_create(void)
     cond->event = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (cond->event) return cond;
 #elif defined(CHOSEN_COND_CLOCK)
-    pthread_condattr_t cond_attr;
+    pthread_condattr_t cond_attr = {0};
     if (pthread_condattr_init(&cond_attr) == 0
      && pthread_condattr_setclock(&cond_attr, CHOSEN_COND_CLOCK) == 0
      && pthread_cond_init(&cond->cond, &cond_attr)  == 0

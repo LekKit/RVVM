@@ -29,6 +29,7 @@ typedef void* (*thread_func_t)(void*);
 typedef void* (*thread_func_va_t)(void**);
 
 // Threading
+thread_ctx_t* thread_create_ex(thread_func_t func, void* arg, uint32_t stack_size);
 thread_ctx_t* thread_create(thread_func_t func, void* arg);
 void*         thread_join(thread_ctx_t* handle);
 bool          thread_detach(thread_ctx_t* handle);
