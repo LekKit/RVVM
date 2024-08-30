@@ -244,7 +244,7 @@ PUBLIC void rvvm_remove_mmio(rvvm_mmio_dev_t* mmio_dev);
 PUBLIC void rvvm_cleanup_mmio_desc(const rvvm_mmio_dev_t* mmio_desc);
 
 //! \brief Run the event loop in the calling thread, returns when any machine stops
-PUBLIC void rvvm_run_eventloop();
+PUBLIC void rvvm_run_eventloop(void);
 
 /*
  * Userland Emulation API (WIP)
