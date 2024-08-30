@@ -30,7 +30,7 @@ void riscv_run_till_event(rvvm_hart_t* vm)
     riscv32_run_interpreter(vm);
 }
 
-void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn)
+slow_path void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn)
 {
     riscv_trap(vm, TRAP_ILL_INSTR, insn);
 }

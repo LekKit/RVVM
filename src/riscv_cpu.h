@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 void riscv_run_till_event(rvvm_hart_t* vm);
 
 // Trap the vCPU on illegal instruction
-void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn);
+slow_path void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn);
 
 // Internal interpreter ISA switching
 void riscv32_run_interpreter(rvvm_hart_t* vm);
