@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 static cond_var_t* global_cond;
 
-static void spin_deinit()
+static void spin_deinit(void)
 {
     cond_var_t* cond = global_cond;
     global_cond = NULL;
@@ -39,7 +39,7 @@ static void spin_deinit()
     condvar_free(cond);
 }
 
-static void spin_cond_init()
+static void spin_cond_init(void)
 {
     DO_ONCE ({
         global_cond = condvar_create();
