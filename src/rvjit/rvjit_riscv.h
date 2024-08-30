@@ -34,7 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VM_PTR_REG RISCV_REG_A0
 #endif
 
-static inline size_t rvjit_native_default_hregmask()
+static inline size_t rvjit_native_default_hregmask(void)
 {
     // t0-t6, a0-a7 are caller-saved
     // a0 is preserved as vmptr
@@ -54,7 +54,7 @@ static inline size_t rvjit_native_default_hregmask()
            rvjit_hreg_mask(31);
 }
 
-static inline size_t rvjit_native_abireclaim_hregmask()
+static inline size_t rvjit_native_abireclaim_hregmask(void)
 {
     // We have enough caller-saved registers, no need for push/pop as well
     return 0;
