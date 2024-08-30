@@ -74,14 +74,14 @@ static inline bool check_imm_bits(int32_t val, bitcnt_t bits)
 #define VM_PTR_REG 0 // Argument/scratch reg 1
 #endif
 
-static inline size_t rvjit_native_default_hregmask()
+static inline size_t rvjit_native_default_hregmask(void)
 {
     return rvjit_hreg_mask(1)  /* argument/result/scratch reg 2 */
          | rvjit_hreg_mask(2)  /* argument/scratch reg 3 */
          | rvjit_hreg_mask(3); /* argument/scratch reg 4 */
 }
 
-static inline size_t rvjit_native_abireclaim_hregmask()
+static inline size_t rvjit_native_abireclaim_hregmask(void)
 {
     return rvjit_hreg_mask(4)   /* variable reg 1 */
          | rvjit_hreg_mask(5)   /* variable reg 2 */
