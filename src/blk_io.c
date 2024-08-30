@@ -24,10 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define _DEFAULT_SOURCE
 
 #include "blk_io.h"
-#include "utils.h"
-#include "spinlock.h"
-#include "threading.h"
-#include <string.h>
 
 // Maximum buffer size processed per internal IO syscall
 #define RVFILE_MAX_BUFF 0x10000000
@@ -75,36 +71,16 @@ typedef struct {
 // Emulates pread by using locks around fseek+fread
 #include <stdio.h>
 
-// 64-bit offset & UTF-8 filenames on win32
-#if defined(_WIN32) && !defined(UNDER_CE)
-#if     _WIN32_WINNT < 0x0600
-#undef  _WIN32_WINNT
-#define _WIN32_WINNT   0x0600
-#endif
-#include <windows.h>
-static FILE* fopen_utf8(const char* name, const char* mode)
-{
-    size_t name_len = rvvm_strlen(name);
-    wchar_t* u16_name = safe_new_arr(wchar_t, name_len + 1);
-    wchar_t u16_mode[16] = {0};
-    MultiByteToWideChar(CP_UTF8, 0, name, -1, u16_name, name_len + 1);
-    MultiByteToWideChar(CP_UTF8, 0, mode, -1, u16_mode, STATIC_ARRAY_SIZE(u16_mode));
-    FILE* file = _wfopen(u16_name, u16_mode);
-    free(u16_name);
-
-    // Retry opening existing file using system locale (oh...)
-    if (!file && mode[0] != 'w') file = fopen(name, mode);
-    return file;
-}
-#define fopen fopen_utf8
-#define fseek _fseeki64
-#define ftell _ftelli64
-#endif
-
 #define FILE_POS_INVALID 0
 #define FILE_POS_READ    1
 #define FILE_POS_WRITE   2
 #endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "mem_ops.h"
+#include "utils.h"
+#include "spinlock.h"
+#include "threading.h"
 
 struct blk_io_rvfile {
     uint64_t size;
@@ -430,71 +406,6 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
     }
     return true;
 #endif
-}
-
-/*
- * Async IO
- */
-
-static void* async_io_task(void** data)
-{
-    rvaio_op_t* iolist = (rvaio_op_t*)data[0];
-    size_t count = (size_t)data[1];
-    rvfile_async_callback_t va_callback = (rvfile_async_callback_t)data[2];
-    void* va_userdata = data[3];
-
-    uint8_t va_result = ASYNC_IO_DONE;
-    bool op_result;
-    for (size_t i=0; i<count; ++i) {
-        switch (iolist[i].opcode) {
-            case RVFILE_ASYNC_READ:
-                op_result = rvread(iolist[i].file, iolist[i].buffer, iolist[i].length, iolist[i].offset) == iolist[i].length;
-                break;
-            case RVFILE_ASYNC_WRITE:
-                op_result = rvwrite(iolist[i].file, iolist[i].buffer, iolist[i].length, iolist[i].offset) == iolist[i].length;
-                break;
-            case RVFILE_ASYNC_TRIM:
-                op_result = rvtrim(iolist[i].file, iolist[i].offset, iolist[i].length);
-                break;
-            default:
-                rvvm_warn("Unknown opcode %d in async_io_task()!", iolist[i].opcode);
-                return NULL;
-        }
-        if (iolist[i].callback) iolist[i].callback(iolist[i].file, iolist[i].userdata, op_result ? ASYNC_IO_DONE : ASYNC_IO_FAIL);
-        if (!op_result) va_result = ASYNC_IO_FAIL;
-    }
-    if (va_callback) va_callback(NULL, va_userdata, va_result);
-    free(iolist);
-    return NULL;
-}
-
-bool rvread_async(rvfile_t* file, void* destination, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
-{
-    if (!file || offset == RVFILE_CURPOS) return false;
-    rvaio_op_t op = {file, destination, offset, count, userdata, callback, RVFILE_ASYNC_READ};
-    return rvasync_va(&op, 1, NULL, NULL);
-}
-
-bool rvwrite_async(rvfile_t* file, const void* source, size_t count, uint64_t offset, rvfile_async_callback_t callback, void* userdata)
-{
-    if (!file || offset == RVFILE_CURPOS) return false;
-    rvaio_op_t op = {file, (void*)source, offset, count, userdata, callback, RVFILE_ASYNC_WRITE};
-    return rvasync_va(&op, 1, NULL, NULL);
-}
-
-bool rvfsync_async(rvfile_t* file)
-{
-    UNUSED(file);
-    return false;
-}
-
-bool rvasync_va(rvaio_op_t* iolist, size_t count, rvfile_async_callback_t callback, void* userdata)
-{
-    rvaio_op_t* task_iolist = safe_new_arr(rvaio_op_t, count);
-    memcpy(task_iolist, iolist, sizeof(rvaio_op_t) * count);
-    void* args[4] = {task_iolist, (void*)count, (void*)callback, userdata};
-    thread_create_task_va(async_io_task, args, 4);
-    return true;
 }
 
 /*
