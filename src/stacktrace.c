@@ -15,9 +15,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "stacktrace.h"
-#include "compiler.h"
-#include "utils.h"
-#include "dlib.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -32,6 +29,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SIGBUS 10
 #endif
 #endif
+
+// RVVM internal headers come after system headers because of safe_free()
+#include "compiler.h"
+#include "utils.h"
+#include "dlib.h"
 
 /*
  * libbacktrace boilerplace
