@@ -75,6 +75,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define mem_prefetch(addr, rw, loc)
 #endif
 
+// Never inline this function
 #if GNU_ATTRIBUTE(__noinline__)
 #define NOINLINE      __attribute__((__noinline__))
 #elif defined(_MSC_VER)
@@ -103,10 +104,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #if CLANG_CHECK_VER(17, 0) && GNU_ATTRIBUTE(__preserve_most__) && !defined(__EMSCRIPTEN__)
 #define slow_path __attribute__((__preserve_most__,__noinline__,__cold__))
+#elif GNU_ATTRIBUTE(__cold__)
+#define slow_path NOINLINE __attribute__((__cold__))
 #else
 #define slow_path NOINLINE
 #endif
 
+// Always inline this function into the caller
 #if GNU_ATTRIBUTE(__always_inline__)
 #define forceinline inline __attribute__((__always_inline__))
 #elif defined(_MSC_VER)
@@ -115,10 +119,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define forceinline inline
 #endif
 
+// Inline all function calls into the caller marked with flatten_calls. Use with care!
 #if GNU_ATTRIBUTE(__flatten__)
 #define flatten_calls __attribute__((__flatten__))
 #else
 #define flatten_calls
+#endif
+
+// Warn if return value is unused
+#if GNU_ATTRIBUTE(__warn_unused_result__)
+#define warn_unused_ret __attribute__((__warn_unused_result__))
+#else
+#define warn_unused_ret
+#endif
+
+// Explicitly mark deallocator for an allocator function
+#if GNU_ATTRIBUTE(__malloc__)
+#define deallocate_with(deallocator) warn_unused_ret __attribute__((__malloc__,__malloc__(deallocator, 1)))
+#else
+#define deallocate_with(deallocator) warn_unused_ret
 #endif
 
 // Match GCC macro __SANITIZE_THREAD__, __SANITIZE_ADDRESS__ on Clang, provide __SANITIZE_MEMORY__
