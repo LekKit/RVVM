@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "rvvmlib.h"
+#include "rvvm_user.h"
 #include "rvvm_isolation.h"
 #include "utils.h"
 #include "dlib.h"
@@ -278,6 +279,14 @@ static int rvvm_cli_main(int argc, const char** argv)
     return 0;
 }
 
+static int rvvm_main(int argc, char** argv)
+{
+    if (argc >= 3 && rvvm_strcmp(argv[1], "-user")) {
+        return rvvm_user_linux(argc - 2, argv + 2, NULL);
+    }
+    return rvvm_cli_main(argc, (const char**)argv);
+}
+
 int main(int argc, char** argv)
 {
 #if defined(_WIN32) && !defined(UNDER_CE)
@@ -300,7 +309,7 @@ int main(int argc, char** argv)
         WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, argv[i], arg_len, NULL, NULL);
     }
 #endif
-    int ret = rvvm_cli_main(argc, (const char**)argv);
+    int ret = rvvm_main(argc, argv);
 #if defined(_WIN32) && !defined(UNDER_CE)
     for (int i=0; i<argc; ++i) free(argv[i]);
     free(argv);
