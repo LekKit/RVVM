@@ -1,7 +1,7 @@
 /*
-rvvm_user.c - RVVM Userland binary emulator
-Copyright (C) 2023  LekKit <github.com/LekKit>
-                    nebulka1
+rvvm_user.c - RVVM Linux binary emulator
+Copyright (C) 2024  LekKit <github.com/LekKit>
+              2023  nebulka1
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  * Some helpful resources:
  *   https://jborza.com/post/2021-05-11-riscv-linux-syscalls/
+ *   https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
  *
  * Now if we ever get this to work, here are some interesting further goals:
  *
@@ -62,6 +63,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "threading.h"
 #include "vma_ops.h"
 #include "spinlock.h"
+#include "rvtimer.h"
+#include "stacktrace.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -103,8 +106,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef struct {
     // Self explanatory
     size_t argc;
-    const char** argv;
-    const char** envp;
+    char** argv;
+    char** envp;
 
     size_t base;         // Main ELF base address (relocation)
     size_t entry;        // Main ELF entry point
@@ -198,6 +201,9 @@ static char *init_stack(char *stack, exec_desc_t* desc)
 
     return stack;
 }
+
+#define UAPI_EINVAL 22
+#define UAPI_ENOSYS 38
 
 // RISC-V UAPI struct definitions & conversions
 struct uapi_new_utsname {
@@ -313,7 +319,7 @@ static void uapi_sigaction_convert(struct uapi_sigaction* dst, const struct siga
     memcpy(&dst->mask, &src->sa_flags, sizeof(dst->mask));
 }
 
-static rvvm_machine_t* proc_ctx; // Emulated RVVM process context
+static rvvm_machine_t* userland; // Emulated RVVM process context
 
 // Return negative values on -1 error like a syscall interface does
 static rvvm_addr_t errno_ret(int64_t val)
@@ -362,7 +368,7 @@ static elf_desc_t interp = {
 
 static bool proc_mem_readable(const void* addr, size_t size)
 {
-    static int fd;
+    static int fd = 0;
     DO_ONCE({
         fd = memfd_create("null", 0);
         if (fd < 0) rvvm_fatal("Failed to create memfd!");
@@ -370,17 +376,11 @@ static bool proc_mem_readable(const void* addr, size_t size)
     return write(fd, addr, size) == (ssize_t)size;
 }
 
-#define prefix_path ""
+static const char* prefix_path = "/home/lekkit/stuff/userland/arch";
 
 static const char* wrap_path(char* buffer, const char* path, size_t size)
 {
-    if ((rvvm_strfind(path, "/usr") == path || rvvm_strfind(path, "/") == path
-     || rvvm_strfind(path, "/lib") == path)
-     && rvvm_strfind(path, "/sys") != path
-     && rvvm_strfind(path, "/proc") != path
-     && rvvm_strfind(path, "/var/tmp") != path
-     && rvvm_strfind(path, "/tmp") != path
-     && rvvm_strfind(path, "/dev") != path) {
+    if (path && rvvm_strfind(path, "/") == path) {
          size_t prefix_len = rvvm_strlcpy(buffer, prefix_path, size);
          rvvm_strlcpy(buffer + prefix_len, path, size - prefix_len);
          return buffer;
@@ -397,25 +397,145 @@ static size_t unwrap_path(char* path, size_t len)
     return 0;
 }
 
-//static spinlock_t tcr_lock;
-//static rvvm_addr_t tcr_tid;
 static struct uapi_sigaction siga[64] = {0};
-
-//#define rvvm_info(...) DO_ONCE(rvvm_info(__VA_ARGS__))
 
 void sig_handler(int signal)
 {
-    rvvm_warn("Received signal %d", signal);
+    rvvm_info("Received signal %d", signal);
 }
 
+typedef struct {
+    rvvm_hart_t* cpu;
+    uint32_t* child_tid;
+    spinlock_t lock;
+    uint32_t tid;
+} rvvm_user_thread_t;
+
 // Main execution loop (Run the user CPU, handle syscalls)
-void* rvvm_user_thread(void* arg)
+static void* rvvm_user_thread_wrap(void* arg);
+
+#define UAPI_CLONE_VM             0x00000100
+#define UAPI_CLONE_VFORK          0x00004000
+#define UAPI_CLONE_SETTLS         0x00080000
+#define UAPI_CLONE_PARENT_SETTID  0x00100000
+#define UAPI_CLONE_CHILD_CLEARTID 0x00200000
+#define UAPI_CLONE_CHILD_SETTID   0x01000000
+
+#define UAPI_CLONE_INVALID_THREAD_FLAGS 0x7E02F000
+
+// long sys_clone(unsigned long flags, void *stack, int *parent_tid, unsigned long tls, int *child_tid);
+static int rvvm_sys_clone(rvvm_hart_t* cpu, uint32_t flags, size_t stack, uint32_t* parent_tid, size_t tls, uint32_t* child_tid)
 {
-    rvvm_cpu_handle_t cpu = arg;
+    if ((flags & UAPI_CLONE_VM) && !(flags & UAPI_CLONE_VFORK)) {
+        if (flags & UAPI_CLONE_INVALID_THREAD_FLAGS) {
+            rvvm_warn("sys_clone(): Invalid flags %x", flags);
+            return -UAPI_EINVAL;
+        }
+
+        rvvm_user_thread_t* thread = safe_new_obj(rvvm_user_thread_t);
+        thread->cpu = rvvm_create_user_thread(userland);
+
+        // Clone all CPU state
+        for (size_t i=1; i<32; ++i) {
+            rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + i));
+        }
+        for (size_t i=0; i<32; ++i) {
+            rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_F0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_F0 + i));
+        }
+
+        // Land after syscall entry
+        rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC) + 4);
+
+        // Set guest stack pointer
+        rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 2, stack);
+
+        if (flags & UAPI_CLONE_SETTLS) {
+            // Set guest TLS register
+            rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 4, tls);
+        }
+
+        // Return 0 in cloned thread
+        rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 10, 0); // a0
+
+        spin_lock(&thread->lock);
+
+        // Spawn the thread using portable RVVM thread facilities
+        thread_detach(thread_create_ex(rvvm_user_thread_wrap, thread, 0));
+
+        while (!atomic_load_uint32(&thread->tid)) {
+            sleep_ms(0);
+        }
+
+        uint32_t tid = atomic_load_uint32(&thread->tid);
+
+        if (flags & UAPI_CLONE_PARENT_SETTID) {
+            *parent_tid = tid;
+        }
+
+        if (flags & UAPI_CLONE_CHILD_SETTID) {
+            *child_tid = tid;
+        }
+
+        if (flags & UAPI_CLONE_CHILD_CLEARTID) {
+            thread->child_tid = child_tid;
+        }
+
+        spin_unlock(&thread->lock);
+        return tid;
+    } else {
+        // Emulate vfork via fork too
+        return fork();
+    }
+}
+
+#define UAPI_FUTEX_CMD_MASK 0x3F
+#define UAPI_FUTEX_WAIT 0x0
+#define UAPI_FUTEX_WAKE 0x1
+
+static int rvvm_sys_futex(uint32_t* addr, int futex_op, uint32_t val, size_t val2, uint32_t* uaddr2, uint32_t val3)
+{
+#if defined(__linux__)
+    return errno_ret(syscall(SYS_futex, addr, futex_op, val, val2, uaddr2, val3));
+#else
+    UNUSED(val2); UNUSED(uaddr2); UNUSED(val3);
+    switch (futex_op & UAPI_FUTEX_CMD_MASK) {
+        case UAPI_FUTEX_WAIT:
+#if defined(__FreeBSD__)
+            _umtx_op(addr, UMTX_OP_WAIT_UINT, val, NULL, NULL);
+#else
+            // Very crappy emulation that barely works
+            while (atomic_load_uint32(addr) == val) {
+                sleep_ms(1);
+            }
+#endif
+            return 0;
+        case UAPI_FUTEX_WAKE:
+#if defined(__FreeBSD__)
+            return _umtx_op(addr, UMTX_OP_WAKE, val, NULL, NULL);
+#else
+            return EVAL_MIN(1, val);
+#endif
+    }
+    return -UAPI_EINVAL;
+#endif
+}
+
+static void* rvvm_user_thread_wrap(void* arg)
+{
+    rvvm_user_thread_t* thread = arg;
+    rvvm_hart_t* cpu = thread->cpu;
+    bool running = true;
+
     char path_buf[1024] = {0};
     char path_buf1[1024] = {0};
 
-    while (true) {
+    atomic_store_uint32(&thread->tid, gettid());
+
+    // Just block here before cloner prepares stuff
+    spin_lock(&thread->lock);
+    spin_unlock(&thread->lock);
+
+    while (running) {
         rvvm_addr_t cause = rvvm_run_user_thread(cpu);
         if (cause == 8) {
             // Handle syscall trap
@@ -487,8 +607,13 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 36: // symlinkat
                     rvvm_info("sys_symlinkat(%s, %ld, %s)", (const char*)a0, a1, (const char*)a2);
-                    a0 = errno_ret(symlinkat(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)), a1,
-                        wrap_path(path_buf1, (const char*)a2, sizeof(path_buf1))));
+                    a0 = errno_ret(symlinkat(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)),
+                                             a1, wrap_path(path_buf1, (const char*)a2, sizeof(path_buf1))));
+                    break;
+                case 37: // linkat
+                    rvvm_info("sys_linkat(%ld, %s, %ld, %s, %lx)", a0, (const char*)a1, a2, (const char*)a3, a4);
+                    a0 = errno_ret(linkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)),
+                                          a2, wrap_path(path_buf1, (const char*)a3, sizeof(path_buf1)), a4));
                     break;
                 case 43: { // statfs64
                     struct statfs stfs = {0};
@@ -528,6 +653,10 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_fchdir(%ld)", a0);
                     a0 = errno_ret(fchdir(a0));
                     break;
+                case 52: // fchmod
+                    rvvm_info("sys_fchmodat(%ld, %lx)", a0, a1);
+                    a0 = errno_ret(fchmod(a0, a1));
+                    break;
                 case 53: // fchmodat
                     rvvm_info("sys_fchmodat(%ld, %s, %lx)", a0, (const char*)a1, a2);
                     a0 = errno_ret(fchmodat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, 0));
@@ -535,6 +664,10 @@ void* rvvm_user_thread(void* arg)
                 case 54: // fchownat
                     rvvm_info("sys_fchownat(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
                     a0 = errno_ret(fchownat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, a4));
+                    break;
+                case 55: // fchown
+                    rvvm_info("sys_fchownat(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(fchown(a0, a1, a2));
                     break;
                 case 56: // openat
                     rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
@@ -546,7 +679,7 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 59: // pipe2
                     rvvm_info("sys_pipe2(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(pipe2((int*)a0, a1));
+                    a0 = errno_ret(pipe2((void*)a0, a1));
                     break;
                 case 61: // getdents64
                     // TODO: struct conversion(?)
@@ -562,7 +695,7 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret(read(a0, (void*)a1, a2));
                     break;
                 case 64: // write
-                    rvvm_info("sys_write(%ld, %lx, %lx)", a0, a1, a2);
+                    //rvvm_info("sys_write(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(write(a0, (const void*)a1, a2));
                     break;
                 case 65: // readv
@@ -593,10 +726,13 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
                     a0 = errno_ret(ppoll((void*)a0, a1, (void*)a2, (void*)a3));
                     break;
-                case 78: // readlinkat
+                case 78: { // readlinkat
+                    char* buf = (char*)a0;
                     rvvm_info("sys_readlinkat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(readlinkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), (char*)a2, a3));
+                    a0 = errno_ret(readlinkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), buf, a3));
+                    if ((int64_t)a0 > 0) a0 -= unwrap_path(buf, a3);
                     break;
+                }
                 case 79: { // newfstatat
                     struct stat st = {0};
                     rvvm_info("sys_newfstatat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
@@ -615,6 +751,9 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_fsync(%ld)", a0);
                     a0 = errno_ret(fsync(a0));
                     break;
+                case 88: // utimensat, ignore
+                    a0 = 0;
+                    break;
                 case 90: // capget
                     rvvm_info("sys_capget(%lx, %lx)", a0, a1);
                     a0 = errno_ret(syscall(SYS_capget, a0, a1));
@@ -625,24 +764,25 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 93: // exit
                     rvvm_info("sys_exit(%ld)", a0);
-                    //exit(a0);
-                    syscall(SYS_exit, a0);
+                    running = false;
                     break;
                 case 94: // exit_group
                     rvvm_info("sys_exit_group(%ld)", a0);
-                    exit(a0);
+                    _Exit(a0);
                     break;
                 case 96: // set_tid_address
-                    rvvm_warn("sys_set_tid_address(%lx)", a0);
-                    a0 = -38; // ENOSYS
+                    rvvm_info("sys_set_tid_address(%lx)", a0);
+                    thread->child_tid = (void*)a0;
+                    a0 = thread->tid;
                     break;
                 case 98: // futex
                     rvvm_info("sys_futex(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(syscall(SYS_futex, a0, a1, a2, a3, a4, a5));
+                    a0 = rvvm_sys_futex((void*)a0, a1, a2, a3, (void*)a4, a5);
                     break;
                 case 99: // set_robust_list
-                    rvvm_warn("sys_set_robust_list(%lx, %lx)", a0, a1);
-                    a0 = -38; // ENOSYS
+                    // TODO: Implement this
+                    rvvm_info("sys_set_robust_list(%lx, %lx)", a0, a1);
+                    a0 = 0;
                     break;
                 case 103: // setitimer
                     rvvm_info("sys_setitimer(%lx, %lx, %lx)", a0, a1, a2);
@@ -658,6 +798,10 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
                     break;
+                case 123: // sched_getaffinity
+                    rvvm_info("sys_sched_getaffinity(%lx, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(sched_getaffinity(a0, a1, (void*)a2));
+                    break;
                 case 129: // kill
                     rvvm_warn("sys_kill(%lx, %lx)", a0, a1);
                     a0 = errno_ret(kill(a0, a1));
@@ -665,6 +809,10 @@ void* rvvm_user_thread(void* arg)
                 case 130: // tkill
                     rvvm_warn("sys_tkill(%lx, %lx)", a0, a1);
                     a0 = errno_ret(tgkill(getpid(), a0, a1));
+                    break;
+                case 131: // tgkill
+                    rvvm_warn("sys_tgkill(%lx, %lx, %ld)", a0, a1, a2);
+                    a0 = errno_ret(tgkill(a0, a1, a2));
                     break;
                 case 134: { // rt_sigaction
                     struct sigaction sa = {0};
@@ -702,6 +850,10 @@ void* rvvm_user_thread(void* arg)
                 case 146: // setuid
                     rvvm_info("sys_setuid(%lx)", a0);
                     a0 = errno_ret(setuid(a0));
+                    break;
+                case 147: // setresuid
+                    rvvm_info("sys_setresuid(%lx, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(setresuid(a0, a1, a2));
                     break;
                 case 149: // setresgid
                     rvvm_info("sys_setresgid(%lx, %lx, %lx)", a0, a1, a2);
@@ -792,6 +944,11 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_shmget(%lx, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(shmget(a0, a1, a2));
                     break;
+                case 195: // shmctl
+                    // TODO: struct conversion?
+                    rvvm_info("sys_shmctl(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(shmctl(a0, a1, (void*)a2));
+                    break;
                 case 196: // shmat
                     rvvm_info("sys_shmat(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret((size_t)shmat(a0, (void*)a1, a2));
@@ -859,6 +1016,11 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_shutdown(%ld, %lx)", a0, a1);
                     a0 = errno_ret(shutdown(a0, a1));
                     break;
+                case 211: // sendmsg
+                    // TODO: struct conversion(?)
+                    rvvm_info("sys_sendmsg(%ld, %lx, %lx)", a0, a1, a2);
+                    a0 = errno_ret(sendmsg(a0, (void*)a1, a2));
+                    break;
                 case 212: // recvmsg
                     // TODO: struct conversion(?)
                     rvvm_info("sys_recvmsg(%ld, %lx, %lx)", a0, a1, a2);
@@ -877,41 +1039,11 @@ void* rvvm_user_thread(void* arg)
                     a0 = errno_ret((size_t)mremap((void*)a0, a1, a2, a3, (void*)a4));
                     break;
                 case 220: // clone
-                    rvvm_warn("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    //long clone(unsigned long flags, void *stack,
-                    // int *parent_tid, unsigned long tls,
-                    // int *child_tid);
-                    if ((a0 & 0x00010100) == 0x00010100) {
-#if 1
-                        // CLONE_THREAD | CLONE_VM (Aka fork for threads)
-                        // TODO this is spectacularly broken I guess
-                        rvvm_cpu_handle_t thread = rvvm_create_user_thread(proc_ctx);
-                        for (size_t i=1; i<32; ++i) {
-                            rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + i));
-                        }
-                        for (size_t i=0; i<32; ++i) {
-                            rvvm_write_cpu_reg(thread, RVVM_REGID_F0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_F0 + i));
-                        }
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC) + 4);
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 2, a1); // sp
-                        if (a0 & CLONE_SETTLS) rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 4, a3); // tp
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 10, 0); // a0
-
-                        //thread_detach(thread_create(rvvm_user_thread, thread));
-                        uint8_t* new_host_stack = safe_new_arr(uint8_t, 0x100000) + 0x100000;
-                        a0 = errno_ret(clone((void*)rvvm_user_thread, new_host_stack,
-                                   a0 & ~CLONE_SETTLS, thread, a2, NULL, a4));
-#else
-                        a0 = -38;
-#endif
-                    } else {
-                        // This should be OK(?)
-                        rvvm_warn("sys_fork()");
-                        a0 = errno_ret(fork());
-                    }
+                    rvvm_info("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    a0 = rvvm_sys_clone(cpu, a0, a1, (void*)a2, a3, (void*)a4);
                     break;
                 case 221: { // execve
-                    rvvm_warn("sys_execve(%lx, %lx, %lx)", a0, a1, a2);
+                    rvvm_info("sys_execve(%lx, %lx, %lx)", a0, a1, a2);
                     if (access(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)), F_OK)) {
                         a0 = -ENOENT;
                         break;
@@ -941,9 +1073,12 @@ void* rvvm_user_thread(void* arg)
                     rvvm_info("sys_accept4(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
                     break;
+                case 258: // riscv_hwprobe
+                    a0 = -38;
+                    break;
                 case 259: // riscv_flush_icache
                     rvvm_info("riscv_flush_icache(%lx, %lx, %lx)", a0, a1, a2);
-                    rvvm_flush_icache(proc_ctx, a0, a1 - a0);
+                    //rvvm_flush_icache(proc_ctx, a0, a1 - a0);
                     a0 = 0;
                     break;
                 case 260: // wait4
@@ -967,55 +1102,31 @@ void* rvvm_user_thread(void* arg)
                     break;
                 case 278: // getrandom
                     rvvm_info("sys_getrandom(%lx, %lx, %lx)", a0, a1, a2);
-                    rvvm_randombytes((char*)a0, a1);
+                    rvvm_randombytes((void*)a0, a1);
                     a0 = a1;
                     break;
                 case 279: // memfd_create
                     rvvm_info("sys_memfd_create(%s, %lx)", (const char*)a0, a1);
                     a0 = errno_ret(memfd_create((const char*)a0, a1));
                     break;
-#if 0
-                // TODO: return TID so pthread_join works
-                // For now glibc falls back to clone()
-                case 435: { // clone3
-                    struct uapi_clone_args* cl = (void*)a0;
-                    rvvm_warn("sys_clone3(%lx, %lx)", a0, a1);
-                    if ((cl->flags & 0x00010100) == 0x00010100) {
-                        // CLONE_VM (Aka fork for threads)
-                        // TODO this is spectacularly broken I guess
-                        rvvm_cpu_handle_t thread = rvvm_create_user_thread(proc_ctx);
-                        for (size_t i=1; i<32; ++i) {
-                            rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + i));
-                        }
-                        for (size_t i=0; i<32; ++i) {
-                            rvvm_write_cpu_reg(thread, RVVM_REGID_F0 + i, rvvm_read_cpu_reg(cpu, RVVM_REGID_F0 + i));
-                        }
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC) + 4);
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 2, cl->stack + cl->stack_size); // sp
-                        if (cl->flags & 0x80000) rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 4, cl->tls); // tp
-                        rvvm_write_cpu_reg(thread, RVVM_REGID_X0 + 10, 0); // a0
-                        spin_lock(&tcr_lock);
-                        thread_detach(thread_create(rvvm_user_thread, thread));
-
-                        while(!tcr_tid);
-                        a0 = tcr_tid;
-                        tcr_tid = 0;
-                        spin_unlock(&tcr_lock);
-                    } else {
-                        // This should be OK(?)
-                        rvvm_warn("sys_fork()");
-                        a0 = errno_ret(fork());
-                    }
+                case 435: // clone3
+                    // FUCK THIS FUCKING SYSCALL FOR NOW
+                    a0 = -UAPI_ENOSYS;
                     break;
-                }
-#endif
+                case 436: // close_range
+                    a0 = -UAPI_ENOSYS;
+                    break;
                 case 439: // faccessat2
                     rvvm_info("sys_faccessat2(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
                     a0 = errno_ret(faccessat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3));
                     break;
                 default:
+#ifndef __riscv
                     rvvm_error("Unknown syscall %ld!", a7);
-                    a0 = -38; // ENOSYS
+                    a0 = -UAPI_ENOSYS;
+#else
+                    a0 = syscall(a7, a0, a1, a2, a3, a4, a5);
+#endif
                     break;
             }
             rvvm_info("  -> %lx", a0);
@@ -1074,7 +1185,13 @@ void* rvvm_user_thread(void* arg)
         }
     }
 
+    if (thread->child_tid) {
+        atomic_store_uint32(thread->child_tid, 0);
+        rvvm_sys_futex(thread->child_tid, UAPI_FUTEX_WAKE, 1, 0, NULL, 0);
+    }
+
     rvvm_free_user_thread(cpu);
+    free(thread);
     return NULL;
 }
 
@@ -1103,21 +1220,23 @@ static void jump_start(void* entry, void* stack_top)
         :
     );
 #else
-    proc_ctx = rvvm_create_userland(true);
-    rvvm_cpu_handle_t cpu = rvvm_create_user_thread(proc_ctx);
+    userland = rvvm_create_userland(true);
+    rvvm_user_thread_t* thread = safe_new_obj(rvvm_user_thread_t);
+    thread->cpu = rvvm_create_user_thread(userland);
 
-    rvvm_write_cpu_reg(cpu, RVVM_REGID_X0 + 2, (size_t)stack_top);
-    rvvm_write_cpu_reg(cpu, RVVM_REGID_PC,     (size_t)entry);
+    rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 2, (size_t)stack_top);
+    rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_PC,     (size_t)entry);
 
-    rvvm_user_thread(cpu);
+    rvvm_user_thread_wrap(thread);
 
-    rvvm_free_machine(proc_ctx);
+    rvvm_free_machine(userland);
 #endif
 }
 
-int rvvm_user(int argc, const char** argv, const char** envp)
+int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     char path_buf[1024] = {0};
+    stacktrace_init();
     /*elf_desc_t elf = {
         .base = NULL,
     };
@@ -1145,6 +1264,10 @@ int rvvm_user(int argc, const char** argv, const char** envp)
         }
         rvvm_info("Loaded interpreter %s at base %lx, entry %lx,\n%ld PHDRs at %lx",
                   elf.interp_path, (size_t)interp.base, interp.entry, interp.phnum, interp.phdr);
+    }
+
+    if (envp == NULL) {
+        envp = environ;
     }
 
     exec_desc_t desc = {
@@ -1179,7 +1302,7 @@ int rvvm_user(int argc, const char** argv, const char** envp)
 
 #include "utils.h"
 
-int rvvm_user(int argc, char** argv, char** envp)
+int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     UNUSED(argc); UNUSED(argv); UNUSED(envp);
     rvvm_warn("Userland emulation not available, define RVVM_USER_TEST");
