@@ -45,19 +45,71 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *   built benches
  */
 
+#define _FILE_OFFSET_BITS 64
+#define _LARGEFILE64_SOURCE
+#define _GNU_SOURCE
+#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
+
 //#define RVVM_USER_TEST
 //#define RVVM_USER_TEST_X86
 //#define RVVM_USER_TEST_RISCV
 
 // Guard this for now
-#if defined(__linux__) && defined(RVVM_USER_TEST)
+#if defined(RVVM_USER_TEST)
 
-#define _FILE_OFFSET_BITS 64
-#define _LARGEFILE64_SOURCE
-#define _GNU_SOURCE
+#include <stdio.h>
+
+#include <errno.h>
+#include <unistd.h>
+
+#include <time.h>     // clock_gettime(), etc
+#include <signal.h>   // sigaction(), etc
+
+#include <sys/types.h>
+#include <sys/param.h>
+
+#include <sys/time.h> // setitimer()
+
+// File stuff
+#include <dirent.h>    // readdir(), etc
+#include <sys/file.h>  // fcntl(), flock(), fallocate(), openat()
+#include <sys/uio.h>   // readv(), writev()
+#include <sys/stat.h>  // mknodat(), mkdirat(), fchmod(), fchmodat(), fstatat(), fstat(), umask(), statx()
+#include <sys/mount.h> // struct statfs
+
+// VMA manipulation
+#include <sys/mman.h> // mmap(), munmap(), mprotect()
+#include <sys/shm.h>  // shmget(), shmctl(), shmat(), shmdt()
+
+// Sockets
+#include <sys/socket.h>
+#include <sys/ioctl.h>  // ioctl()
+#include <sys/select.h> // select()
+#include <poll.h>       // poll()
+
+// Misc
+#include <sys/times.h>    // times()
+#include <sys/wait.h>     // wait4()
+#include <sys/resource.h> // getrusage()
+
+// Linux-specific stuff
+#ifdef __linux__
+#include <sys/eventfd.h> // eventfd()
+#include <sys/epoll.h>   // epoll_create1(), etc
+#include <sys/sysinfo.h> // sysinfo()
+#include <sys/fsuid.h>   // setfsuid(), setfsgid()
+#include <sys/vfs.h>     // struct statfs
+
+// Put syscall headers here
+#include <linux/futex.h> // FUTEX_*
+#include <sys/syscall.h> // SYS_*
+#include <unistd.h>
+#endif
 
 #include "rvvmlib.h"
 #include "elf_load.h"
+#include "mem_ops.h"
 #include "utils.h"
 #include "blk_io.h"
 #include "threading.h"
@@ -66,41 +118,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "rvtimer.h"
 #include "stacktrace.h"
 
-#include <string.h>
-#include <stdio.h>
-
-#include <errno.h>
-#include <sys/file.h>
-#include <sys/mman.h>
-#include <sys/uio.h>
-#include <unistd.h>
-
-#include <sys/random.h>
-#include <time.h>
-#include <sys/times.h>
-#include <sys/shm.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <sys/prctl.h>
-#include <sys/eventfd.h>
-#include <sys/epoll.h>
-#include <sys/vfs.h>
-#include <sys/socket.h>
-#include <sys/resource.h>
-#include <sys/sysinfo.h>
-#include <sys/fsuid.h>
-#include <sys/time.h>
-
-// Put syscall headers here
-#include <linux/futex.h>      /* Definition of FUTEX_* constants */
-#include <sys/syscall.h>      /* Definition of SYS_* constants */
-#include <unistd.h>
-
-// Damned sys_clone()
-#include <sched.h>
+typedef uint64_t guest_size_t;
 
 // Describes the executable to be ran
 typedef struct {
@@ -135,7 +153,7 @@ static char *stack_put_str(char *stack, const char *str)
     return stack_put_mem(stack, str, rvvm_strlen(str) + 1);
 }
 
-static char *init_stack(char *stack, exec_desc_t* desc)
+static char* init_stack(char* stack, exec_desc_t* desc)
 {
     /* Stack layout (upside down):
      * 1. argc (8 bytes)
@@ -170,7 +188,7 @@ static char *init_stack(char *stack, exec_desc_t* desc)
     rvvm_randombytes(random_bytes, 16);
 
     // 4. align to 16 bytes
-    stack = (char *)(((size_t)stack) & ~0xFULL);
+    stack = (char*)(size_t)(((size_t)stack) & ~0xFULL);
 
     // 3. auxv, then null
     uint64_t auxv[32 * 2], *auxp = auxv;
@@ -189,6 +207,7 @@ static char *init_stack(char *stack, exec_desc_t* desc)
     *auxp++ = /* AT_CLKTCK */ 17; *auxp++ = 100;
     *auxp++ = /* AT_RANDOM */ 25; *auxp++ = (size_t)random_bytes;
     *auxp++ = /* AT_EXECFN */ 31; *auxp++ = (size_t)execfn;
+    *auxp++ = /* AT_SECURE */ 23; *auxp++ = 0;
     *auxp++ = /* AT_NULL */    0; *auxp++ = 0;
     stack = stack_put_mem(stack, auxv, (auxp - auxv) * sizeof(uint64_t));
 
@@ -202,6 +221,9 @@ static char *init_stack(char *stack, exec_desc_t* desc)
     return stack;
 }
 
+#define UAPI_ENOENT 2
+#define UAPI_EBADF  9
+#define UAPI_ENOMEM 12
 #define UAPI_EINVAL 22
 #define UAPI_ENOSYS 38
 
@@ -275,6 +297,52 @@ struct uapi_clone_args {
     uint64_t cgroup;
 };
 
+struct uapi_sched_param {
+    int sched_priority;
+};
+
+struct uapi_cap_data_struct {
+    uint32_t effective;
+    uint32_t permitted;
+    uint32_t inheritable;
+};
+
+union uapi_epoll_data {
+    void     *ptr;
+    int       fd;
+    uint32_t  u32;
+    uint64_t  u64;
+};
+
+struct uapi_epoll_event {
+    uint32_t event;
+    union uapi_epoll_data data;
+};
+
+struct uapi_timeval32 {
+    long tv_sec;
+    long tv_usec;
+};
+
+struct uapi_timespec32 {
+    long tv_sec;
+    long tv_nsec;
+};
+
+struct uapi_pollfd {
+    int fd;
+    short events;
+    short revents;
+};
+
+struct uapi_linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[0];
+};
+
 static void uapi_stat_convert(struct uapi_stat* dst, const struct stat* src)
 {
     dst->dev = src->st_dev;
@@ -307,19 +375,33 @@ static void uapi_statfs64_convert(struct uapi_statfs64* dst, const struct statfs
     dst->files = src->f_files;
     dst->ffree = src->f_ffree;
     memcpy(&dst->fsid, &src->f_fsid, sizeof(dst->fsid));
-    dst->namelen = src->f_namelen;
-    dst->frsize = src->f_frsize;
+    dst->namelen = 256;
+    dst->frsize = src->f_bsize;
     dst->flags = src->f_flags;
 }
 
+/*
 static void uapi_sigaction_convert(struct uapi_sigaction* dst, const struct sigaction* src)
 {
     dst->handler = src->sa_handler;
     dst->flags = src->sa_flags;
     memcpy(&dst->mask, &src->sa_flags, sizeof(dst->mask));
 }
+*/
 
 static rvvm_machine_t* userland; // Emulated RVVM process context
+
+// Short cast rvvm_addr_t -> void*
+static void* to_ptr(rvvm_addr_t addr)
+{
+    return (void*)(size_t)addr;
+}
+
+// Short cast rvvm_addr_t -> const char*
+static const char* to_str(rvvm_addr_t addr)
+{
+    return (const char*)(size_t)addr;
+}
 
 // Return negative values on -1 error like a syscall interface does
 static rvvm_addr_t errno_ret(int64_t val)
@@ -341,23 +423,6 @@ static rvvm_addr_t errno_ret_str(const char* str, size_t len)
     }
 }
 
-#define BRK_HEAP_SIZE 0x1000000
-
-// We can't touch the native brk heap since it would likely blow up the process
-static void* emulated_brk(void* addr)
-{
-    static uint8_t* brk_buffer;
-    static uint8_t* brk_ptr;
-    DO_ONCE({
-        brk_buffer = safe_calloc(BRK_HEAP_SIZE, 1);
-        brk_ptr = brk_buffer;
-    });
-    if ((uint8_t*)addr >= brk_buffer && (uint8_t*)addr < brk_buffer + BRK_HEAP_SIZE) {
-        brk_ptr = addr;
-    }
-    return brk_ptr;
-}
-
 // This is for debugging sake
 static elf_desc_t elf = {
     .base = NULL,
@@ -370,13 +435,17 @@ static bool proc_mem_readable(const void* addr, size_t size)
 {
     static int fd = 0;
     DO_ONCE({
-        fd = memfd_create("null", 0);
+        fd = vma_anon_memfd(4096);
         if (fd < 0) rvvm_fatal("Failed to create memfd!");
     });
     return write(fd, addr, size) == (ssize_t)size;
 }
 
+#ifndef __riscv
 static const char* prefix_path = "/home/lekkit/stuff/userland/arch";
+#else
+#define prefix_path ""
+#endif
 
 static bool fake_root = true;
 
@@ -393,6 +462,7 @@ static const char* wrap_path(char* buffer, const char* path, size_t size)
 
         if (rvvm_strfind(path, prefix_path)) {
             rvvm_warn("Wrapped path somehow leaked! %s", path);
+            //stacktrace_print();
             return path;
         }
 
@@ -410,7 +480,15 @@ static size_t unwrap_path(char* path, size_t len)
 {
     if (rvvm_strfind(path, prefix_path) == path) {
         rvvm_strlcpy(path, path + rvvm_strlen(prefix_path), len);
+        if (!rvvm_strlen(path)) {
+            rvvm_strlcpy(path, "/", len);
+        }
         return rvvm_strlen(prefix_path);
+    }
+
+    if (rvvm_strfind(path, prefix_path) == path) {
+        rvvm_warn("Wrapped path somehow leaked! %s", path);
+        stacktrace_print();
     }
 
     if (rvvm_strfind(path, "/")) {
@@ -436,6 +514,37 @@ typedef struct {
 
 // Main execution loop (Run the user CPU, handle syscalls)
 static void* rvvm_user_thread_wrap(void* arg);
+
+#define BRK_HEAP_SIZE 0x40000000
+
+static spinlock_t brk_lock = {0};
+static uint8_t* brk_buffer = NULL;
+static uint8_t* brk_ptr = NULL;
+
+// We can't touch the native brk heap since it would likely blow up the process
+static void* rvvm_sys_brk(void* addr)
+{
+    uint8_t* brk_new = addr;
+    uint8_t* brk_ret = NULL;
+    DO_ONCE({
+        brk_buffer = vma_alloc(NULL, BRK_HEAP_SIZE, VMA_RDWR);
+        brk_ptr = brk_buffer;
+    });
+
+    spin_lock(&brk_lock);
+    if (brk_new >= brk_buffer && brk_new < (brk_buffer + BRK_HEAP_SIZE)) {
+        if (brk_new > brk_ptr) {
+            // Newly allocated brk memory should be zeroed
+            memset(brk_ptr, 0, brk_new - brk_ptr);
+        }
+        brk_ptr = brk_new;
+    } else if (brk_new) {
+        rvvm_warn("invalid brk %p, current %p, off %ld!", brk_new, brk_ptr, brk_new - brk_buffer);
+    }
+    brk_ret = brk_ptr;
+    spin_unlock(&brk_lock);
+    return brk_ret;
+}
 
 #define UAPI_CLONE_VM             0x00000100
 #define UAPI_CLONE_VFORK          0x00004000
@@ -511,9 +620,11 @@ static int rvvm_sys_clone(rvvm_hart_t* cpu, uint32_t flags, size_t stack, uint32
     }
 }
 
-#define UAPI_FUTEX_CMD_MASK 0x3F
-#define UAPI_FUTEX_WAIT 0x0
-#define UAPI_FUTEX_WAKE 0x1
+#define UAPI_FUTEX_CMD_MASK    0x3F
+#define UAPI_FUTEX_WAIT        0x0
+#define UAPI_FUTEX_WAKE        0x1
+#define UAPI_FUTEX_WAIT_BITSET 0x9
+#define UAPI_FUTEX_WAKE_BITSET 0xA
 
 static int rvvm_sys_futex(uint32_t* addr, int futex_op, uint32_t val, size_t val2, uint32_t* uaddr2, uint32_t val3)
 {
@@ -523,25 +634,114 @@ static int rvvm_sys_futex(uint32_t* addr, int futex_op, uint32_t val, size_t val
     UNUSED(val2); UNUSED(uaddr2); UNUSED(val3);
     switch (futex_op & UAPI_FUTEX_CMD_MASK) {
         case UAPI_FUTEX_WAIT:
-#if defined(__FreeBSD__)
-            _umtx_op(addr, UMTX_OP_WAIT_UINT, val, NULL, NULL);
-#else
-            // Very crappy emulation that barely works
-            while (atomic_load_uint32(addr) == val) {
+        case UAPI_FUTEX_WAIT_BITSET:
+            if (atomic_load_uint32(addr) == val) {
                 sleep_ms(1);
             }
-#endif
             return 0;
         case UAPI_FUTEX_WAKE:
-#if defined(__FreeBSD__)
-            return _umtx_op(addr, UMTX_OP_WAKE, val, NULL, NULL);
-#else
-            return EVAL_MIN(1, val);
-#endif
+        case UAPI_FUTEX_WAKE_BITSET:
+            return 0;
     }
+    rvvm_warn("Unimplemented futex op %x", futex_op);
     return -UAPI_EINVAL;
 #endif
 }
+
+static struct timeval* uapi_ts32_to_timeval(struct timeval* tv, const struct uapi_timespec32* ts32)
+{
+    if (ts32) {
+        tv->tv_sec = ts32->tv_sec;
+        tv->tv_usec = ts32->tv_nsec / 1000;
+        return tv;
+    }
+    return NULL;
+}
+
+static int rvvm_sys_select_time32(int nfds, void* rfds, void* wfds, void* efds, const struct uapi_timespec32* ts32)
+{
+    // TODO: fd_set conversion
+    struct timeval tv = {0};
+    return errno_ret(select(nfds, rfds, wfds, efds, uapi_ts32_to_timeval(&tv, ts32)));
+}
+
+static int rvvm_sys_poll_time32(void* pfds, size_t npfds, const struct uapi_timespec32* ts32)
+{
+    // TODO: struct pollfd conversion
+    int timeout = -1;
+    if (ts32) {
+        timeout = (ts32->tv_sec * 1000) + (ts32->tv_nsec / 1000000);
+    }
+    return errno_ret(poll(pfds, npfds, timeout));
+}
+
+static int64_t rvvm_sys_getdents64(int fd, void* dirp, size_t size)
+{
+    size_t ret = 0;
+    DIR* dir = fdopendir(dup(fd));
+    if (dir) {
+        struct dirent* dent = NULL;
+        while ((dent = readdir(dir))) {
+            size_t name_len = rvvm_strlen(dent->d_name);
+            size_t dirent_size = sizeof(struct uapi_linux_dirent64) + name_len + 1;
+            if (dirent_size <= size) {
+                struct uapi_linux_dirent64* dirent = dirp;
+                dirent->d_ino = dent->d_ino;
+                dirent->d_off = dirent_size;
+                dirent->d_reclen = dirent_size;
+                // TODO: Figure d_type somehow?
+                dirent->d_type = 0;
+                memcpy(dirent->d_name, dent->d_name, name_len);
+                dirent->d_name[name_len] = 0;
+
+                ret += dirent_size;
+                size -= dirent_size;
+                dirp = ((uint8_t*)dirp) + dirent_size;
+            } else {
+                closedir(dir);
+                return -UAPI_EINVAL;
+            }
+        }
+        closedir(dir);
+        return ret;
+    } else {
+        return -UAPI_ENOENT;
+    }
+}
+
+static spinlock_t mmap_lock = {0};
+
+static rvvm_addr_t rvvm_sys_mmap(void* addr, size_t size, int prot, int flags, int fd, uint64_t offset)
+{
+    spin_lock(&mmap_lock);
+    if (flags & MAP_FIXED) {
+        munmap(addr, size);
+    }
+    rvvm_addr_t ret = errno_ret((size_t)mmap(addr, size, prot, flags, fd, offset));
+    spin_unlock(&mmap_lock);
+    return ret;
+}
+
+static int rvvm_sys_munmap(void* addr, size_t size)
+{
+    spin_lock(&mmap_lock);
+    rvvm_addr_t ret = errno_ret(munmap(addr, size));
+    spin_unlock(&mmap_lock);
+    return ret;
+}
+
+extern uint64_t __thread_selfid(void);
+
+static int rvvm_sys_gettid(void)
+{
+#if defined(__APPLE__)
+    return __thread_selfid();
+#else
+    return gettid();
+#endif
+}
+
+//#define rvvm_info(...) rvvm_warn(__VA_ARGS__);
 
 static void* rvvm_user_thread_wrap(void* arg)
 {
@@ -552,7 +752,7 @@ static void* rvvm_user_thread_wrap(void* arg)
     char path_buf[1024] = {0};
     char path_buf1[1024] = {0};
 
-    atomic_store_uint32(&thread->tid, gettid());
+    atomic_store_uint32(&thread->tid, rvvm_sys_gettid());
 
     // Just block here before cloner prepares stuff
     spin_lock(&thread->lock);
@@ -571,12 +771,13 @@ static void* rvvm_user_thread_wrap(void* arg)
             rvvm_addr_t a7 = rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + 17);
             switch (a7) {
                 case 17: { // getcwd
-                    char* buf = (char*)a0;
+                    char* buf = to_ptr(a0);
                     rvvm_info("sys_getcwd(%lx, %lx)", a0, a1);
                     a0 = errno_ret_str(getcwd(buf, a1), a1);
                     if ((int64_t)a0 > 0) a0 -= unwrap_path(buf, a1);
                     break;
                 }
+#ifdef __linux__
                 case 19: // eventfd2
                     rvvm_info("sys_eventfd2(%lx, %lx)", a0, a1);
                     a0 = errno_ret(eventfd(a0, a1));
@@ -588,20 +789,21 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 21: // epoll_ctl
                     // TODO struct conversion
                     rvvm_info("sys_epoll_ctl(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(epoll_ctl(a0, a1, a2, (void*)a3));
+                    a0 = errno_ret(epoll_ctl(a0, a1, a2, to_ptr(a3)));
                     break;
                 case 22: // epoll_pwait
                     // TODO struct conversion
                     rvvm_info("sys_epoll_pwait(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(epoll_pwait(a0, (void*)a1, a2, a3, (const void*)a4));
+                    a0 = errno_ret(epoll_wait(a0, to_ptr(a1), a2, a3));
                     break;
+#endif
                 case 23: // dup
                     rvvm_info("sys_dup(%ld)", a0);
                     a0 = errno_ret(dup(a0));
                     break;
                 case 24: // dup3
                     rvvm_info("sys_dup3(%ld, %ld, %lx)", a0, a1, a2);
-                    a0 = errno_ret(dup3(a0, a1, a2));
+                    a0 = errno_ret(dup2(a0, a1));
                     break;
                 case 25: // fcntl64
                     rvvm_info("sys_fcntl64(%ld, %lx, %lx)", a0, a1, a2);
@@ -617,31 +819,31 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(flock(a0, a1));
                     break;
                 case 33: // mknodat
-                    rvvm_info("sys_mknodat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
-                    a0 = errno_ret(mknodat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3));
+                    rvvm_info("sys_mknodat(%ld, %s, %lx, %lx)", a0, to_str(a1), a2, a3);
+                    a0 = errno_ret(mknodat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, a3));
                     break;
                 case 34: // mkdirat
-                    rvvm_info("sys_mkdirat(%ld, %s, %lx)", a0, (const char*)a1, a2);
-                    a0 = errno_ret(mkdirat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2));
+                    rvvm_info("sys_mkdirat(%ld, %s, %lx)", a0, to_str(a1), a2);
+                    a0 = errno_ret(mkdirat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2));
                     break;
                 case 35: // unlinkat
-                    rvvm_info("sys_unlinkat(%ld, %s, %lx)", a0, (const char*)a1, a2);
-                    a0 = errno_ret(unlinkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2));
+                    rvvm_info("sys_unlinkat(%ld, %s, %lx)", a0, to_str(a1), a2);
+                    a0 = errno_ret(unlinkat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2));
                     break;
                 case 36: // symlinkat
-                    rvvm_info("sys_symlinkat(%s, %ld, %s)", (const char*)a0, a1, (const char*)a2);
-                    a0 = errno_ret(symlinkat(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)),
-                                             a1, wrap_path(path_buf1, (const char*)a2, sizeof(path_buf1))));
+                    rvvm_info("sys_symlinkat(%s, %ld, %s)", to_str(a0), a1, to_str(a2));
+                    a0 = errno_ret(symlinkat(wrap_path(path_buf, to_str(a0), sizeof(path_buf)),
+                                             a1, wrap_path(path_buf1, to_str(a2), sizeof(path_buf1))));
                     break;
                 case 37: // linkat
-                    rvvm_info("sys_linkat(%ld, %s, %ld, %s, %lx)", a0, (const char*)a1, a2, (const char*)a3, a4);
-                    a0 = errno_ret(linkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)),
-                                          a2, wrap_path(path_buf1, (const char*)a3, sizeof(path_buf1)), a4));
+                    rvvm_info("sys_linkat(%ld, %s, %ld, %s, %lx)", a0, to_str(a1), a2, to_str(a3), a4);
+                    a0 = errno_ret(linkat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)),
+                                          a2, wrap_path(path_buf1, to_str(a3), sizeof(path_buf1)), a4));
                     break;
                 case 43: { // statfs64
                     struct statfs stfs = {0};
-                    rvvm_info("sys_statfs64(%s, %lx, %lx)", (const char*)a0, a1, a2);
-                    a0 = errno_ret(statfs(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)), &stfs));
+                    rvvm_info("sys_statfs64(%s, %lx, %lx)", to_str(a0), a1, a2);
+                    a0 = errno_ret(statfs(wrap_path(path_buf, to_str(a0), sizeof(path_buf)), &stfs));
                     uapi_statfs64_convert((struct uapi_statfs64*)a1, &stfs);
                     break;
                 }
@@ -653,24 +855,26 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 }
                 case 45: // truncate64
-                    rvvm_info("sys_truncate64(%s, %lx)", (const char*)a0, a1);
-                    a0 = errno_ret(truncate(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)), a1));
+                    rvvm_info("sys_truncate64(%s, %lx)", to_str(a0), a1);
+                    a0 = errno_ret(truncate(wrap_path(path_buf, to_str(a0), sizeof(path_buf)), a1));
                     break;
                 case 46: // ftruncate64
                     rvvm_info("sys_ftruncate64(%ld, %lx)", a0, a1);
                     a0 = errno_ret(ftruncate(a0, a1));
                     break;
+#ifdef __linux__
                 case 47: // fallocate
                     rvvm_info("sys_fallocate(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(fallocate(a0, a1, a2, a3));
                     break;
+#endif
                 case 48: // faccessat
-                    rvvm_info("sys_faccessat(%ld, %s, %lx)", a0, (const char*)a1, a2);
-                    a0 = errno_ret(faccessat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, 0));
+                    rvvm_info("sys_faccessat(%ld, %s, %lx)", a0, to_str(a1), a2);
+                    a0 = errno_ret(faccessat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, 0));
                     break;
                 case 49: // chdir
-                    rvvm_info("sys_chdir(%s)", (const char*)a0);
-                    a0 = errno_ret(chdir(wrap_path(path_buf, (const char*)a0, sizeof(path_buf))));
+                    rvvm_info("sys_chdir(%s)", to_str(a0));
+                    a0 = errno_ret(chdir(wrap_path(path_buf, to_str(a0), sizeof(path_buf))));
                     break;
                 case 50: // fchdir
                     rvvm_info("sys_fchdir(%ld)", a0);
@@ -681,15 +885,15 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(fchmod(a0, a1));
                     break;
                 case 53: // fchmodat
-                    rvvm_info("sys_fchmodat(%ld, %s, %lx)", a0, (const char*)a1, a2);
-                    a0 = errno_ret(fchmodat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, 0));
+                    rvvm_info("sys_fchmodat(%ld, %s, %lx)", a0, to_str(a1), a2);
+                    a0 = errno_ret(fchmodat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, 0));
                     break;
                 case 54: // fchownat
                     if (fake_root) {
                         a0 = 0;
                     } else {
-                        rvvm_info("sys_fchownat(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
-                        a0 = errno_ret(fchownat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, a4));
+                        rvvm_info("sys_fchownat(%ld, %s, %lx, %lx, %lx)", a0, to_str(a1), a2, a3, a4);
+                        a0 = errno_ret(fchownat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, a3, a4));
                     }
                     break;
                 case 55: // fchown
@@ -701,8 +905,8 @@ static void* rvvm_user_thread_wrap(void* arg)
                     }
                     break;
                 case 56: // openat
-                    rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
-                    a0 = errno_ret(openat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3));
+                    rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, to_str(a1), a2, a3);
+                    a0 = errno_ret(openat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, a3));
                     break;
                 case 57: // close
                     rvvm_info("sys_close(%ld)", a0);
@@ -710,64 +914,51 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 59: // pipe2
                     rvvm_info("sys_pipe2(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(pipe2((void*)a0, a1));
+                    a0 = errno_ret(pipe(to_ptr(a0)));
                     break;
                 case 61: // getdents64
-                    // TODO: struct conversion(?)
-                    rvvm_info("sys_getdents64(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(syscall(SYS_getdents64, a0, a1, a2));
+                    a0 = rvvm_sys_getdents64(a0, to_ptr(a1), a2);
                     break;
                 case 62: // lseek
-                    //rvvm_info("sys_lseek(%ld, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(lseek(a0, a1, a2));
                     break;
                 case 63: // read
-                    //rvvm_info("sys_read(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(read(a0, (void*)a1, a2));
+                    a0 = errno_ret(read(a0, to_ptr(a1), a2));
                     break;
                 case 64: // write
-                    //rvvm_info("sys_write(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(write(a0, (const void*)a1, a2));
+                    a0 = errno_ret(write(a0, to_ptr(a1), a2));
                     break;
                 case 65: // readv
                     // TODO: struct conversion(?)
-                    //rvvm_info("sys_readv(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(readv(a0, (const void*)a1, a2));
+                    a0 = errno_ret(readv(a0, to_ptr(a1), a2));
                     break;
                 case 66: // writev
                     // TODO: struct conversion(?)
-                    //rvvm_info("sys_writev(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(writev(a0, (const void*)a1, a2));
+                    a0 = errno_ret(writev(a0, to_ptr(a1), a2));
                     break;
                 case 67: // pread64
-                    //rvvm_info("sys_pread64(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(pread(a0, (void*)a1, a2, a3));
+                    a0 = errno_ret(pread(a0, to_ptr(a1), a2, a3));
                     break;
                 case 68: // pwrite64
-                    //rvvm_info("sys_pwrite64(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(pwrite(a0, (const void*)a1, a2, a3));
+                    a0 = errno_ret(pwrite(a0, to_ptr(a1), a2, a3));
                     break;
                 case 72: // pselect6_time32
-                    // TODO: struct conversion
-                    rvvm_info("sys_pselect6_time32(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(pselect(a0, (void*)a1, (void*)a2, (void*)a3, (void*)a4, (void*)a5));
+                    a0 = rvvm_sys_select_time32(a0, to_ptr(a1), to_ptr(a2), to_ptr(a3), to_ptr(a4));
                     break;
                 case 73: // ppoll_time32
-                    // TODO: struct conversion
-                    rvvm_info("sys_ppoll_time32(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = errno_ret(ppoll((void*)a0, a1, (void*)a2, (void*)a3));
+                    a0 = rvvm_sys_poll_time32(to_ptr(a0), a1, to_ptr(a2));
                     break;
                 case 78: { // readlinkat
                     char* buf = (char*)a0;
-                    rvvm_info("sys_readlinkat(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(readlinkat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), buf, a3));
+                    rvvm_info("sys_readlinkat(%ld, %s, %lx, %lx)", a0, to_str(a1), a2, a3);
+                    a0 = errno_ret(readlinkat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), buf, a3));
                     if ((int64_t)a0 > 0) a0 -= unwrap_path(buf, a3);
                     break;
                 }
                 case 79: { // newfstatat
                     struct stat st = {0};
-                    rvvm_info("sys_newfstatat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
-                    a0 = errno_ret(fstatat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), &st, a3));
+                    rvvm_info("sys_newfstatat(%ld, %s, %lx, %lx)", a0, to_str(a1), a2, a3);
+                    a0 = errno_ret(fstatat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), &st, a3));
                     uapi_stat_convert((struct uapi_stat*)a2, &st);
                     break;
                 }
@@ -782,16 +973,22 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_info("sys_fsync(%ld)", a0);
                     a0 = errno_ret(fsync(a0));
                     break;
-                case 88: // utimensat, ignore
+                case 83: // fdatasync
+                    rvvm_info("sys_fdatasync(%ld)", a0);
+                    a0 = errno_ret(fsync(a0));
+                    break;
+                case 88: // utimensat - ignore
                     a0 = 0;
                     break;
-                case 90: // capget
-                    rvvm_info("sys_capget(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(syscall(SYS_capget, a0, a1));
+                case 90: // capget - stub
+                    if (a1) {
+                        struct uapi_cap_data_struct* cap = to_ptr(a1);
+                        memset(cap, 0, sizeof(*cap));
+                    }
+                    a0 = 0;
                     break;
-                case 91: // capset
-                    rvvm_info("sys_capset(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(syscall(SYS_capset, a0, a1));
+                case 91: // capset - ignore
+                    a0 = 0;
                     break;
                 case 93: // exit
                     rvvm_info("sys_exit(%ld)", a0);
@@ -803,12 +1000,12 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 96: // set_tid_address
                     rvvm_info("sys_set_tid_address(%lx)", a0);
-                    thread->child_tid = (void*)a0;
+                    thread->child_tid = to_ptr(a0);
                     a0 = thread->tid;
                     break;
                 case 98: // futex
                     rvvm_info("sys_futex(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = rvvm_sys_futex((void*)a0, a1, a2, a3, (void*)a4, a5);
+                    a0 = rvvm_sys_futex(to_ptr(a0), a1, a2, a3, to_ptr(a4), a5);
                     break;
                 case 99: // set_robust_list
                     // TODO: Implement this
@@ -817,36 +1014,59 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 103: // setitimer
                     rvvm_info("sys_setitimer(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(setitimer(a0, (const void*)a1, (void*)a2));
+                    a0 = errno_ret(setitimer(a0, to_ptr(a1), to_ptr(a2)));
                     break;
                 case 113: // clock_gettime
                     // TODO: Struct conversion!
                     rvvm_info("sys_clock_gettime(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(clock_gettime(a0, (void*)a1));
+                    a0 = errno_ret(clock_gettime(a0, to_ptr(a1)));
                     break;
                 case 114: // clock_getres
                     rvvm_info("sys_clock_getres(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(clock_getres(a0, (void*)a1));
+                    a0 = errno_ret(clock_getres(a0, to_ptr(a1)));
                     break;
+#ifdef __linux__
                 case 115: // clock_nanosleep
                     // TODO: struct conversion?
                     rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
+                    a0 = errno_ret(clock_nanosleep(a0, a1, to_ptr(a2), to_ptr(a3)));
                     break;
+#endif
+                case 118: // sched_setparam - ignore
                 case 119: // sched_setscheduler - ignore
+                case 120: // sched_getscheduler - ignore
+                    a0 = 0;
+                    break;
+                case 121: // sched_getparam - stub
+                    if (a1) {
+                        struct uapi_sched_param* param = to_ptr(a1);
+                        memset(param, 0, sizeof(*param));
+                    }
                     a0 = 0;
                     break;
                 case 122: // sched_setaffinity - ignore
                     a0 = 0;
                     break;
-                case 123: // sched_getaffinity
-                    rvvm_info("sys_sched_getaffinity(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(sched_getaffinity(a0, a1, (void*)a2));
+                case 123: // sched_getaffinity - stub
+                    if (a2 && a1) {
+                        memset(to_ptr(a2), 0, a1);
+                        *(uint8_t*)to_ptr(a2) = 1;
+                    }
+                    a0 = 0;
+                    break;
+                case 124: // sched_yield
+                    sleep_ms(0);
+                    a0 = 0;
+                    break;
+                case 125: // sched_get_priority_max - ignore
+                case 126: // sched_get_priority_min - ignore
+                    a0 = 0;
                     break;
                 case 129: // kill
                     rvvm_warn("sys_kill(%lx, %lx)", a0, a1);
                     a0 = errno_ret(kill(a0, a1));
                     break;
+#ifdef __linux__
                 case 130: // tkill
                     rvvm_warn("sys_tkill(%lx, %lx)", a0, a1);
                     a0 = errno_ret(tgkill(getpid(), a0, a1));
@@ -855,13 +1075,14 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_warn("sys_tgkill(%lx, %lx, %ld)", a0, a1, a2);
                     a0 = errno_ret(tgkill(a0, a1, a2));
                     break;
+#endif
                 case 134: { // rt_sigaction
                     struct sigaction sa = {0};
                     rvvm_info("sys_rt_sigaction(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     if (a0 < STATIC_ARRAY_SIZE(siga)) {
-                        if (a2) memcpy((void*)a2, &siga[a0], a3);
+                        if (a2) memcpy(to_ptr(a2), &siga[a0], a3);
                         if (a1) {
-                            memcpy(&siga[a0], (const void*)a1, a3);
+                            memcpy(&siga[a0], to_ptr(a1), a3);
 
                             // Register a shim signal handler
                             if (a0 != 11) {
@@ -876,13 +1097,18 @@ static void* rvvm_user_thread_wrap(void* arg)
                         }
                         a0 = 0;
                     } else {
-                        a0 = -EINVAL;
+                        a0 = -UAPI_EINVAL;
                     }
                     break;
                 }
                 case 135: // rt_sigprocmask
                     rvvm_info("sys_rt_sigprocmask(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(sigprocmask(a0, (const void*)a1, (void*)a2));
+                    a0 = errno_ret(sigprocmask(a0, to_ptr(a1), to_ptr(a2)));
+                    break;
+                case 137: // rt_sigtimedwait_time32
+                    // TODO: Signal handling
+                    sleep_ms(-1);
+                    a0 = 0;
                     break;
                 case 140: // setpriority - ignore
                     a0 = 0;
@@ -897,25 +1123,52 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 147: // setresuid
                     rvvm_info("sys_setresuid(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(setresuid(a0, a1, a2));
+                    a0 = errno_ret(setuid(a0));
+                    break;
+                case 148: // getresuid
+                    rvvm_info("sys_getresuid(%lx, %lx, %lx)", a0, a1, a2);
+                    if (a0) {
+                        *(int*)to_ptr(a0) = getuid();
+                    }
+                    if (a1) {
+                        *(int*)to_ptr(a2) = getuid();
+                    }
+                    if (a2) {
+                        *(int*)to_ptr(a2) = getuid();
+                    }
+                    a0 = 0;
                     break;
                 case 149: // setresgid
                     rvvm_info("sys_setresgid(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(setresgid(a0, a1, a2));
+                    a0 = errno_ret(setgid(a0));
+                    break;
+                case 150: // getresgid
+                    rvvm_info("sys_getresgid(%lx, %lx, %lx)", a0, a1, a2);
+                    if (a0) {
+                        *(int*)to_ptr(a0) = getgid();
+                    }
+                    if (a1) {
+                        *(int*)to_ptr(a2) = getgid();
+                    }
+                    if (a2) {
+                        *(int*)to_ptr(a2) = getgid();
+                    }
+                    a0 = 0;
                     break;
                 case 151: // setfsuid
                     rvvm_info("sys_setfsuid(%lx)", a0);
-                    a0 = errno_ret(setfsuid(a0));
+                    a0 = errno_ret(setuid(a0));
                     break;
                 case 152: // setfsgid
                     rvvm_info("sys_setfsgid(%lx)", a0);
-                    a0 = errno_ret(setfsgid(a0));
+                    a0 = errno_ret(setgid(a0));
                     break;
                 case 153: // times
                     // TODO: Struct conversion!
                     rvvm_info("sys_times(%lx)", a0);
-                    a0 = errno_ret(times((void*)a0));
+                    a0 = errno_ret(times(to_ptr(a0)));
                     break;
+#ifdef __linux__
                 case 154: // setpgid
                     rvvm_info("sys_setpgid(%lx, %lx)", a0, a1);
                     a0 = errno_ret(setpgid(a0, a1));
@@ -924,6 +1177,7 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_info("sys_getpgid(%lx)", a0);
                     a0 = errno_ret(getpgid(a0));
                     break;
+#endif
                 case 157: // setsid
                     rvvm_info("sys_setsid()");
                     a0 = setsid();
@@ -939,13 +1193,13 @@ static void* rvvm_user_thread_wrap(void* arg)
                             .version = "RVVM " RVVM_VERSION,
                             .machine = "riscv64",
                         };
-                        memcpy((void*)a0, &name, sizeof(name));
+                        memcpy(to_ptr(a0), &name, sizeof(name));
                         a0 = 0;
                     }
                     break;
                 case 165: // getrusage
                     rvvm_info("sys_getrusage(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(getrusage(a0, (void*)a1));
+                    a0 = errno_ret(getrusage(a0, to_ptr(a1)));
                     break;
                 case 166: // umask
                     rvvm_info("sys_umask(%lx)", a0);
@@ -953,7 +1207,8 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 167: // prctl
                     rvvm_info("sys_prctl(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = errno_ret(prctl(a0, a1, a2, a3, a4));
+                    //a0 = errno_ret(prctl(a0, a1, a2, a3, a4));
+                    a0 = -UAPI_EINVAL;
                     break;
                 case 172: // getpid
                     rvvm_info("sys_getpid()");
@@ -989,13 +1244,15 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 178: // gettid
                     rvvm_info("sys_gettid()");
-                    a0 = errno_ret(gettid());
+                    a0 = thread->tid;
                     break;
+#ifdef __linux__
                 case 179: // sysinfo
                     // TODO: struct conversion(?)
                     rvvm_info("sys_sysinfo(%lx)", a0);
-                    a0 = errno_ret(sysinfo((void*)a0));
+                    a0 = errno_ret(sysinfo(to_ptr(a0)));
                     break;
+#endif
                 case 194: // shmget
                     rvvm_info("sys_shmget(%lx, %lx, %lx)", a0, a1, a2);
                     a0 = errno_ret(shmget(a0, a1, a2));
@@ -1003,15 +1260,15 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 195: // shmctl
                     // TODO: struct conversion?
                     rvvm_info("sys_shmctl(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(shmctl(a0, a1, (void*)a2));
+                    a0 = errno_ret(shmctl(a0, a1, to_ptr(a2)));
                     break;
                 case 196: // shmat
                     rvvm_info("sys_shmat(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret((size_t)shmat(a0, (void*)a1, a2));
+                    a0 = errno_ret((size_t)shmat(a0, to_ptr(a1), a2));
                     break;
                 case 197: // shmdt
                     rvvm_info("sys_shmdt(%lx)", a0);
-                    a0 = errno_ret(shmdt((void*)a0));
+                    a0 = errno_ret(shmdt(to_ptr(a0)));
                     break;
                 case 198: // socket
                     rvvm_info("sys_socket(%lx, %lx, %lx)", a0, a1, a2);
@@ -1019,12 +1276,12 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 199: // socketpair
                     rvvm_info("sys_socketpair(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(socketpair(a0, a1, a2, (int*)a3));
+                    a0 = errno_ret(socketpair(a0, a1, a2, to_ptr(a3)));
                     break;
                 case 200: // bind
                     // TODO struct conversion
                     rvvm_info("sys_bind(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(bind(a0, (void*)a1, a2));
+                    a0 = errno_ret(bind(a0, to_ptr(a1), a2));
                     break;
                 case 201: // listen
                     rvvm_info("sys_listen(%ld, %lx)", a0, a1);
@@ -1033,40 +1290,40 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 202: // accept
                     // TODO: struct conversion(?)
                     rvvm_info("sys_accept(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(accept(a0, (void*)a1, (void*)a2));
+                    a0 = errno_ret(accept(a0, to_ptr(a1), to_ptr(a2)));
                     break;
                 case 203: // connect
                     // TODO: struct conversion(?)
                     rvvm_info("sys_connect(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(connect(a0, (void*)a1, a2));
+                    a0 = errno_ret(connect(a0, to_ptr(a1), a2));
                     break;
                 case 204: // getsockname
                     // TODO: struct conversion(?)
                     rvvm_info("sys_getsockname(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(getsockname(a0, (void*)a1, (void*)a2));
+                    a0 = errno_ret(getsockname(a0, to_ptr(a1), to_ptr(a2)));
                     break;
                 case 205: // getpeername
                     // TODO: struct conversion(?)
                     rvvm_info("sys_getpeername(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(getpeername(a0, (void*)a1, (void*)a2));
+                    a0 = errno_ret(getpeername(a0, to_ptr(a1), to_ptr(a2)));
                     break;
                 case 206: // sendto
                     // TODO: struct conversion(?)
                     rvvm_info("sys_sendto(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(sendto(a0, (const void*)a1, a2, a3, (void*)a4, a5));
+                    a0 = errno_ret(sendto(a0, to_ptr(a1), a2, a3, to_ptr(a4), a5));
                     break;
                 case 207: // recvfrom
                     // TODO: struct conversion(?)
                     rvvm_info("sys_recvfrom(%ld, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(recvfrom(a0, (void*)a1, a2, a3, (void*)a4, (void*)a5));
+                    a0 = errno_ret(recvfrom(a0, to_ptr(a1), a2, a3, to_ptr(a4), to_ptr(a5)));
                     break;
                 case 208: // setsockopt
                     rvvm_info("sys_setsockopt(%ld, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = errno_ret(setsockopt(a0, a1, a2, (void*)a3, a4));
+                    a0 = errno_ret(setsockopt(a0, a1, a2, to_ptr(a3), a4));
                     break;
                 case 209: // getsockopt
                     rvvm_info("sys_getsockopt(%ld, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = errno_ret(getsockopt(a0, a1, a2, (void*)a3, (void*)a4));
+                    a0 = errno_ret(getsockopt(a0, a1, a2, to_ptr(a3), to_ptr(a4)));
                     break;
                 case 210: // shutdown
                     rvvm_info("sys_shutdown(%ld, %lx)", a0, a1);
@@ -1075,101 +1332,117 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 211: // sendmsg
                     // TODO: struct conversion(?)
                     rvvm_info("sys_sendmsg(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(sendmsg(a0, (void*)a1, a2));
+                    a0 = errno_ret(sendmsg(a0, to_ptr(a1), a2));
                     break;
                 case 212: // recvmsg
                     // TODO: struct conversion(?)
                     rvvm_info("sys_recvmsg(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(recvmsg(a0, (void*)a1, a2));
+                    a0 = errno_ret(recvmsg(a0, to_ptr(a1), a2));
                     break;
                 case 214: // brk
                     rvvm_info("sys_brk(%lx)", a0);
-                    a0 = (size_t)emulated_brk((void*)a0);
+                    a0 = (size_t)rvvm_sys_brk(to_ptr(a0));
                     break;
                 case 215: // munmap
                     rvvm_info("sys_munmap(%lx, %lx)", a0, a1);
-                    a0 = errno_ret(munmap((void*)a0, a1));
+                    a0 = rvvm_sys_munmap(to_ptr(a0), a1);
                     break;
+#ifdef __linux__
                 case 216: // mremap
                     rvvm_info("sys_mremap(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = errno_ret((size_t)mremap((void*)a0, a1, a2, a3, (void*)a4));
+                    a0 = errno_ret((size_t)mremap(to_ptr(a0), a1, a2, a3, to_ptr(a4)));
                     break;
+#endif
                 case 220: // clone
                     rvvm_info("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
-                    a0 = rvvm_sys_clone(cpu, a0, a1, (void*)a2, a3, (void*)a4);
+                    a0 = rvvm_sys_clone(cpu, a0, a1, to_ptr(a2), a3, to_ptr(a4));
                     break;
                 case 221: { // execve
                     rvvm_info("sys_execve(%lx, %lx, %lx)", a0, a1, a2);
-                    if (access(wrap_path(path_buf, (const char*)a0, sizeof(path_buf)), F_OK)) {
+                    if (access(wrap_path(path_buf, to_str(a0), sizeof(path_buf)), F_OK)) {
                         a0 = -ENOENT;
                         break;
                     }
-                    char** orig_argv = (void*)a1;
+                    char** orig_argv = to_ptr(a1);
                     char* new_argv[256] = {"/proc/self/exe", "-user", 0};
                     for (size_t i=2; i<255 && orig_argv[i - 2]; ++i) new_argv[i] = orig_argv[i - 2];
-                    new_argv[2] = (char*)a0;
-                    a0 = errno_ret(execve("/proc/self/exe", new_argv, (void*)a2));
+                    new_argv[2] = to_ptr(a0);
+                    a0 = errno_ret(execve("/proc/self/exe", new_argv, to_ptr(a2)));
                     break;
                 }
                 case 222: // mmap
-                    rvvm_info("sys_mmap(%lx, %lx, %lx, %lx, %lx, %lx)",
-                            a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret((size_t)mmap((void*)a0, a1, a2, a3, a4, a5));
+                    rvvm_info("sys_mmap(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
+                    a0 = rvvm_sys_mmap(to_ptr(a0), a1, a2, a3, a4, a5);
+                    break;
+                case 223: // fadvise64_64 - ignore
+                    a0 = 0;
                     break;
                 case 226: // mprotect
                     rvvm_info("sys_mprotect(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(mprotect((void*)a0, a1, a2));
+                    a0 = errno_ret(mprotect(to_ptr(a0), a1, a2));
                     break;
                 case 233: // madvise
                     rvvm_info("sys_madvise(%lx, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(madvise((void*)a0, a1, a2));
+                    a0 = errno_ret(madvise(to_ptr(a0), a1, a2));
                     break;
+#ifdef __linux__
                 case 242: // accept4
                     // TODO: struct conversion(?)
                     rvvm_info("sys_accept4(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
+                    a0 = errno_ret(accept4(a0, to_ptr(a1), to_ptr(a2), a3));
                     break;
+#endif
                 case 258: // riscv_hwprobe
                     a0 = -UAPI_ENOSYS;
                     break;
                 case 259: // riscv_flush_icache
-                    rvvm_info("riscv_flush_icache(%lx, %lx, %lx)", a0, a1, a2);
-                    //rvvm_flush_icache(proc_ctx, a0, a1 - a0);
+                    rvvm_warn("riscv_flush_icache(%lx, %lx, %lx)", a0, a1, a2);
+                    //rvvm_flush_icache(userland, a0, a1 - a0);
                     a0 = 0;
                     break;
                 case 260: // wait4
-                    // TODO: struct conversion(?)
+                    // TODO: Struct conversion
                     rvvm_info("sys_wait4(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(wait4(a0, (void*)a1, a2, (void*)a3));
+                    a0 = errno_ret(wait4(a0, to_ptr(a1), a2, to_ptr(a3)));
                     break;
                 case 261: // prlimit64
-                    // TODO: struct conversion(?)
+                    // TODO: Struct conversion
                     rvvm_info("sys_prlimit64(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(prlimit(a0, a1, (const void*)a2, (void*)a3));
+                    //a0 = errno_ret(prlimit(a0, a1, to_ptr(a2), to_ptr(a3)));
+                    a0 = -UAPI_ENOSYS;
                     break;
+#ifdef __linux__
                 case 269: // sendmmsg
+                    // TODO: Struct conversion
                     rvvm_info("sys_sendmmsg(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(sendmmsg(a0, (void*)a1, a2, a3));
+                    a0 = errno_ret(sendmmsg(a0, to_ptr(a1), a2, a3));
                     break;
+#endif
                 case 276: // renameat2
-                    rvvm_info("sys_renameat2(%ld, %s, %ld, %s, %lx)", a0, (const char*)a1, a2, (const char*)a3, a4);
-                    a0 = errno_ret(renameat2(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)),
-                                             a2, wrap_path(path_buf1, (const char*)a3, sizeof(path_buf1)), a4));
+                    rvvm_info("sys_renameat2(%ld, %s, %ld, %s, %lx)", a0, to_str(a1), a2, to_str(a3), a4);
+                    a0 = errno_ret(renameat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)),
+                                             a2, wrap_path(path_buf1, to_str(a3), sizeof(path_buf1))));
+                    break;
+                case 277: // seccomp
+                    // Hitler SHOT HIMSELF after seeing this...
+                    a0 = 0;
                     break;
                 case 278: // getrandom
                     rvvm_info("sys_getrandom(%lx, %lx, %lx)", a0, a1, a2);
-                    rvvm_randombytes((void*)a0, a1);
+                    rvvm_randombytes(to_ptr(a0), a1);
                     a0 = a1;
                     break;
+#ifdef __linux__
                 case 279: // memfd_create
-                    rvvm_info("sys_memfd_create(%s, %lx)", (const char*)a0, a1);
-                    a0 = errno_ret(memfd_create((const char*)a0, a1));
+                    rvvm_info("sys_memfd_create(%s, %lx)", to_str(a0), a1);
+                    a0 = errno_ret(memfd_create(to_str(a0), a1));
                     break;
                 case 291: // statx
                     // TODO: Struct conversion!
-                    rvvm_info("sys_statx(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
-                    a0 = errno_ret(statx(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, (void*)a4));
+                    rvvm_info("sys_statx(%ld, %s, %lx, %lx, %lx)", a0, to_str(a1), a2, a3, a4);
+                    a0 = errno_ret(statx(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, a3, to_ptr(a4)));
                     break;
+#endif
                 case 435: // clone3
                     // FUCK THIS FUCKING SYSCALL FOR NOW
                     a0 = -UAPI_ENOSYS;
@@ -1178,15 +1451,15 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = -UAPI_ENOSYS;
                     break;
                 case 439: // faccessat2
-                    rvvm_info("sys_faccessat2(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
-                    a0 = errno_ret(faccessat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3));
+                    rvvm_info("sys_faccessat2(%ld, %s, %lx, %lx)", a0, to_str(a1), a2, a3);
+                    a0 = errno_ret(faccessat(a0, wrap_path(path_buf, to_str(a1), sizeof(path_buf)), a2, a3));
                     break;
                 default:
 #ifndef __riscv
                     rvvm_error("Unknown syscall %ld!", a7);
                     a0 = -UAPI_ENOSYS;
 #else
-                    a0 = syscall(a7, a0, a1, a2, a3, a4, a5);
+                    a0 = errno_ret(syscall(a7, a0, a1, a2, a3, a4, a5));
 #endif
                     break;
             }
@@ -1242,6 +1515,7 @@ static void* rvvm_user_thread_wrap(void* arg)
             } else {
                 rvvm_warn(" * * * PC points to inaccessible memory!");
             }
+
             break;
         }
     }
@@ -1294,6 +1568,18 @@ static void jump_start(void* entry, void* stack_top)
 #endif
 }
 
+extern char** environ;
+
+/*
+static char* default_envp[] = {
+    "LANG=en_US.UTF-8",
+    "TERM=xterm-256color",
+    "DISPLAY=:0",
+    "XDG_RUNTIME_DIR=/run/user/1000",
+    NULL,
+};
+*/
+
 int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     char path_buf[1024] = {0};
@@ -1332,6 +1618,8 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
     }
 
     //chdir(prefix_path);
+
+    //rvvm_set_loglevel(LOG_INFO);
 
     exec_desc_t desc = {
         .argc = argc,
