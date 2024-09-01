@@ -213,7 +213,9 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
     void* ret = VirtualAlloc(addr, size, MEM_COMMIT | MEM_RESERVE, vma_native_flags(flags));
 #elif defined(VMA_MMAP_IMPL)
     int mmap_flags = (flags & VMA_EXEC) ? MAP_VMA_JIT : MAP_VMA_ANON;
-#ifdef MAP_FIXED
+#if defined(MAP_FIXED_NOREPLACE)
+    if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED_NOREPLACE;
+#elif defined(MAP_FIXED)
     if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED;
 #endif
     void* ret = mmap(addr, size, vma_native_flags(flags), mmap_flags, -1, 0);
