@@ -51,7 +51,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
 {
-    uint8_t tmp[64];
+    uint8_t tmp[64] = {0};
     WRAP_ERR(file && elf, "Invalid arguments to elf_load_file()");
     WRAP_ERR(rvread(file, tmp, 64, 0) == 64, "Failed to read ELF header");
     WRAP_ERR(read_uint32_le_m(tmp) == 0x464c457F, "Not an ELF file");
@@ -99,12 +99,14 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
         elf->buf_size = elf_hiaddr - elf_loaddr;
         if (elf_type == ELF_ET_DYN) {
             // Dynamic (PIC) ELF, relocate it
-            elf->base = vma_alloc(NULL, elf->buf_size, VMA_NONE);
-            WRAP_ERR(elf->base, "Failed to relocate dynamic ELF");
-            vma_free(elf->base, elf->buf_size);
+            elf->base = vma_alloc(NULL, elf->buf_size, VMA_RDWR);
+        } else {
+            // Non-relocatable ELF at fixed address
+            elf->base = vma_alloc((void*)(size_t)elf_loaddr, elf->buf_size, VMA_RDWR | VMA_FIXED);
         }
-        if (elf->entry) elf->entry += (size_t)elf->base;
-        if (elf->phdr)  elf->phdr  += (size_t)elf->base;
+        WRAP_ERR(elf->base, "Failed to allocate ELF VMA");
+        if (elf->entry) elf->entry += (size_t)elf->base - elf_loaddr;
+        if (elf->phdr)  elf->phdr  += (size_t)elf->base - elf_loaddr;
     }
 
     for (size_t i=0; i<elf_phnum; ++i) {
@@ -119,15 +121,8 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
 
         if (p_type == ELF_PT_LOAD || p_type == ELF_PT_PHDR) {
             // Load ELF program segment or PHDR segment
-            if (objcopy) {
-                p_vaddr -= elf_loaddr;
-                WRAP_ERR(p_vaddr + p_memsz <= elf->buf_size, "ELF does not fit in objcopy buffer");
-            }
-            void* vaddr = ((uint8_t*)elf->base) + p_vaddr;
-            if (!objcopy) {
-                WRAP_ERR(vma_alloc(vaddr, p_memsz, VMA_RWX | VMA_FIXED) == vaddr, "Failed to allocate ELF VMA");
-            }
-
+            void* vaddr = ((uint8_t*)elf->base) + p_vaddr - elf_loaddr;
+            WRAP_ERR(p_vaddr + p_memsz <= elf_loaddr + elf->buf_size, "ELF segment does not fit in memory");
             WRAP_ERR(rvread(file, vaddr, p_fsize, p_offset) == p_fsize, "Failed to read ELF segment");
         }
         if (p_type == ELF_PT_INTERP && !objcopy && !elf->interp_path) {
