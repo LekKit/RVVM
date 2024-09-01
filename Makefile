@@ -569,7 +569,7 @@ lib: $(SHARED) $(STATIC)
 
 .PHONY: test
 test: $(BINARY)
-	@curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz" --output-dir "$(BUILDDIR)"
+	@cd "$(BUILDDIR)"; curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz"
 	@tar xf "$(BUILDDIR)/riscv-tests.tar.gz" -C $(BUILDDIR)
 	@echo
 	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
