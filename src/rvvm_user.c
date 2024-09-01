@@ -378,12 +378,30 @@ static bool proc_mem_readable(const void* addr, size_t size)
 
 static const char* prefix_path = "/home/lekkit/stuff/userland/arch";
 
+static bool fake_root = true;
+
 static const char* wrap_path(char* buffer, const char* path, size_t size)
 {
-    if (path && rvvm_strfind(path, "/") == path) {
-         size_t prefix_len = rvvm_strlcpy(buffer, prefix_path, size);
-         rvvm_strlcpy(buffer + prefix_len, path, size - prefix_len);
-         return buffer;
+    if (path) {
+        if (rvvm_strfind(path, "/dev") == path
+         || rvvm_strfind(path, "/sys") == path
+         || rvvm_strfind(path, "/proc") == path
+         || rvvm_strfind(path, "/tmp") == path
+         || rvvm_strfind(path, "/var/tmp") == path) {
+            return path;
+        }
+
+        if (rvvm_strfind(path, prefix_path)) {
+            rvvm_warn("Wrapped path somehow leaked! %s", path);
+            return path;
+        }
+
+        if (rvvm_strfind(path, "/") == path) {
+            size_t prefix_len = rvvm_strlcpy(buffer, prefix_path, size);
+            rvvm_strlcpy(buffer + prefix_len, path, size - prefix_len);
+            //rvvm_warn("accessing path %s", buffer);
+            return buffer;
+        }
     }
     return path;
 }
@@ -394,6 +412,11 @@ static size_t unwrap_path(char* path, size_t len)
         rvvm_strlcpy(path, path + rvvm_strlen(prefix_path), len);
         return rvvm_strlen(prefix_path);
     }
+
+    if (rvvm_strfind(path, "/")) {
+        rvvm_warn("Unwrapped path %s", path);
+    }
+
     return 0;
 }
 
@@ -662,12 +685,20 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(fchmodat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, 0));
                     break;
                 case 54: // fchownat
-                    rvvm_info("sys_fchownat(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
-                    a0 = errno_ret(fchownat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, a4));
+                    if (fake_root) {
+                        a0 = 0;
+                    } else {
+                        rvvm_info("sys_fchownat(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
+                        a0 = errno_ret(fchownat(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, a4));
+                    }
                     break;
                 case 55: // fchown
-                    rvvm_info("sys_fchownat(%ld, %lx, %lx)", a0, a1, a2);
-                    a0 = errno_ret(fchown(a0, a1, a2));
+                    if (fake_root) {
+                        a0 = 0;
+                    } else {
+                        rvvm_info("sys_fchownat(%ld, %lx, %lx)", a0, a1, a2);
+                        a0 = errno_ret(fchown(a0, a1, a2));
+                    }
                     break;
                 case 56: // openat
                     rvvm_info("sys_openat(%ld, %s, %lx, %lx)", a0, (const char*)a1, a2, a3);
@@ -789,14 +820,24 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(setitimer(a0, (const void*)a1, (void*)a2));
                     break;
                 case 113: // clock_gettime
-                    // TODO: struct conversion?
+                    // TODO: Struct conversion!
                     rvvm_info("sys_clock_gettime(%lx, %lx)", a0, a1);
                     a0 = errno_ret(clock_gettime(a0, (void*)a1));
+                    break;
+                case 114: // clock_getres
+                    rvvm_info("sys_clock_getres(%lx, %lx)", a0, a1);
+                    a0 = errno_ret(clock_getres(a0, (void*)a1));
                     break;
                 case 115: // clock_nanosleep
                     // TODO: struct conversion?
                     rvvm_info("sys_clock_nanosleep(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(clock_nanosleep(a0, a1, (const void*)a2, (void*)a3));
+                    break;
+                case 119: // sched_setscheduler - ignore
+                    a0 = 0;
+                    break;
+                case 122: // sched_setaffinity - ignore
+                    a0 = 0;
                     break;
                 case 123: // sched_getaffinity
                     rvvm_info("sys_sched_getaffinity(%lx, %lx, %lx)", a0, a1, a2);
@@ -843,6 +884,9 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_info("sys_rt_sigprocmask(%ld, %lx, %lx, %lx)", a0, a1, a2, a3);
                     a0 = errno_ret(sigprocmask(a0, (const void*)a1, (void*)a2));
                     break;
+                case 140: // setpriority - ignore
+                    a0 = 0;
+                    break;
                 case 144: // setgid
                     rvvm_info("sys_setgid(%lx)", a0);
                     a0 = errno_ret(setgid(a0));
@@ -868,7 +912,7 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(setfsgid(a0));
                     break;
                 case 153: // times
-                    // TODO: struct conversion(?)
+                    // TODO: Struct conversion!
                     rvvm_info("sys_times(%lx)", a0);
                     a0 = errno_ret(times((void*)a0));
                     break;
@@ -879,6 +923,10 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 155: // getpgid
                     rvvm_info("sys_getpgid(%lx)", a0);
                     a0 = errno_ret(getpgid(a0));
+                    break;
+                case 157: // setsid
+                    rvvm_info("sys_setsid()");
+                    a0 = setsid();
                     break;
                 case 160: // newuname
                     rvvm_info("sys_newuname(%lx)", a0);
@@ -917,11 +965,19 @@ static void* rvvm_user_thread_wrap(void* arg)
                     break;
                 case 174: // getuid
                     rvvm_info("sys_getuid()");
-                    a0 = errno_ret(getuid());
+                    if (fake_root) {
+                        a0 = 0;
+                    } else {
+                        a0 = errno_ret(getuid());
+                    }
                     break;
                 case 175: // geteuid
                     rvvm_info("sys_geteuid()");
-                    a0 = errno_ret(geteuid());
+                    if (fake_root) {
+                        a0 = 0;
+                    } else {
+                        a0 = errno_ret(geteuid());
+                    }
                     break;
                 case 176: // getgid
                     rvvm_info("sys_getgid()");
@@ -1074,7 +1130,7 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(accept4(a0, (void*)a1, (void*)a2, a3));
                     break;
                 case 258: // riscv_hwprobe
-                    a0 = -38;
+                    a0 = -UAPI_ENOSYS;
                     break;
                 case 259: // riscv_flush_icache
                     rvvm_info("riscv_flush_icache(%lx, %lx, %lx)", a0, a1, a2);
@@ -1109,11 +1165,16 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_info("sys_memfd_create(%s, %lx)", (const char*)a0, a1);
                     a0 = errno_ret(memfd_create((const char*)a0, a1));
                     break;
+                case 291: // statx
+                    // TODO: Struct conversion!
+                    rvvm_info("sys_statx(%ld, %s, %lx, %lx, %lx)", a0, (const char*)a1, a2, a3, a4);
+                    a0 = errno_ret(statx(a0, wrap_path(path_buf, (const char*)a1, sizeof(path_buf)), a2, a3, (void*)a4));
+                    break;
                 case 435: // clone3
                     // FUCK THIS FUCKING SYSCALL FOR NOW
                     a0 = -UAPI_ENOSYS;
                     break;
-                case 436: // close_range
+                case 436: // close_range - ignore
                     a0 = -UAPI_ENOSYS;
                     break;
                 case 439: // faccessat2
@@ -1269,6 +1330,8 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
     if (envp == NULL) {
         envp = environ;
     }
+
+    //chdir(prefix_path);
 
     exec_desc_t desc = {
         .argc = argc,
