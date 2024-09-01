@@ -100,11 +100,12 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
         if (elf_type == ELF_ET_DYN) {
             // Dynamic (PIC) ELF, relocate it
             elf->base = vma_alloc(NULL, elf->buf_size, VMA_RDWR);
+            WRAP_ERR(elf->base, "Failed to allocate dynamic ELF VMA");
         } else {
             // Non-relocatable ELF at fixed address
             elf->base = vma_alloc((void*)(size_t)elf_loaddr, elf->buf_size, VMA_RDWR | VMA_FIXED);
+            WRAP_ERR(elf->base, "Failed to map fixed ELF VMA, address collision?");
         }
-        WRAP_ERR(elf->base, "Failed to allocate ELF VMA");
         if (elf->entry) elf->entry += (size_t)elf->base - elf_loaddr;
         if (elf->phdr)  elf->phdr  += (size_t)elf->base - elf_loaddr;
     }
