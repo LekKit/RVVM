@@ -16,8 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef SPINLOCK_H
-#define SPINLOCK_H
+#ifndef RVVM_SPINLOCK_H
+#define RVVM_SPINLOCK_H
 
 #include <stddef.h>
 #include "atomics.h"
@@ -31,7 +31,7 @@ typedef struct {
 
 // Internal locking operations
 slow_path void spin_lock_wait(spinlock_t* lock, const char* location);
-slow_path void spin_lock_wake(spinlock_t* lock);
+slow_path void spin_lock_wake(spinlock_t* lock, uint32_t prev);
 
 // Static initialization
 #define SPINLOCK_INIT {0}
@@ -39,7 +39,7 @@ slow_path void spin_lock_wake(spinlock_t* lock);
 // Initialize a lock
 static inline void spin_init(spinlock_t* lock)
 {
-    lock->flag = 0;
+    atomic_store_uint32(&lock->flag, 0);
 #ifdef USE_SPINLOCK_DEBUG
     lock->location = NULL;
 #endif
@@ -87,8 +87,9 @@ static forceinline void spin_lock_slow_real(spinlock_t* lock, const char* locati
 // Release the lock
 static forceinline void spin_unlock(spinlock_t* lock)
 {
-    if (unlikely(atomic_swap_uint32_ex(&lock->flag, 0, ATOMIC_RELEASE) > 1)) {
-        spin_lock_wake(lock);
+    uint32_t prev = atomic_swap_uint32_ex(&lock->flag, 0, ATOMIC_RELEASE);
+    if (unlikely(prev != 1)) {
+        spin_lock_wake(lock, prev);
     }
 }
 

@@ -47,6 +47,19 @@ static void spin_cond_init(void)
     });
 }
 
+static void spin_lock_debug_report(spinlock_t* lock)
+{
+#ifdef USE_SPINLOCK_DEBUG
+    rvvm_warn("The lock was previously held at %s", lock->location);
+#else
+    UNUSED(lock);
+#endif
+#ifdef RVVM_VERSION
+    rvvm_warn("Version: RVVM v"RVVM_VERSION);
+#endif
+    stacktrace_print();
+}
+
 slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
 {
     for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
@@ -81,21 +94,19 @@ slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
     } while (location == NULL || rvtimer_get(&timer) < SPINLOCK_MAX_MS);
 
     rvvm_warn("Possible deadlock at %s", location);
-#ifdef USE_SPINLOCK_DEBUG
-    rvvm_warn("The lock was previously held at %s", lock->location ? lock->location : "[nowhere?]");
-#endif
-#ifdef RVVM_VERSION
-    rvvm_warn("Version: RVVM v"RVVM_VERSION);
-#endif
 
-    stacktrace_print();
+    spin_lock_debug_report(lock);
 
     rvvm_warn("Attempting to recover execution...\n * * * * * * *\n");
 }
 
-slow_path void spin_lock_wake(spinlock_t* lock)
+slow_path void spin_lock_wake(spinlock_t* lock, uint32_t prev)
 {
-    UNUSED(lock);
-    spin_cond_init();
-    condvar_wake_all(global_cond);
+    if (prev) {
+        spin_cond_init();
+        condvar_wake_all(global_cond);
+    } else {
+        rvvm_warn("Unlock of a non-locked lock!");
+        spin_lock_debug_report(lock);
+    }
 }
