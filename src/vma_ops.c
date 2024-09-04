@@ -209,35 +209,35 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
     size_t ptr_diff = ((size_t)addr) & vma_page_mask();
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
+
 #if defined(VMA_WIN32_IMPL)
-    void* ret = VirtualAlloc(addr, size, MEM_COMMIT | MEM_RESERVE, vma_native_flags(flags));
+    uint8_t* ret = VirtualAlloc(addr, size, MEM_COMMIT | MEM_RESERVE, vma_native_flags(flags));
 #elif defined(VMA_MMAP_IMPL)
     int mmap_flags = (flags & VMA_EXEC) ? MAP_VMA_JIT : MAP_VMA_ANON;
 #if defined(MAP_FIXED_NOREPLACE)
     if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED_NOREPLACE;
-#elif defined(MAP_FIXED)
+#elif defined(MAP_FIXED) && !defined(__linux__)
     if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED;
 #endif
-    void* ret = mmap(addr, size, vma_native_flags(flags), mmap_flags, -1, 0);
-    if (ret == MAP_FAILED) {
-        ret = NULL;
-    } else if ((flags & VMA_FIXED) && ret != addr) {
-        vma_free(ret, size);
-        ret = NULL;
-    } else {
+    uint8_t* ret = mmap(addr, size, vma_native_flags(flags), mmap_flags, -1, 0);
+    if (ret == MAP_FAILED) ret = NULL;
 #if defined(__linux__) && defined(MADV_MERGEABLE)
-        if (flags & VMA_KSM) madvise(ret, size, MADV_MERGEABLE);
+    if (ret && (flags & VMA_KSM)) madvise(ret, size, MADV_MERGEABLE);
 #endif
 #if defined(__linux__) && defined(MADV_HUGEPAGE)
-        if (flags & VMA_THP) madvise(ret, size, MADV_HUGEPAGE);
+    if (ret && (flags & VMA_THP)) madvise(ret, size, MADV_HUGEPAGE);
 #endif
-    }
 #else
-    if (addr || (flags & (VMA_EXEC | VMA_FIXED))) return NULL;
-    void* ret = calloc(size, 1);
+    if (flags & (VMA_EXEC | VMA_FIXED)) return NULL;
+    uint8_t* ret = calloc(size, 1);
 #endif
-    if (ret == NULL) return NULL;
-    return ((uint8_t*)ret) + ptr_diff;
+
+    if ((flags & VMA_FIXED) && ret && ret != addr) {
+        vma_free(ret, size);
+        ret = NULL;
+    }
+
+    return ret ? (ret + ptr_diff) : NULL;
 }
 
 bool vma_multi_mmap(void** rw, void** exec, size_t size)
@@ -274,62 +274,53 @@ bool vma_multi_mmap(void** rw, void** exec, size_t size)
 // Resize VMA
 void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
 {
-    void* ret = addr;
+    size_t ptr_diff = ((size_t)addr) & vma_page_mask();
+    uint8_t* ret = ptr_to_page(addr);
     old_size = ptrsize_to_page(addr, old_size);
     new_size = ptrsize_to_page(addr, new_size);
-    addr = ptr_to_page(addr);
-#if defined(VMA_WIN32_IMPL)
-    if (flags & VMA_FIXED) {
-        // TODO
-        ret = NULL;
-    } else if (new_size != old_size) {
-        // Just copy the data into a completely new mapping
-        ret = vma_alloc(NULL, new_size, flags);
-        if (ret) {
-            memcpy(ret, addr, old_size);
-            vma_free(addr, old_size);
-        }
-    }
-#elif defined(VMA_MMAP_IMPL)
-#if defined(__linux__) && defined(MREMAP_MAYMOVE)
+    addr = ret;
+
+    if (new_size == old_size) return addr;
+
+#if defined(VMA_MMAP_IMPL) && defined(__linux__) && defined(MREMAP_MAYMOVE)
     ret = mremap(addr, old_size, new_size, (flags & VMA_FIXED) ? 0 : MREMAP_MAYMOVE);
     if (ret == MAP_FAILED) ret = NULL;
-#else
-    void* region_end = ((uint8_t*)addr) + new_size;
+#elif defined(VMA_MMAP_IMPL) || defined(VMA_WIN32_IMPL)
     if (new_size < old_size) {
         // Shrink the mapping by unmapping at the end
-        if (!vma_free(region_end, old_size - new_size)) ret = NULL;
+        if (!vma_free(((uint8_t*)addr) + new_size, old_size - new_size)) {
+            ret = NULL;
+        }
     } else if (new_size > old_size) {
         // Grow the mapping by mapping additional pages at the end
-        void* tmp = vma_alloc(region_end, new_size - old_size, flags & ~VMA_FIXED);
-        if (tmp != region_end) {
+        if (!vma_alloc(((uint8_t*)addr) + old_size, new_size - old_size, flags | VMA_FIXED)) {
             ret = NULL;
-            if (tmp) vma_free(tmp, new_size - old_size);
         }
     }
     if (ret == NULL && !(flags & VMA_FIXED)) {
         // Just copy the data into a completely new mapping
         ret = vma_alloc(NULL, new_size, flags);
         if (ret) {
-            memcpy(ret, addr, old_size);
+            memcpy(ret, addr, EVAL_MIN(old_size, new_size));
             vma_free(addr, old_size);
         }
     }
-#endif
 #else
     if (flags & VMA_FIXED) {
-        ret = NULL;
-    } else if (new_size != old_size) {
+        if (new_size > old_size) ret = NULL;
+    } else {
         ret = realloc(addr, new_size);
     }
 #endif
-    return ret;
+
+    return ret ? (ret + ptr_diff) : NULL;
 }
 
 bool vma_protect(void* addr, size_t size, uint32_t flags)
 {
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
+
 #if defined(VMA_WIN32_IMPL)
     DWORD old;
     return VirtualProtect(addr, size, vma_native_flags(flags), &old);
@@ -346,6 +337,7 @@ bool vma_clean(void* addr, size_t size, bool lazy)
 {
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
+
 #if defined(VMA_WIN32_IMPL)
     if (lazy) {
         return VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS);
@@ -366,6 +358,7 @@ bool vma_clean(void* addr, size_t size, bool lazy)
     return madvise(addr, size, MADV_FREE) == 0 && lazy;
 #endif
 #endif
+
     return addr && size && lazy;
 }
 
@@ -393,8 +386,10 @@ bool vma_pageout(void* addr, size_t size, bool lazy)
 
 bool vma_free(void* addr, size_t size)
 {
+    if (!addr || !size) return false;
     size = ptrsize_to_page(addr, size);
     addr = ptr_to_page(addr);
+
 #if defined(VMA_WIN32_IMPL)
     //VirtualFree(addr, size, MEM_DECOMMIT);
     UNUSED(size);
@@ -402,7 +397,7 @@ bool vma_free(void* addr, size_t size)
 #elif defined(VMA_MMAP_IMPL)
     return munmap(addr, size) == 0;
 #else
-    if (size) free(addr);
-    return addr && size;
+    free(addr);
+    return true;
 #endif
 }
