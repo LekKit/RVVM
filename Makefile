@@ -661,4 +661,19 @@ else
 	@echo "$(WARN_PREFIX) Unsupported on non-POSIX!$(RESET)"
 endif
 
+.PHONY: help
+help:
+	$(info $(INFO_PREFIX) Available make useflags:$(RESET))
+	$(foreach useflag, $(filter USE_%, $(.VARIABLES)), $(info $(useflag)=$($(useflag))))
+	$(info $(INFO_PREFIX) Available make targets:$(RESET))
+	$(info $(shell grep '^.PHONY:' Makefile | sed 's/\.PHONY://g'))
+	@echo $(NULL_STDERR)
+
+# More aliases to help
+.PHONY: info
+info: help
+
+.PHONY: list
+list: help
+
 sinclude $(DEPS)
