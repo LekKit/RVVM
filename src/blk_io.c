@@ -159,7 +159,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     DWORD tmp = 0;
     DeviceIoControl(handle, DEVIOCTL_SET_SPARSE, NULL, 0, NULL, 0, &tmp, NULL);
 
-    rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    rvfile_t* file = safe_new_obj(rvfile_t);
     file->size = ((uint64_t)sizeh) << 32 | sizel;
     file->pos = 0;
     file->handle = handle;
@@ -176,7 +176,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     if (!fp && (mode & RVFILE_RW) && (mode & RVFILE_CREAT)) fp = fopen(filepath, "wb+");
     if (!fp) return NULL;
 
-    rvfile_t* file = safe_calloc(sizeof(rvfile_t), 1);
+    rvfile_t* file = safe_new_obj(rvfile_t);
     fseek(fp, 0, SEEK_END);
     file->size = ftell(fp);
     file->pos = 0;
