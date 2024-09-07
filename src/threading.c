@@ -102,6 +102,7 @@ thread_ctx_t* thread_create_ex(thread_func_t func, void* arg, uint32_t stack_siz
     thread_win32_wrap_t* wrap = safe_new_obj(thread_win32_wrap_t);
     wrap->func = func;
     wrap->arg = arg;
+    arg = wrap;
 #else
     void* entry = func;
 #endif
