@@ -197,9 +197,6 @@ static void win32_window_draw(gui_window_t* win)
     StretchDIBits(data->hdc, 0, 0, win->fb.width, win->fb.height,
                              0, 0, win->fb.width, win->fb.height,
                              win->fb.buffer, &bmi, 0, SRCCOPY);
-#ifndef UNDER_CE
-    SwapBuffers(data->hdc);
-#endif
 }
 
 static void win32_window_poll(gui_window_t* win)
