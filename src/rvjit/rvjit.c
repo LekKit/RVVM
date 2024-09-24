@@ -24,45 +24,77 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "bit_ops.h"
 #include "vma_ops.h"
 
-#if defined(_WIN32) && !defined(RVJIT_X86) && !defined(GNU_EXTS)
-#include <windows.h>
-#endif
-
-#if defined(__APPLE__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
-void sys_icache_invalidate(void* start, size_t len);
+#if defined(RVJIT_ARM64) && defined(__APPLE__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 110000
+/*
+ * Apple Silicon needs special care with JIT memory protection
+ */
 #include <pthread.h>
 #define RVJIT_APPLE_SILICON
+void sys_icache_invalidate(void* start, size_t len);
 #endif
 
 #if defined(RVJIT_RISCV) && defined(__linux__)
 /*
- * Clang doesn't seem to implement __builtin___clear_cache properly
- * on RISC-V, wreaking havok on hosts with non-coherent icache
- * (RVVM is also affected, heh), hence we make a direct syscall
+ * Clang doesn't seem to implement __clear_cache() properly on RISC-V,
+ * wreaking havok on hosts with non-coherent icache, just use a syscall
  */
 #include <sys/syscall.h>
 #include <unistd.h>
-#ifndef __NR_riscv_flush_icache
-#define __NR_riscv_flush_icache 259
-#endif
+
+#elif defined(RVJIT_ARM64) && defined(GNU_EXTS)
+/*
+ * Don't rely on GCC's __clear_cache implementation, as it may
+ * use incorrect cacheline sizes on buggy big.LITTLE hardware.
+ * TODO: Figure out proper cacheline from the kernel somehow?
+ */
+static inline void rvjit_arm64_fluch_icache(const void* addr, size_t size)
+{
+    size_t dsize = 64, isize = 64;
+    size_t end = ((size_t)addr) + size;
+
+    // Drain data cache
+    for (size_t cl = align_size_down((size_t)addr, dsize); cl < end; cl += dsize) {
+        // Use "dc civac" instead of "dc cvau", as this is the suggested workaround for
+        // Cortex-A53 errata 819472, 826319, 827319 and 824069.
+        __asm__ volatile ("dc civac, %0" : : "r" (cl) : "memory");
+    }
+    // Store barrier
+    __asm__ volatile ("dsb ish" : : : "memory");
+    // Flush instruction cache
+    for (size_t cl = align_size_down((size_t)addr, isize); cl < end; cl += isize) {
+        __asm__ volatile ("ic ivau, %0" : : "r" (cl) : "memory");
+    }
+    // Load/store barrier
+    __asm__ volatile ("dsb ish" : : : "memory");
+    __asm__ volatile ("isb" : : : "memory");
+}
+
+#elif defined(_WIN32) && !defined(RVJIT_X86) && !defined(GNU_EXTS)
+/*
+ * FlushInstructionCache() might be used
+ */
+#include <windows.h>
+
 #endif
 
 static void rvjit_flush_icache(const void* addr, size_t size)
 {
 #ifdef RVJIT_X86
     // x86 has coherent instruction caches
-    UNUSED(addr);
-    UNUSED(size);
+    UNUSED(addr); UNUSED(size);
+#elif defined(RVJIT_ARM64) && defined(GNU_EXTS)
+    rvjit_arm64_fluch_icache(addr, size);
 #elif defined(RVJIT_APPLE_SILICON)
     sys_icache_invalidate((void*)addr, size);
-#elif defined(RVJIT_RISCV) && defined(__linux__)
+#elif defined(RVJIT_RISCV) && defined(__linux__) && defined(__NR_riscv_flush_icache)
     syscall(__NR_riscv_flush_icache, addr, ((char*)addr) + size, 0);
 #elif GCC_CHECK_VER(4, 7) || CLANG_CHECK_VER(3, 5)
-    // Use __builtin___clear_cache on modern toolchains
     __builtin___clear_cache((char*)addr, ((char*)addr) + size);
 #elif defined(GNU_EXTS)
+    // Use legacy __clear_cache() on old GNU compilers
     __clear_cache((char*)addr, ((char*)addr) + size);
 #elif defined(_WIN32)
+    // This is probably MSVC on ARM
     FlushInstructionCache(GetCurrentProcess(), addr, size);
 #else
     #error No rvjit_flush_icache() support!
@@ -96,8 +128,6 @@ bool rvjit_ctx_init(rvjit_block_t* block, size_t size)
         block->heap.data = rw;
         block->heap.code = exec;
     }
-
-    rvjit_flush_icache(block->heap.code, block->heap.size);
 
     block->space = 1024;
     block->code = safe_malloc(block->space);
@@ -210,19 +240,15 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
 #endif
 
     memcpy(dest, block->code, block->size);
-    rvjit_flush_icache(code, block->size);
-    //block->heap.curr = (block->heap.curr + block->size + 31) & ~31ULL;
     block->heap.curr += block->size;
 
     hashmap_put(&block->heap.blocks, block->phys_pc, (size_t)code);
 
 #ifdef RVJIT_NATIVE_LINKER
-    vector_t(uint8_t*)* linked_blocks;
-    phys_addr_t k;
-    size_t v;
+    vector_t(uint8_t*)* linked_blocks = NULL;
     vector_foreach(block->links, i) {
-        k = vector_at(block->links, i).dest;
-        v = vector_at(block->links, i).ptr;
+        phys_addr_t k = vector_at(block->links, i).dest;
+        size_t v = vector_at(block->links, i).ptr;
         linked_blocks = (void*)hashmap_get(&block->heap.block_links, k);
         if (!linked_blocks) {
             linked_blocks = safe_calloc(1, sizeof(vector_t(uint8_t*)));
@@ -243,6 +269,8 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         hashmap_remove(&block->heap.block_links, block->phys_pc);
     }
 #endif
+
+    rvjit_flush_icache(code, block->size);
 
 #ifdef RVJIT_APPLE_SILICON
     pthread_jit_write_protect_np(true);
@@ -280,7 +308,6 @@ void rvjit_flush_cache(rvjit_block_t* block)
         // This reduces average memory usage since the cache is never full
         vma_clean(block->heap.data, block->heap.size, true);
     }
-    rvjit_flush_icache(block->heap.code, block->heap.curr);
 
     hashmap_clear(&block->heap.blocks);
     block->heap.curr = 0;
