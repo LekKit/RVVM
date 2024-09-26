@@ -95,11 +95,24 @@ static void signal_handler(int sig)
 
 static void set_signal_handler(int sig)
 {
+#ifdef SA_SIGINFO
+    struct sigaction sa_old = {0};
+    struct sigaction sa = {
+        .sa_handler = signal_handler,
+        .sa_flags = SA_RESTART,
+    };
+    sigaction(sig, NULL, &sa_old);
+    if (!(sa_old.sa_flags & SA_SIGINFO) && (sa_old.sa_handler == NULL || sa_old.sa_handler == (void*)SIG_IGN || sa_old.sa_handler != (void*)SIG_DFL)) {
+        // Signal not used
+        sigaction(sig, &sa, NULL);
+    }
+#else
     void* prev = signal(sig, signal_handler);
-    if (prev != NULL && prev != (void*)SIG_IGN) {
+    if (prev != NULL && prev != (void*)SIG_IGN && prev != (void*)SIG_DFL) {
         // Signal already used
         signal(sig, prev);
     }
+#endif
 }
 
 #endif
