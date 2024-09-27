@@ -459,6 +459,22 @@ bool vma_protect(void* addr, size_t size, uint32_t flags)
 #endif
 }
 
+bool vma_sync(void* addr, size_t size, bool lazy)
+{
+    size_t ptr_diff = ((size_t)addr) & (vma_page_size() - 1);
+    addr = align_ptr_down(addr, vma_page_size());
+    size = align_size_up(size + ptr_diff, vma_page_size());
+    UNUSED(lazy);
+
+#if defined(VMA_WIN32_IMPL)
+    return FlushViewOfFile(addr, size);
+#elif defined(VMA_MMAP_IMPL) && defined(MS_ASYNC) && defined(MS_SYNC)
+    return msync(addr, size, lazy ? MS_ASYNC : MS_SYNC) == 0;
+#else
+    return false;
+#endif
+}
+
 bool vma_clean(void* addr, size_t size, bool lazy)
 {
     size_t ptr_diff = ((size_t)addr) & (vma_page_size() - 1);
