@@ -49,7 +49,7 @@ extern uint32_t rvjit_a32_soft_uidiv(uint32_t a, uint32_t b)
 
 static uint32_t rvjit_a32_hwcaps = 0;
 
-static inline void rvjit_a32_test_cpu()
+static inline void rvjit_a32_test_cpu(void)
 {
 #ifdef __linux__
     rvjit_a32_hwcaps = getauxval(AT_HWCAP);
@@ -59,7 +59,7 @@ static inline void rvjit_a32_test_cpu()
     }
 }
 
-static bool rvjit_a32_check_div()
+static bool rvjit_a32_check_div(void)
 {
     DO_ONCE(rvjit_a32_test_cpu());
     return !!(rvjit_a32_hwcaps & RVJIT_ARM_IDIVA);
