@@ -54,7 +54,7 @@ static bool try_lock_fd(int fd)
     return fcntl(fd, F_SETLK, &flk) == 0 || (errno != EACCES && errno != EAGAIN);
 }
 
-#elif defined(_WIN32) && !defined(UNDER_CE) && !defined(USE_STDIO)
+#elif defined(_WIN32) && !defined(USE_STDIO)
 // Win32 implementation using CreateFile, OVERLAPPED, ReadFile...
 #include <windows.h>
 #define WIN32_FILE_IMPL
@@ -70,6 +70,12 @@ typedef struct {
 // C stdio implementation using fopen, fread...
 // Emulates pread by using locks around fseek+fread
 #include <stdio.h>
+
+#ifdef _WIN32
+// For rvfile_get_win32_handle()
+#include <windows.h>
+#include <io.h>
+#endif
 
 #define FILE_POS_INVALID 0
 #define FILE_POS_READ    1
@@ -91,29 +97,33 @@ struct blk_io_rvfile {
     HANDLE handle;
 #else
     uint64_t pos_real;
-    uint8_t  pos_state;
-    spinlock_t lock;
     FILE* fp;
+    spinlock_t lock;
+    uint8_t  pos_state;
 #endif
 };
 
-rvfile_t* rvopen(const char* filepath, uint8_t mode)
+rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 {
+    if (filemode & ~RVFILE_LEGAL_FLAGS) return NULL;
 #if defined(POSIX_FILE_IMPL)
     int open_flags = O_CLOEXEC;
-    if (mode & RVFILE_RW) {
-        if (mode & RVFILE_TRUNC) open_flags |= O_TRUNC;
-        if (mode & RVFILE_CREAT) {
+    if (filemode & RVFILE_RW) {
+        if (filemode & RVFILE_TRUNC) open_flags |= O_TRUNC;
+        if (filemode & RVFILE_CREAT) {
             open_flags |= O_CREAT;
-            if (mode & RVFILE_EXCL) open_flags |= O_EXCL;
+            if (filemode & RVFILE_EXCL) open_flags |= O_EXCL;
         }
         open_flags |= O_RDWR;
     } else open_flags |= O_RDONLY;
+#ifdef O_DIRECT
+    if (filemode & RVFILE_DIRECT) open_flags |= O_DIRECT;
+#endif
 
     int fd = open(filepath, open_flags, 0644);
-    if (fd == -1) return NULL;
+    if (fd < 0) return NULL;
 
-    if ((mode & RVFILE_EXCL) && !try_lock_fd(fd)) {
+    if ((filemode & RVFILE_EXCL) && !try_lock_fd(fd)) {
         rvvm_error("File %s is busy", filepath);
         close(fd);
         return NULL;
@@ -125,34 +135,32 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->fd = fd;
     return file;
 #elif defined(WIN32_FILE_IMPL)
-    DWORD access = GENERIC_READ | ((mode & RVFILE_RW) ? GENERIC_WRITE : 0);
-    DWORD share = (mode & RVFILE_EXCL) ? 0 : (FILE_SHARE_READ | FILE_SHARE_WRITE);
+    DWORD access = GENERIC_READ | ((filemode & RVFILE_RW) ? GENERIC_WRITE : 0);
+    DWORD share = (filemode & RVFILE_EXCL) ? 0 : (FILE_SHARE_READ | FILE_SHARE_WRITE);
     DWORD disp = OPEN_EXISTING;
-    if (mode & RVFILE_RW) {
-        if (mode & RVFILE_CREAT) {
+    DWORD attr = FILE_ATTRIBUTE_NORMAL;
+    if (filemode & RVFILE_DIRECT) attr = FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
+    if (filemode & RVFILE_RW) {
+        if (filemode & RVFILE_CREAT) {
             disp = OPEN_ALWAYS;
-            if (mode & RVFILE_TRUNC) disp = CREATE_ALWAYS;
+            if (filemode & RVFILE_EXCL) disp = CREATE_NEW;
         } else {
-            if (mode & RVFILE_TRUNC) disp = TRUNCATE_EXISTING;
+            if (filemode & RVFILE_TRUNC) disp = TRUNCATE_EXISTING;
         }
     }
 
     size_t path_len = rvvm_strlen(filepath);
     wchar_t* u16_path = safe_new_arr(wchar_t, path_len + 1);
     MultiByteToWideChar(CP_UTF8, 0, filepath, -1, u16_path, path_len + 1);
-    HANDLE handle = CreateFileW(u16_path, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE handle = CreateFileW(u16_path, access, share, NULL, disp, attr, NULL);
     free(u16_path);
 
-    if (handle == INVALID_HANDLE_VALUE) {
-        DWORD last_error = GetLastError();
-        if (last_error == ERROR_SHARING_VIOLATION) rvvm_error("File %s is busy", filepath);
-        if (last_error == ERROR_FILE_NOT_FOUND && !(mode & (RVFILE_CREAT | RVFILE_TRUNC))) {
-            // Retry opening existing file using system locale (oh...)
-            handle = CreateFileA(filepath, access, share, NULL, disp, FILE_ATTRIBUTE_NORMAL, NULL);
-            if (handle != INVALID_HANDLE_VALUE) rvvm_warn("Non UTF-8 filepath \"%s\"", filepath);
+    if (handle == NULL || handle == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == ERROR_SHARING_VIOLATION) {
+            rvvm_error("File %s is busy", filepath);
         }
+        return NULL;
     }
-    if (handle == INVALID_HANDLE_VALUE) return NULL;
 
     DWORD sizeh = 0;
     DWORD sizel = GetFileSize(handle, &sizeh);
@@ -163,17 +171,36 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->size = ((uint64_t)sizeh) << 32 | sizel;
     file->pos = 0;
     file->handle = handle;
+    if ((filemode & RVFILE_TRUNC) && disp == OPEN_ALWAYS) {
+        // Handle RVFILE_TRUNC properly
+        rvtruncate(file, 0);
+    }
     return file;
 #else
     const char* open_mode = "rb";
-    if ((mode & RVFILE_TRUNC) && (mode & RVFILE_RW)) {
-        open_mode = "wb+";
-    } else if (mode & RVFILE_RW) {
+    if (filemode & RVFILE_RW) {
         open_mode = "rb+";
+        if ((filemode & RVFILE_TRUNC) || (filemode & RVFILE_CREAT)) {
+            // NOTE: This implementation is not atomically safe for RVFILE_CREAT and RVFILE_TRUNC
+            FILE* file_exists = fopen(filepath, "rb");
+            if (file_exists) {
+                fclose(file_exists);
+                if (filemode & RVFILE_TRUNC) {
+                    // File exists and we want to truncate it
+                    open_mode = "wb+";
+                }
+                if (filemode & RVFILE_EXCL) {
+                    // File exists but we requested exclusive access
+                    return NULL;
+                }
+            } else if (filemode & RVFILE_CREAT) {
+                // File doesn't exist but we want to create it
+                open_mode = "wb+";
+            }
+        }
     }
 
     FILE* fp = fopen(filepath, open_mode);
-    if (!fp && (mode & RVFILE_RW) && (mode & RVFILE_CREAT)) fp = fopen(filepath, "wb+");
     if (!fp) return NULL;
 
     rvfile_t* file = safe_new_obj(rvfile_t);
@@ -182,12 +209,11 @@ rvfile_t* rvopen(const char* filepath, uint8_t mode)
     file->pos = 0;
     file->pos_state = FILE_POS_INVALID;
     file->fp = fp;
-    spin_init(&file->lock);
     return file;
 #endif
 }
 
-void rvclose(rvfile_t *file)
+void rvclose(rvfile_t* file)
 {
     if (!file) return;
 #if defined(POSIX_FILE_IMPL)
@@ -208,115 +234,94 @@ uint64_t rvfilesize(rvfile_t* file)
     return atomic_load_uint64(&file->size);
 }
 
-#if defined(POSIX_FILE_IMPL) && defined(RVREAD_MMAP_FILE)
-#include <sys/mman.h>
-
-/*
- * This is an experimental memory usage optimization, which remaps
- * the destination buffer to be a file mapping which you just read.
- * Under memory pressure, this allows swapping elimination.
- * TODO: This is currently sub-optimal in regard to vm.max_map_count,
- * and may cause OOM. Use with care!
- */
-static void rvread_mmap_file(rvfile_t* file, void* destination, size_t count, uint64_t offset)
+// Return value of -1 means "Try again"
+static int32_t rvread_chunk(rvfile_t* file, void* dst, size_t size, uint64_t offset)
 {
-    if (count < 0x1000) return;
-    size_t low = ((size_t)destination) & 0xFFFULL;
-    uint8_t* buffer = ((uint8_t*)destination) + low;
-    size_t size = (count - low) & (~0xFFFULL);
-    offset += low;
-    if (!size || (offset & 0xFFF)) return;
-    mmap(buffer, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, file->fd, offset);
-}
-#endif
-
-size_t rvread(rvfile_t* file, void* destination, size_t count, uint64_t offset)
-{
-    if (!file || count == 0) return 0;
-    uint64_t pos = (offset == RVFILE_CURPOS) ? file->pos : offset;
-    uint8_t* buffer = destination;
-    size_t ret = 0;
 #if defined(POSIX_FILE_IMPL)
-    while (ret < count) {
-        size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        ssize_t tmp = pread(file->fd, buffer + ret, size, pos + ret);
-        if (tmp > 0) ret += tmp;
-        if (tmp == 0 || (tmp < 0 && errno != EINTR) || pos + ret >= rvfilesize(file)) break;
-    }
-#ifdef RVREAD_MMAP_FILE
-    rvread_mmap_file(file, destination, ret, pos);
-#endif
+    int32_t ret = pread(file->fd, dst, size, offset);
+    if (ret < 0 && errno != EINTR) ret = 0;
 #elif defined(WIN32_FILE_IMPL)
-    while (ret < count) {
-        size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        OVERLAPPED overlapped = { .OffsetHigh = (pos + ret) >> 32, .Offset = (uint32_t)(pos + ret) };
-        DWORD tmp = 0;
-        ReadFile(file->handle, buffer + ret, size, &tmp, &overlapped);
-        ret += tmp;
-        if (tmp == 0 || pos + ret >= rvfilesize(file)) break;
-    }
+    DWORD ret = 0;
+    OVERLAPPED overlapped = { .OffsetHigh = offset >> 32, .Offset = (uint32_t)offset, };
+    ReadFile(file->handle, dst, size, &ret, &overlapped);
 #else
     spin_lock_slow(&file->lock);
-    if (pos != file->pos_real || !(file->pos_state & FILE_POS_READ)) {
-        fseek(file->fp, pos, SEEK_SET);
+    if (offset != file->pos_real || file->pos_state != FILE_POS_READ) {
+        fseek(file->fp, offset, SEEK_SET);
     }
-    while (ret < count) {
-        size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        size_t tmp = fread(buffer + ret, 1, size, file->fp);
-        ret += tmp;
-        if (tmp == 0 || pos + ret >= rvfilesize(file)) break;
-    }
-    file->pos_real = pos + ret;
+    uint32_t ret = fread(dst, 1, size, file->fp);
+    file->pos_real = offset + ret;
     file->pos_state = FILE_POS_READ;
     spin_unlock(&file->lock);
 #endif
-    if (offset == RVFILE_CURPOS) file->pos += ret;
+    return ret;
+}
+
+size_t rvread(rvfile_t* file, void* dst, size_t size, uint64_t offset)
+{
+    if (!file || size == 0) return 0;
+    uint64_t pos = (offset == RVFILE_CUR) ? file->pos : offset;
+    uint8_t* buffer = dst;
+    size_t ret = 0;
+    while (ret < size) {
+        size_t chunk_size = EVAL_MIN(size - ret, RVFILE_MAX_BUFF);
+        int32_t tmp = rvread_chunk(file, buffer + ret, chunk_size, pos + ret);
+        if (tmp > 0) {
+            ret += tmp;
+        } else if (tmp == 0 || pos + ret >= rvfilesize(file)) {
+            // IO error, or end of file
+            break;
+        }
+    }
+    if (offset == RVFILE_CUR) file->pos += ret;
+    return ret;
+}
+
+// Return value of -1 means "Try again"
+int32_t rvwrite_chunk(rvfile_t* file, const void* src, size_t size, uint64_t offset)
+{
+#if defined(POSIX_FILE_IMPL)
+    int32_t ret = pwrite(file->fd, src, size, offset);
+    if (ret < 0 && errno != EINTR) ret = 0;
+#elif defined(WIN32_FILE_IMPL)
+    DWORD ret = 0;
+    OVERLAPPED overlapped = { .OffsetHigh = offset >> 32, .Offset = (uint32_t)offset, };
+    WriteFile(file->handle, src, size, &ret, &overlapped);
+#else
+    spin_lock_slow(&file->lock);
+    if (offset != file->pos_real || file->pos_state != FILE_POS_WRITE) {
+        fseek(file->fp, offset, SEEK_SET);
+    }
+    uint32_t ret = fwrite(src, 1, size, file->fp);
+    file->pos_real = offset + ret;
+    file->pos_state = FILE_POS_WRITE;
+    spin_unlock(&file->lock);
+#endif
     return ret;
 }
 
 size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset)
 {
     if (!file || count == 0) return 0;
-    uint64_t pos = (offset == RVFILE_CURPOS) ? file->pos : offset;
+    uint64_t pos = (offset == RVFILE_CUR) ? file->pos : offset;
     const uint8_t* buffer = source;
     size_t ret = 0;
-#if defined(POSIX_FILE_IMPL)
     while (ret < count) {
         size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        ssize_t tmp = pwrite(file->fd, buffer + ret, size, pos + ret);
-        if (tmp > 0) ret += tmp;
-        if (tmp == 0 || (tmp < 0 && errno != EINTR)) break;
+        int32_t tmp = rvwrite_chunk(file, buffer + ret, size, pos + ret);
+        if (tmp > 0) {
+            ret += tmp;
+        } else if (tmp == 0) {
+            // IO error
+            break;
+        }
     }
-#elif defined(WIN32_FILE_IMPL)
-    while (ret < count) {
-        size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        OVERLAPPED overlapped = { .OffsetHigh = (pos + ret) >> 32, .Offset = (uint32_t)(pos + ret) };
-        DWORD tmp = 0;
-        WriteFile(file->handle, buffer + ret, size, &tmp, &overlapped);
-        ret += tmp;
-        if (tmp == 0) break;
-    }
-#else
-    spin_lock_slow(&file->lock);
-    if (pos != file->pos_real || !(file->pos_state & FILE_POS_WRITE)) {
-        fseek(file->fp, pos, SEEK_SET);
-    }
-    while (ret < count) {
-        size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
-        size_t tmp = fwrite(buffer + ret, 1, size, file->fp);
-        ret += tmp;
-        if (tmp == 0) break;
-    }
-    file->pos_real = pos + ret;
-    file->pos_state = FILE_POS_WRITE;
-    spin_unlock(&file->lock);
-#endif
-    if (offset == RVFILE_CURPOS) file->pos += ret;
     uint64_t file_size = 0;
     do {
         file_size = atomic_load_uint64(&file->size);
         if (likely(pos + ret <= file->size)) break;
-    } while (!atomic_cas_uint64_ex(&file->size, file_size, pos + ret, true, ATOMIC_RELEASE, ATOMIC_ACQUIRE));
+    } while (!atomic_cas_uint64(&file->size, file_size, pos + ret));
+    if (offset == RVFILE_CUR) file->pos += ret;
     return ret;
 }
 
@@ -351,13 +356,15 @@ bool rvtrim(rvfile_t* file, uint64_t offset, uint64_t count)
 
 bool rvseek(rvfile_t* file, int64_t offset, uint8_t startpos)
 {
-    if (!file || startpos > RVFILE_END) return false;
-    if (startpos == RVFILE_CUR) {
+    if (!file) return false;
+    if (startpos == RVFILE_SEEK_CUR) {
         offset = file->pos + offset;
-    } else if (startpos == RVFILE_END) {
+    } else if (startpos == RVFILE_SEEK_END) {
         offset = rvfilesize(file) - offset;
+    } else if (startpos != RVFILE_SEEK_SET) {
+        return false;
     }
-    if (startpos != RVFILE_SET && offset < 0) return false;
+    if (offset < 0) return false;
     file->pos = (uint64_t)offset;
     return true;
 }
@@ -372,21 +379,28 @@ bool rvflush(rvfile_t* file)
 {
     if (!file) return false;
     // Do not issue kernel-side buffer flushing
-#if defined(POSIX_FILE_IMPL)
-    //return fsync(file->fd) == 0;
-    return true;
-#elif defined(WIN32_FILE_IMPL)
-    //return FlushFileBuffers(file->handle);
-    return true;
-#else
+#if !defined(POSIX_FILE_IMPL) && !defined(WIN32_FILE_IMPL)
     return fflush(file->fp) == 0;
+#else
+    return true;
 #endif
+}
+
+bool rvfsync(rvfile_t* file)
+{
+    if (!file) return false;
+#if defined(POSIX_FILE_IMPL)
+    return fsync(file->fd) == 0;
+#elif defined(WIN32_FILE_IMPL)
+    return FlushFileBuffers(file->handle);
+#endif
+    return rvflush(file);
 }
 
 bool rvtruncate(rvfile_t* file, uint64_t length)
 {
     if (!file) return false;
-    file->size = length;
+    atomic_store_uint64(&file->size, length);
 #if defined(POSIX_FILE_IMPL)
     return ftruncate(file->fd, length) == 0;
 #elif defined(WIN32_FILE_IMPL)
@@ -394,17 +408,44 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
     SetFilePointer(file->handle, (uint32_t)length, &high_len, FILE_BEGIN);
     return SetEndOfFile(file->handle);
 #else
-    char tmp = 0;
     if (length) {
+        char tmp = 0;
         spin_lock_slow(&file->lock);
         fseek(file->fp, length - 1, SEEK_SET);
         fread(&tmp, 1, 1, file->fp);
         fseek(file->fp, length - 1, SEEK_SET);
         fwrite(&tmp, 1, 1, file->fp);
+        fflush(file->fp);
         file->pos_state = FILE_POS_INVALID;
         spin_unlock(&file->lock);
     }
     return true;
+#endif
+}
+
+int rvfile_get_posix_fd(rvfile_t* file)
+{
+#if defined(POSIX_FILE_IMPL)
+    return file->fd;
+#elif defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
+    return fileno(file->fp);
+#else
+    UNUSED(file);
+    return -1;
+#endif
+}
+
+void* rvfile_get_win32_handle(rvfile_t* file)
+{
+#if defined(WIN32_FILE_IMPL)
+    return file->handle;
+#elif defined(_WIN32) && defined(UNDER_CE)
+    return (void*)_fileno(file->fp);
+#elif defined(_WIN32) && !defined(UNDER_CE)
+    return (void*)_get_osfhandle(_fileno(file->fp));
+#else
+    UNUSED(file);
+    return NULL;
 #endif
 }
 
@@ -415,7 +456,7 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
 // Raw block device implementation
 // Be careful with function prototypes
 static const blkdev_type_t blkdev_type_raw = {
-    .name = "raw",
+    .name = "blk-raw",
     .close = (void*)rvclose,
     .read = (void*)rvread,
     .write = (void*)rvwrite,
@@ -423,7 +464,7 @@ static const blkdev_type_t blkdev_type_raw = {
     .sync = (void*)rvflush,
 };
 
-static blkdev_t* blk_open_raw(const char* filename, uint8_t filemode)
+static blkdev_t* blk_raw_open(const char* filename, uint8_t filemode)
 {
     rvfile_t* file = rvopen(filename, filemode);
     if (!file) return NULL;
@@ -433,6 +474,8 @@ static blkdev_t* blk_open_raw(const char* filename, uint8_t filemode)
     dev->data = file;
     return dev;
 }
+
+blkdev_t* blk_dedup_open(const char* filename, uint8_t filemode);
 
 static bool check_file_ext(const char* filename, const char* ext)
 {
@@ -449,14 +492,14 @@ static bool check_file_ext(const char* filename, const char* ext)
 blkdev_t* blk_open(const char* filename, uint8_t opts)
 {
     uint8_t filemode = (opts & BLKDEV_RW) ? (RVFILE_RW | RVFILE_EXCL) : 0;
-    if (check_file_ext(filename, ".bdi")) {
+    if (check_file_ext(filename, ".bdv")) {
         return NULL;
     }
     if (check_file_ext(filename, ".qcow2")) {
         rvvm_error("QCOW2 images aren't supported yet");
         return NULL;
     }
-    return blk_open_raw(filename, filemode);
+    return blk_raw_open(filename, filemode);
 }
 
 void blk_close(blkdev_t* dev)
