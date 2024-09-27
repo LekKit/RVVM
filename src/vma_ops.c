@@ -25,16 +25,35 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_WIN32_IMPL
 #include <windows.h>
 
-static inline DWORD vma_native_flags(uint32_t flags)
+#ifndef FILE_MAP_EXECUTE
+#define FILE_MAP_EXECUTE 0x20
+#endif
+
+static inline DWORD vma_native_prot(uint32_t flags)
 {
     switch (flags & VMA_RWX) {
         case VMA_EXEC: return PAGE_EXECUTE;
         case VMA_READ: return PAGE_READONLY;
         case VMA_RDEX: return PAGE_EXECUTE_READ;
+        case VMA_WRITE:
         case VMA_RDWR: return PAGE_READWRITE;
+        case VMA_EXEC | VMA_WRITE:
         case VMA_RWX:  return PAGE_EXECUTE_READWRITE;
     }
     return PAGE_NOACCESS;
+}
+
+static inline DWORD vma_native_view_prot(uint32_t flags)
+{
+    DWORD ret = 0;
+    if (!(flags & VMA_SHARED) && (flags & VMA_WRITE)) {
+        // Set FILE_MAP_COPY on private writable mappings
+        return FILE_MAP_COPY;
+    }
+    if (flags & VMA_READ)      ret |= FILE_MAP_READ;
+    if (flags & VMA_WRITE)     ret |= FILE_MAP_WRITE;
+    if (flags & VMA_EXEC)      ret |= FILE_MAP_EXECUTE;
+    return ret;
 }
 
 #elif defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
@@ -69,7 +88,7 @@ static inline DWORD vma_native_flags(uint32_t flags)
 #define MAP_VMA_JIT MAP_VMA_ANON
 #endif
 
-static inline int vma_native_flags(uint32_t flags)
+static inline int vma_native_prot(uint32_t flags)
 {
     int mmap_flags = 0;
     if (flags & VMA_EXEC)  mmap_flags |= PROT_EXEC;
@@ -87,50 +106,54 @@ static inline int vma_native_flags(uint32_t flags)
 // RVVM internal headers come after system headers because of safe_free()
 #include "mem_ops.h"
 #include "utils.h"
+#include "blk_io.h"
 
 static size_t host_pagesize = 0;
+static size_t host_granularity = 0; // Allocation granularity, may be > pagesize
+
+static void vma_page_size_init_once(void)
+{
+#if defined(VMA_WIN32_IMPL)
+    SYSTEM_INFO info = { .dwPageSize = 0x1000, .dwAllocationGranularity = 0x10000, };
+    GetSystemInfo(&info);
+    host_pagesize = info.dwPageSize;
+    host_granularity = info.dwAllocationGranularity;
+#elif defined(VMA_MMAP_IMPL)
+    host_pagesize = sysconf(_SC_PAGESIZE);
+    host_granularity = host_pagesize;
+#else
+    // Non-paging fallback via malloc/free, disable alignment
+    host_pagesize = 1;
+    host_granularity = 1;
+#endif
+}
+
+static void vma_page_size_init(void)
+{
+    DO_ONCE(vma_page_size_init_once());
+}
 
 size_t vma_page_size(void)
 {
-    if (!host_pagesize) {
-#if defined(VMA_WIN32_IMPL)
-        SYSTEM_INFO info = { .dwPageSize = 0x1000, };
-        GetSystemInfo(&info);
-        host_pagesize = info.dwPageSize;
-#elif defined(VMA_MMAP_IMPL)
-        host_pagesize = sysconf(_SC_PAGESIZE);
-#else
-        // Non-paging fallback via malloc/free, disable alignment
-        host_pagesize = 1;
-#endif
-    }
+    vma_page_size_init();
     return host_pagesize;
 }
 
-static inline size_t vma_page_mask(void)
+static size_t vma_granularity(void)
 {
-    return vma_page_size() - 1;
+    vma_page_size_init();
+    return host_granularity;
 }
 
-// Align VMA size/address to page boundaries
-static inline size_t size_to_page(size_t size)
+static inline void* align_ptr_down(void* ptr, size_t align)
 {
-    return (size + vma_page_mask()) & (~vma_page_mask());
-}
-
-static inline void* ptr_to_page(void* ptr)
-{
-    return (void*)(size_t)(((size_t)ptr) & (~vma_page_mask()));
-}
-
-static inline size_t ptrsize_to_page(void* ptr, size_t size)
-{
-    return size_to_page(size + (((size_t)ptr) & vma_page_mask()));
+    return (void*)align_size_down((size_t)ptr, align);
 }
 
 int vma_anon_memfd(size_t size)
 {
     int memfd = -1;
+    size = align_size_up(size, vma_granularity());
 #if defined(VMA_MMAP_IMPL)
 #if defined(__NR_memfd_create)
     // If we are running on older kernel, should return -ENOSYS
@@ -199,38 +222,139 @@ int vma_anon_memfd(size_t size)
     }
 #else
     UNUSED(size);
-    rvvm_warn("anonymous memfd is not supported!");
+    rvvm_warn("Anonymous memfd is not supported!");
 #endif
     return memfd;
 }
 
-void* vma_alloc(void* addr, size_t size, uint32_t flags)
-{
-    size_t ptr_diff = ((size_t)addr) & vma_page_mask();
-    size = ptrsize_to_page(addr, size);
-    addr = ptr_to_page(addr);
+/*
+ * TODO: Better mmap() emulation on Win32?
+ * - Proper vma_remap()
+ * - Partial unmapping
+ * - Handle non-granular fixed-address file mappings
+ */
 
+static void* vma_mmap_aligned_internal(void* addr, size_t size, uint32_t flags, rvfile_t* file, uint64_t offset)
+{
+    void* ret = NULL;
 #if defined(VMA_WIN32_IMPL)
-    uint8_t* ret = VirtualAlloc(addr, size, MEM_COMMIT | MEM_RESERVE, vma_native_flags(flags));
+    // Win32 implementation
+    if (file) {
+        HANDLE file_handle = rvfile_get_win32_handle(file);
+        if ((flags & VMA_WRITE) && (flags & VMA_EXEC)) {
+            // WX protection is prohibited
+            return NULL;
+        }
+        if (file_handle) {
+            HANDLE file_map = CreateFileMappingW(file_handle, NULL, vma_native_prot(flags), 0, 0, NULL);
+            if (!file_map) {
+                return NULL;
+            }
+            if (flags & VMA_FIXED) {
+#ifdef UNDER_CE
+                // No MapViewOfFileEx() on Windows CE
+                ret = NULL;
+#else
+                ret = MapViewOfFileEx(file_map, vma_native_view_prot(flags), offset >> 32, (uint32_t)offset, size, addr);
+#endif
+            } else {
+                ret = MapViewOfFile(file_map, vma_native_view_prot(flags), offset >> 32, (uint32_t)offset, size);
+            }
+            CloseHandle(file_map);
+        } else {
+            // File doesn't have a native Win32 HANDLE
+            return NULL;
+        }
+    } else {
+        ret = VirtualAlloc(addr, size, MEM_COMMIT | MEM_RESERVE, vma_native_prot(flags));
+    }
+
 #elif defined(VMA_MMAP_IMPL)
+    // POSIX mmap() implementation
     int mmap_flags = (flags & VMA_EXEC) ? MAP_VMA_JIT : MAP_VMA_ANON;
+    int mmap_fd = file ? rvfile_get_posix_fd(file) : -1;
+    if (file) {
+        mmap_flags = (flags & VMA_SHARED) ? MAP_SHARED : MAP_PRIVATE;
+        if (mmap_fd == -1) {
+            // File doesn't have a native POSIX fd
+            return NULL;
+        }
+    }
+    // Use MAP_FIXED_NOREPLACE on Linux for non-destructive behavior
 #if defined(MAP_FIXED_NOREPLACE)
     if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED_NOREPLACE;
 #elif defined(MAP_FIXED) && !defined(__linux__)
     if (flags & VMA_FIXED) mmap_flags |= MAP_FIXED;
 #endif
-    uint8_t* ret = mmap(addr, size, vma_native_flags(flags), mmap_flags, -1, 0);
+    ret = mmap(addr, size, vma_native_prot(flags), mmap_flags, mmap_fd, offset);
     if (ret == MAP_FAILED) ret = NULL;
+    // Apply madvise() flags
 #if defined(__linux__) && defined(MADV_MERGEABLE)
     if (ret && (flags & VMA_KSM)) madvise(ret, size, MADV_MERGEABLE);
 #endif
 #if defined(__linux__) && defined(MADV_HUGEPAGE)
     if (ret && (flags & VMA_THP)) madvise(ret, size, MADV_HUGEPAGE);
 #endif
+
 #else
-    if (flags & (VMA_EXEC | VMA_FIXED)) return NULL;
-    uint8_t* ret = calloc(size, 1);
+    // Generic libc implementationn
+    UNUSED(addr);
+    if (flags & (VMA_SHARED | VMA_EXEC | VMA_FIXED)) {
+        // No support for VMA_SHARED, VMA_EXEC, VMA_FIXED
+        DO_ONCE(rvvm_warn("Unsupported VMA flags %x on fallback implementation", flags));
+        return NULL;
+    }
+    ret = calloc(size, 1);
+    if (ret && file) {
+        // Emulate private file mappings by reading the file into memory
+        rvread(file, ret, size, offset);
+    }
 #endif
+    return ret;
+}
+
+void* vma_alloc(void* addr, size_t size, uint32_t flags)
+{
+    return vma_mmap(addr, size, flags, NULL, 0);
+}
+
+void* vma_mmap(void* addr, size_t size, uint32_t flags, rvfile_t* file, uint64_t offset)
+{
+    size_t ptr_diff = ((size_t)addr) & (vma_granularity() - 1);
+    if (file) {
+        // File VMA mapping
+        size_t off_diff = offset & (vma_granularity() - 1);
+        offset -= off_diff;
+        if (flags & VMA_FIXED) {
+            if (ptr_diff != off_diff) {
+                // Misaligned address / offset
+                return NULL;
+            }
+        } else {
+            // Fixup file offset misalign
+            ptr_diff = off_diff;
+        }
+    } else {
+        // Anonymous VMA allocation
+        offset = 0;
+        if (flags & VMA_SHARED) {
+            // Mapping shared anonymous memory doesn't make a lot of sense
+            return NULL;
+        }
+    }
+
+    addr = align_ptr_down(addr, vma_granularity());
+    size = align_size_up(size + ptr_diff, vma_page_size());
+
+    if (file && offset + size > rvfilesize(file)) {
+        // Aligned mapping extends beyond the end of file
+        // NOTE: This may cause issues for generic code that maps near end of file,
+        // some kind of win32-like file growing mechanism may be implemented to
+        // hide page alignment details altogether
+        return NULL;
+    }
+
+    uint8_t* ret = vma_mmap_aligned_internal(addr, size, flags, file, offset);
 
     if ((flags & VMA_FIXED) && ret && ret != addr) {
         vma_free(ret, size);
@@ -242,7 +366,7 @@ void* vma_alloc(void* addr, size_t size, uint32_t flags)
 
 bool vma_multi_mmap(void** rw, void** exec, size_t size)
 {
-    size = size_to_page(size);
+    size = align_size_up(size, vma_granularity());
 #ifdef VMA_MMAP_IMPL
     int memfd = vma_anon_memfd(size);
     if (memfd < 0) {
@@ -271,14 +395,13 @@ bool vma_multi_mmap(void** rw, void** exec, size_t size)
 #endif
 }
 
-// Resize VMA
 void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
 {
-    size_t ptr_diff = ((size_t)addr) & vma_page_mask();
-    uint8_t* ret = ptr_to_page(addr);
-    old_size = ptrsize_to_page(addr, old_size);
-    new_size = ptrsize_to_page(addr, new_size);
-    addr = ret;
+    size_t ptr_diff = ((size_t)addr) & (vma_granularity() - 1);
+    uint8_t* ret = NULL;
+    addr = align_ptr_down(addr, vma_granularity());
+    old_size = align_size_up(old_size + ptr_diff, vma_page_size());
+    new_size = align_size_up(new_size + ptr_diff, vma_page_size());
 
     if (new_size == old_size) return addr;
 
@@ -286,6 +409,7 @@ void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
     ret = mremap(addr, old_size, new_size, (flags & VMA_FIXED) ? 0 : MREMAP_MAYMOVE);
     if (ret == MAP_FAILED) ret = NULL;
 #elif defined(VMA_MMAP_IMPL) || defined(VMA_WIN32_IMPL)
+#ifdef VMA_MMAP_IMPL
     if (new_size < old_size) {
         // Shrink the mapping by unmapping at the end
         if (!vma_free(((uint8_t*)addr) + new_size, old_size - new_size)) {
@@ -297,6 +421,7 @@ void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
             ret = NULL;
         }
     }
+#endif
     if (ret == NULL && !(flags & VMA_FIXED)) {
         // Just copy the data into a completely new mapping
         ret = vma_alloc(NULL, new_size, flags);
@@ -318,14 +443,15 @@ void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags)
 
 bool vma_protect(void* addr, size_t size, uint32_t flags)
 {
-    size = ptrsize_to_page(addr, size);
-    addr = ptr_to_page(addr);
+    size_t ptr_diff = ((size_t)addr) & (vma_page_size() - 1);
+    addr = align_ptr_down(addr, vma_page_size());
+    size = align_size_up(size + ptr_diff, vma_page_size());
 
 #if defined(VMA_WIN32_IMPL)
     DWORD old;
-    return VirtualProtect(addr, size, vma_native_flags(flags), &old);
+    return VirtualProtect(addr, size, vma_native_prot(flags), &old);
 #elif defined(VMA_MMAP_IMPL)
-    return mprotect(addr, size, vma_native_flags(flags)) == 0;
+    return mprotect(addr, size, vma_native_prot(flags)) == 0;
 #else
     UNUSED(addr);
     UNUSED(size);
@@ -335,13 +461,17 @@ bool vma_protect(void* addr, size_t size, uint32_t flags)
 
 bool vma_clean(void* addr, size_t size, bool lazy)
 {
-    size = ptrsize_to_page(addr, size);
-    addr = ptr_to_page(addr);
+    size_t ptr_diff = ((size_t)addr) & (vma_page_size() - 1);
+    addr = align_ptr_down(addr, vma_page_size());
+    size = align_size_up(size + ptr_diff, vma_page_size());
 
 #if defined(VMA_WIN32_IMPL)
     if (lazy) {
         return VirtualAlloc(addr, size, MEM_RESET, PAGE_NOACCESS);
     } else {
+        // NOTE: There is a tiny timeslice when other thread may SEGV
+        // upon trying to access the cleaned region, consider such
+        // behavior as a race condition anyways and use a lock
         MEMORY_BASIC_INFORMATION mbi = {0};
         if (!VirtualQuery(addr, &mbi, sizeof(mbi))) return false;
         if (!VirtualFree(addr, size, MEM_DECOMMIT)) return false;
@@ -364,8 +494,9 @@ bool vma_clean(void* addr, size_t size, bool lazy)
 
 bool vma_pageout(void* addr, size_t size, bool lazy)
 {
-    size = ptrsize_to_page(addr, size);
-    addr = ptr_to_page(addr);
+    size_t ptr_diff = ((size_t)addr) & (vma_page_size() - 1);
+    addr = align_ptr_down(addr, vma_page_size());
+    size = align_size_up(size + ptr_diff, vma_page_size());
 
     if (!lazy) {
 #if defined(VMA_WIN32_IMPL) && !defined(UNDER_CE)
@@ -386,14 +517,31 @@ bool vma_pageout(void* addr, size_t size, bool lazy)
 
 bool vma_free(void* addr, size_t size)
 {
+    size_t ptr_diff = ((size_t)addr) & (vma_granularity() - 1);
+    addr = align_ptr_down(addr, vma_granularity());
+    size = align_size_up(size + ptr_diff, vma_page_size());
     if (!addr || !size) return false;
-    size = ptrsize_to_page(addr, size);
-    addr = ptr_to_page(addr);
 
 #if defined(VMA_WIN32_IMPL)
-    //VirtualFree(addr, size, MEM_DECOMMIT);
-    UNUSED(size);
-    return VirtualFree(addr, 0, MEM_RELEASE);
+    MEMORY_BASIC_INFORMATION mbi = {0};
+    if (!VirtualQuery(addr, &mbi, sizeof(mbi))) {
+        rvvm_warn("vma_free(): VirtualQuery() failed!");
+        return false;
+    }
+    if (mbi.RegionSize != size) {
+        rvvm_warn("vma_free(): Invalid VMA size!");
+    }
+    if (mbi.AllocationBase != addr) {
+        rvvm_warn("vma_free(): Invalid VMA address!");
+    }
+    if (mbi.Type == MEM_MAPPED) {
+        return UnmapViewOfFile(addr);
+    } else if (mbi.Type == MEM_PRIVATE) {
+        return VirtualFree(addr, 0, MEM_RELEASE);
+    } else {
+        rvvm_fatal("vma_free(): Invalid win32 page type %x!", (uint32_t)mbi.Type);
+        return false;
+    }
 #elif defined(VMA_MMAP_IMPL)
     return munmap(addr, size) == 0;
 #else

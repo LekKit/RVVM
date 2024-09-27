@@ -29,9 +29,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_RDEX  (VMA_READ | VMA_EXEC)
 #define VMA_RWX   (VMA_READ | VMA_WRITE | VMA_EXEC)
 
-#define VMA_FIXED 0x8  // Forcefully map into occupied zone
-#define VMA_THP   0x10 // Transparent hugepages
-#define VMA_KSM   0x20 // Kernel same-page merging
+#define VMA_SHARED 0x08 // Shared file mapping, private by default
+#define VMA_FIXED  0x10 // Fixed mapping address (Non-destructive), pretty picky to use
+#define VMA_THP    0x20 // Transparent hugepages
+#define VMA_KSM    0x40 // Kernel same-page merging
+
+// Forward-declare the file handle type without including <blk_io.h>
+typedef struct blk_io_rvfile rvfile_t;
 
 // Get host page size
 size_t vma_page_size(void);
@@ -39,14 +43,25 @@ size_t vma_page_size(void);
 // Create anonymous memory-backed FD (POSIX only!)
 int vma_anon_memfd(size_t size);
 
-// Allocate VMA, force needed address using VMA_FIXED
+/*
+ * VMA allocations & file mapping
+ */
+
+// Allocate anonymous VMA, force needed address using VMA_FIXED
 void* vma_alloc(void* addr, size_t size, uint32_t flags);
+
+// Map file into memory, acts like vma_alloc() when file == NULL
+void* vma_mmap(void* addr, size_t size, uint32_t flags, rvfile_t* file, uint64_t offset);
 
 // Create separate RW/exec VMAs (For W^X JIT)
 bool  vma_multi_mmap(void** rw, void** exec, size_t size);
 
-// Resize VMA, pass VMA_FIXED to make sure it stays in place
+// Resize anon VMA, pass VMA_FIXED to make sure it stays in place
 void* vma_remap(void* addr, size_t old_size, size_t new_size, uint32_t flags);
+
+/*
+ * VMA operations
+ */
 
 // Change VMA protection flags
 bool  vma_protect(void* addr, size_t size, uint32_t flags);
