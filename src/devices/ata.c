@@ -213,7 +213,7 @@ static bool ata_read_buf(struct ata_dev *ata)
 {
     if (!blk_read(ata->drive[ata->curdrive].blk,
                   ata->drive[ata->curdrive].buf,
-                  SECTOR_SIZE, BLKDEV_CURPOS)) {
+                  SECTOR_SIZE, BLKDEV_CUR)) {
         return false;
     }
 
@@ -227,7 +227,7 @@ static bool ata_write_buf(struct ata_dev *ata)
 {
     if (!blk_write(ata->drive[ata->curdrive].blk,
                    ata->drive[ata->curdrive].buf,
-                   SECTOR_SIZE, BLKDEV_CURPOS)) {
+                   SECTOR_SIZE, BLKDEV_CUR)) {
         return false;
     }
 
@@ -244,7 +244,7 @@ static void ata_cmd_read_sectors(struct ata_dev *ata)
     }
 
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SET)
+    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SEEK_SET)
      || !ata_read_buf(ata)) {
         ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
         ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
@@ -260,7 +260,7 @@ static void ata_cmd_write_sectors(struct ata_dev *ata)
     }
 
     ata->drive[ata->curdrive].status |= ATA_STATUS_DRQ | ATA_STATUS_RDY;
-    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SET)) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SEEK_SET)) {
         ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
         ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
     } else {
@@ -284,7 +284,7 @@ static void ata_cmd_read_dma(struct ata_dev *ata)
             | ATA_STATUS_DRQ
             | ATA_STATUS_ERR);
 
-    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SET)) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SEEK_SET)) {
         ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
         ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
         spin_unlock(&ata->dma_info.lock);
@@ -311,7 +311,7 @@ static void ata_cmd_write_dma(struct ata_dev *ata)
             | ATA_STATUS_DRQ
             | ATA_STATUS_ERR);
 
-    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SET)) {
+    if (!blk_seek(ata->drive[ata->curdrive].blk, ata_get_lba(ata, false) * SECTOR_SIZE, BLKDEV_SEEK_SET)) {
         ata->drive[ata->curdrive].status |= ATA_STATUS_ERR;
         ata->drive[ata->curdrive].error |= ATA_ERR_UNC;
         spin_unlock(&ata->dma_info.lock);
@@ -648,11 +648,11 @@ static void ata_process_prdt(struct ata_dev* ata)
 
         // Read/write data to/from RAM
         if (is_read) {
-            if (blk_read(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
+            if (blk_read(blk, buf, buf_size, BLKDEV_CUR) != buf_size) {
                 break;
             }
         } else {
-            if (blk_write(blk, buf, buf_size, BLKDEV_CURPOS) != buf_size) {
+            if (blk_write(blk, buf, buf_size, BLKDEV_CUR) != buf_size) {
                 break;
             }
         }
