@@ -58,9 +58,9 @@ bool      rvseek(rvfile_t* file, int64_t offset, uint8_t startpos);
 uint64_t  rvtell(rvfile_t* file);
 
 bool      rvtrim(rvfile_t* file, uint64_t offset, uint64_t size);
-bool      rvflush(rvfile_t* file);
 bool      rvfsync(rvfile_t* file);
 bool      rvtruncate(rvfile_t* file, uint64_t length);
+bool      rvfallocate(rvfile_t* file, uint64_t length);
 
 // Get native POSIX file descriptor, returns -1 on failure
 int rvfile_get_posix_fd(rvfile_t* file);

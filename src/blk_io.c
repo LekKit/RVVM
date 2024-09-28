@@ -77,16 +77,15 @@ typedef struct {
 #include <io.h>
 #endif
 
-#define FILE_POS_INVALID 0
-#define FILE_POS_READ    1
-#define FILE_POS_WRITE   2
+#define RVFILE_POS_INVALID 0x0
+#define RVFILE_POS_READ    0x1
+#define RVFILE_POS_WRITE   0x2
 #endif
 
 // RVVM internal headers come after system headers because of safe_free()
 #include "mem_ops.h"
 #include "utils.h"
 #include "spinlock.h"
-#include "threading.h"
 
 struct blk_io_rvfile {
     uint64_t size;
@@ -102,6 +101,22 @@ struct blk_io_rvfile {
     uint8_t  pos_state;
 #endif
 };
+
+static inline bool rvfile_grow_internal(rvfile_t* file, uint64_t length)
+{
+    while (true) {
+        uint64_t file_size = atomic_load_uint64(&file->size);
+        if (likely(length <= file_size)) {
+            // File is big enough
+            break;
+        }
+        if (atomic_cas_uint64(&file->size, file_size, length)) {
+            // Grow success
+            return true;
+        }
+    }
+    return false;
+}
 
 rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 {
@@ -131,7 +146,6 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 
     rvfile_t* file = safe_new_obj(rvfile_t);
     file->size = lseek(fd, 0, SEEK_END);
-    file->pos = 0;
     file->fd = fd;
     return file;
 #elif defined(WIN32_FILE_IMPL)
@@ -169,7 +183,6 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 
     rvfile_t* file = safe_new_obj(rvfile_t);
     file->size = ((uint64_t)sizeh) << 32 | sizel;
-    file->pos = 0;
     file->handle = handle;
     if ((filemode & RVFILE_TRUNC) && disp == OPEN_ALWAYS) {
         // Handle RVFILE_TRUNC properly
@@ -189,8 +202,8 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
                     // File exists and we want to truncate it
                     open_mode = "wb+";
                 }
-                if (filemode & RVFILE_EXCL) {
-                    // File exists but we requested exclusive access
+                if ((filemode & RVFILE_CREAT) && (filemode & RVFILE_EXCL)) {
+                    // File exists but we requested exclusive creation
                     return NULL;
                 }
             } else if (filemode & RVFILE_CREAT) {
@@ -203,11 +216,15 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
     FILE* fp = fopen(filepath, open_mode);
     if (!fp) return NULL;
 
+#ifdef _IONBF
+    // Disable stdio buffering altogether for coherence sake
+    setvbuf(fp, NULL, _IONBF, 0);
+#endif
+
     rvfile_t* file = safe_new_obj(rvfile_t);
     fseek(fp, 0, SEEK_END);
     file->size = ftell(fp);
-    file->pos = 0;
-    file->pos_state = FILE_POS_INVALID;
+    file->pos_state = RVFILE_POS_INVALID;
     file->fp = fp;
     return file;
 #endif
@@ -246,12 +263,12 @@ static int32_t rvread_chunk(rvfile_t* file, void* dst, size_t size, uint64_t off
     ReadFile(file->handle, dst, size, &ret, &overlapped);
 #else
     spin_lock_slow(&file->lock);
-    if (offset != file->pos_real || file->pos_state != FILE_POS_READ) {
+    if (offset != file->pos_real || file->pos_state != RVFILE_POS_READ) {
         fseek(file->fp, offset, SEEK_SET);
     }
     uint32_t ret = fread(dst, 1, size, file->fp);
     file->pos_real = offset + ret;
-    file->pos_state = FILE_POS_READ;
+    file->pos_state = RVFILE_POS_READ;
     spin_unlock(&file->lock);
 #endif
     return ret;
@@ -260,9 +277,10 @@ static int32_t rvread_chunk(rvfile_t* file, void* dst, size_t size, uint64_t off
 size_t rvread(rvfile_t* file, void* dst, size_t size, uint64_t offset)
 {
     if (!file || size == 0) return 0;
-    uint64_t pos = (offset == RVFILE_CUR) ? file->pos : offset;
+    uint64_t pos = (offset == RVFILE_CUR) ? rvtell(file) : offset;
     uint8_t* buffer = dst;
     size_t ret = 0;
+
     while (ret < size) {
         size_t chunk_size = EVAL_MIN(size - ret, RVFILE_MAX_BUFF);
         int32_t tmp = rvread_chunk(file, buffer + ret, chunk_size, pos + ret);
@@ -273,7 +291,8 @@ size_t rvread(rvfile_t* file, void* dst, size_t size, uint64_t offset)
             break;
         }
     }
-    if (offset == RVFILE_CUR) file->pos += ret;
+
+    if (offset == RVFILE_CUR) rvseek(file, ret, RVFILE_SEEK_CUR);
     return ret;
 }
 
@@ -289,12 +308,12 @@ int32_t rvwrite_chunk(rvfile_t* file, const void* src, size_t size, uint64_t off
     WriteFile(file->handle, src, size, &ret, &overlapped);
 #else
     spin_lock_slow(&file->lock);
-    if (offset != file->pos_real || file->pos_state != FILE_POS_WRITE) {
+    if (offset != file->pos_real || file->pos_state != RVFILE_POS_WRITE) {
         fseek(file->fp, offset, SEEK_SET);
     }
     uint32_t ret = fwrite(src, 1, size, file->fp);
     file->pos_real = offset + ret;
-    file->pos_state = FILE_POS_WRITE;
+    file->pos_state = RVFILE_POS_WRITE;
     spin_unlock(&file->lock);
 #endif
     return ret;
@@ -303,9 +322,10 @@ int32_t rvwrite_chunk(rvfile_t* file, const void* src, size_t size, uint64_t off
 size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset)
 {
     if (!file || count == 0) return 0;
-    uint64_t pos = (offset == RVFILE_CUR) ? file->pos : offset;
+    uint64_t pos = (offset == RVFILE_CUR) ? rvtell(file) : offset;
     const uint8_t* buffer = source;
     size_t ret = 0;
+
     while (ret < count) {
         size_t size = EVAL_MIN(count - ret, RVFILE_MAX_BUFF);
         int32_t tmp = rvwrite_chunk(file, buffer + ret, size, pos + ret);
@@ -316,12 +336,9 @@ size_t rvwrite(rvfile_t* file, const void* source, size_t count, uint64_t offset
             break;
         }
     }
-    uint64_t file_size = 0;
-    do {
-        file_size = atomic_load_uint64(&file->size);
-        if (likely(pos + ret <= file->size)) break;
-    } while (!atomic_cas_uint64(&file->size, file_size, pos + ret));
-    if (offset == RVFILE_CUR) file->pos += ret;
+
+    rvfile_grow_internal(file, pos + ret);
+    if (offset == RVFILE_CUR) rvseek(file, ret, RVFILE_SEEK_CUR);
     return ret;
 }
 
@@ -358,32 +375,22 @@ bool rvseek(rvfile_t* file, int64_t offset, uint8_t startpos)
 {
     if (!file) return false;
     if (startpos == RVFILE_SEEK_CUR) {
-        offset = file->pos + offset;
+        atomic_add_uint64(&file->pos, offset);
+        return true;
     } else if (startpos == RVFILE_SEEK_END) {
         offset = rvfilesize(file) - offset;
     } else if (startpos != RVFILE_SEEK_SET) {
         return false;
     }
     if (offset < 0) return false;
-    file->pos = (uint64_t)offset;
+    atomic_store_uint64(&file->pos, offset);
     return true;
 }
 
 uint64_t rvtell(rvfile_t* file)
 {
     if (!file) return -1;
-    return file->pos;
-}
-
-bool rvflush(rvfile_t* file)
-{
-    if (!file) return false;
-    // Do not issue kernel-side buffer flushing
-#if !defined(POSIX_FILE_IMPL) && !defined(WIN32_FILE_IMPL)
-    return fflush(file->fp) == 0;
-#else
-    return true;
-#endif
+    return atomic_load_uint64(&file->pos);
 }
 
 bool rvfsync(rvfile_t* file)
@@ -393,22 +400,26 @@ bool rvfsync(rvfile_t* file)
     return fsync(file->fd) == 0;
 #elif defined(WIN32_FILE_IMPL)
     return FlushFileBuffers(file->handle);
+#else
+    return fflush(file->fp) == 0;
 #endif
-    return rvflush(file);
 }
 
 bool rvtruncate(rvfile_t* file, uint64_t length)
 {
     if (!file) return false;
-    atomic_store_uint64(&file->size, length);
 #if defined(POSIX_FILE_IMPL)
-    return ftruncate(file->fd, length) == 0;
+    if (ftruncate(file->fd, length)) return false;
 #elif defined(WIN32_FILE_IMPL)
     LONG high_len = length >> 32;
     SetFilePointer(file->handle, (uint32_t)length, &high_len, FILE_BEGIN);
-    return SetEndOfFile(file->handle);
+    if (!SetEndOfFile(file->handle)) return false;
 #else
-    if (length) {
+    if (length < atomic_load_uint64(&file->size)) {
+        // Can't shrink the file on stdio
+        return false;
+    } else if (length) {
+        // Grow the file by re-writing one byte at the new end
         char tmp = 0;
         spin_lock_slow(&file->lock);
         fseek(file->fp, length - 1, SEEK_SET);
@@ -416,11 +427,28 @@ bool rvtruncate(rvfile_t* file, uint64_t length)
         fseek(file->fp, length - 1, SEEK_SET);
         fwrite(&tmp, 1, 1, file->fp);
         fflush(file->fp);
-        file->pos_state = FILE_POS_INVALID;
+        file->pos_state = RVFILE_POS_INVALID;
         spin_unlock(&file->lock);
     }
-    return true;
 #endif
+    atomic_store_uint64(&file->size, length);
+    return true;
+}
+
+bool rvfallocate(rvfile_t* file, uint64_t length)
+{
+    if (!file) return false;
+    if (length > rvfilesize(file)) {
+#ifdef POSIX_FILE_IMPL
+        if (posix_fallocate(file->fd, length - 1, 1)) return false;
+        rvfile_grow_internal(file, length);
+#else
+        // NOTE: This is not perfectly thread safe on Win32 if
+        // there are writers currently extending the end of file.
+        if (!rvtruncate(file, length)) return false;
+#endif
+    }
+    return true;
 }
 
 int rvfile_get_posix_fd(rvfile_t* file)
@@ -461,7 +489,6 @@ static const blkdev_type_t blkdev_type_raw = {
     .read = (void*)rvread,
     .write = (void*)rvwrite,
     .trim = (void*)rvtrim,
-    .sync = (void*)rvflush,
 };
 
 static blkdev_t* blk_raw_open(const char* filename, uint8_t filemode)
