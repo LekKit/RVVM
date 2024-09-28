@@ -347,11 +347,8 @@ void* vma_mmap(void* addr, size_t size, uint32_t flags, rvfile_t* file, uint64_t
     size = align_size_up(size + ptr_diff, vma_page_size());
 
     if (file && offset + size > rvfilesize(file)) {
-        // Aligned mapping extends beyond the end of file
-        // NOTE: This may cause issues for generic code that maps near end of file,
-        // some kind of win32-like file growing mechanism may be implemented to
-        // hide page alignment details altogether
-        return NULL;
+        // Grow the file to fit the mapping for same semantics across systems
+        if (!rvfallocate(file, offset + size)) return NULL;
     }
 
     uint8_t* ret = vma_mmap_aligned_internal(addr, size, flags, file, offset);
