@@ -439,14 +439,15 @@ bool rvfallocate(rvfile_t* file, uint64_t length)
 {
     if (!file) return false;
     if (length > rvfilesize(file)) {
-#ifdef POSIX_FILE_IMPL
-        if (posix_fallocate(file->fd, length - 1, 1)) return false;
-        rvfile_grow_internal(file, length);
-#else
-        // NOTE: This is not perfectly thread safe on Win32 if
-        // there are writers currently extending the end of file.
-        if (!rvtruncate(file, length)) return false;
+#if defined(POSIX_FILE_IMPL) && (defined(__linux__) || defined(__FreeBSD__))
+        if (posix_fallocate(file->fd, length - 1, 1) == 0) {
+            rvfile_grow_internal(file, length);
+            return true;
+        }
 #endif
+        // NOTE: This is not perfectly thread safe if there
+        // are writers currently extending the end of file.
+        if (!rvtruncate(file, length)) return false;
     }
     return true;
 }
