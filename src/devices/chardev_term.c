@@ -85,6 +85,10 @@ static void term_rawmode(void)
     GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &orig_input_mode);
     GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &orig_output_mode);
 
+    // Pre-Win10 raw console setup
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0x0);
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), 0x1);
+
     // ENABLE_VIRTUAL_TERMINAL_INPUT
     SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), 0x200);
     // ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
