@@ -635,13 +635,11 @@ bool sdl_window_init(gui_window_t* win)
         if (SDL_MUSTLOCK(sdl_surface)) {
             rvvm_info("SDL surface is locking. Expect higher CPU use.");
             win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
-#ifndef __EMSCRIPTEN__
-        } else if (((size_t)sdl_surface->pixels) & 0xFFF) {
-            rvvm_info("SDL surface is misaligned. Expect higher CPU use.");
-            win->fb.buffer = vma_alloc(NULL, framebuffer_size(&win->fb), VMA_RDWR);
-#endif
         } else {
-            // Direct page-aligned framebuffer surface, like XShm
+            // Direct framebuffer surface, like XShm
+            if (((size_t)sdl_surface->pixels) & 0xFFF) {
+                rvvm_info("SDL surface is misaligned. Expect higher CPU use.");
+            }
             win->fb.buffer = sdl_surface->pixels;
         }
     }
