@@ -41,6 +41,11 @@ void sys_icache_invalidate(void* start, size_t len);
 #include <sys/syscall.h>
 #include <unistd.h>
 
+/*
+ * RISC-V currently has a "global icache flush" scheme so coalescing is preferred
+ */
+#define RVJIT_GLOBAL_ICACHE_FLUSH
+
 #elif defined(RVJIT_ARM64) && defined(GNU_EXTS)
 /*
  * Don't rely on GCC's __clear_cache implementation, as it may
@@ -263,6 +268,9 @@ rvjit_func_t rvjit_block_finalize(rvjit_block_t* block)
         vector_foreach(*linked_blocks, i) {
             uint8_t* jptr = vector_at(*linked_blocks, i);
             rvjit_linker_patch_jmp(jptr, ((size_t)dest) - ((size_t)jptr));
+#ifndef RVJIT_GLOBAL_ICACHE_FLUSH
+            rvjit_flush_icache(jptr, 8);
+#endif
         }
         vector_free(*linked_blocks);
         free(linked_blocks);

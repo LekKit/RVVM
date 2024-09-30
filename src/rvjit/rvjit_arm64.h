@@ -1343,7 +1343,6 @@ static inline void rvjit_patch_ret(void* addr)
 static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
 {
     if (rvjit_a64_valid_reloc(offset)) {
-        write_uint32_le_m(addr, 0);
         rvjit_a64_b_reloc(addr, offset);
         return true;
     }
