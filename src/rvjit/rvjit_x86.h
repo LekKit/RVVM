@@ -1066,8 +1066,9 @@ static inline void rvjit_patch_ret(void* addr)
 static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
 {
     uint8_t* code = (uint8_t*)addr;
-    code[0] = 0xE9;
     write_uint32_le_m(code + 1, ((uint32_t)offset) - 5);
+    atomic_fence();
+    code[0] = 0xE9;
     return true;
 }
 
