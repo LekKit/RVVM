@@ -524,7 +524,6 @@ static inline void rvjit_patch_ret(void* addr)
 static inline bool rvjit_patch_jmp(void* addr, int32_t offset)
 {
     if (rvjit_is_valid_jal_imm(offset)) {
-        write_uint32_le_m(addr, 0);
         rvjit_riscv_jal_patch(addr, offset);
         return true;
     } else {
