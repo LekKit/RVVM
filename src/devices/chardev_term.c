@@ -29,6 +29,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
+#ifndef O_NOCTTY
+#define O_NOCTTY
+#endif
 
 #define POSIX_TERM_IMPL
 
@@ -61,7 +64,7 @@ static DWORD orig_output_mode = 0;
 static void term_origmode(void)
 {
 #if defined(POSIX_TERM_IMPL)
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term_opts);
+    tcsetattr(0, TCSAFLUSH, &orig_term_opts);
 #elif defined(WIN32_TERM_IMPL)
     SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), orig_input_mode);
     SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), orig_output_mode);
@@ -72,14 +75,12 @@ static void term_rawmode(void)
 {
 #if defined(POSIX_TERM_IMPL)
     struct termios term_opts = {
-        .c_iflag = ICRNL,
         .c_oflag = OPOST | ONLCR,
-        .c_cflag = orig_term_opts.c_cflag,
-        .c_lflag = 0,
+        .c_cflag = CLOCAL | CREAD | CS8,
         .c_cc[VMIN] = 1,
     };
-    tcgetattr(STDIN_FILENO, &orig_term_opts);
-    tcsetattr(STDIN_FILENO, TCSANOW, &term_opts);
+    tcgetattr(0, &orig_term_opts);
+    tcsetattr(0, TCSANOW, &term_opts);
 #elif defined(WIN32_TERM_IMPL)
     SetConsoleOutputCP(CP_UTF8);
     GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &orig_input_mode);
@@ -296,7 +297,7 @@ PUBLIC chardev_t* chardev_pty_create(const char* path)
     if (rvvm_strcmp(path, "stdout")) return chardev_term_create();
     if (rvvm_strcmp(path, "null")) return NULL; // NULL chardev
 #ifdef POSIX_TERM_IMPL
-    int fd = open(path, O_RDWR | O_CLOEXEC);
+    int fd = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (fd >= 0) return chardev_fd_create(fd, fd);
     rvvm_error("Could not open PTY %s", path);
 #else
