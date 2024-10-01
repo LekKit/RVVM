@@ -405,33 +405,52 @@ bool rvfsync(rvfile_t* file)
 #endif
 }
 
+static bool rvfile_grow_generic(rvfile_t* file, uint64_t length)
+{
+    bool ret = true;
+    if (length && length > rvfilesize(file)) {
+        // Grow the file by re-writing one byte at the new end
+        char tmp = 0;
+#if defined(POSIX_FILE_IMPL) || defined(WIN32_FILE_IMPL)
+        if (!rvread(file, &tmp, 1, length - 1)) {
+            // NOTE: This is not perfectly thread safe if there
+            // are writers currently extending the end of file.
+            ret = !!rvwrite(file, &tmp, 1, length - 1);
+        }
+#else
+        spin_lock_slow(&file->lock);
+        fseek(file->fp, length - 1, SEEK_SET);
+        if (!fread(&tmp, 1, 1, file->fp)) {
+            fseek(file->fp, length - 1, SEEK_SET);
+            ret = !!fwrite(&tmp, 1, 1, file->fp);
+            fflush(file->fp);
+        }
+        file->pos_state = RVFILE_POS_INVALID;
+        spin_unlock(&file->lock);
+#endif
+        if (ret) rvfile_grow_internal(file, length);
+    }
+    return ret;
+}
+
 bool rvtruncate(rvfile_t* file, uint64_t length)
 {
     if (!file) return false;
 #if defined(POSIX_FILE_IMPL)
     if (ftruncate(file->fd, length)) return false;
+    atomic_store_uint64(&file->size, length);
 #elif defined(WIN32_FILE_IMPL)
     LONG high_len = length >> 32;
     SetFilePointer(file->handle, (uint32_t)length, &high_len, FILE_BEGIN);
     if (!SetEndOfFile(file->handle)) return false;
-#else
-    if (length < atomic_load_uint64(&file->size)) {
-        // Can't shrink the file on stdio
-        return false;
-    } else if (length) {
-        // Grow the file by re-writing one byte at the new end
-        char tmp = 0;
-        spin_lock_slow(&file->lock);
-        fseek(file->fp, length - 1, SEEK_SET);
-        fread(&tmp, 1, 1, file->fp);
-        fseek(file->fp, length - 1, SEEK_SET);
-        fwrite(&tmp, 1, 1, file->fp);
-        fflush(file->fp);
-        file->pos_state = RVFILE_POS_INVALID;
-        spin_unlock(&file->lock);
-    }
-#endif
     atomic_store_uint64(&file->size, length);
+#else
+    if (length < rvfilesize(file)) {
+        // Generic implementation can't shrink the file
+        return false;
+    }
+    if (!rvfile_grow_generic(file, length)) return false;
+#endif
     return true;
 }
 
@@ -445,9 +464,7 @@ bool rvfallocate(rvfile_t* file, uint64_t length)
             return true;
         }
 #endif
-        // NOTE: This is not perfectly thread safe if there
-        // are writers currently extending the end of file.
-        if (!rvtruncate(file, length)) return false;
+        return rvfile_grow_generic(file, length);
     }
     return true;
 }
