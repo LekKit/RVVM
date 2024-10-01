@@ -233,6 +233,7 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 void rvclose(rvfile_t* file)
 {
     if (!file) return;
+    rvfsync(file);
 #if defined(POSIX_FILE_IMPL)
     close(file->fd);
 #elif defined(WIN32_FILE_IMPL)
