@@ -20,13 +20,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 #include <stdio.h>
 
-#if (defined(__unix__) || defined(__APPLE__) || defined(__MINGW32__)) \
- && !defined(NO_STACKTRACE) && !defined(UNDER_CE) && !defined(__SANITIZE_ADDRESS__)
-#define SIGNAL_IMPL
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(NO_STACKTRACE) && !defined(__SANITIZE_ADDRESS__)
 #include <stdlib.h>
 #include <signal.h>
 #ifndef SIGBUS
 #define SIGBUS 10
+#endif
+#ifdef SA_SIGINFO
+#define STACKTRACE_SIGACTION_IMPL
 #endif
 #endif
 
@@ -67,7 +68,7 @@ static int backtrace_dummy_callback(void* data, uintptr_t pc, const char* filena
  * Fatal signal stacktraces
  */
 
-#ifdef SIGNAL_IMPL
+#ifdef STACKTRACE_SIGACTION_IMPL
 
 static void signal_handler(int sig)
 {
@@ -76,7 +77,7 @@ static void signal_handler(int sig)
             rvvm_warn("Fatal signal: Segmentation fault!");
             break;
         case SIGBUS:
-            rvvm_warn("Fatal signal: Bus fault - Address is non-canonic or misaligned!");
+            rvvm_warn("Fatal signal: Bus fault - Misaligned access or mapped IO error!");
             break;
         case SIGILL:
             rvvm_warn("Fatal signal: Illegal instruction!");
@@ -88,31 +89,27 @@ static void signal_handler(int sig)
             rvvm_warn("Fatal signal %d", sig);
             break;
     }
-    rvvm_warn("Stacktrace:");
-    stacktrace_print();
-    _Exit(-sig);
+    if (backtrace_full && bt_state) {
+        rvvm_warn("Stacktrace:");
+        stacktrace_print();
+    }
+    exit(-sig);
 }
 
 static void set_signal_handler(int sig)
 {
-#ifdef SA_SIGINFO
     struct sigaction sa_old = {0};
     struct sigaction sa = {
         .sa_handler = signal_handler,
-        .sa_flags = SA_RESTART,
     };
     sigaction(sig, NULL, &sa_old);
-    if (!(sa_old.sa_flags & SA_SIGINFO) && (sa_old.sa_handler == NULL || sa_old.sa_handler == (void*)SIG_IGN || sa_old.sa_handler != (void*)SIG_DFL)) {
-        // Signal not used
-        sigaction(sig, &sa, NULL);
+    if (!(sa_old.sa_flags & SA_SIGINFO)) {
+        void* prev = sa_old.sa_handler;
+        if (prev == NULL || prev == (void*)SIG_IGN || prev == (void*)SIG_DFL) {
+            // Signal not used
+            sigaction(sig, &sa, NULL);
+        }
     }
-#else
-    void* prev = signal(sig, signal_handler);
-    if (prev != NULL && prev != (void*)SIG_IGN && prev != (void*)SIG_DFL) {
-        // Signal already used
-        signal(sig, prev);
-    }
-#endif
 }
 
 #endif
@@ -137,14 +134,14 @@ static void backtrace_init_once(void)
     if (backtrace_full && bt_state) {
         // Preload backtracing data, isolation is enabled later on
         backtrace_full(bt_state, 0, backtrace_dummy_callback, backtrace_dummy_error, NULL);
-
-#ifdef SIGNAL_IMPL
-        set_signal_handler(SIGSEGV);
-        set_signal_handler(SIGBUS);
-        set_signal_handler(SIGILL);
-        set_signal_handler(SIGFPE);
-#endif
     }
+
+#ifdef STACKTRACE_SIGACTION_IMPL
+    set_signal_handler(SIGSEGV);
+    set_signal_handler(SIGBUS);
+    set_signal_handler(SIGILL);
+    set_signal_handler(SIGFPE);
+#endif
 }
 
 void stacktrace_init(void)
@@ -157,6 +154,5 @@ void stacktrace_print(void)
     stacktrace_init();
     if (backtrace_print && bt_state) {
         backtrace_print(bt_state, 0, stderr);
-
     }
 }
