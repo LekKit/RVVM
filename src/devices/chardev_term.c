@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define O_CLOEXEC 0
 #endif
 #ifndef O_NOCTTY
-#define O_NOCTTY
+#define O_NOCTTY 0
 #endif
 
 #define POSIX_TERM_IMPL
