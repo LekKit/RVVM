@@ -635,7 +635,7 @@ endif
 
 # System-wide install
 DESTDIR ?=
-PREFIX  ?= /usr/local
+PREFIX  ?= /usr
 # Handle all the weird GNU-style variables
 prefix      ?= $(PREFIX)
 exec_prefix ?= $(prefix)
