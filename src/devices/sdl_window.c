@@ -20,7 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "compiler.h"
 
-#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER)
+#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER) && !defined(__REDOX__)
+// Emscripten, MSVC and Redox OS can't handle dynamic SDL loading
 #define SDL_DYNAMIC_LOADING
 #endif
 
