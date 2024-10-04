@@ -28,13 +28,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define X11_DLIB_SYM(sym) static typeof(sym)* sym##_dlib = NULL;
 
 // Check for X11 headers presence
-#if defined(USE_X11) && !(CHECK_INCLUDE(X11/Xlib.h) && CHECK_INCLUDE(X11/Xutil.h) && CHECK_INCLUDE(X11/keysym.h))
+#if defined(USE_X11) && !(CHECK_INCLUDE(X11/Xlib.h, 1) && CHECK_INCLUDE(X11/Xutil.h, 1) && CHECK_INCLUDE(X11/keysym.h, 1))
 #undef USE_X11
 #warning Disabling X11 support as <X11/Xlib.h> is unavailable
 #endif
 
 // Check for XShm header presence
-#if CHECK_INCLUDE(X11/extensions/XShm.h) && CHECK_INCLUDE(sys/ipc.h) && CHECK_INCLUDE(sys/shm.h)
+#if CHECK_INCLUDE(X11/extensions/XShm.h, 1) && CHECK_INCLUDE(sys/ipc.h, 1) && CHECK_INCLUDE(sys/shm.h, 1)
 #define USE_XSHM
 #else
 #warning Disabling XShm support as <X11/extensions/XShm.h> is unavailable
