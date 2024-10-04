@@ -28,7 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 
 // Check that <linux/vfio.h> include is available
-#if defined(__linux__) && defined(USE_VFIO) && !CHECK_INCLUDE(linux/vfio.h)
+#if defined(__linux__) && defined(USE_VFIO) && !CHECK_INCLUDE(linux/vfio.h, 0)
 #warning Disabling USE_VFIO as <linux/vfio.h> is unavailable
 #undef USE_VFIO
 #endif
