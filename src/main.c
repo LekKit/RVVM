@@ -302,10 +302,10 @@ int main(int argc, char** argv)
     }
     // Use UTF-8 arguments
     LPWSTR* argv_u16 = CommandLineToArgvW(GetCommandLineW(), &argc);
-    argv = safe_calloc(sizeof(char*), argc + 1);
+    argv = safe_new_arr(char*, argc + 1);
     for (int i=0; i<argc; ++i) {
         size_t arg_len = WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, NULL, 0, NULL, NULL);
-        argv[i] = safe_calloc(sizeof(char), arg_len);
+        argv[i] = safe_new_arr(char, arg_len);
         WideCharToMultiByte(CP_UTF8, 0, argv_u16[i], -1, argv[i], arg_len, NULL, NULL);
     }
 #endif
