@@ -566,10 +566,11 @@ static forceinline uint64_t atomic_or_uint64_ex(void* addr, uint64_t val, int me
 #if defined(C11_ATOMICS_IMPL)
     return atomic_fetch_or_explicit((_Atomic uint64_t*)addr, val, memorder);
 #elif defined(GNU_ATOMICS_IMPL)
-    return __sync_fetch_and_or((uint64_t*)addr, val, memorder);
+    return __atomic_fetch_or_8((uint64_t*)addr, val, memorder);
 #elif defined(_WIN32)
-    UNUSED(memorder);
     return InterlockedOr64((LONG64*)addr, val);
+#elif defined(SYNC_ATOMICS_IMPL)
+    return __sync_fetch_and_or((uint64_t*)addr, val);
 #else
     uint64_t tmp = 0;
     do {
