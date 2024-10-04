@@ -20,8 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "utils.h"
 #include "compiler.h"
 
-#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER) && !defined(__REDOX__)
-// Emscripten, MSVC and Redox OS can't handle dynamic SDL loading
+#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER)
 #define SDL_DYNAMIC_LOADING
 #endif
 
@@ -29,13 +28,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SDL_DLIB_SYM(sym) static typeof(sym)* sym##_dlib = NULL;
 
 // Check for SDL1 header presence
-#if USE_SDL == 1 && !CHECK_INCLUDE(SDL/SDL.h)
+#if USE_SDL == 1 && !CHECK_INCLUDE(SDL/SDL.h, 1)
 #undef USE_SDL
 #warning Disabling USE_SDL as <SDL/SDL.h> is unavailable
 #endif
 
 // Check for SDL2 header presence
-#if USE_SDL == 2 && !CHECK_INCLUDE(SDL2/SDL.h)
+#if USE_SDL == 2 && !CHECK_INCLUDE(SDL2/SDL.h, 1)
 #undef USE_SDL
 #warning Disabling USE_SDL as <SDL2/SDL.h> is unavailable
 #endif
