@@ -236,7 +236,7 @@ static int rvvm_cli_main(int argc, const char** argv)
     }
     if (bootrom == NULL) {
         printf("Usage: rvvm [bootrom] [-mem 256M] [-k kernel] [-help] ...\n");
-        return -1;
+        return 0;
     }
 
     // Create & configure machine
