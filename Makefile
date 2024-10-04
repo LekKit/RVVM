@@ -16,7 +16,7 @@ override OS :=
 endif
 else
 # Assume a POSIX host
-override HOST_UNAME := $(firstword $(shell uname -o 2>/dev/null) POSIX)
+override HOST_UNAME := $(firstword $(shell uname -s 2>/dev/null) POSIX)
 endif
 
 ifeq ($(HOST_UNAME),Windows)
