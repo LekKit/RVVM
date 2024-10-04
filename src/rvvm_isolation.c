@@ -40,12 +40,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ISOLATION_DROP_ROOT_IMPL
 #endif
 
-#if defined(__linux__) && CHECK_INCLUDE(sys/prctl.h)
+#if defined(__linux__) && CHECK_INCLUDE(sys/prctl.h, 1)
 #include <sys/prctl.h>
 #define ISOLATION_PRCTL_IMPL
 #endif
 
-#if defined(__linux__) && CHECK_INCLUDE(linux/seccomp.h) && CHECK_INCLUDE(sys/prctl.h)
+#if defined(__linux__) && CHECK_INCLUDE(linux/seccomp.h, 0) && CHECK_INCLUDE(sys/prctl.h, 0)
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <linux/bpf.h>
