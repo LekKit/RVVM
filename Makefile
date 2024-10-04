@@ -298,7 +298,7 @@ override CC_AT_LEAST_7_0 := $(filter-out 6.%,$(CC_AT_LEAST_6_0))
 override LTO_CHECK_OUT := $(OBJDIR)/lto_lest$(BIN_EXT)
 override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
 ifeq (,$(LTO_SUPPORTED))
-$(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) - $(NULL_STDERR))
+$(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) -)
 override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
 endif
 ifeq (,$(LTO_SUPPORTED))
