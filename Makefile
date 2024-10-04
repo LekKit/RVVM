@@ -429,7 +429,7 @@ override LTO_ERROR := $(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o 
 ifeq (,$(LTO_ERROR))
 override LTO_SUPPORTED := 1
 else
-$(info $(INFO_PREFIX) LTO is not supported by this toolchain$(RESET))
+$(info $(INFO_PREFIX) LTO is not supported by this toolchain: $(wordlist 2,8,$(LTO_ERROR))$(RESET))
 endif
 endif
 
