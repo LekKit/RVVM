@@ -259,116 +259,11 @@ USE_FDT ?= 1
 USE_PCI ?= 1
 USE_VFIO ?= 1
 
-# Output directories / files
-override OBJDIR := $(BUILDDIR)/obj
-override BINARY := $(BUILDDIR)/$(BINARY)
-override SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
-override STATIC := $(BUILDDIR)/lib$(NAME)_static.a
-
-#
-# Detect compiler brand & features, set up optimization/warning options
-#
-
-override CC_INFO := $(shell $(CC) -v 2>&1)
-override CC_INFO_TMP := $(CC_INFO)
-override CC_FULL_VERSION := $(strip $(foreach cc_word,$(CC_INFO),$(if $(filter version,$(word 2,$(CC_INFO_TMP))),$(wordlist 1,3,$(CC_INFO_TMP)))\
-$(eval override CC_INFO_TMP := $(wordlist 2,$(words $(CC_INFO_TMP)),$(CC_INFO_TMP)))))
-override CC_BRAND := $(firstword $(CC_FULL_VERSION))
-override CC_VERSION := $(word 3,$(CC_FULL_VERSION))
-ifeq (,$(findstring .,$(CC_VERSION)))
-override CC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion $(NULL_STDERR))
-endif
-ifeq ($(ARCH),e2k)
-# It's not a real GCC, workaround issues by explicitly marking it as different compiler brand
-override CC_BRAND := ПТН ПНХ
-endif
-ifeq (,$(CC_BRAND))
-override CC_BRAND := Unknown
-endif
-
-# Compiler version checks
-override CC_AT_LEAST_2_0 := $(filter-out 1.%,$(CC_VERSION))
-override CC_AT_LEAST_3_0 := $(filter-out 2.%,$(CC_AT_LEAST_2_0))
-override CC_AT_LEAST_4_0 := $(filter-out 3.%,$(CC_AT_LEAST_3_0))
-override CC_AT_LEAST_5_0 := $(filter-out 4.%,$(CC_AT_LEAST_4_0))
-override CC_AT_LEAST_6_0 := $(filter-out 5.%,$(CC_AT_LEAST_5_0))
-override CC_AT_LEAST_7_0 := $(filter-out 6.%,$(CC_AT_LEAST_6_0))
-
-# Check LTO support
-override LTO_CHECK_OUT := $(OBJDIR)/lto_lest$(BIN_EXT)
-override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
-ifeq (,$(LTO_SUPPORTED))
-$(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) -)
-override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
-endif
-ifeq (,$(LTO_SUPPORTED))
-$(info $(INFO_PREFIX) LTO is not supported by this toolchain$(RESET))
-endif
-
-override CC_STD := -std=c99
-override CXX_STD :=
-
-# Warning options (Strict safety/portability, stack/object size limits)
-# Need at least GCC 7.0 or Clang 7.0
-# -Wbad-function-cast, -Wcast-align, need fixes in codebase
-ifneq (,$(CC_AT_LEAST_7_0))
-override WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
--Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Wdouble-promotion -Werror=return-type
-else
-# Conservative warning options for older compilers
-override WARN_OPTS := -Wall -Wextra
-endif
-
-# Set up optimization options based on the compiler brand
-ifeq ($(CC_BRAND),clang)
-# LLVM Clang or derivatives (Zig CC, Emscripten)
-override CC_PRETTY := LLVM Clang $(CC_VERSION)
-
-override CC_STD := -std=gnu99
-ifneq (,$(CC_AT_LEAST_4_0))
-override CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-definition
-override CXX_STD := -std=gnu++11
-endif
-
-override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=thin) $(if $(CC_AT_LEAST_4_0),-frounding-math) -fvisibility=hidden -fno-math-errno \
-$(WARN_OPTS) -Wno-unknown-warning-option -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument -Wno-ignored-pragmas -Wno-atomic-alignment $(CFLAGS)
-
-else
-ifeq ($(CC_BRAND),gcc)
-# GNU GCC or derivatives (MinGW)
-override CC_PRETTY := GCC $(CC_VERSION)
-
-override CC_STD := -std=gnu99
-ifneq (,$(CC_AT_LEAST_5_0))
-override CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
-override CXX_STD := -std=gnu++11
-endif
-
-override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=auto) -frounding-math $(if $(CC_AT_LEAST_4_0),-fvisibility=hidden -fno-math-errno) $(if $(CC_AT_LEAST_6_0),-fno-plt) \
-$(WARN_OPTS) -Wno-missing-braces -Wno-missing-field-initializers $(CFLAGS)
-
-else
-# Toy compiler (TCC, Chibicc, Cproc)
-override CC_PRETTY := $(RED)$(CC_BRAND) $(CC_VERSION)
-
-endif
-endif
-
-#
-# Print build information
-#
-
 # Determine build commit id
 GIT_COMMIT ?= $(firstword $(shell git describe --match=NeVeRmAtCh_TaG --always --dirty $(NULL_STDERR)))
 ifneq (,$(GIT_COMMIT))
 override VERSION := $(VERSION)-$(GIT_COMMIT)
 endif
-
-$(info $(WHITE)Detected OS: $(GREEN)$(OS_PRETTY)$(RESET))
-$(info $(WHITE)Detected CC: $(GREEN)$(CC_PRETTY)$(RESET))
-$(info $(WHITE)Target arch: $(GREEN)$(ARCH)$(RESET))
-$(info $(WHITE)Version:     $(GREEN)RVVM $(VERSION)$(RESET))
-$(info $(SPACE))
 
 #
 # Set up sources, useflags, CFLAGS & LDFLAGS
@@ -478,6 +373,12 @@ override LDFLAGS += $(strip $(foreach useflag,$(USEFLAGS),$(if $(filter-out 0,$(
 # Set useflags C definitions
 override CFLAGS += $(strip $(foreach useflag, $(USEFLAGS),$(if $(filter-out 0,$($(useflag))),-D$(useflag)=$($(useflag)))))
 
+# Output directories / files
+override OBJDIR := $(BUILDDIR)/obj
+override BINARY := $(BUILDDIR)/$(BINARY)
+override SHARED := $(BUILDDIR)/lib$(NAME)$(LIB_EXT)
+override STATIC := $(BUILDDIR)/lib$(NAME)_static.a
+
 # Combine the object files
 override OBJS := $(SRC:$(SRCDIR)/%.c=$(OBJDIR)/%.o) $(SRC_CXX:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 override LIB_OBJS := $(filter-out main.o,$(OBJS))
@@ -491,7 +392,99 @@ else
 $(foreach directory,$(DIRS),$(shell mkdir $(subst /,\\,$(directory)) $(NULL_STDERR))$(shell mkdir $(directory) $(NULL_STDERR)))
 endif
 
-# Check previous buildflags
+#
+# Detect compiler brand & features, set up optimization/warning options
+#
+
+override CC_INFO := $(shell $(CC) -v 2>&1)
+override CC_INFO_TMP := $(CC_INFO)
+override CC_FULL_VERSION := $(strip $(foreach cc_word,$(CC_INFO),$(if $(filter version,$(word 2,$(CC_INFO_TMP))),$(wordlist 1,3,$(CC_INFO_TMP)))\
+$(eval override CC_INFO_TMP := $(wordlist 2,$(words $(CC_INFO_TMP)),$(CC_INFO_TMP)))))
+override CC_BRAND := $(firstword $(CC_FULL_VERSION))
+override CC_VERSION := $(word 3,$(CC_FULL_VERSION))
+ifeq (,$(findstring .,$(CC_VERSION)))
+override CC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion $(NULL_STDERR))
+endif
+ifeq ($(ARCH),e2k)
+# It's not a real GCC, workaround issues by explicitly marking it as different compiler brand
+override CC_BRAND := ПТН ПНХ
+endif
+ifeq (,$(CC_BRAND))
+override CC_BRAND := Unknown
+endif
+
+# Compiler version checks
+override CC_AT_LEAST_2_0 := $(filter-out 1.%,$(CC_VERSION))
+override CC_AT_LEAST_3_0 := $(filter-out 2.%,$(CC_AT_LEAST_2_0))
+override CC_AT_LEAST_4_0 := $(filter-out 3.%,$(CC_AT_LEAST_3_0))
+override CC_AT_LEAST_5_0 := $(filter-out 4.%,$(CC_AT_LEAST_4_0))
+override CC_AT_LEAST_6_0 := $(filter-out 5.%,$(CC_AT_LEAST_5_0))
+override CC_AT_LEAST_7_0 := $(filter-out 6.%,$(CC_AT_LEAST_6_0))
+
+# Check LTO support
+override LTO_CHECK_OUT := $(OBJDIR)/lto_lest$(BIN_EXT)
+override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
+ifeq (,$(LTO_SUPPORTED))
+$(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) - $(NULL_STDERR))
+override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
+endif
+ifeq (,$(LTO_SUPPORTED))
+$(info $(INFO_PREFIX) LTO is not supported by this toolchain$(RESET))
+endif
+
+override CC_STD := -std=c99
+override CXX_STD :=
+
+# Warning options (Strict safety/portability, stack/object size limits)
+# Need at least GCC 7.0 or Clang 7.0
+# -Wbad-function-cast, -Wcast-align, need fixes in codebase
+ifneq (,$(CC_AT_LEAST_7_0))
+override WARN_OPTS := -Wall -Wextra -Wshadow -Wvla -Wpointer-arith -Walloca -Wduplicated-cond \
+-Wtrampolines -Wlarger-than=1048576 -Wframe-larger-than=32768 -Wdouble-promotion -Werror=return-type
+else
+# Conservative warning options for older compilers
+override WARN_OPTS := -Wall -Wextra
+endif
+
+# Set up optimization options based on the compiler brand
+ifeq ($(CC_BRAND),clang)
+# LLVM Clang or derivatives (Zig CC, Emscripten)
+override CC_PRETTY := LLVM Clang $(CC_VERSION)
+
+override CC_STD := -std=gnu99
+ifneq (,$(CC_AT_LEAST_4_0))
+override CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-definition
+override CXX_STD := -std=gnu++11
+endif
+
+override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=thin) $(if $(CC_AT_LEAST_4_0),-frounding-math) -fvisibility=hidden -fno-math-errno \
+$(WARN_OPTS) -Wno-unknown-warning-option -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument -Wno-ignored-pragmas -Wno-atomic-alignment $(CFLAGS)
+
+else
+ifeq ($(CC_BRAND),gcc)
+# GNU GCC or derivatives (MinGW)
+override CC_PRETTY := GCC $(CC_VERSION)
+
+override CC_STD := -std=gnu99
+ifneq (,$(CC_AT_LEAST_5_0))
+override CC_STD := -std=gnu11 -Wstrict-prototypes -Wold-style-declaration -Wold-style-definition
+override CXX_STD := -std=gnu++11
+endif
+
+override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=auto) -frounding-math $(if $(CC_AT_LEAST_4_0),-fvisibility=hidden -fno-math-errno) $(if $(CC_AT_LEAST_6_0),-fno-plt) \
+$(WARN_OPTS) -Wno-missing-braces -Wno-missing-field-initializers $(CFLAGS)
+
+else
+# Toy compiler (TCC, Chibicc, Cproc)
+override CC_PRETTY := $(RED)$(CC_BRAND) $(CC_VERSION)
+
+endif
+endif
+
+#
+# Check previous build flags, force a rebuild if necessary
+#
+
 override CFLAGS_TXT := $(OBJDIR)/cflags.txt
 override LDFLAGS_TXT := $(OBJDIR)/ldflags.txt
 override CURR_CFLAGS := $(CC) $(CC_VERSION) $(CFLAGS)
@@ -518,6 +511,10 @@ $(shell echo "PREV_CFLAGS := $(subst ",\\",$(CURR_CFLAGS))" > $(CFLAGS_TXT))
 $(shell echo "PREV_LDFLAGS := $(subst ",\\",$(CURR_LDFLAGS))" > $(LDFLAGS_TXT))
 endif
 
+#
+# Compiler invocation helpers
+#
+
 override DO_CC = $(CC) $(CC_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 override DO_CXX = $(CXX) $(CXX_STD) $(CFLAGS) -MMD -MF $(patsubst %.o, %.d, $@) -o $@ -c $<
 
@@ -526,6 +523,16 @@ override CC_LD := $(CC)
 ifneq (,$(strip $(SRC_CXX)))
 override CC_LD := $(CXX)
 endif
+
+#
+# Print build information
+#
+
+$(info $(WHITE)Detected OS: $(GREEN)$(OS_PRETTY)$(RESET))
+$(info $(WHITE)Detected CC: $(GREEN)$(CC_PRETTY)$(RESET))
+$(info $(WHITE)Target arch: $(GREEN)$(ARCH)$(RESET))
+$(info $(WHITE)Version:     $(GREEN)RVVM $(VERSION)$(RESET))
+$(info $(SPACE))
 
 # Ignore deleted header files
 %.h:
