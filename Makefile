@@ -358,7 +358,7 @@ override SRC := $(filter-out $(foreach cond_src,$(SRC_CONDITIONAL),$($(cond_src)
 override SRC_CXX := $(filter-out $(foreach cond_src,$(SRC_CONDITIONAL),$($(cond_src))),$(SRC_CXX))
 
 # Disable all useflags which depend on another disabled useflags
-override _ := $(foreach useflag,$(USEFLAGS),$(foreach need_useflag,$(NEED_$(useflag)),$(if $(filter 0,$(need_useflag)),$(eval override $(useflag) := 0))))
+override _ := $(foreach useflag,$(USEFLAGS),$(foreach need_useflag,$(NEED_$(useflag)),$(if $(filter 0,$($(need_useflag))),$(eval override $(useflag) := 0))))
 
 # Include actually enabled C/C++ sources
 override SRC += $(sort $(foreach useflag,$(USEFLAGS),$(if $(filter-out 0,$($(useflag))),$(SRC_$(useflag)))))
@@ -448,7 +448,7 @@ override WARN_OPTS := -Wall -Wextra
 endif
 
 # Set up optimization options based on the compiler brand
-ifeq ($(CC_BRAND),clang)
+ifneq (,$(findstring clang,$(CC_INFO))$(findstring LLVM,$(CC_INFO)))
 # LLVM Clang or derivatives (Zig CC, Emscripten)
 override CC_PRETTY := LLVM Clang $(CC_VERSION)
 
@@ -459,7 +459,8 @@ override CXX_STD := -std=gnu++11
 endif
 
 override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=thin) $(if $(CC_AT_LEAST_4_0),-frounding-math) -fvisibility=hidden -fno-math-errno \
-$(WARN_OPTS) -Wno-unknown-warning-option -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument -Wno-ignored-pragmas -Wno-atomic-alignment $(CFLAGS)
+$(WARN_OPTS) -Wno-unknown-warning-option -Wno-unsupported-floating-point-opt -Wno-ignored-optimization-argument \
+-Wno-missing-braces -Wno-missing-field-initializers -Wno-ignored-pragmas -Wno-atomic-alignment $(CFLAGS)
 
 else
 ifeq ($(CC_BRAND),gcc)
@@ -473,7 +474,7 @@ override CXX_STD := -std=gnu++11
 endif
 
 override CFLAGS := -O2 $(if $(LTO_SUPPORTED),-flto=auto) -frounding-math $(if $(CC_AT_LEAST_4_0),-fvisibility=hidden -fno-math-errno) $(if $(CC_AT_LEAST_6_0),-fno-plt) \
-$(WARN_OPTS) -Wno-missing-braces -Wno-missing-field-initializers $(CFLAGS)
+$(WARN_OPTS) -Wno-missing-braces $(if $(CC_AT_LEAST_4_0),-Wno-missing-field-initializers) $(CFLAGS)
 
 else
 # Toy compiler (TCC, Chibicc, Cproc)
