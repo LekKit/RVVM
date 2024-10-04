@@ -187,7 +187,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 // Pushable size optimization attribute, Clang supports this to some degree
-#if CLANG_CHECK_VER(8, 0) && GNU_ATTRIBUTE(__minsize__)
+#if CLANG_CHECK_VER(12, 0) && GNU_ATTRIBUTE(__minsize__)
 #define PUSH_OPTIMIZATION_SIZE _Pragma("clang attribute push (__attribute__((__minsize__)), apply_to=function)")
 #define POP_OPTIMIZATION_SIZE _Pragma("clang attribute pop")
 #elif GCC_CHECK_VER(4, 4)
