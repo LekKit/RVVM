@@ -358,7 +358,7 @@ override SRC := $(filter-out $(foreach cond_src,$(SRC_CONDITIONAL),$($(cond_src)
 override SRC_CXX := $(filter-out $(foreach cond_src,$(SRC_CONDITIONAL),$($(cond_src))),$(SRC_CXX))
 
 # Disable all useflags which depend on another disabled useflags
-$(foreach useflag,$(USEFLAGS),$(foreach need_useflag,$(NEED_$(useflag)),$(if $(filter 0,$(need_useflag)),$(eval override $(useflag) := 0))))
+override _ := $(foreach useflag,$(USEFLAGS),$(foreach need_useflag,$(NEED_$(useflag)),$(if $(filter 0,$(need_useflag)),$(eval override $(useflag) := 0))))
 
 # Include actually enabled C/C++ sources
 override SRC += $(sort $(foreach useflag,$(USEFLAGS),$(if $(filter-out 0,$($(useflag))),$(SRC_$(useflag)))))
@@ -387,9 +387,9 @@ override DIRS := $(sort $(BUILDDIR) $(OBJDIR) $(dir $(OBJS)))
 
 # Create directories for object files
 ifeq ($(HOST_POSIX),1)
-$(shell mkdir -p $(DIRS))
+override _ := $(shell mkdir -p $(DIRS))
 else
-$(foreach directory,$(DIRS),$(shell mkdir $(subst /,\\,$(directory)) $(NULL_STDERR))$(shell mkdir $(directory) $(NULL_STDERR)))
+override _ := $(foreach directory,$(DIRS),$(shell mkdir $(subst /,\\,$(directory)) $(NULL_STDERR))$(shell mkdir $(directory) $(NULL_STDERR)))
 endif
 
 #
@@ -425,11 +425,12 @@ override CC_AT_LEAST_7_0 := $(filter-out 6.%,$(CC_AT_LEAST_6_0))
 override LTO_CHECK_OUT := $(OBJDIR)/lto_lest$(BIN_EXT)
 override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
 ifeq (,$(LTO_SUPPORTED))
-$(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) - $(NULL_STDERR))
-override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
-endif
-ifeq (,$(LTO_SUPPORTED))
+override LTO_ERROR := $(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) - 2>&1)
+ifeq (,$(LTO_ERROR))
+override LTO_SUPPORTED := 1
+else
 $(info $(INFO_PREFIX) LTO is not supported by this toolchain$(RESET))
+endif
 endif
 
 override CC_STD := -std=c99
@@ -499,16 +500,16 @@ override MAKEFLAGS += -B
 else
 ifneq ($(CURR_LDFLAGS),$(PREV_LDFLAGS))
 $(info $(INFO_PREFIX) LDFLAGS changed, relinking binaries$(RESET))
-$(shell rm $(BINARY) $(SHARED) $(NULL_STDERR))
+override _ := $(shell rm $(BINARY) $(SHARED) $(NULL_STDERR))
 endif
 endif
 
 ifneq (,$(filter-out 3.%,$(MAKE_VERSION)))
-$(file >$(CFLAGS_TXT),PREV_CFLAGS := $(CURR_CFLAGS))
-$(file >$(LDFLAGS_TXT),PREV_LDFLAGS := $(CURR_LDFLAGS))
+override _ := $(file >$(CFLAGS_TXT),PREV_CFLAGS := $(CURR_CFLAGS))
+override _ := $(file >$(LDFLAGS_TXT),PREV_LDFLAGS := $(CURR_LDFLAGS))
 else
-$(shell echo "PREV_CFLAGS := $(subst ",\\",$(CURR_CFLAGS))" > $(CFLAGS_TXT))
-$(shell echo "PREV_LDFLAGS := $(subst ",\\",$(CURR_LDFLAGS))" > $(LDFLAGS_TXT))
+override _ := $(shell echo "PREV_CFLAGS := $(subst ",\\",$(CURR_CFLAGS))" > $(CFLAGS_TXT))
+override _ := $(shell echo "PREV_LDFLAGS := $(subst ",\\",$(CURR_LDFLAGS))" > $(LDFLAGS_TXT))
 endif
 
 #
