@@ -57,7 +57,6 @@ typedef struct {
     pci_func_desc_t func[PCI_DEV_FUNCS];
 } pci_dev_desc_t;
 
-typedef struct pci_bus    pci_bus_t;
 typedef struct pci_device pci_dev_t;
 
 // Passing irq = 0 implies auto-allocation of 4 IRQ lanes
