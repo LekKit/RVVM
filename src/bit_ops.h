@@ -20,13 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "compiler.h"
 #include "rvvm_types.h"
 
-// For optimized bit_orc_b() implementation
-#if (defined(__x86_64__) && defined(GNU_EXTS)) || defined(_M_X64)
-#include <emmintrin.h>
-#elif defined(__aarch64__) && defined(GNU_EXTS)
-#include <arm_neon.h>
-#endif
-
 // Simple bit operations (sign-extend, etc) for internal usage
 
 /*
@@ -207,23 +200,21 @@ static inline bitcnt_t bit_popcnt64(uint64_t val)
 // Bitwise OR-combine, byte granule for orc.b instruction emulation
 static inline uint64_t bit_orc_b(uint64_t val)
 {
-#if (defined(__x86_64__) && defined(GNU_EXTS)) || defined(_M_X64)
-    __m128i in = _mm_set_epi64x(0, val);
-    __m128i zero = _mm_set_epi64x(0, 0);
-    __m128i cmp = _mm_cmpeq_epi8(in, zero);
-    __m128i orc = _mm_cmpeq_epi8(cmp, zero);
-    return _mm_cvtsi128_si64(orc);
-#elif defined(__aarch64__) && defined(GNU_EXTS)
-    uint8x8_t in = vreinterpret_u8_u64(vcreate_u64(val));
-    uint8x8_t orc = vtst_u8(in, in);
-    return vget_lane_u64(vreinterpret_u64_u8(orc), 0);
+#if defined(GNU_EXTS) && defined(__x86_64__)
+    uint64_t tmp = 0;
+    __asm__ (
+    "pcmpeqb %1, %0\n\t"
+    "pcmpeqb %1, %0\n\t"
+    : "+x"(val) : "x"(tmp));
+#elif defined(GNU_EXTS) && defined(__aarch64__)
+    __asm__ ("cmtst %0.8b, %0.8b, %0.8b" : "+w"(val));
 #else
     val |= ((val >> 1) | (val << 1)) & 0x7E7E7E7E7E7E7E7EULL;
     val |= ((val >> 2) | (val << 2)) & 0x3C3C3C3C3C3C3C3CULL;
     val |= (val >> 4) & 0x0F0F0F0F0F0F0F0FULL;
     val |= (val << 4) & 0xF0F0F0F0F0F0F0F0ULL;
-    return val;
 #endif
+    return val;
 }
 
 /*
