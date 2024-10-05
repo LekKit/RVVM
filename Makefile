@@ -571,10 +571,10 @@ lib: $(SHARED) $(STATIC)
 
 .PHONY: test        # Run RISC-V tests
 test: all
-	@cd "$(BUILDDIR)"; curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz"
+	$(if $(wildcard $(BUILDDIR)/riscv-tests.tar.gz),,@cd "$(BUILDDIR)"; curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz")
 	@tar xf "$(BUILDDIR)/riscv-tests.tar.gz" -C $(BUILDDIR)
 	@echo
-	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV32)"
+	@echo "$(INFO_PREFIX) Running RISC-V Tests (RV32)$(RESET)"
 	@echo
 	@for file in "$(BUILDDIR)/riscv-tests/rv32"*; do \
 		result=$$($(BINARY) $$file -nogui -rv32 | tr -d '\0'); \
@@ -588,7 +588,7 @@ test: all
 	done
 ifeq ($(USE_RV64),1)
 	@echo
-	@echo "[$(YELLOW)INFO$(RESET)] Running RISC-V Tests (RV64)"
+	@echo "$(INFO_PREFIX) Running RISC-V Tests (RV64)$(RESET)"
 	@echo
 	@for file in "$(BUILDDIR)/riscv-tests/rv64"*; do \
 		result=$$($(BINARY) $$file -nogui -rv64 | tr -d '\0'); \
