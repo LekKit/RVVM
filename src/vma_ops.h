@@ -17,9 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef VMA_OPS_H
 #define VMA_OPS_H
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
+#include "blk_io.h"
 
 #define VMA_NONE  0x0
 #define VMA_EXEC  0x1
@@ -33,9 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define VMA_FIXED  0x10 // Fixed mapping address (Non-destructive), pretty picky to use
 #define VMA_THP    0x20 // Transparent hugepages
 #define VMA_KSM    0x40 // Kernel same-page merging
-
-// Forward-declare the file handle type without including <blk_io.h>
-typedef struct blk_io_rvfile rvfile_t;
 
 // Get host page size
 size_t vma_page_size(void);
