@@ -321,7 +321,7 @@ override SRC_USE_RV32 := $(wildcard $(SRCDIR)/cpu/riscv_*.c)
 override CFLAGS_USE_DEBUG := -DDEBUG -g -fno-omit-frame-pointer
 override CFLAGS_USE_DEBUG_FULL := -DDEBUG -Og -ggdb -fno-omit-frame-pointer
 override CFLAGS_USE_LIB := -fPIC
-override CFLAGS_USE_LIB_STATIC := -ffat-lto-objects
+override CFLAGS_USE_LIB_STATIC := $(if $(LTO_SUPPORTED),-ffat-lto-objects)
 
 # Useflag LDFLAGS
 # Needed for floating-point functions like fetestexcept/feraiseexcept
