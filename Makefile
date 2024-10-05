@@ -321,7 +321,6 @@ override SRC_USE_RV32 := $(wildcard $(SRCDIR)/cpu/riscv_*.c)
 override CFLAGS_USE_DEBUG := -DDEBUG -g -fno-omit-frame-pointer
 override CFLAGS_USE_DEBUG_FULL := -DDEBUG -Og -ggdb -fno-omit-frame-pointer
 override CFLAGS_USE_LIB := -fPIC
-override CFLAGS_USE_LIB_STATIC := $(if $(LTO_SUPPORTED),-ffat-lto-objects)
 
 # Useflag LDFLAGS
 # Needed for floating-point functions like fetestexcept/feraiseexcept
@@ -347,7 +346,6 @@ endif
 # Enable building the lib on lib or install target
 ifneq (,$(findstring lib, $(MAKECMDGOALS))$(findstring install, $(MAKECMDGOALS)))
 override USE_LIB := 1
-override USE_LIB_STATIC := 1
 endif
 
 override USEFLAGS := $(sort $(filter USE_%,$(.VARIABLES)))
@@ -426,7 +424,7 @@ override LTO_CHECK_OUT := $(OBJDIR)/lto_lest$(BIN_EXT)
 override LTO_SUPPORTED := $(wildcard $(LTO_CHECK_OUT))
 ifeq (,$(LTO_SUPPORTED))
 override LTO_ERROR := $(shell echo "int main(){return 0;}" | $(CC) -flto -xc -o $(LTO_CHECK_OUT) - 2>&1)
-ifeq (,$(LTO_ERROR))
+ifeq (,$(findstring lto,$(LTO_ERROR))$(findstring LTO,$(LTO_ERROR)))
 override LTO_SUPPORTED := 1
 else
 $(info $(INFO_PREFIX) LTO is not supported by this toolchain: $(wordlist 2,8,$(LTO_ERROR))$(RESET))
