@@ -36,7 +36,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define ATOMIC_ACQ_REL memory_order_acq_rel
 #define ATOMIC_SEQ_CST memory_order_seq_cst
 
-#elif GCC_CHECK_VER(4, 7) && 0 || CLANG_CHECK_VER(3, 1)
+#elif GCC_CHECK_VER(4, 7) || CLANG_CHECK_VER(3, 1)
 // Use libatomic-compatible compiler intrinsics on GCC 4.7+ and Clang 3.1+
 #define GNU_ATOMICS_IMPL 1
 #define GNU_ATOMICS_INTRINS 1
