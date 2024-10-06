@@ -36,8 +36,8 @@ typedef struct {
     uint8_t  ip[16];
 } net_addr_t;
 
-#define NET_TYPE_IPV4 0
-#define NET_TYPE_IPV6 1
+#define NET_TYPE_IPV4 0x0
+#define NET_TYPE_IPV6 0x1
 #define NET_PORT_ANY  0
 
 extern const net_addr_t net_ipv4_any_addr;
@@ -57,8 +57,14 @@ extern const net_addr_t net_ipv6_local_addr;
 #define NET_ERR_DISCONNECT (-3)
 #define NET_ERR_RESET      (-4)
 
-// Parses "[port]"; "0.0.0.0:[port]"; "[::1]:[port]"; "localhost"; etc
-bool        net_parse_addr(net_addr_t* addr, const char* str);
+// Parses IPv6 address string, returns parsed length or 0 on failure
+size_t      net_parse_ipv6(net_addr_t* addr, const char* str);
+
+// Parses IPv4 address string, returns parsed length or 0 on failure
+size_t      net_parse_ipv4(net_addr_t* addr, const char* str);
+
+// Parses string with IPv4/IPv6 and/or port, returns parsed length or 0 on failure
+size_t      net_parse_addr(net_addr_t* addr, const char* str);
 
 // TCP Sockets
 
@@ -96,12 +102,12 @@ typedef struct {
 } net_event_t;
 
 // Incoming connection, data received or peer disconnected
-// Implicitly polled for all watched sockets
-#define NET_POLL_RECV 1
+// Implicitly watched on all added sockets
+#define NET_POLL_RECV 0x1
 
 // Transmission is possible or outbound connect finished
 // Check connection success with net_tcp_status() afterwards
-#define NET_POLL_SEND 2
+#define NET_POLL_SEND 0x2
 
 #define NET_POLL_INF ((uint32_t)-1)
 
