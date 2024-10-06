@@ -569,6 +569,14 @@ all: $(BINARY)
 .PHONY: lib         # Build shared & static libraries
 lib: $(SHARED) $(STATIC)
 
+.PHONY: codesign
+codesign:
+	ifeq ($(OS),darwin)
+	codesign --sign - --force --deep  --options=runtime --entitlements rvvm.entitlements ./
+	else
+	echo "$(RED)FAIL: $(WHITE)Codesign is not supported on this system!$(RESET)"
+	endif
+
 .PHONY: test        # Run RISC-V tests
 test: all
 	$(if $(wildcard $(BUILDDIR)/riscv-tests.tar.gz),,@cd "$(BUILDDIR)"; curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz")
@@ -648,7 +656,11 @@ datarootdir ?= $(prefix)/share
 datadir     ?= $(datarootdir)
 
 .PHONY: install     # Install the package
-install: all lib
+ifeq ($(OS),darwin)
+	install: all lib codesign
+else
+	install: all lib
+endif
 ifeq ($(HOST_POSIX),1)
 	@echo "$(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET)"
 	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
