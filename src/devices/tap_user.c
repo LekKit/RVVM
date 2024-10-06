@@ -1097,28 +1097,46 @@ void tap_attach(tap_dev_t* tap, const tap_net_dev_t* net_dev)
 
 bool tap_portfwd(tap_dev_t* tap, const char* fwd)
 {
-    net_addr_t host, guest;
-    char host_str[256];
-    const char* tcp_prefix = rvvm_strfind(fwd, "tcp/");
-    const char* udp_prefix = rvvm_strfind(fwd, "udp/");
-    if (tcp_prefix || udp_prefix) fwd += 4;
-    const char* delim = rvvm_strfind(fwd, "=");
-    if (!delim) return false;
-    rvvm_strlcpy(host_str, fwd, EVAL_MIN((size_t)(delim - fwd + 1), sizeof(host_str)));
-    if (!net_parse_addr(&host, host_str) || !net_parse_addr(&guest, delim + 1)) {
+    net_addr_t host = {0}, guest = {0};
+    const char* parse = fwd;
+    const char* tcp_prefix = rvvm_strfind(parse, "tcp/");
+    const char* udp_prefix = rvvm_strfind(parse, "udp/");
+    if (tcp_prefix || udp_prefix) parse += 4;
+
+    size_t host_len = net_parse_addr(&host, parse);
+    if (!host_len) {
+        rvvm_error("Failed to parse host address!");
         return false;
     }
-    // Accomodate addr types (If only port is passed at either side, etc)
-    if (guest.type == NET_TYPE_IPV4) guest.type = host.type;
-    if (host.type == NET_TYPE_IPV4) host.type = guest.type;
+    parse += host_len;
+
+    if (rvvm_strfind(parse, "=") == parse) {
+        // Guest address is specified
+        parse++;
+        size_t guest_len = net_parse_addr(&guest, parse);
+        if (!guest_len) {
+            rvvm_error("Failed to parse guest address!");
+            return false;
+        }
+        parse += guest_len;
+    } else {
+        // Same port & default IP in guest
+        guest.port = host.port;
+    }
+
+    if (rvvm_strlen(parse)) {
+        rvvm_error("Invalid port forwarding string!");
+        return false;
+    }
+
+    guest.type = host.type;
     if (guest.type == NET_TYPE_IPV4 && memcmp(guest.ip, net_ipv4_any_addr.ip, PLEN_IPv4) == 0) {
         memcpy(guest.ip, CLIENT_IP, PLEN_IPv4);
     }
-    bool ret = true;
-    if (tcp_prefix || !udp_prefix) ret = bind_port(tap, &guest, &host, true);
-    if (ret && (udp_prefix || !tcp_prefix)) ret = bind_port(tap, &guest, &host, false);
+    bool ret = (udp_prefix && !tcp_prefix) ||  bind_port(tap, &guest, &host, true);
+    ret = ret && ((tcp_prefix && !udp_prefix) || bind_port(tap, &guest, &host, false));
     if (!ret) {
-        rvvm_error("Failed to bind %s", host_str);
+        rvvm_error("Failed to forward port %s", fwd);
         if (host.port && host.port < 1024) rvvm_error("Binding ports below 1024 requires root/admin privilege");
     }
     return ret;
