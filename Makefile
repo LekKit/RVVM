@@ -569,6 +569,38 @@ all: $(BINARY)
 .PHONY: lib         # Build shared & static libraries
 lib: $(SHARED) $(STATIC)
 
+.PHONY: codesign
+codesign: all lib
+ifeq ($(OS),darwin)
+	@for file in "$(BINARY)" "$(SHARED)"; do \
+		if codesign -s - --force --options=runtime --entitlements rvvm_debug.entitlements "$$file"; then \
+		echo "$(WHITE)[$(YELLOW)CODESIGN$(WHITE)] $$file$(RESET)"; \
+		else \
+		echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] $$file$(RESET)"; \
+		exit -1; \
+		fi; \
+	done
+	@echo "$(WHITE)[$(GREEN)CODESIGN$(WHITE)] Codesign complete!$(RESET)"; 
+else
+	@echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] Codesign is not supported on this system!$(RESET)"
+endif
+
+.PHONY: codesign_isolement
+codesign_isolement: all lib
+ifeq ($(OS),darwin)
+	@for file in "$(BINARY)" "$(SHARED)" "$(STATIC)"; do \
+		if codesign -s - --force --options=runtime --entitlements rvvm_debug.entitlements "$$file"; then \
+		echo "$(WHITE)[$(YELLOW)CODESIGN$(WHITE)] $$file$(RESET)"; \
+		else \
+		echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] $$file$(RESET)"; \
+		exit -1; \
+		fi; \
+	done
+	@echo "$(WHITE)[$(GREEN)CODESIGN$(WHITE)] Codesign complete!$(RESET)"; 
+else
+	@echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] Codesign is not supported on this system!$(RESET)"
+endif
+
 .PHONY: test        # Run RISC-V tests
 test: all
 	$(if $(wildcard $(BUILDDIR)/riscv-tests.tar.gz),,@cd "$(BUILDDIR)"; curl -LO "https://github.com/LekKit/riscv-tests/releases/download/rvvm-tests/riscv-tests.tar.gz")
@@ -648,7 +680,11 @@ datarootdir ?= $(prefix)/share
 datadir     ?= $(datarootdir)
 
 .PHONY: install     # Install the package
-install: all lib
+ifeq ($(OS),darwin)
+	install: all lib codesign
+else
+	install: all lib
+endif
 ifeq ($(HOST_POSIX),1)
 	@echo "$(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET)"
 	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
