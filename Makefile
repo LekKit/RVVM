@@ -245,7 +245,8 @@ USE_FPU ?= 1
 
 # Infrastructure
 USE_SPINLOCK_DEBUG ?= 1
-USE_LIB ?= 0
+USE_LIB ?= 1
+USE_LIB_STATIC ?= 0
 USE_JNI ?= 1
 USE_ISOLATION ?= 1
 
@@ -325,7 +326,11 @@ override CFLAGS_USE_SDL = $(shell pkg-config $(SDL_PKGCONF) --cflags-only-I $(NU
 override CFLAGS_USE_X11 = $(shell pkg-config x11 xext --cflags-only-I $(NULL_STDERR))
 override CFLAGS_USE_DEBUG := -DDEBUG -g -fno-omit-frame-pointer
 override CFLAGS_USE_DEBUG_FULL := -DDEBUG -Og -ggdb -fno-omit-frame-pointer
+
+# Enable building the lib on lib or install target
+ifneq (,$(findstring lib, $(MAKECMDGOALS))$(findstring install, $(MAKECMDGOALS)))
 override CFLAGS_USE_LIB := -fPIC
+endif
 
 # Useflag LDFLAGS
 # Needed for floating-point functions like fetestexcept/feraiseexcept
@@ -352,11 +357,6 @@ endif
 
 ifeq ($(USE_TAP_LINUX),1)
 $(info $(WARN_PREFIX) Linux TAP is deprecated in favor of USE_NET due to checksum issues)
-endif
-
-# Enable building the lib on lib or install target
-ifneq (,$(findstring lib, $(MAKECMDGOALS))$(findstring install, $(MAKECMDGOALS)))
-override USE_LIB := 1
 endif
 
 override USEFLAGS := $(sort $(filter USE_%,$(.VARIABLES)))
@@ -578,7 +578,7 @@ $(STATIC): $(LIB_OBJS)
 all: $(BINARY)
 
 .PHONY: lib         # Build shared & static libraries
-lib: $(SHARED) $(STATIC)
+lib: $(if $(findstring 1,$(USE_LIB)),$(SHARED)) $(if $(findstring 1,$(USE_LIB_STATIC)),$(STATIC))
 
 .PHONY: test        # Run RISC-V tests
 test: all
@@ -663,8 +663,12 @@ install: all lib
 ifeq ($(HOST_POSIX),1)
 	@echo "$(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET)"
 	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
+ifeq ($(USE_LIB),1)
 	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
+endif
+ifeq ($(USE_LIB_STATIC),1)
 	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm_static.a
+endif
 	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
 	@install -Dm644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
 	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/
