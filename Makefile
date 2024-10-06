@@ -336,10 +336,21 @@ endif
 # Needed for floating-point functions like fetestexcept/feraiseexcept
 override LDFLAGS_USE_FPU := -lm
 
-ifneq (,$(findstring linux,$(OS))$(findstring darwin,$(OS)))
 # Fix Nix & MacOS brew issues with non-standard library paths
-override LDFLAGS_USE_SDL = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config $(SDL_PKGCONF) --variable libdir $(NULL_STDERR)))
-override LDFLAGS_USE_X11 = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config x11 xext --variable libdir $(NULL_STDERR)))
+ifneq (,$(findstring linux,$(OS))$(findstring darwin,$(OS)))
+ifneq ($(USE_SDL),0)
+override SDL_LIBDIR := $(subst $(SPACE),:,$(shell pkg-config $(SDL_PKGCONF) --variable libdir $(NULL_STDERR)))
+endif
+ifneq (,$(SDL_LIBDIR))
+override LDFLAGS_USE_SDL := -Wl,-rpath,$(SDL_LIBDIR)
+endif
+
+ifneq ($(USE_X11),0)
+override X11_LIBDIR := $(subst $(SPACE),:,$(shell pkg-config x11 xext --variable libdir $(NULL_STDERR)))
+endif
+ifneq (,$(X11_LIBDIR))
+override LDFLAGS_USE_X11 := -Wl,-rpath,$(X11_LIBDIR)
+endif
 endif
 
 # Useflag dependencies
