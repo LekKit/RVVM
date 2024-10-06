@@ -318,6 +318,8 @@ override SRC_USE_RV64 := $(wildcard $(SRCDIR)/cpu/riscv64_*.c)
 override SRC_USE_RV32 := $(wildcard $(SRCDIR)/cpu/riscv_*.c)
 
 # Useflag CFLAGS
+override CFLAGS_USE_SDL := $(shell pkg-config sdl$(subst 1,,$(USE_SDL)) --cflags-only-I $(NULL_STDERR))
+override CFLAGS_USE_X11 := $(shell pkg-config x11 xext --cflags-only-I $(NULL_STDERR))
 override CFLAGS_USE_DEBUG := -DDEBUG -g -fno-omit-frame-pointer
 override CFLAGS_USE_DEBUG_FULL := -DDEBUG -Og -ggdb -fno-omit-frame-pointer
 override CFLAGS_USE_LIB := -fPIC
