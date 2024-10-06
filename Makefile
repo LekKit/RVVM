@@ -572,15 +572,15 @@ lib: $(SHARED) $(STATIC)
 .PHONY: codesign
 codesign:
 ifeq ($(OS),darwin)
-	codesign --sign - --force --deep  --options=runtime --entitlements rvvm_debug.entitlements ./
+	codesign --sign - --force --deep  --options=runtime --entitlements rvvm_debug.entitlements $(BINARY)
 else
 	echo "$(RED)FAIL: $(WHITE)Codesign is not supported on this system!$(RESET)"
 endif
 
 .PHONY: codesign_isolement
-codesign:
+codesign_isolement:
 ifeq ($(OS),darwin)
-	codesign --sign - --force --deep  --options=runtime --entitlements rvvm_isolement.entitlements ./
+	codesign --sign - --force --deep  --options=runtime --entitlements rvvm_isolement.entitlements $(BINARY)
 else
 	echo "$(RED)FAIL: $(WHITE)Codesign is not supported on this system!$(RESET)"
 endif
