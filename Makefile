@@ -546,6 +546,12 @@ ifneq (,$(strip $(SRC_CXX)))
 override CC_LD := $(CXX)
 endif
 
+# Sign binaries on MacOS host
+ifneq (,$(if $(findstring darwin,$(OS)),$(shell which codesign $(NULL_STDERR))))
+override ENTITLEMENTS := $(SRCDIR)/bindings/macos_codesign/rvvm_debug.entitlements
+override CODESIGN = codesign -s - --force --options=runtime --entitlements $(ENTITLEMENTS) $@
+endif
+
 #
 # Print build information
 #
@@ -574,11 +580,13 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
 $(BINARY): $(OBJS)
 	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
+	@$(CODESIGN)
 
 # Shared library
 $(SHARED): $(LIB_OBJS)
 	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
+	@$(CODESIGN)
 
 # Static library
 $(STATIC): $(LIB_OBJS)
