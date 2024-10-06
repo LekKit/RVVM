@@ -108,6 +108,7 @@ struct net_poll {
     net_sock_t* wake_sock[2];
     spinlock_t lock;
     uint32_t  wake;
+    uint32_t  waiters;
     int    max_fd;
 #endif
 };
@@ -808,7 +809,7 @@ static bool net_poll_select_mod_internal(net_poll_t* poll, const net_monitor_t* 
 
 static void net_poll_select_wake_internal(net_poll_t* poll)
 {
-    if (!atomic_swap_uint32(&poll->wake, 1)) {
+    if (atomic_load_uint32(&poll->waiters) && !atomic_swap_uint32(&poll->wake, 1)) {
         char tmp = 0;
         net_tcp_send(poll->wake_sock[1], &tmp, sizeof(tmp));
     }
@@ -973,12 +974,6 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
     }
 #else
     size_t ret = 0;
-    if (atomic_swap_uint32(&poll->wake, 0)) {
-        // Consume wakeup bytes
-        char buffer[256] = {0};
-        net_tcp_recv(poll->wake_sock[0], buffer, sizeof(buffer));
-    }
-
     spin_lock(&poll->lock);
     bool has_events = poll->consumed;
     if (!has_events) {
@@ -991,7 +986,17 @@ size_t net_poll_wait(net_poll_t* poll, net_event_t* events, size_t size, uint32_
         poll->r_ready = poll->r_set;
         poll->w_ready = poll->w_set;
         spin_unlock(&poll->lock);
+
+        // Mark this thread as waiting in select()
+        atomic_add_uint32(&poll->waiters, 1);
+        if (atomic_swap_uint32(&poll->wake, 0)) {
+            // Consume wakeup bytes
+            char buffer[256] = {0};
+            net_tcp_recv(poll->wake_sock[0], buffer, sizeof(buffer));
+        }
         has_events = select(nfds, &poll->r_ready, &poll->w_ready, NULL, wait_ms == NET_POLL_INF ? NULL : &tv) > 0;
+        atomic_sub_uint32(&poll->waiters, 1);
+
         spin_lock(&poll->lock);
     }
     if (has_events) {
