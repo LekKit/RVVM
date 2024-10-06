@@ -44,7 +44,8 @@ endif
 # Some eye-candy stuff
 #
 
-override SPACE :=
+override EMPTY :=
+override SPACE := $(EMPTY) $(EMPTY)
 override RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\e[0m" $(NULL_STDERR))
 override BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\e[1m" $(NULL_STDERR))
 override RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\e[31m" $(NULL_STDERR))$(BOLD)
@@ -54,17 +55,17 @@ override WHITE   := $(RESET)$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
-$(info $(SPACE)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
-$(info $(SPACE) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
-$(info $(SPACE) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
-$(info $(SPACE) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
-$(info $(SPACE) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
-$(info $(SPACE) ░ ▒▓ ░▒▓░   ░ █░     ░ █░  ░ ▒░   ░  ░)
-$(info $(SPACE)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
-$(info $(SPACE)   ░░   ░      ░░       ░░  ░      ░   )
-$(info $(SPACE)    ░           ░        ░         ░   )
-$(info $(SPACE)               ░        ░              )
-$(info $(SPACE))
+$(info $(EMPTY)  ██▀███   ██▒   █▓ ██▒   █▓ ███▄ ▄███▓)
+$(info $(EMPTY) ▓██ ▒ ██▒▓██░   █▒▓██░   █▒▓██▒▀█▀ ██▒)
+$(info $(EMPTY) ▓██ ░▄█ ▒ ▓██  █▒░ ▓██  █▒░▓██    ▓██░)
+$(info $(EMPTY) ▒██▀▀█▄    ▒██ █░░  ▒██ █░░▒██    ▒██ )
+$(info $(EMPTY) ░██▓ ▒██▒   ▒▀█░     ▒▀█░  ▒██▒   ░██▒)
+$(info $(EMPTY) ░ ▒▓ ░▒▓░   ░ █░     ░ █░  ░ ▒░   ░  ░)
+$(info $(EMPTY)   ░▒ ░ ▒░   ░ ░░     ░ ░░  ░  ░      ░)
+$(info $(EMPTY)   ░░   ░      ░░       ░░  ░      ░   )
+$(info $(EMPTY)    ░           ░        ░         ░   )
+$(info $(EMPTY)               ░        ░              )
+$(info $(EMPTY))
 endif
 
 # Message prefixes
@@ -332,8 +333,8 @@ override LDFLAGS_USE_FPU := -lm
 
 ifneq (,$(findstring linux,$(OS))$(findstring darwin,$(OS)))
 # Fix Nix & MacOS brew issues with non-standard library paths
-override LDFLAGS_USE_SDL = -Wl,-rpath,$(shell pkg-config $(SDL_PKGCONF) --variable libdir | tr ' ' : $(NULL_STDERR))
-override LDFLAGS_USE_X11 = -Wl,-rpath,$(shell pkg-config x11 xext --variable libdir | tr ' ' : $(NULL_STDERR))
+override LDFLAGS_USE_SDL = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config $(SDL_PKGCONF) --variable libdir $(NULL_STDERR)))
+override LDFLAGS_USE_X11 = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config x11 xext --variable libdir $(NULL_STDERR)))
 endif
 
 # Useflag dependencies
@@ -542,7 +543,7 @@ $(info $(WHITE)Detected OS: $(GREEN)$(OS_PRETTY)$(RESET))
 $(info $(WHITE)Detected CC: $(GREEN)$(CC_PRETTY)$(RESET))
 $(info $(WHITE)Target arch: $(GREEN)$(ARCH)$(RESET))
 $(info $(WHITE)Version:     $(GREEN)RVVM $(VERSION)$(RESET))
-$(info $(SPACE))
+$(info $(EMPTY))
 
 # Ignore deleted header files
 %.h:
@@ -676,7 +677,7 @@ endif
 .PHONY: help        # Show this help message
 help:
 	$(info $(INFO_PREFIX) Available make useflags:$(RESET))
-	$(foreach useflag, $(USEFLAGS),$(info $(SPACE) $(useflag)=$($(useflag))))
+	$(foreach useflag, $(USEFLAGS),$(info $(EMPTY) $(useflag)=$($(useflag))))
 	$(info $(INFO_PREFIX) Available make targets:$(RESET))
 	@grep '^.PHONY:' Makefile | sed 's/\.PHONY://g'
 	@echo $(NULL_STDERR)
