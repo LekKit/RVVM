@@ -85,6 +85,7 @@ static void print_help(void)
            "    -res 1280x720    Set display(s) resolution\n"
            "    -poweroff_key    Send HID_KEY_POWER instead of exiting on GUI close\n"
            "    -portfwd 8080=80 Port forwarding (Extended: tcp/127.0.0.1:8080=80)\n"
+           "    -vfio_pci   ...  PCI passthrough via VFIO (Example: 00:02.0), needs root\n"
            "    -nvme       ...  Explicitly attach storage image as NVMe device\n"
            "    -ata        ...  Explicitly attach storage image as ATA (IDE) device\n"
            "    -nogui           Disable display GUI\n"
