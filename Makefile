@@ -46,12 +46,12 @@ endif
 
 override EMPTY :=
 override SPACE := $(EMPTY) $(EMPTY)
-override RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\e[0m" $(NULL_STDERR))
-override BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\e[1m" $(NULL_STDERR))
-override RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\e[31m" $(NULL_STDERR))$(BOLD)
-override GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || printf "\\e[32m" $(NULL_STDERR))$(BOLD)
-override YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || printf "\\e[33m" $(NULL_STDERR))$(BOLD)
-override WHITE   := $(RESET)$(BOLD)
+override RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\033[0m" $(NULL_STDERR))
+override BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\033[1m" $(NULL_STDERR))
+override RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\033[31m" $(NULL_STDERR))$(BOLD)
+override GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || printf "\\033[32m" $(NULL_STDERR))$(BOLD)
+override YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || printf "\\033[33m" $(NULL_STDERR))$(BOLD)
+override WHITE   := $(shell tput AF 7 $(NULL_STDERR) || tput setaf 7 $(NULL_STDERR) || printf "\\033[37m" $(NULL_STDERR))$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
@@ -87,11 +87,11 @@ override CC_TRIPLET :=
 endif
 
 # Try to detect target OS via target triplet
-ifneq (,$(findstring android,$(CC_TRIPLET)))
-override OS := Android
-endif
 ifneq (,$(findstring linux,$(CC_TRIPLET)))
 override OS := Linux
+endif
+ifneq (,$(findstring android,$(CC_TRIPLET)))
+override OS := Android
 endif
 ifneq (,$(findstring mingw,$(CC_TRIPLET))$(findstring windows,$(CC_TRIPLET)))
 override OS := Windows
@@ -101,6 +101,15 @@ override OS := Darwin
 endif
 ifneq (,$(findstring emscripten,$(CC_TRIPLET)))
 override OS := Emscripten
+endif
+ifneq (,$(findstring haiku,$(CC_TRIPLET)))
+override OS := Haiku
+endif
+ifneq (,$(findstring serenity,$(CC_TRIPLET)))
+override OS := Serenity
+endif
+ifneq (,$(findstring redox,$(CC_TRIPLET)))
+override OS := Redox
 endif
 
 # Assume target OS matches host if triplet didn't match any known cross toolchains
