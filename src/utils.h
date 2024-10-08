@@ -47,6 +47,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void rvvm_set_loglevel(int level);
 
+// Debug logger
+#ifdef USE_DEBUG
+PRINT_FORMAT void rvvm_debug(const char* str, ...);
+#else
+#define rvvm_debug(...) do {} while (0)
+#endif
+
 // Logging functions (controlled by loglevel)
 PRINT_FORMAT void rvvm_info(const char* str, ...);
 PRINT_FORMAT void rvvm_warn(const char* str, ...);

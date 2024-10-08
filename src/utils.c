@@ -103,6 +103,19 @@ static void log_print(const char* prefix, const char* fmt, va_list args)
     fputs(buffer, stderr);
 }
 
+#ifdef USE_DEBUG
+
+PRINT_FORMAT void rvvm_debug(const char* str, ...)
+{
+    if (loglevel < LOG_INFO) return;
+    va_list args;
+    va_start(args, str);
+    log_print(log_has_colors() ? "\033[33;1mDEBUG\033[37;1m: " : "DEBUG: ", str, args);
+    va_end(args);
+}
+
+#endif
+
 PRINT_FORMAT void rvvm_info(const char* str, ...)
 {
     if (loglevel < LOG_INFO) return;
