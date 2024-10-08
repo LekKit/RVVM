@@ -231,7 +231,7 @@ static deinit_func_t dequeue_func(void)
     return ret;
 }
 
-GNU_DESTRUCTOR static void full_deinit(void)
+GNU_DESTRUCTOR void full_deinit(void)
 {
     rvvm_info("Fully deinitializing librvvm");
     while (true) {

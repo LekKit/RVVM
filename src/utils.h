@@ -114,6 +114,8 @@ static inline size_t align_size_down(size_t x, size_t align)
 
 void call_at_deinit(void (*function)(void));
 
+GNU_DESTRUCTOR void full_deinit(void);
+
 // Portable strtol/ltostr replacement
 size_t   uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base);
 uint64_t str_to_uint_base(const char* str, size_t* len, uint8_t base);
