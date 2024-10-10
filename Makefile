@@ -326,7 +326,7 @@ override SRC_USE_NET := $(SRCDIR)/networking.c $(SRCDIR)/devices/tap_user.c
 override SRC_USE_JIT := $(SRCDIR)/rvjit/rvjit.c $(SRCDIR)/rvjit/rvjit_emit.c
 override SRC_USE_JNI := $(SRCDIR)/bindings/jni/rvvm_jni.c
 override SRC_USE_RV64 := $(wildcard $(SRCDIR)/cpu/riscv64_*.c)
-override SRC_USE_RV32 := $(wildcard $(SRCDIR)/cpu/riscv_*.c)
+override SRC_USE_RV32 := $(wildcard $(SRCDIR)/cpu/riscv32_*.c)
 
 override SDL_PKGCONF := sdl$(subst 1,,$(USE_SDL))
 
