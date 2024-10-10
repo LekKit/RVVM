@@ -32,7 +32,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <time.h>
 
 #if !defined(__APPLE__) && !defined(HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE)
-#if defined(CLOCK_MONOTONIC)
+#include <unistd.h>
+#if defined(CLOCK_MONOTONIC) && _POSIX_VERSION >= 200809
 #define CHOSEN_COND_CLOCK CLOCK_MONOTONIC
 #else
 #include <sys/time.h> // For gettimeofday()

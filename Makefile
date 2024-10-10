@@ -46,12 +46,12 @@ endif
 
 override EMPTY :=
 override SPACE := $(EMPTY) $(EMPTY)
-override RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\e[0m" $(NULL_STDERR))
-override BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\e[1m" $(NULL_STDERR))
-override RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\e[31m" $(NULL_STDERR))$(BOLD)
-override GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || printf "\\e[32m" $(NULL_STDERR))$(BOLD)
-override YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || printf "\\e[33m" $(NULL_STDERR))$(BOLD)
-override WHITE   := $(RESET)$(BOLD)
+override RESET   := $(shell tput me   $(NULL_STDERR) || tput sgr0 $(NULL_STDERR)    || printf "\\033[0m" $(NULL_STDERR))
+override BOLD    := $(shell tput md   $(NULL_STDERR) || tput bold $(NULL_STDERR)    || printf "\\033[1m" $(NULL_STDERR))
+override RED     := $(shell tput AF 1 $(NULL_STDERR) || tput setaf 1 $(NULL_STDERR) || printf "\\033[31m" $(NULL_STDERR))$(BOLD)
+override GREEN   := $(shell tput AF 2 $(NULL_STDERR) || tput setaf 2 $(NULL_STDERR) || printf "\\033[32m" $(NULL_STDERR))$(BOLD)
+override YELLOW  := $(shell tput AF 3 $(NULL_STDERR) || tput setaf 3 $(NULL_STDERR) || printf "\\033[33m" $(NULL_STDERR))$(BOLD)
+override WHITE   := $(shell tput AF 7 $(NULL_STDERR) || tput setaf 7 $(NULL_STDERR) || printf "\\033[37m" $(NULL_STDERR))$(BOLD)
 
 $(info $(RESET))
 ifneq (,$(findstring UTF, $(LANG)))
@@ -87,11 +87,11 @@ override CC_TRIPLET :=
 endif
 
 # Try to detect target OS via target triplet
-ifneq (,$(findstring android,$(CC_TRIPLET)))
-override OS := Android
-endif
 ifneq (,$(findstring linux,$(CC_TRIPLET)))
 override OS := Linux
+endif
+ifneq (,$(findstring android,$(CC_TRIPLET)))
+override OS := Android
 endif
 ifneq (,$(findstring mingw,$(CC_TRIPLET))$(findstring windows,$(CC_TRIPLET)))
 override OS := Windows
@@ -101,6 +101,15 @@ override OS := Darwin
 endif
 ifneq (,$(findstring emscripten,$(CC_TRIPLET)))
 override OS := Emscripten
+endif
+ifneq (,$(findstring haiku,$(CC_TRIPLET)))
+override OS := Haiku
+endif
+ifneq (,$(findstring serenity,$(CC_TRIPLET)))
+override OS := Serenity
+endif
+ifneq (,$(findstring redox,$(CC_TRIPLET)))
+override OS := Redox
 endif
 
 # Assume target OS matches host if triplet didn't match any known cross toolchains
@@ -169,6 +178,9 @@ else
 override BIN_EXT :=
 ifeq ($(OS),darwin)
 override LIB_EXT := .dylib
+ifdef USE_EXPERIMENTAL_SHIT
+override LDFLAGS := -lobjc -framework Cocoa
+endif
 else
 override LIB_EXT := .so
 endif
@@ -336,10 +348,21 @@ endif
 # Needed for floating-point functions like fetestexcept/feraiseexcept
 override LDFLAGS_USE_FPU := -lm
 
-ifneq (,$(findstring linux,$(OS))$(findstring darwin,$(OS)))
 # Fix Nix & MacOS brew issues with non-standard library paths
-override LDFLAGS_USE_SDL = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config $(SDL_PKGCONF) --variable libdir $(NULL_STDERR)))
-override LDFLAGS_USE_X11 = -Wl,-rpath,$(subst $(SPACE),:,$(shell pkg-config x11 xext --variable libdir $(NULL_STDERR)))
+ifneq (,$(findstring linux,$(OS))$(findstring darwin,$(OS)))
+ifneq ($(USE_SDL),0)
+override SDL_LIBDIR := $(subst $(SPACE),:,$(shell pkg-config $(SDL_PKGCONF) --variable libdir $(NULL_STDERR)))
+endif
+ifneq (,$(SDL_LIBDIR))
+override LDFLAGS_USE_SDL := -Wl,-rpath,$(SDL_LIBDIR)
+endif
+
+ifneq ($(USE_X11),0)
+override X11_LIBDIR := $(subst $(SPACE),:,$(shell pkg-config x11 xext --variable libdir $(NULL_STDERR)))
+endif
+ifneq (,$(X11_LIBDIR))
+override LDFLAGS_USE_X11 := -Wl,-rpath,$(X11_LIBDIR)
+endif
 endif
 
 # Useflag dependencies
@@ -535,6 +558,14 @@ ifneq (,$(strip $(SRC_CXX)))
 override CC_LD := $(CXX)
 endif
 
+# Sign binaries on MacOS host
+ifdef USE_EXPERIMENTAL_SHIT=1
+ifneq (,$(if $(findstring darwin,$(OS)),$(shell which codesign $(NULL_STDERR))))
+ENTITLEMENTS := $(SRCDIR)/bindings/macos_codesign/rvvm_debug.entitlements
+CODESIGN = codesign -f -s - --force --options=runtime --timestamp --verbose --entitlements $(ENTITLEMENTS) $@ && codesign -d -vvv --entitlements - $@ && plutil $(ENTITLEMENTS)
+endif
+endif
+
 #
 # Print build information
 #
@@ -563,11 +594,13 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp Makefile
 $(BINARY): $(OBJS)
 	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
+	@$(CODESIGN)
 
 # Shared library
 $(SHARED): $(LIB_OBJS)
 	$(info $(WHITE)[$(GREEN)LD$(WHITE)] $@ $(RESET))
 	@$(CC_LD) $(CFLAGS) $(LIB_OBJS) $(LDFLAGS) -shared -o $@
+	@$(CODESIGN)
 
 # Static library
 $(STATIC): $(LIB_OBJS)
@@ -579,38 +612,6 @@ all: $(BINARY)
 
 .PHONY: lib         # Build shared & static libraries
 lib: $(if $(findstring 1,$(USE_LIB)),$(SHARED)) $(if $(findstring 1,$(USE_LIB_STATIC)),$(STATIC))
-
-.PHONY: codesign
-codesign: all lib
-ifeq ($(OS),darwin)
-	@for file in "$(BINARY)" "$(SHARED)"; do \
-		if codesign -s - --force --options=runtime --entitlements rvvm_debug.entitlements "$$file"; then \
-		echo "$(WHITE)[$(YELLOW)CODESIGN$(WHITE)] $$file$(RESET)"; \
-		else \
-		echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] $$file$(RESET)"; \
-		exit -1; \
-		fi; \
-	done
-	@echo "$(WHITE)[$(GREEN)CODESIGN$(WHITE)] Codesign complete!$(RESET)"; 
-else
-	@echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] Codesign is not supported on this system!$(RESET)"
-endif
-
-.PHONY: codesign_isolement
-codesign_isolement: all lib
-ifeq ($(OS),darwin)
-	@for file in "$(BINARY)" "$(SHARED)" "$(STATIC)"; do \
-		if codesign -s - --force --options=runtime --entitlements rvvm_debug.entitlements "$$file"; then \
-		echo "$(WHITE)[$(YELLOW)CODESIGN$(WHITE)] $$file$(RESET)"; \
-		else \
-		echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] $$file$(RESET)"; \
-		exit -1; \
-		fi; \
-	done
-	@echo "$(WHITE)[$(GREEN)CODESIGN$(WHITE)] Codesign complete!$(RESET)"; 
-else
-	@echo "$(WHITE)[$(RED)FAIL CODESIGN$(WHITE)] Codesign is not supported on this system!$(RESET)"
-endif
 
 .PHONY: test        # Run RISC-V tests
 test: all

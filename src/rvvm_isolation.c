@@ -1,6 +1,6 @@
 /*
 rvvm_isolation.c - Process & thread isolation
-Copyright (C) 2024  LekKit <github.com/LekKit>
+Copyright (C) 2024  LekKit <github.com/LekKit> foxxie <github.com/n30f0x>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -58,6 +58,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #if defined(__OpenBSD__)
 #include <unistd.h>
 #define ISOLATION_PLEDGE_IMPL
+#endif
+
+// Attempt to isolate via POSIX call, without lisp sandbox.
+#if defined (__APPLE__) && defined (USE_DEBUG) && defined (USE_EXPERIMENTAL_SHIT) && CHECK_INCLUDE(sandbox.h, 0) && CHECK_INCLUDE(objc/objc-api.h, 0)
+// && CHECK_INCLUDE(Foundation/Foundation.h, 0) && CHECK_INCLUDE(Cocoa/Cocoa.h, 0)
+#include <sys/stat.h>
+#include <sandbox.h>
+#include <objc/runtime.h>
+#include <objc/message.h>
+#include <objc/objc-api.h>
+#include <objc/NSObject.h>
+// #include <Cocoa/Cocoa.h>
+// #include <Foundation/Foundation.h>
+#define ISOLATION_GATEKEEPER_IMPL
+#define THREAD_LOCK
+// #define PROC_LOCK
 #endif
 
 #endif
@@ -541,14 +557,38 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 
 #endif
 
+#if defined(ISOLATION_GATEKEEPER_IMPL)
+static void engage_gatekeeper_sandboxing (char* namemsg){
+    char* errorbuf;
+    id NSHomeDirectory (void);
+    int sandbox_init_with_parameters(const char *profile, uint64_t flags, const char *const parameters[], char **errorbuf);
+    // for more info see: https://opensource.apple.com/source/objc4/objc4-551.1/runtime/message.h.auto.html
+    // Parameters are passed as an array containing key,value,buff.
+    // TODO: proper profile for rvvm and rvjit
+    const char profile[] = "(version 1)" "(deny default)" "(allow file-read* (subpath (param \"USER_HOME_DIR\")))";
+    const char* restrict_dir = ((const char* (*)(id,SEL)) &objc_msgSend)(NSHomeDirectory(), sel_registerName("UTF8String"));
+    const char* parameters[] = { "USER_HOME_DIR", restrict_dir, NULL };
+    rvvm_debug("Attempting to sandbox %s... \nSANDBOX_NAMED is: %d, profile is: %s restrict_dir is: %s",
+     namemsg, SANDBOX_NAMED, profile, restrict_dir);
+    if (sandbox_init_with_parameters(profile, 0, parameters, &errorbuf)) {
+        DO_ONCE(rvvm_warn("Failed to enforce gatekeeper sandbox on %s: %s!", namemsg, errorbuf));
+        DO_ONCE(sandbox_free_error(errorbuf));
+    } else {
+        DO_ONCE(rvvm_info("Sandbox engaged successfully on %s", namemsg));
+    };
+};
+#endif                                 
+
 void rvvm_restrict_this_thread(void)
 {
     drop_root_user();
     drop_thread_caps();
 #if defined(ISOLATION_SECCOMP_IMPL) && !defined(SANITIZERS_PRESENT)
     seccomp_setup_syscall_filter(false);
-#endif
     // No per-thread pledge on OpenBSD :c
+#elif defined(ISOLATION_GATEKEEPER_IMPL) && defined(THREAD_LOCK)
+    engage_gatekeeper_sandboxing("thread");
+#endif
 }
 
 PUBLIC void rvvm_restrict_process(void)
@@ -563,5 +603,7 @@ PUBLIC void rvvm_restrict_process(void)
     if (pledge("stdio inet tty ioctl dns audio drm vmm error", "")) {
         DO_ONCE(rvvm_warn("Failed to enforce pledge: %s!", strerror(errno)));
     }
+#elif defined(ISOLATION_GATEKEEPER_IMPL) && defined(PROC_LOCK)
+    engage_gatekeeper_sandboxing("process");
 #endif
 }

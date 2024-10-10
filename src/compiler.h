@@ -198,12 +198,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define POP_OPTIMIZATION_SIZE
 #endif
 
-// Guess endianness based on arch/common macros
-// Able to detect big-endian MIPS, ARM, PowerPC, PA-RISC, s390
-#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(__MIPSEB__) || \
-    defined(__ARMEB__) || defined(__hppa__) || defined(__hppa64__) || defined(__s390__)
+// Guess endianness based on __BYTE_ORDER__, and arch ifdefs for older compilers
+#if (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || \
+    defined(__MIPSEB__) || defined(__ARMEB__)
 #define HOST_BIG_ENDIAN 1
-#elif !defined(GNU_EXTS) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#elif defined(_MSC_VER) || !defined(__BYTE_ORDER__) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) || \
+    defined(__i386__) || defined(__x86_64__) || defined(__aarch64__) || defined(__arm__)
 #define HOST_LITTLE_ENDIAN 1
 #endif
 

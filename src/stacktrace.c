@@ -93,7 +93,8 @@ static void signal_handler(int sig)
         rvvm_warn("Stacktrace:");
         stacktrace_print();
     }
-    exit(-sig);
+    full_deinit();
+    _Exit(-sig);
 }
 
 static void set_signal_handler(int sig)

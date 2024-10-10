@@ -83,7 +83,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Use Interlocked Win32 functions
 #include <windows.h>
 
-#elif defined(GNU_EXTS)
+#elif GCC_CHECK_VER(4, 1)
 // Use legacy GNU __sync atomics
 #define SYNC_ATOMICS_IMPL 1
 

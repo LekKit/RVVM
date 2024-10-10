@@ -1,63 +1,45 @@
-# RVVM - The RISC-V Virtual Machine
+<div align="center">
+
+![RVVM Logo](https://github.com/user-attachments/assets/a8d241eb-ebe9-4ceb-a31f-8fd452db75e6 "The “RISC-V” trade name is a registered trade mark of RISC-V International. AmazDooM font is licensed under CC BY-NC 3.0. If you're a designer and have a better logo idea, please open an issue!")
+
 [![version](https://img.shields.io/badge/version-0.7--git-brightgreen?style=for-the-badge)](#-installing) [![Build](https://img.shields.io/github/actions/workflow/status/LekKit/RVVM/build.yml?branch=staging&style=for-the-badge)](https://github.com/LekKit/RVVM/actions/workflows/build.yml) [![Codacy grade](https://img.shields.io/codacy/grade/c77cc7499a784cd293fde58641ce3e46?logo=codacy&style=for-the-badge)](https://app.codacy.com/gh/LekKit/RVVM/dashboard)
-![RISC-V Logo](https://riscv.org/wp-content/uploads/2018/09/riscv-logo-1.png "The “RISC-V” trade name is a registered trade mark of RISC-V International.")
 
-RISC-V CPU & System software implementation written in С
+[![Demo](https://img.shields.io/badge/Check%20it%20out-WASM%20Demo-red?style=for-the-badge)](https://lekkit.github.io/test/index.html) [![Wiki](https://img.shields.io/badge/Wiki-brightgreen?style=for-the-badge)](https://github.com/LekKit/RVVM/wiki)
 
-## What's working
-[![Demo](https://img.shields.io/badge/Check%20it%20out-WASM%20Demo-red?style=for-the-badge)](https://lekkit.github.io/test/index.html)
-- Passes RISC-V compliance/torture tests for both RV64 & RV32
-- OpenSBI, U-Boot, custom firmwares boot and execute properly
-- Working Linux, FreeBSD, OpenBSD, Haiku & other cool OSes
-- Tracing JIT, multicore support
-- Framebuffer display, mouse & keyboard, UART shell
-- NVMe storage drives
-- Networking
+</div>
 
-## 💡 Tell me more...
-- Feature-complete **rv64imafdcb** instruction set, Zkr/Zicbom/Zicboz/Sstc extensions
-- Multicore support (SMP), SV32/SV39/SV48/SV57 MMU
-- Tracing RVJIT with x86_64, ARM64, RISC-V, i386, ARM backends
-  (faster than QEMU, yay!)
-- Bootrom, Kernel Image loading, ELF support
-- Device Tree auto-generation, passing to firmware/kernel
-- RVVM Public API for VM integration
-- UART 16550a-compatible text console
-- PLIC/ACLINT, Timers, Poweroff/reset
-- Generic PCI Express Bus
-- NVMe storage, image TRIM support, fast IO
-- Framebuffer display, GUI for X11/WinAPI/Haiku/SDL
-- I2C HID keyboard & mouse, OpenCores I2C controller
-- Realtek RTL8169, OpenCores Ethernet NICs
-- Userspace networking
-- VFIO PCI Passthrough (For GPUs, etc)
-- SiFive GPIO
-- Deprecated: PS2 keyboard & mouse, ATA (IDE) drive, Linux TAP
+# RVVM - The RISC-V Virtual Machine
+RVVM is a virtual machine / emulator for RISC-V guests, which emphasizes on performance, security, lean code and portability. It already runs a lot of guest operating systems, including Linux, Haiku, FreeBSD, OpenBSD, etc. It also aims to run RISC-V applications on a foreign-arch host without full OS guest & isolation (Userland emulation).
+
+## Main features
+- Fully spec-compliant **rv64imafdcb** instruction set, Zkr/Zicbom/Zicboz/Sstc extensions
+- Tracing JIT with x86_64, ARM64, RISC-V backends - Faster than QEMU TCG
+- Working OpenSBI & U-Boot, Linux, FreeBSD, OpenBSD, Haiku guests
+- Framebuffer display, HID mouse & keyboard, UART terminal
+- NVMe storage drives, TRIM support (Deallocate space on host), fast multi-threaded IO
+- Networking userland stack (Works on any host OS)
+- VFIO PCIe passthrough (For GPUs, etc)
+- Kernel-level isolation to prevent and contain vulnerability exploitation
+- Library API (**librvvm**) for machine/userland emulation, implementing new devices
+- Userland emulation (WIP)
+- Shadow pagetable acceleration (WIP)
+- See [wiki page](https://github.com/LekKit/RVVM/wiki) for full list of features
 
 ## 📦 Installing
-[![Release](https://img.shields.io/badge/BIN-Release-green?style=for-the-badge)](https://github.com/LekKit/RVVM/releases) 
-[![Artifacts](https://img.shields.io/badge/BIN-Artifacts-orange?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
+[![Artifacts](https://img.shields.io/badge/BIN-Artifacts-brightgreen?style=for-the-badge)](https://nightly.link/LekKit/RVVM/workflows/build/staging) [![AUR](https://img.shields.io/badge/Arch%20Linux-AUR-blue?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/rvvm-git) [![Build](https://img.shields.io/badge/Build-Make-red?style=for-the-badge)](#-building)
 
 ## 🛠 Building
 Currently builds using GNU Make (recommended) or CMake and is extremely portable.
-```
+```sh
 git clone https://github.com/LekKit/RVVM
 cd RVVM
 make
 cd release.linux.x86_64
 ./rvvm_x86_64 -h
 ```
-You can configure the build with USE flags. To cross-compile, pass CC=target-gcc to make. If it fails to detect features, pass ARCH/OS variables explicitly.
 
-Examples:
-```
-make lib CC=aarch64-linux-android21-clang USE_FB=0
-make lib all CC=x86_64-w64-mingw32-gcc USE_NET=1
-make CFLAGS=-m32 ARCH=i386 USE_RV64=0 BUILDDIR=build BINARY=rvvm
-make CC=mipseb-linux-gnu-gcc USE_JIT=0 USE_SDL=2
-```
 Alternatively, you can use CMake:
-```
+```sh
 git clone https://github.com/LekKit/RVVM
 cd RVVM
 cmake -S. -Bbuild
@@ -66,49 +48,42 @@ cd build
 ./rvvm -h
 ```
 
+See the [wiki page](https://github.com/LekKit/RVVM/wiki/Building-&-Installing) for advanced build manual like cross-compilation.
+
 ## 🚀 Running
+Example: Launches a dual-core VM with 2 GiB of RAM, 1280x720 display.
+
+Runs OpenSBI + U-Boot firmware, EFI guest from `drive.img`. Forwards host `127.0.0.1:2022` into guest SSH port.
+```sh
+rvvm fw_payload.bin -i drive.img -m 2G -smp 2 -res 1280x720 -portfwd tcp/127.0.0.1:2022=22
 ```
-rvvm fw_payload.bin -i drive.img -m 2G -smp 2 -res 1280x720
-```
-Recommended working firmware, distro images are found in [Release section](https://github.com/LekKit/RVVM/releases/tag/v0.6)
 
 Argument explanation:
 ```
-[fw_payload.bin]       Initial M-mode firmware, OpenSBI + U-Boot in this case
--k, -kernel u-boot.bin Optional S-mode kernel payload (Linux Image, U-Boot, etc)
--i, -image drive.img   Attach storage image (Raw format, NVMe as of now)
--m, -mem 2G            Memory amount (may be suffixed by k/M/G), default 256M
--s, -smp 2             Amount of cores, single-core machine by default
--res 1280x720          Changes framebuffer & VM window resolution
--rv32                  Enable 32-bit RISC-V, 64-bit by default
+[fw_payload.bin]    Initial M-mode firmware, OpenSBI + U-Boot in this case
+-i  drive.img       Attach preferred storage image (Currently as NVMe)
+-m 2G               Memory amount (may be suffixed by k/M/G), default 256M
+-smp 2              Amount of cores, single-core machine by default
+-res 1280x720       Set display(s) resolution
+-portfwd 8080=80    Port forwarding (Extended: tcp/127.0.0.1:8080=80)
  . . .
--cmdline, -append ...  Override/append default kernel command line
--nogui, -nojit         Disable GUI (Use only UART), Disable JIT (for debugging)
--v                     Verbose mode
+-rv32               Enable 32-bit RISC-V, 64-bit by default
+-v                  Verbose mode
+-h                  Extended help
 ```
-Invoke `rvvm -h` to see extended help.
 
-## Tested environments (Likely works elsewhere as well)
-| OS         | JIT                        | GUI          |
-|------------|----------------------------|--------------|
-| Linux      | Works                      | X11, SDL     |
-| Windows    | Works                      | Win32, SDL   |
-| MacOS X    | Works, need signing for M1 | SDL, XQuartz |
-| FreeBSD    | Works                      | X11, SDL     |
-| Haiku      | Works                      | Haiku, SDL   |
-| Serenity   | Works                      | SDL          |
-| Windows CE | Broken (?)                 | Win32        |
-| Emscripten | -                          | SDL          |
+See [wiki page](https://github.com/LekKit/RVVM/wiki/Running) for recommended guest firmware/images and full argument explanation. 
 
 ## ⚖️ License
-This work is dual-licensed under **GPL 3.0** and **MPL 2.0**. You can choose between one of them if you use this work.
+The **librvvm** library is licensed under non-viral [**MPL 2.0**](https://github.com/LekKit/RVVM/blob/staging/LICENSE-MPL) license.
 
-If you wish to use this work as a component of a larger, non-GPL compliant project, you are free to do so in any form
-(Static linkage, binary distribution, modules) as long as you comply with the MPL 2.0 license.
+If you wish to use **librvvm** as a component of a larger, non-GPL compliant project (permissive, etc), you are free<br>
+to do so in any form (Static linkage, binary distribution, modules) as long as you comply with the MPL 2.0 license.
 
-For any form of software distribution, changes made precisely to this work should be made public to comply with either licenses.
+The RVVM Manager and Linux userland emulator (**rvvm** and **rvvm-user**) binaries are licensed under the [**GPL 3.0**](https://github.com/LekKit/RVVM/blob/staging/LICENSE-GPL)<br>
+license, since they are intended for end-users. All the heavy lifting is done by **librvvm** anyways.
 
-Source file headers should be gradually transitioned to reflect their reusability.
+Source file headers should be gradually fixed to reflect this.
 
 ## 🎉 Contributions
 [![PRs are welcome](https://img.shields.io/badge/Pull%20requests-welcome-8957e5?style=for-the-badge&logo=github)](https://github.com/LekKit/RVVM/pulls?q=is%3Apr+is%3Aclosed)
@@ -134,9 +109,10 @@ Source file headers should be gradually transitioned to reflect their reusabilit
 - Vector extensions
 - Other peripherals from real boards (VisionFive 2: GPIO, SPI, flash...)
 - RISC-V APLIC, PCIe MSI Interrupts
-- *Maybe* virtio devices (For better QEMU interoperability, current devices are plenty fast)
+- Virtio devices (For better QEMU interoperability; VirGL via Virtio-GPU)
 - Free page reporting via virtio-balloon
 - *A lot more...*
 - KVM hypervisor? Alternative CPU engines?
+
 
 The RISC-V trade name is a registered trade mark of RISC-V International.

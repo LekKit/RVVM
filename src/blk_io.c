@@ -40,6 +40,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
+#ifndef O_DIRECT
+#define O_DIRECT 0
+#endif
+#ifndef O_SYNC
+#define O_SYNC 0
+#endif
+#ifndef O_DSYNC
+#define O_DSYNC O_SYNC
+#endif
 
 #ifdef __FreeBSD__
 #include <sys/syscall.h> // For SYS_fspacectl()
@@ -124,16 +133,15 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
 #if defined(POSIX_FILE_IMPL)
     int open_flags = O_CLOEXEC;
     if (filemode & RVFILE_RW) {
-        if (filemode & RVFILE_TRUNC) open_flags |= O_TRUNC;
+        if (filemode & RVFILE_DIRECT) open_flags |= O_DIRECT;
+        if (filemode & RVFILE_SYNC)   open_flags |= O_DSYNC;
+        if (filemode & RVFILE_TRUNC)  open_flags |= O_TRUNC;
         if (filemode & RVFILE_CREAT) {
             open_flags |= O_CREAT;
             if (filemode & RVFILE_EXCL) open_flags |= O_EXCL;
         }
         open_flags |= O_RDWR;
     } else open_flags |= O_RDONLY;
-#ifdef O_DIRECT
-    if (filemode & RVFILE_DIRECT) open_flags |= O_DIRECT;
-#endif
 
     int fd = open(filepath, open_flags, 0644);
     if (fd < 0) return NULL;
@@ -153,8 +161,9 @@ rvfile_t* rvopen(const char* filepath, uint8_t filemode)
     DWORD share = (filemode & RVFILE_EXCL) ? 0 : (FILE_SHARE_READ | FILE_SHARE_WRITE);
     DWORD disp = OPEN_EXISTING;
     DWORD attr = FILE_ATTRIBUTE_NORMAL;
-    if (filemode & RVFILE_DIRECT) attr = FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
     if (filemode & RVFILE_RW) {
+        if (filemode & RVFILE_SYNC) attr = FILE_FLAG_WRITE_THROUGH;
+        if (filemode & RVFILE_DIRECT) attr = FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
         if (filemode & RVFILE_CREAT) {
             disp = OPEN_ALWAYS;
             if (filemode & RVFILE_EXCL) disp = CREATE_NEW;

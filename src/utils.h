@@ -47,6 +47,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void rvvm_set_loglevel(int level);
 
+// Debug logger
+#ifdef USE_DEBUG
+PRINT_FORMAT void rvvm_debug(const char* str, ...);
+#else
+#define rvvm_debug(...) do {} while (0)
+#endif
+
 // Logging functions (controlled by loglevel)
 PRINT_FORMAT void rvvm_info(const char* str, ...);
 PRINT_FORMAT void rvvm_warn(const char* str, ...);
@@ -106,6 +113,8 @@ static inline size_t align_size_down(size_t x, size_t align)
 }
 
 void call_at_deinit(void (*function)(void));
+
+GNU_DESTRUCTOR void full_deinit(void);
 
 // Portable strtol/ltostr replacement
 size_t   uint_to_str_base(char* str, size_t size, uint64_t val, uint8_t base);

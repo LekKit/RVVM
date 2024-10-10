@@ -29,9 +29,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define RVFILE_CREAT  0x2  // Create file if it doesn't exist (for RW only)
 #define RVFILE_EXCL   0x4  // Prevent other processes from opening this file
 #define RVFILE_TRUNC  0x8  // Truncate file conents upon opening (for RW only)
-#define RVFILE_DIRECT 0x10 // Bypass kernel pagecache, buffer & offset should be page aligned!
+#define RVFILE_DIRECT 0x10 // Direct read/write DMA with the underlying storage
+#define RVFILE_SYNC   0x20 // Disable writeback buffering
 
-#define RVFILE_LEGAL_FLAGS 0x1F
+#define RVFILE_LEGAL_FLAGS 0x3F
 
 #define RVFILE_SEEK_SET 0x0 // Set file cursor
 #define RVFILE_SEEK_CUR 0x1 // Move file cursor
