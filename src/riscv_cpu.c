@@ -21,13 +21,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 void riscv_run_till_event(rvvm_hart_t* vm)
 {
-    #ifdef USE_RV64
     if (vm->rv64) {
+#ifdef USE_RV64
         riscv64_run_interpreter(vm);
-        return;
+#endif
+    } else {
+#ifdef USE_RV32
+        riscv32_run_interpreter(vm);
+#endif
     }
-    #endif
-    riscv32_run_interpreter(vm);
 }
 
 slow_path void riscv_illegal_insn(rvvm_hart_t* vm, const uint32_t insn)
