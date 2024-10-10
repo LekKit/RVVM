@@ -329,6 +329,12 @@ PUBLIC bool rvvm_mmio_none(rvvm_mmio_dev_t* dev, void* dest, size_t offset, uint
 PUBLIC rvvm_machine_t* rvvm_create_machine(rvvm_addr_t mem_base, size_t mem_size, size_t hart_count, bool rv64)
 {
     stacktrace_init();
+#ifndef USE_RV32
+    if (!rv64) {
+        rvvm_error("RV32 is disabled in this RVVM build");
+        return NULL;
+    }
+#endif
 #ifndef USE_RV64
     if (rv64) {
         rvvm_error("RV64 is disabled in this RVVM build");
