@@ -86,7 +86,7 @@ NOINLINE void do_once_finalize(uint32_t* ticket);
 #define DO_ONCE(expr) \
 do { \
     static uint32_t already_done_once = 0; \
-    if (unlikely(atomic_load_uint32_ex(&already_done_once, ATOMIC_RELAXED) != 2)) { \
+    if (unlikely(atomic_load_uint32_ex(&already_done_once, ATOMIC_ACQUIRE) != 2)) { \
         if (atomic_cas_uint32(&already_done_once, 0, 1)) { \
             expr; \
             atomic_store_uint32_ex(&already_done_once, 2, ATOMIC_RELEASE); \
