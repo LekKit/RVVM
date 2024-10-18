@@ -294,7 +294,9 @@ static void fdt_serialize_string(struct fdt_serializer_ctx* ctx, const char* str
 
 static void fdt_serialize_data(struct fdt_serializer_ctx* ctx, const char* data, uint32_t len)
 {
-    memcpy(ctx->buf + ctx->struct_off, data, len);
+    if (len) {
+        memcpy(ctx->buf + ctx->struct_off, data, len);
+    }
     ctx->struct_off = align_size_up(ctx->struct_off + len, sizeof(uint32_t));
 }
 
