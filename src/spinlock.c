@@ -28,7 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Attemts to claim the lock before blocking in the kernel
 #define SPINLOCK_RETRIES 60
 
-static cond_var_t* global_cond;
+static cond_var_t* global_cond = NULL;
 
 static void spin_deinit(void)
 {
@@ -39,7 +39,7 @@ static void spin_deinit(void)
     condvar_free(cond);
 }
 
-static void spin_cond_init(void)
+static void spin_global_init(void)
 {
     DO_ONCE ({
         global_cond = condvar_create();
@@ -62,15 +62,18 @@ static void spin_lock_debug_report(spinlock_t* lock)
 
 slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
 {
-    for (size_t i=0; i<SPINLOCK_RETRIES; ++i) {
+    for (size_t i = 0; i < SPINLOCK_RETRIES; ++i) {
         // Read lock flag until there's any chance to grab it
         // Improves performance due to cacheline bouncing elimination
         if (atomic_load_uint32_ex(&lock->flag, ATOMIC_ACQUIRE) == 0) {
-            if (spin_try_lock_real(lock, location)) return;
+            if (spin_try_lock_real(lock, location)) {
+                return;
+            }
+            break;
         }
     }
 
-    spin_cond_init();
+    spin_global_init();
 
     rvtimer_t timer = {0};
     rvtimer_init(&timer, 1000);
@@ -102,8 +105,8 @@ slow_path void spin_lock_wait(spinlock_t* lock, const char* location)
 
 slow_path void spin_lock_wake(spinlock_t* lock, uint32_t prev)
 {
-    if (prev) {
-        spin_cond_init();
+    if (prev > 1) {
+        spin_global_init();
         condvar_wake_all(global_cond);
     } else {
         rvvm_warn("Unlock of a non-locked lock!");
