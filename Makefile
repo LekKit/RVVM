@@ -178,6 +178,9 @@ else
 override BIN_EXT :=
 ifeq ($(OS),darwin)
 override LIB_EXT := .dylib
+ifdef USE_EXPERIMENTAL_SHIT
+override LDFLAGS := -lobjc -framework Cocoa
+endif
 else
 override LIB_EXT := .so
 endif
@@ -557,8 +560,8 @@ endif
 
 # Sign binaries on MacOS host
 ifneq (,$(if $(findstring darwin,$(OS)),$(shell which codesign $(NULL_STDERR))))
-override ENTITLEMENTS := $(SRCDIR)/bindings/macos_codesign/rvvm_debug.entitlements
-override CODESIGN = codesign -s - --force --options=runtime --entitlements $(ENTITLEMENTS) $@
+ENTITLEMENTS := $(SRCDIR)/bindings/macos_codesign/rvvm_debug.entitlements
+override CODESIGN = codesign -f -s - --force --options=runtime --timestamp --verbose --entitlements $(ENTITLEMENTS) $@ && codesign -d -vvv --entitlements - $@ && plutil $(ENTITLEMENTS)
 endif
 
 #
