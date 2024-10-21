@@ -677,7 +677,8 @@ endif
 # System-wide install
 DESTDIR ?=
 PREFIX  ?= /usr
-# Handle all the weird GNU-style variables
+
+# Handle all the weird GNU-style installation variables
 prefix      ?= $(PREFIX)
 exec_prefix ?= $(prefix)
 bindir      ?= $(exec_prefix)/bin
@@ -689,21 +690,25 @@ datadir     ?= $(datarootdir)
 .PHONY: install     # Install the package
 install: all lib
 ifeq ($(HOST_POSIX),1)
-	@echo "$(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET)"
-	@install -Dm755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
+	$(info $(INFO_PREFIX) Installing to prefix $(DESTDIR)$(prefix)$(RESET))
+	@install -d                            $(DESTDIR)$(bindir)
+	@install -m 0755 $(BINARY)             $(DESTDIR)$(bindir)/rvvm
 ifeq ($(USE_LIB),1)
-	@install -Dm755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
+	@install -d                            $(DESTDIR)$(libdir)
+	@install -m 0755 $(SHARED)             $(DESTDIR)$(libdir)/librvvm$(LIB_EXT)
 endif
 ifeq ($(USE_LIB_STATIC),1)
-	@install -Dm644 $(STATIC)             $(DESTDIR)$(libdir)/librvvm_static.a
+	@install -d                            $(DESTDIR)$(libdir)
+	@install -m644 $(STATIC)               $(DESTDIR)$(libdir)/librvvm_static.a
 endif
-	@install -Dm644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
-	@install -Dm644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
-	@install -Dm644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/
-	@install -d                           $(DESTDIR)$(datadir)/licenses/rvvm/
-	@install -Dm644 LICENSE*              $(DESTDIR)$(datadir)/licenses/rvvm/
+	@install -d                            $(DESTDIR)$(includedir)/rvvm/
+	@install -m 0644 $(SRCDIR)/rvvmlib.h   $(DESTDIR)$(includedir)/rvvm/rvvmlib.h
+	@install -m 0644 $(SRCDIR)/fdtlib.h    $(DESTDIR)$(includedir)/rvvm/fdtlib.h
+	@install -m 0644 $(SRCDIR)/devices/*.h $(DESTDIR)$(includedir)/rvvm/
+	@install -d                            $(DESTDIR)$(datadir)/licenses/rvvm/
+	@install -m 0644 LICENSE*              $(DESTDIR)$(datadir)/licenses/rvvm/
 else
-	@echo "$(WARN_PREFIX) Install target unsupported on non-POSIX!$(RESET)"
+	$(info $(WARN_PREFIX) Install target unsupported on non-POSIX!$(RESET))
 endif
 
 .PHONY: help        # Show this help message
