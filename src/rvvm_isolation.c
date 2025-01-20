@@ -558,17 +558,17 @@ static void seccomp_setup_syscall_filter(bool all_threads) {
 #endif
 
 #if defined(ISOLATION_GATEKEEPER_IMPL1) || defined(ISOLATION_GATEKEEPER_IMPL2)
-static void mac_sandbox_callback(void (*funcptr)(void)) {
-    void(*func) = funcptr;
+static void mac_sandbox_callback(void (*funcptr)(void *)) {
     if (!rvvm_has_arg("nogui")){
-        dispatch_async_f(dispatch_get_main_queue(), NULL, func);
+        dispatch_async_f(dispatch_get_main_queue(), NULL, funcptr);
     } else {
-        funcptr();
+        funcptr(NULL);
     };
 };
 #endif
 #if defined (ISOLATION_GATEKEEPER_IMPL1)
-static void engage_legacy_sandboxing(void) {
+static void engage_legacy_sandboxing(void * nullable) {
+        UNUSED(nullable);
     	#if defined(__clang__)// && defined(__llvm__)
     	#pragma clang diagnostic push
     	#pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -584,7 +584,8 @@ static void engage_legacy_sandboxing(void) {
     	#endif
 };
 #elif defined (ISOLATION_GATEKEEPER_IMPL2)
-static void engage_cocoa_sandboxing(void) {
+static void engage_cocoa_sandboxing(void * nullable) {
+    UNUSED(nullable);
     char* errorbuf = "";
     id NSHomeDirectory(void);
     const char* restrict_dir = ((const char* (*)(id,SEL, char *)) &objc_msgSend) (NSHomeDirectory(), sel_registerName("UTF8String"), errorbuf);
@@ -652,6 +653,6 @@ PUBLIC void rvvm_restrict_process(void)
     rvvm_warn("Legacy isolation used, may not work in newer versions!");
     mac_sandbox_callback(engage_legacy_sandboxing);
 #elif defined(ISOLATION_GATEKEEPER_IMPL2)
-   	mac_sandbox_callback(engage_cocoa_sandboxing);
+    mac_sandbox_callback(engage_cocoa_sandboxing);
 #endif
 }
