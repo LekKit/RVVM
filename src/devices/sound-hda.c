@@ -714,8 +714,33 @@ static void *sound_hda_stream_worker(void *arg)
     sound_hda_dev_t *hda = arg;
     sound_hda_stream_t *stream = &hda->stream_output;
 
+    // Pace the worker to the hard-coded codec rate (192 kHz × 2 bytes mono
+    // = 384_000 bytes/s). Without pacing, non-blocking backends (ring
+    // buffers, null sinks, etc.) let this loop blast through the BDL as
+    // fast as the CPU allows: LPIB advances instantly, the guest HDA
+    // driver sees its DMA "consume" data faster than it can refill, and
+    // aplay trips ALSA's position-consistency assertion ("pcm_plugin.c
+    // Assertion status->appl_ptr == *pcm->appl.ptr failed").
+    //
+    // Blocking backends (ALSA's snd_pcm_writei) dodge this accidentally —
+    // the writei call blocks when the host buffer is full. Now every
+    // backend gets pacing for free.
+    const uint64_t SAMPLE_RATE_BYTES_PER_SEC = 192000ULL * 2;
+    uint64_t       paced_start_ns  = 0;
+    uint64_t       paced_bytes_out = 0;
+
     uint32_t total = stream->bdl_lvi + 1;
     uint64_t *dma = pci_get_dma_ptr(hda->pci_func, stream->bdl_lo, stream->bdl_len);
+
+    // If the guest set up the stream control register without a valid BDL
+    // (bdl_lo == 0 or invalid), pci_get_dma_ptr returns NULL. Bail out
+    // cleanly — the guest's ALSA driver will eventually retry with a
+    // proper BDL when userspace opens another PCM handle.
+    if (dma == NULL) {
+        atomic_store_uint32_relax(&stream->running, 0);
+        return NULL;
+    }
+
     while (atomic_load_uint32_relax(&stream->running)) {
         for (uint32_t i = 0; i < total; ++i) {
             uint64_t *bdle = &dma[i * 2];
@@ -735,6 +760,28 @@ static void *sound_hda_stream_worker(void *arg)
             } else {
                 UNUSED(addr);
             }
+
+            // Wall-clock pacing. Compute the ideal elapsed time for the
+            // bytes we've emitted so far and sleep the difference.
+            paced_bytes_out += len;
+            uint64_t now_ns = rvtimer_clocksource(1000000000ULL);
+            if (paced_start_ns == 0) {
+                paced_start_ns = now_ns;
+            } else {
+                uint64_t expected_ns = paced_bytes_out * 1000000000ULL
+                                     / SAMPLE_RATE_BYTES_PER_SEC;
+                uint64_t elapsed_ns  = now_ns - paced_start_ns;
+                if (expected_ns > elapsed_ns) {
+                    sleep_ns(expected_ns - elapsed_ns);
+                } else if (elapsed_ns > expected_ns + 100000000ULL) {
+                    // Fell more than 100 ms behind — rebase so we don't
+                    // try to "catch up" by blasting. Happens on machine
+                    // resume from pause, or very long Java-side GCs.
+                    paced_start_ns  = now_ns;
+                    paced_bytes_out = 0;
+                }
+            }
+
             stream->lpib += len;
             // If stream longer than BDL length, reset LPIB.
             if (stream->lpib >= stream->bdl_len)
@@ -759,8 +806,16 @@ static void sound_hda_output_stream_ctl(sound_hda_dev_t *hda, uint32_t cmd)
     stream->ioce = ioce;
 
     if (run) {
-        atomic_store_uint32_relax(&stream->running, 1);
-        thread_create_task(sound_hda_stream_worker, hda);
+        // Only spawn a worker if one isn't already running. Without this
+        // guard, a guest that writes run=1 twice in quick succession (or
+        // a backend slow enough that one aplay ends before the worker
+        // exits and the next aplay starts) can leave two workers walking
+        // the same stream struct. They'd race on stream->lpib / running,
+        // and if one worker's cached dma pointer got stale from a guest
+        // BDL update in between, dereferencing it crashes.
+        if (atomic_cas_uint32(&stream->running, 0, 1)) {
+            thread_create_task(sound_hda_stream_worker, hda);
+        }
     } else {
         atomic_store_uint32_relax(&stream->running, 0);
     }
