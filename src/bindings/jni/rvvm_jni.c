@@ -1,3 +1,6 @@
+#include <pthread.h>
+#include <string.h>
+
 #include "compiler.h"
 #include "tiny-jni.h"
 #include "utils.h"
@@ -443,108 +446,163 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1auto(JNIEn
 }
 
 /*
- * JVM handle cached on first sound_hda_init_with_sink call. JNI guarantees
- * there's only one JVM per process, so one global is enough.
- */
-static JavaVM* g_sound_jvm = NULL;
-
-/*
- * Per-sink context. One allocated per SoundHDA device; lives for the
- * lifetime of the VM (freed via leak — matches the rest of sound-hda.c's
- * "devices live until machine destruction" pattern).
- */
-typedef struct {
-    jobject   sink_ref;      // Global ref to the Java sink object.
-    jmethodID on_audio_mid;  // Cached method ID for onAudio([B)V.
-} jni_sound_sink_ctx_t;
-
-/*
- * Trampoline invoked by RVVM's HDA stream worker thread. Copies the PCM
- * chunk into a Java byte[] and calls sink.onAudio(bytes).
+ * Audio sink design: native ring buffer + Java polling.
  *
- * Thread attachment: the first call on a given RVVM worker thread attaches
- * it to the JVM as a daemon. Subsequent calls reuse the attachment via
- * GetEnv. We never explicitly detach — the stream worker thread exits
- * naturally when the guest stops the stream, and the JVM cleans up the
- * attachment state at that point.
+ * Rationale: on JDK 21 / macOS arm64, AttachCurrentThread(AsDaemon) on an
+ * RVVM-created pthread returns JNI_ERR. Rather than fight the JVM's thread
+ * attach semantics, we stage PCM in a native mutex-guarded ring and have
+ * Java poll it from a thread that's already JVM-owned (server tick).
+ *
+ * Layout:
+ *   RVVM stream_worker thread --write-->  native ring buffer  <--poll-- Java server-tick thread
+ *
+ * Capacity: 1 MiB — ~2.7 seconds at 192 kHz mono 16-bit. If the Java
+ * side falls behind more than that, the ring drops the oldest bytes
+ * (latency over completeness, same philosophy as the stream worker's
+ * under-run handling).
  */
-static void jni_sound_sink_write(void* user_data, void* pcm_data, size_t size)
+#define JNI_SOUND_RING_BYTES (1u << 20)
+
+typedef struct {
+    pthread_mutex_t lock;
+    uint8_t         buffer[JNI_SOUND_RING_BYTES];
+    uint32_t        head;          // read position (next byte to read)
+    uint32_t        tail;          // write position (next byte to write)
+    uint32_t        count;         // bytes currently buffered
+    uint64_t        total_pushed;  // monotonic counter of bytes ever written
+    uint64_t        total_popped;  // monotonic counter of bytes ever read
+    uint64_t        dropped;       // bytes dropped due to overflow
+} jni_sound_ring_t;
+
+static void jni_sound_ring_write(void* user_data, void* pcm_data, size_t size)
 {
-    jni_sound_sink_ctx_t* ctx = (jni_sound_sink_ctx_t*)user_data;
-    if (ctx == NULL || g_sound_jvm == NULL) return;
+    jni_sound_ring_t* r = (jni_sound_ring_t*)user_data;
+    if (r == NULL || pcm_data == NULL || size == 0) return;
 
-    JNIEnv* env       = NULL;
-    jint    get_result = (*g_sound_jvm)->GetEnv(g_sound_jvm, (void**)&env, JNI_VERSION_1_6);
-    if (get_result == JNI_EDETACHED) {
-        // First call on this native thread — attach as daemon so it doesn't
-        // block JVM shutdown. JNI docs promise the attachment survives until
-        // the thread exits or explicitly detaches.
-        if ((*g_sound_jvm)->AttachCurrentThreadAsDaemon(g_sound_jvm, (void**)&env, NULL) != JNI_OK) {
-            return;
-        }
-    } else if (get_result != JNI_OK) {
-        return;
+    pthread_mutex_lock(&r->lock);
+    // If we'd overflow, evict the oldest bytes first. Preserves head-of-stream
+    // alignment better than dropping the incoming data.
+    if (r->count + size > JNI_SOUND_RING_BYTES) {
+        size_t to_evict = (r->count + size) - JNI_SOUND_RING_BYTES;
+        if (to_evict > r->count) to_evict = r->count;
+        r->head = (r->head + to_evict) % JNI_SOUND_RING_BYTES;
+        r->count -= to_evict;
+        r->dropped += to_evict;
     }
+    const uint8_t* src = (const uint8_t*)pcm_data;
+    uint32_t first = JNI_SOUND_RING_BYTES - r->tail;
+    if (first > size) first = size;
+    memcpy(r->buffer + r->tail, src, first);
+    if (size > first) {
+        memcpy(r->buffer, src + first, size - first);
+    }
+    r->tail = (r->tail + size) % JNI_SOUND_RING_BYTES;
+    r->count += size;
+    r->total_pushed += size;
+    pthread_mutex_unlock(&r->lock);
+}
 
-    // Java-side exception paranoia: if the sink's onAudio throws, we must
-    // not let the exception propagate into the C side. Clear after each
-    // call to keep the HDA worker thread healthy.
-    jbyteArray arr = (*env)->NewByteArray(env, (jsize)size);
-    if (arr != NULL) {
-        (*env)->SetByteArrayRegion(env, arr, 0, (jsize)size, (const jbyte*)pcm_data);
-        (*env)->CallVoidMethod(env, ctx->sink_ref, ctx->on_audio_mid, arr);
-        if ((*env)->ExceptionCheck(env)) {
-            (*env)->ExceptionClear(env);
-        }
-        (*env)->DeleteLocalRef(env, arr);
-    } else if ((*env)->ExceptionCheck(env)) {
-        (*env)->ExceptionClear(env);
+static size_t jni_sound_ring_read(jni_sound_ring_t* r, uint8_t* out, size_t max)
+{
+    pthread_mutex_lock(&r->lock);
+    size_t to_read = r->count < max ? r->count : max;
+    uint32_t first = JNI_SOUND_RING_BYTES - r->head;
+    if (first > to_read) first = to_read;
+    memcpy(out, r->buffer + r->head, first);
+    if (to_read > first) {
+        memcpy(out + first, r->buffer, to_read - first);
     }
+    r->head = (r->head + to_read) % JNI_SOUND_RING_BYTES;
+    r->count -= to_read;
+    r->total_popped += to_read;
+    pthread_mutex_unlock(&r->lock);
+    return to_read;
 }
 
 /*
- * Register a Java SoundSink callback that receives every PCM chunk the
- * guest writes to the HDA controller. The sink must expose a method with
- * signature `void onAudio(byte[] pcm)` — chunks arrive in whatever size
- * the guest's BDL entries dictate (typically 128-frame periods = 256 bytes
- * at 16-bit mono).
+ * Attach an HDA PCI device whose PCM output lands in a native ring
+ * buffer. Returns a *sink handle* (pointer to jni_sound_ring_t) as jlong;
+ * the PCI device handle is returned via {@code pci_dev_out[0]} so the
+ * Java caller can hand it to {@code PCIDevice.setPCIHandle}.
  *
- * Returns the pci_dev_t* handle (as jlong) for PCIDevice.setPCIHandle, or
- * 0 if attachment failed.
+ * Two return values are awkward in JNI; a single-element jlong array is
+ * the least-bad way to hand back the PCI device.
+ *
+ * Returns 0 on failure (sink handle); pci_dev_out[0] is then 0 too.
  */
-JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1with_1sink(
-    JNIEnv* env, jclass cls, jlong machine, jobject sink)
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1with_1ring(
+    JNIEnv* env, jclass cls, jlong machine, jlongArray pci_dev_out)
 {
     UNUSED(cls);
-    if (sink == NULL) return 0;
 
-    if (g_sound_jvm == NULL) {
-        (*env)->GetJavaVM(env, &g_sound_jvm);
-    }
-    if (g_sound_jvm == NULL) return 0;
-
-    jclass sink_class = (*env)->GetObjectClass(env, sink);
-    if (sink_class == NULL) return 0;
-    jmethodID on_audio_mid = (*env)->GetMethodID(env, sink_class, "onAudio", "([B)V");
-    (*env)->DeleteLocalRef(env, sink_class);
-    if (on_audio_mid == NULL) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    jni_sound_ring_t* ring = safe_new_obj(jni_sound_ring_t);
+    if (pthread_mutex_init(&ring->lock, NULL) != 0) {
         return 0;
     }
 
-    jni_sound_sink_ctx_t* ctx = safe_new_obj(jni_sound_sink_ctx_t);
-    ctx->sink_ref     = (*env)->NewGlobalRef(env, sink);
-    ctx->on_audio_mid = on_audio_mid;
-
     pci_dev_t* dev = sound_hda_init_auto_ex((rvvm_machine_t*)(size_t)machine,
-                                            jni_sound_sink_write,
-                                            ctx);
+                                            jni_sound_ring_write,
+                                            ring);
     if (dev == NULL) {
-        (*env)->DeleteGlobalRef(env, ctx->sink_ref);
-        // ctx leaked — matches the existing pattern in sound-hda.c; revisit
-        // if sound_hda_remove ever gets a proper teardown.
+        pthread_mutex_destroy(&ring->lock);
+        // ring is leaked — matches the existing sound-hda.c pattern where
+        // devices live until machine destruction with no cleanup.
+        return 0;
     }
-    return (jlong)(size_t)dev;
+
+    if (pci_dev_out != NULL) {
+        jlong out[1] = { (jlong)(size_t)dev };
+        (*env)->SetLongArrayRegion(env, pci_dev_out, 0, 1, out);
+    }
+    return (jlong)(size_t)ring;
+}
+
+/*
+ * Drain up to {@code out.length} bytes of queued PCM from the ring into
+ * the supplied byte array. Returns the number of bytes actually read.
+ * Called from Java on a JVM-owned thread (server tick) so no thread
+ * attachment is needed.
+ */
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1poll(
+    JNIEnv* env, jclass cls, jlong sink_handle, jbyteArray out)
+{
+    UNUSED(cls);
+    if (sink_handle == 0 || out == NULL) return 0;
+    jni_sound_ring_t* ring = (jni_sound_ring_t*)(size_t)sink_handle;
+    jsize cap = (*env)->GetArrayLength(env, out);
+    if (cap <= 0) return 0;
+
+    // Stack-allocate small chunks, heap for larger (ring buffer is up to
+    // 1 MiB so Java-side polls typically ask for tens of KB). Use a
+    // temporary local buffer to avoid holding the ring mutex during JNI
+    // array ops.
+    uint8_t* tmp = safe_new_arr(uint8_t, (size_t)cap);
+    size_t n = jni_sound_ring_read(ring, tmp, (size_t)cap);
+    if (n > 0) {
+        (*env)->SetByteArrayRegion(env, out, 0, (jsize)n, (const jbyte*)tmp);
+    }
+    free(tmp);
+    return (jint)n;
+}
+
+/* Stats — monotonic counters useful for tests and instrumentation. */
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1stats(
+    JNIEnv* env, jclass cls, jlong sink_handle, jint which)
+{
+    UNUSED(env); UNUSED(cls);
+    if (sink_handle == 0) return 0;
+    jni_sound_ring_t* ring = (jni_sound_ring_t*)(size_t)sink_handle;
+    pthread_mutex_lock(&ring->lock);
+    jlong v = 0;
+    switch (which) {
+        case 0: v = (jlong)ring->total_pushed; break;
+        case 1: v = (jlong)ring->total_popped; break;
+        case 2: v = (jlong)ring->dropped;      break;
+        case 3: v = (jlong)ring->count;        break;
+        default: v = 0;
+    }
+    pthread_mutex_unlock(&ring->lock);
+    return v;
 }
 
 JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_nvme_1init(JNIEnv* env, jclass cls, //
