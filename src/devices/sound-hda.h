@@ -20,10 +20,41 @@ struct sound_subsystem_t {
     void (*write)(sound_subsystem_t *subsystem, void *data, size_t size);
 };
 
+/*
+ * Public callback type for library consumers who want to install their own
+ * host-side audio sink without going through a compile-time USE_* backend.
+ *
+ * The HDA stream worker invokes this callback on its own thread with a chunk
+ * of 16-bit signed little-endian PCM data (mono, 192 kHz, matching the
+ * hard-coded HDA codec format). `user_data` is whatever pointer was passed
+ * to sound_hda_init_ex / sound_hda_init_auto_ex.
+ *
+ * Consumers (e.g. JNI embedders routing audio into the JVM, or a WAV-capture
+ * test harness) supply their own write function instead of relying on a
+ * backend compiled into librvvm.
+ */
+typedef void (*sound_hda_backend_write_fn)(void *user_data, void *pcm_data, size_t size);
+
 // Internal use
 bool alsa_sound_init(sound_subsystem_t *sound);
 
 PUBLIC pci_dev_t* sound_hda_init(pci_bus_t* pci_bus);
 PUBLIC pci_dev_t* sound_hda_init_auto(rvvm_machine_t* machine);
+
+/*
+ * Extended init variants that let the caller plug in a custom host-side
+ * audio sink. Pass NULL for `write_fn` to fall back to the compile-time
+ * default (USE_ALSA if enabled, silent otherwise — same behaviour as
+ * sound_hda_init / sound_hda_init_auto).
+ *
+ * When a non-NULL `write_fn` is supplied, the HDA device skips any
+ * compiled-in backend and routes every PCM chunk through `write_fn`.
+ */
+PUBLIC pci_dev_t* sound_hda_init_ex(pci_bus_t* pci_bus,
+                                    sound_hda_backend_write_fn write_fn,
+                                    void* user_data);
+PUBLIC pci_dev_t* sound_hda_init_auto_ex(rvvm_machine_t* machine,
+                                         sound_hda_backend_write_fn write_fn,
+                                         void* user_data);
 
 #endif

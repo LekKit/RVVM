@@ -706,14 +706,18 @@ static void *sound_hda_stream_worker(void *arg)
             uint32_t len  = bdle[1] & 0xFFFFFFFF;
             uint8_t  ioc  = bdle[1] >> 32 & 1;
 
-#ifdef USE_ALSA
-            void *pcm = pci_get_dma_ptr(hda->pci_func, addr, len);
-            hda->subsystem.write(&hda->subsystem, pcm, len);
-#else
-            // TODO: Stub backend or don't compile this file if no
-            //       sound compilation option?
-            UNUSED(addr);
-#endif
+            // Dispatch PCM to the configured host-side backend. If no backend
+            // was installed at init time (neither a compile-time USE_ALSA nor
+            // a caller-supplied write_fn via sound_hda_init_ex), the HDA
+            // device enumerates on the PCI bus but this path is a no-op —
+            // the guest sees a working device and the LPIB counter advances
+            // so its driver doesn't stall, but PCM data is silently dropped.
+            if (hda->subsystem.write != NULL) {
+                void *pcm = pci_get_dma_ptr(hda->pci_func, addr, len);
+                hda->subsystem.write(&hda->subsystem, pcm, len);
+            } else {
+                UNUSED(addr);
+            }
             stream->lpib += len;
             // If stream longer than BDL length, reset LPIB.
             if (stream->lpib >= stream->bdl_len)
@@ -877,7 +881,29 @@ static bool sound_hda_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset
     return true;
 }
 
-PUBLIC pci_dev_t *sound_hda_init(pci_bus_t *pci_bus)
+/*
+ * Bridge struct stored in sound_subsystem_t.sound_data when a caller-supplied
+ * backend is installed via sound_hda_init_ex. Adapts the public two-argument
+ * callback to the subsystem's three-argument shape. Freed... never. The HDA
+ * device itself is leaked on machine destruction today (see sound_hda_remove),
+ * so this follows the same lifecycle.
+ */
+typedef struct {
+    sound_hda_backend_write_fn user_fn;
+    void                       *user_data;
+} sound_hda_backend_bridge_t;
+
+static void sound_hda_backend_bridge_write(sound_subsystem_t *sub, void *data, size_t size)
+{
+    sound_hda_backend_bridge_t *bridge = (sound_hda_backend_bridge_t *)sub->sound_data;
+    if (bridge != NULL && bridge->user_fn != NULL) {
+        bridge->user_fn(bridge->user_data, data, size);
+    }
+}
+
+PUBLIC pci_dev_t *sound_hda_init_ex(pci_bus_t *pci_bus,
+                                    sound_hda_backend_write_fn write_fn,
+                                    void *user_data)
 {
     sound_hda_dev_t *sound_hda = safe_new_obj(sound_hda_dev_t);
 
@@ -902,12 +928,39 @@ PUBLIC pci_dev_t *sound_hda_init(pci_bus_t *pci_bus)
     if (pci_dev)
         sound_hda->pci_func = pci_get_device_func(pci_dev, 0);
 
+    // Backend selection priority:
+    //   1. Caller-supplied write_fn (via sound_hda_init_ex) — skip the
+    //      compile-time default. Used by embedders that want to route audio
+    //      somewhere other than the host's native audio stack (JNI → JVM,
+    //      WAV capture fixtures, alternate backends, etc.).
+    //   2. Compile-time USE_ALSA — the traditional Linux host path.
+    //   3. Neither — PCI device enumerates but the stream worker drops PCM.
+    if (write_fn != NULL) {
+        sound_hda_backend_bridge_t *bridge = safe_new_obj(sound_hda_backend_bridge_t);
+        bridge->user_fn = write_fn;
+        bridge->user_data = user_data;
+        sound_hda->subsystem.sound_data = bridge;
+        sound_hda->subsystem.write = sound_hda_backend_bridge_write;
+    } else {
 #ifdef USE_ALSA
-    if (!alsa_sound_init(&sound_hda->subsystem))
-        return NULL;
+        if (!alsa_sound_init(&sound_hda->subsystem))
+            return NULL;
 #endif
+    }
 
     return pci_dev;
+}
+
+PUBLIC pci_dev_t *sound_hda_init_auto_ex(rvvm_machine_t *machine,
+                                         sound_hda_backend_write_fn write_fn,
+                                         void *user_data)
+{
+    return sound_hda_init_ex(rvvm_get_pci_bus(machine), write_fn, user_data);
+}
+
+PUBLIC pci_dev_t *sound_hda_init(pci_bus_t *pci_bus)
+{
+    return sound_hda_init_ex(pci_bus, NULL, NULL);
 }
 
 PUBLIC pci_dev_t *sound_hda_init_auto(rvvm_machine_t *machine)
