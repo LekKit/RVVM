@@ -22,6 +22,7 @@
 
 #include "devices/nvme.h"
 #include "devices/rtl8169.h"
+#include "devices/sound-hda.h"
 
 #include "devices/gpio-sifive.h"
 #include "devices/hid_api.h"
@@ -431,6 +432,119 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_rtl8169_1init(JNIEnv* env, j
     UNUSED(env);
     UNUSED(cls);
     return (size_t)rtl8169_init((pci_bus_t*)(size_t)pci_bus, (tap_dev_t*)(size_t)tap);
+}
+
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1auto(JNIEnv* env, jclass cls, //
+                                                                           jlong machine)
+{
+    UNUSED(env);
+    UNUSED(cls);
+    return (size_t)sound_hda_init_auto((rvvm_machine_t*)(size_t)machine);
+}
+
+/*
+ * JVM handle cached on first sound_hda_init_with_sink call. JNI guarantees
+ * there's only one JVM per process, so one global is enough.
+ */
+static JavaVM* g_sound_jvm = NULL;
+
+/*
+ * Per-sink context. One allocated per SoundHDA device; lives for the
+ * lifetime of the VM (freed via leak — matches the rest of sound-hda.c's
+ * "devices live until machine destruction" pattern).
+ */
+typedef struct {
+    jobject   sink_ref;      // Global ref to the Java sink object.
+    jmethodID on_audio_mid;  // Cached method ID for onAudio([B)V.
+} jni_sound_sink_ctx_t;
+
+/*
+ * Trampoline invoked by RVVM's HDA stream worker thread. Copies the PCM
+ * chunk into a Java byte[] and calls sink.onAudio(bytes).
+ *
+ * Thread attachment: the first call on a given RVVM worker thread attaches
+ * it to the JVM as a daemon. Subsequent calls reuse the attachment via
+ * GetEnv. We never explicitly detach — the stream worker thread exits
+ * naturally when the guest stops the stream, and the JVM cleans up the
+ * attachment state at that point.
+ */
+static void jni_sound_sink_write(void* user_data, void* pcm_data, size_t size)
+{
+    jni_sound_sink_ctx_t* ctx = (jni_sound_sink_ctx_t*)user_data;
+    if (ctx == NULL || g_sound_jvm == NULL) return;
+
+    JNIEnv* env       = NULL;
+    jint    get_result = (*g_sound_jvm)->GetEnv(g_sound_jvm, (void**)&env, JNI_VERSION_1_6);
+    if (get_result == JNI_EDETACHED) {
+        // First call on this native thread — attach as daemon so it doesn't
+        // block JVM shutdown. JNI docs promise the attachment survives until
+        // the thread exits or explicitly detaches.
+        if ((*g_sound_jvm)->AttachCurrentThreadAsDaemon(g_sound_jvm, (void**)&env, NULL) != JNI_OK) {
+            return;
+        }
+    } else if (get_result != JNI_OK) {
+        return;
+    }
+
+    // Java-side exception paranoia: if the sink's onAudio throws, we must
+    // not let the exception propagate into the C side. Clear after each
+    // call to keep the HDA worker thread healthy.
+    jbyteArray arr = (*env)->NewByteArray(env, (jsize)size);
+    if (arr != NULL) {
+        (*env)->SetByteArrayRegion(env, arr, 0, (jsize)size, (const jbyte*)pcm_data);
+        (*env)->CallVoidMethod(env, ctx->sink_ref, ctx->on_audio_mid, arr);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+        }
+        (*env)->DeleteLocalRef(env, arr);
+    } else if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+    }
+}
+
+/*
+ * Register a Java SoundSink callback that receives every PCM chunk the
+ * guest writes to the HDA controller. The sink must expose a method with
+ * signature `void onAudio(byte[] pcm)` — chunks arrive in whatever size
+ * the guest's BDL entries dictate (typically 128-frame periods = 256 bytes
+ * at 16-bit mono).
+ *
+ * Returns the pci_dev_t* handle (as jlong) for PCIDevice.setPCIHandle, or
+ * 0 if attachment failed.
+ */
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1with_1sink(
+    JNIEnv* env, jclass cls, jlong machine, jobject sink)
+{
+    UNUSED(cls);
+    if (sink == NULL) return 0;
+
+    if (g_sound_jvm == NULL) {
+        (*env)->GetJavaVM(env, &g_sound_jvm);
+    }
+    if (g_sound_jvm == NULL) return 0;
+
+    jclass sink_class = (*env)->GetObjectClass(env, sink);
+    if (sink_class == NULL) return 0;
+    jmethodID on_audio_mid = (*env)->GetMethodID(env, sink_class, "onAudio", "([B)V");
+    (*env)->DeleteLocalRef(env, sink_class);
+    if (on_audio_mid == NULL) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return 0;
+    }
+
+    jni_sound_sink_ctx_t* ctx = safe_new_obj(jni_sound_sink_ctx_t);
+    ctx->sink_ref     = (*env)->NewGlobalRef(env, sink);
+    ctx->on_audio_mid = on_audio_mid;
+
+    pci_dev_t* dev = sound_hda_init_auto_ex((rvvm_machine_t*)(size_t)machine,
+                                            jni_sound_sink_write,
+                                            ctx);
+    if (dev == NULL) {
+        (*env)->DeleteGlobalRef(env, ctx->sink_ref);
+        // ctx leaked — matches the existing pattern in sound-hda.c; revisit
+        // if sound_hda_remove ever gets a proper teardown.
+    }
+    return (jlong)(size_t)dev;
 }
 
 JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_nvme_1init(JNIEnv* env, jclass cls, //
