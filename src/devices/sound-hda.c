@@ -11,6 +11,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "atomics.h"
 #include "compiler.h"
 #include "mem_ops.h"
+#include "rvtimer.h"
 #include "threading.h"
 #include "spinlock.h"
 #include "utils.h"
@@ -337,7 +338,23 @@ typedef struct {
 
 static void sound_hda_remove(rvvm_mmio_dev_t* dev)
 {
-    UNUSED(dev);
+    // Halt the stream worker(s) before the PCI function is torn down.
+    // Without this, a worker still walking the BDL will call
+    // pci_send_irq() / pci_get_dma_ptr() on a freed pci_func and crash.
+    //
+    // Setting running=0 asks the worker to exit at its next BDL-entry
+    // boundary (typically within a few ms for a 128-frame period).
+    // Ideally we'd also thread_join on the worker, but RVVM's
+    // thread_create_task fire-and-forgets, so we settle for a short
+    // spin-wait: give the worker time to observe the flag.
+    sound_hda_dev_t *hda = dev->data;
+    if (hda != NULL) {
+        atomic_store_uint32_relax(&hda->stream_output.running, 0);
+        // The HDA stream period is 128 frames at 192 kHz = ~667 µs wall.
+        // 20 ms of sleep is 30x that — comfortably long enough for the
+        // worker to finish its current iteration.
+        sleep_ms(20);
+    }
 }
 
 static rvvm_mmio_type_t sound_hda_type = {
