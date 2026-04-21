@@ -82,8 +82,23 @@ static inline size_t mem_suffix_shift(char suffix)
     }
 }
 
-// Generate random bytes
+// Generate random bytes — xorshift64 seeded by monotonic time. Fast and
+// unpredictable to non-adversarial callers. NOT suitable for cryptographic
+// use: the 64-bit state is trivially recoverable from a single 64-bit output.
+// Use {@link rvvm_csprng_bytes} when output may reach an attacker-visible
+// crypto boundary (TLS keying, entropy seeding, etc.).
 void rvvm_randombytes(void* buffer, size_t size);
+
+// Generate cryptographically strong random bytes from the host OS CSPRNG.
+// Linux: getrandom(2). macOS/BSD: getentropy. Windows: BCryptGenRandom.
+// Falls back to /dev/urandom on older POSIX. Output is suitable for the
+// Zkr seed CSR (ratified virtual entropy source, >=256-bit security) and
+// any other crypto-adjacent use.
+//
+// Significantly slower than rvvm_randombytes — expect a syscall per call.
+// Don't use on hot paths (per-packet TCP ISN generation etc.); the fast
+// PRNG is the right choice there.
+void rvvm_csprng_bytes(void* buffer, size_t size);
 
 // Generate random serial number (0-9, A-Z)
 void rvvm_randomserial(char* serial, size_t size);

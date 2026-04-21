@@ -165,8 +165,25 @@ static inline bool riscv_csr_seed(rvvm_hart_t* vm, rvvm_uxlen_t* dest)
 {
     if (riscv_csr_seed_enabled(vm)) {
         uint16_t seed = 0;
-        rvvm_randombytes(&seed, sizeof(seed));
-        return riscv_csr_const(dest, seed);
+        // Ratified Zkr 1.0.1 seed CSR layout:
+        //   [31:30] OPST — 00 BIST, 01 WAIT, 10 ES16 (success), 11 DEAD
+        //   [29:16] reserved / custom, must read as zero
+        //   [15: 0] 16 bits of entropy, only valid when OPST=ES16
+        //
+        // A virtual entropy source (Section 4.4.3) is required to return
+        // ES16-tagged entropy every poll, from a DRBG with at least
+        // 256-bit security. rvvm_csprng_bytes pulls from the host OS
+        // CSPRNG (getrandom / getentropy / BCryptGenRandom) which meets
+        // that bar; rvvm_randombytes would NOT — its xorshift64 state is
+        // recoverable from a single 64-bit output.
+        //
+        // Without OPST=ES16 the raw 16 bits look like OPST=BIST to the
+        // guest; Linux's csr_seed_long then treats each poll as a
+        // self-test indication, loops 100 times through cpu_relax, and
+        // returns false — effectively making Zkr a no-op at best and a
+        // 100x-slower no-op at worst. Wire in the success marker.
+        rvvm_csprng_bytes(&seed, sizeof(seed));
+        return riscv_csr_const(dest, 0x80000000ULL | seed);
     }
     return false;
 }

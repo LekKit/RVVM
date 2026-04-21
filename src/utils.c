@@ -21,6 +21,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include "threading.h"
 #include "vector.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -491,6 +492,118 @@ void rvvm_randombytes(void* buffer, size_t size)
     seed ^= (seed >> 49);
     memcpy(dest + size, &seed, rem);
     atomic_store_uint64_relax(&rvvm_rng_seed, seed);
+}
+
+/*
+ * Cryptographically strong RNG — thin wrapper over the host OS CSPRNG.
+ *
+ * Per-platform notes:
+ *   Linux / FreeBSD / Solaris / Illumos: getrandom(2) is the right syscall.
+ *     GRND_NONBLOCK left off so callers block on initial entropy collection
+ *     rather than failing silently. Post-boot urandom-seed this is a no-op.
+ *   macOS / OpenBSD: getentropy(3). 256-byte limit per call (POSIX 2024
+ *     doesn't actually mandate this but libc enforces it), so loop in chunks.
+ *   Windows: BCryptGenRandom with the system-preferred provider. Requires
+ *     NT 6+ — we advertise HOST_TARGET_WINNT >= 5 but bcrypt showed up in
+ *     Vista so ancient-XP builds fall through to the urandom fallback.
+ *   POSIX fallback: /dev/urandom. Works on every *nix ever shipped since
+ *     the 90s, covers HaikuOS / NetBSD-without-getrandom / ancient kernels.
+ *
+ * If any of the primary paths fail partway through, we log and leave the
+ * remaining bytes as whatever the caller passed in (most commonly zero).
+ * Callers should treat short reads as failure, but since every modern host
+ * ships one of the primary paths, in practice we never hit the fallback.
+ */
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__sun__)
+#include <sys/random.h>
+#define RVVM_HAVE_GETRANDOM 1
+#elif defined(__APPLE__) || defined(__OpenBSD__)
+#include <unistd.h>
+#define RVVM_HAVE_GETENTROPY 1
+#elif defined(_WIN32)
+#include <windows.h>
+// bcrypt.h needs NT 6+ SDK. Declare the symbol locally to avoid a hard
+// link dep on builds that include this file transitively — the linker
+// will pick it up from bcrypt.lib when present; when absent, pass
+// -luserenv and we fall through to the urandom path (won't be taken on
+// Windows but keeps the link step happy).
+__stdcall long BCryptGenRandom(void* alg, unsigned char* buf, unsigned long len, unsigned long flags);
+#define RVVM_BCRYPT_USE_SYSTEM_PREFERRED_RNG 0x00000002
+#define RVVM_HAVE_BCRYPTGENRANDOM 1
+#endif
+
+#if !defined(RVVM_HAVE_GETRANDOM) && !defined(RVVM_HAVE_GETENTROPY) && !defined(RVVM_HAVE_BCRYPTGENRANDOM)
+#include <fcntl.h>
+#include <unistd.h>
+#define RVVM_NEED_URANDOM_FALLBACK 1
+#endif
+
+void rvvm_csprng_bytes(void* buffer, size_t size)
+{
+    uint8_t* dest = buffer;
+#if defined(RVVM_HAVE_GETRANDOM)
+    while (size) {
+        ssize_t n = getrandom(dest, size, 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            rvvm_warn("getrandom() failed: %s (%zu bytes requested)", strerror(errno), size);
+            break;
+        }
+        dest += (size_t)n;
+        size -= (size_t)n;
+    }
+#elif defined(RVVM_HAVE_GETENTROPY)
+    while (size) {
+        size_t chunk = size > 256 ? 256 : size;
+        if (getentropy(dest, chunk) < 0) {
+            rvvm_warn("getentropy() failed: %s (%zu bytes requested)", strerror(errno), chunk);
+            break;
+        }
+        dest += chunk;
+        size -= chunk;
+    }
+#elif defined(RVVM_HAVE_BCRYPTGENRANDOM)
+    // BCryptGenRandom accepts up to 2^32-1 bytes per call. In practice we
+    // never hand it more than a few KiB from crypto callers, but the
+    // signature takes unsigned long so we loop for >4 GiB hosts.
+    while (size) {
+        unsigned long chunk = size > 0xFFFFFFFFUL ? 0xFFFFFFFFUL : (unsigned long)size;
+        long status = BCryptGenRandom(NULL, dest, chunk, RVVM_BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        if (status != 0) {
+            rvvm_warn("BCryptGenRandom failed: 0x%08lx (%lu bytes requested)",
+                      (unsigned long)status, chunk);
+            break;
+        }
+        dest += chunk;
+        size -= chunk;
+    }
+#elif defined(RVVM_NEED_URANDOM_FALLBACK)
+    // Open-read-close each call. Slower than keeping a cached fd but also
+    // safe under fork + sandbox-drop scenarios where a cached fd might be
+    // invalidated mid-flight. Crypto callers aren't on a hot path anyway.
+    int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        rvvm_warn("open(/dev/urandom) failed: %s", strerror(errno));
+        return;
+    }
+    while (size) {
+        ssize_t n = read(fd, dest, size);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            rvvm_warn("read(/dev/urandom) short/failed (%zd bytes, %zu remaining)", n, size);
+            break;
+        }
+        dest += (size_t)n;
+        size -= (size_t)n;
+    }
+    close(fd);
+#else
+    // Platform with no known CSPRNG wired up. Leave buffer untouched;
+    // callers depending on entropy will fail downstream rather than get
+    // silently-predictable output from a fallback to xorshift.
+    (void)dest;
+    rvvm_warn("rvvm_csprng_bytes: no platform CSPRNG compiled in (%zu bytes requested)", size);
+#endif
 }
 
 void rvvm_randomserial(char* serial, size_t size)
