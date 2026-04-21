@@ -61,8 +61,41 @@ static void alsa_sound_write(sound_subsystem_t *subsystem, void *data, size_t si
 {
     alsa_subsystem_t *alsa = subsystem->sound_data;
 
-    if (snd_pcm_writei(alsa->pcm_handle, data, size / 2) == -EPIPE)
-        snd_pcm_prepare(alsa->pcm_handle);
+    // The previous version called snd_pcm_writei exactly once and
+    // dropped whatever didn't land: on xrun (-EPIPE) it prepared the
+    // PCM but skipped re-writing the chunk; on a positive short return
+    // it ignored the tail; on -EINTR it also dropped. Each lost chunk
+    // is an audible click/crackle.
+    //
+    // Loop until every frame is delivered. size is in bytes and we
+    // always feed mono 16-bit, so one frame = 2 bytes. Bail on
+    // unrecoverable errors after a handful of retries so a disconnected
+    // device doesn't spin us forever.
+    int16_t *buf = (int16_t*)data;
+    snd_pcm_uframes_t remaining = size / 2;
+    int xrun_retries = 4;
+
+    while (remaining > 0) {
+        snd_pcm_sframes_t n = snd_pcm_writei(alsa->pcm_handle, buf, remaining);
+        if (n < 0) {
+            if (n == -EAGAIN || n == -EINTR) {
+                // Spurious short-wake; try again with the same data.
+                continue;
+            }
+            if (n == -EPIPE || n == -ESTRPIPE) {
+                // Xrun / suspend. Reset the PCM and retry the chunk.
+                // -ESTRPIPE means suspended — resume would be ideal but
+                // prepare is enough to get us back to a writable state.
+                if (--xrun_retries < 0) return;
+                snd_pcm_prepare(alsa->pcm_handle);
+                continue;
+            }
+            // Unrecoverable (EBADFD, ENODEV, ...) — give up this chunk.
+            return;
+        }
+        buf       += n;     // int16_t* step = one sample per element
+        remaining -= n;
+    }
 }
 
 static bool alsa_load_symbols(void)
