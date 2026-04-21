@@ -27,6 +27,9 @@
 !/project.mk
 !/CMakeLists.txt
 !/Doxyfile
+!/flake.nix
+!/flake.lock
+!/.envrc
 
 # Explicitly track CI infrastructure
 !/.github
