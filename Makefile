@@ -659,6 +659,10 @@ ifeq ($(OS),windows)
 # NOTE: Prefer linking to wsock32 on i386 for Win95/NT 3.x compat, this still allows to use WinSock 2.x when available
 override LDFLAGS_USE_WIN32_GUI := $(call check_cc_flags,-lgdi32)
 override LDFLAGS_USE_NET       := $(call check_cc_flags,$(if $(filter i386,$(ARCH)),-lwsock32,-lws2_32) -lws2)
+# bcrypt: rvvm_csprng_bytes calls BCryptGenRandom (shipped since Vista / NT 6).
+# Linked unconditionally — every Windows target we support has it, and the
+# symbol is referenced from src/utils.c on any Windows build.
+override LDFLAGS := $(LDFLAGS) $(call check_cc_flags,-lbcrypt)
 endif
 
 ifeq ($(OS),haiku)
