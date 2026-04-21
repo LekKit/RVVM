@@ -304,7 +304,8 @@ typedef struct {
     uint8_t     ioce;
     uint8_t     stream;
     uint8_t     channel;
-    uint32_t    running;
+    uint32_t    running;       // Guest intent: 1 = stream should be running
+    uint32_t    worker_alive;  // Worker lifetime: 1 = worker thread exists
     uint8_t     fmt;
     uint8_t     status;
     uint8_t     left_gain;
@@ -338,22 +339,28 @@ typedef struct {
 
 static void sound_hda_remove(rvvm_mmio_dev_t* dev)
 {
-    // Halt the stream worker(s) before the PCI function is torn down.
+    // Halt the stream worker before the PCI function is torn down.
     // Without this, a worker still walking the BDL will call
     // pci_send_irq() / pci_get_dma_ptr() on a freed pci_func and crash.
     //
-    // Setting running=0 asks the worker to exit at its next BDL-entry
-    // boundary (typically within a few ms for a 128-frame period).
-    // Ideally we'd also thread_join on the worker, but RVVM's
-    // thread_create_task fire-and-forgets, so we settle for a short
-    // spin-wait: give the worker time to observe the flag.
+    // running=0 asks the worker to exit at the top of its next drain
+    // iteration. worker_alive is cleared by the worker when it actually
+    // returns — polling it is a reliable join, since thread_create_task
+    // is fire-and-forget and RVVM has no matching thread handle here.
     sound_hda_dev_t *hda = dev->data;
     if (hda != NULL) {
-        atomic_store_uint32_relax(&hda->stream_output.running, 0);
-        // The HDA stream period is 128 frames at 192 kHz = ~667 µs wall.
-        // 20 ms of sleep is 30x that — comfortably long enough for the
-        // worker to finish its current iteration.
-        sleep_ms(20);
+        sound_hda_stream_t *stream = &hda->stream_output;
+        atomic_store_uint32_relax(&stream->running, 0);
+        // The worst-case drain-exit latency is one pacing-sleep period:
+        // at 48 kHz x 2 bytes, a 4 KiB BDL entry paces ~43 ms. Cap the
+        // wait at ~1 s as a liveness guard against a wedged backend
+        // (subsystem.write blocking inside the user callback). If we
+        // hit the cap, the device is being torn down anyway and the
+        // worst outcome is a brief thread leak — not a use-after-free.
+        for (int i = 0; i < 200; i++) {
+            if (!atomic_load_uint32_relax(&stream->worker_alive)) break;
+            sleep_ms(5);
+        }
     }
 }
 
@@ -728,9 +735,12 @@ static void sound_hda_codec_cmd(sound_hda_dev_t *hda, uint32_t cmd)
     sound_hda_write_rirb(hda, cad, response);
 }
 
-static void *sound_hda_stream_worker(void *arg)
+// Drain the stream once: read current fmt/BDL, pace PCM to the backend
+// until the guest clears running (or an unrecoverable condition bails).
+// Separate from the worker-lifetime loop below so early-bail paths can
+// just return without touching worker_alive.
+static void sound_hda_stream_drain(sound_hda_dev_t *hda)
 {
-    sound_hda_dev_t *hda = arg;
     sound_hda_stream_t *stream = &hda->stream_output;
 
     // Pace the worker to the stream's configured bytes-per-second.
@@ -770,7 +780,7 @@ static void *sound_hda_stream_worker(void *arg)
         // Guest wrote run=1 before configuring the format. Bail out
         // like the NULL-dma case — driver will retry properly.
         atomic_store_uint32_relax(&stream->running, 0);
-        return NULL;
+        return;
     }
     uint64_t       paced_start_ns  = 0;
     uint64_t       paced_bytes_out = 0;
@@ -784,7 +794,7 @@ static void *sound_hda_stream_worker(void *arg)
     // proper BDL when userspace opens another PCM handle.
     if (dma == NULL) {
         atomic_store_uint32_relax(&stream->running, 0);
-        return NULL;
+        return;
     }
 
     while (atomic_load_uint32_relax(&stream->running)) {
@@ -875,8 +885,31 @@ static void *sound_hda_stream_worker(void *arg)
                 pci_send_irq(hda->pci_func, 0);
         }
     }
+}
 
-    return NULL;
+static void *sound_hda_stream_worker(void *arg)
+{
+    sound_hda_dev_t *hda = arg;
+    sound_hda_stream_t *stream = &hda->stream_output;
+
+    // Worker lifetime is published via worker_alive. Loop handles a narrow
+    // missed-wakeup window: guest writes run=1 after we read running=0 but
+    // before we clear worker_alive — its spawn CAS sees worker_alive=1
+    // and skips, leaving no worker for a running stream. We catch that by
+    // re-reading running after the clear, and re-claim the slot to drain
+    // again. If a concurrent spawn already won the CAS, they own the next
+    // drain — we exit. Either way, exactly one worker runs at a time.
+    for (;;) {
+        sound_hda_stream_drain(hda);
+
+        atomic_store_uint32_relax(&stream->worker_alive, 0);
+
+        if (!atomic_load_uint32_relax(&stream->running))
+            return NULL;
+        if (!atomic_cas_uint32(&stream->worker_alive, 0, 1))
+            return NULL;
+        // Re-claimed the slot; drain again with freshly-read stream state.
+    }
 }
 
 static void sound_hda_output_stream_ctl(sound_hda_dev_t *hda, uint32_t cmd)
@@ -888,14 +921,20 @@ static void sound_hda_output_stream_ctl(sound_hda_dev_t *hda, uint32_t cmd)
     stream->ioce = ioce;
 
     if (run) {
-        // Only spawn a worker if one isn't already running. Without this
-        // guard, a guest that writes run=1 twice in quick succession (or
-        // a backend slow enough that one aplay ends before the worker
-        // exits and the next aplay starts) can leave two workers walking
-        // the same stream struct. They'd race on stream->lpib / running,
-        // and if one worker's cached dma pointer got stale from a guest
-        // BDL update in between, dereferencing it crashes.
-        if (atomic_cas_uint32(&stream->running, 0, 1)) {
+        // Publish guest intent first, THEN gate the spawn on worker_alive.
+        // Ordering matters: a worker exiting its while-loop right now will
+        // clear worker_alive after its last running-check. If we set
+        // running=1 before it clears, our subsequent CAS will either win
+        // the slot (worker already gone) or lose it (worker still alive),
+        // and the worker's post-clear re-check of running catches the case
+        // where we lost the CAS but running=1 still needs a worker.
+        atomic_store_uint32_relax(&stream->running, 1);
+        // Gate on worker_alive (not running): running is guest intent and
+        // can flip repeatedly while a single worker drains a stream.
+        // worker_alive is owned by the worker — set here on spawn, cleared
+        // only by the worker at function return — so it stays 1 across the
+        // entire window where a second thread would trample stream state.
+        if (atomic_cas_uint32(&stream->worker_alive, 0, 1)) {
             thread_create_task(sound_hda_stream_worker, hda);
         }
     } else {
