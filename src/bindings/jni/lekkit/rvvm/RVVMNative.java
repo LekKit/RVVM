@@ -156,4 +156,25 @@ public class RVVMNative {
     // Takes HID keyboard handle
     public static native void hid_keyboard_press(long kb, byte key);
     public static native void hid_keyboard_release(long kb, byte key);
+
+    //
+    // NS16550A JNI bridge
+    //
+    // Attaches a second UART backed by two 64 KiB ring buffers instead of
+    // stdio. Java drains guest TX with poll() and injects guest RX with
+    // feed(). The bridge handle is freed automatically when the owning
+    // machine is freed — no explicit remove call needed.
+    //
+
+    // Returns a bridge handle (opaque), or 0 on failure.
+    public static native long ns16550a_bridge_init(long machine);
+
+    // Drains up to out.length bytes of guest TX into `out`. Returns count written.
+    public static native int  ns16550a_bridge_poll(long handle, byte[] out);
+
+    // Feeds up to in.length bytes into guest RX. Returns count accepted.
+    public static native int  ns16550a_bridge_feed(long handle, byte[] in);
+
+    // Fills a long[5] with {pushed, popped, fed, consumed, dropped}.
+    public static native void ns16550a_bridge_stats(long handle, long[] out);
 }

@@ -6,7 +6,12 @@
 #include "utils.h"
 #include "vma_ops.h"
 
+#include "ringbuf.h"
+#include "spinlock.h"
+#include "atomics.h"
+
 #include "rvvmlib.h"
+#include "devices/chardev.h"
 
 #include "devices/riscv-aclint.h"
 #include "devices/riscv-aplic.h"
@@ -740,6 +745,259 @@ JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_hid_1keyboard_1release(JNIEnv
     UNUSED(env);
     UNUSED(cls);
     hid_keyboard_release((hid_keyboard_t*)(size_t)kb, key);
+}
+
+/*
+ * NS16550A JNI bridge
+ *
+ * A `chardev_t` backed by two spinlock-guarded ring buffers. Instead of
+ * talking to stdio (chardev_term) or a pty (chardev_pty), the UART talks to
+ * Java: guest TX bytes go into a `tx` ring the Java side drains via
+ * `ns16550a_bridge_poll`, and Java pushes bytes into an `rx` ring via
+ * `ns16550a_bridge_feed` which the UART consumes.
+ *
+ * Threading: chardev read/write/poll/update runs on the RVVM event loop or
+ * CPU thread; JNI feed/poll runs on whatever JVM thread calls in. Ring
+ * access is guarded by `lock`; chardev_notify happens outside the lock to
+ * avoid re-entering the UART while holding it.
+ *
+ * Overflow policy: guest TX that outruns Java draining drops oldest bytes
+ * (same philosophy as the HDA ring in feat/sound-backend-api — preserve
+ * latency and head alignment over completeness). Java-fed RX that outruns
+ * the guest reading reports short writes; caller retries.
+ */
+
+#define JNI_UART_RING_SIZE 65536
+
+typedef struct {
+    chardev_t  chardev;
+    ringbuf_t  rx;              // Java -> guest (UART reads from here)
+    ringbuf_t  tx;              // guest -> Java (UART writes here)
+    spinlock_t lock;
+    uint32_t   flags;           // CHARDEV_RX | CHARDEV_TX cache
+
+    uint64_t   total_pushed;    // bytes guest has written into tx
+    uint64_t   total_popped;    // bytes Java has drained from tx
+    uint64_t   total_fed;       // bytes Java has written into rx
+    uint64_t   total_consumed;  // bytes guest has read from rx
+    uint64_t   tx_dropped;      // bytes dropped on tx overflow
+} jni_uart_bridge_t;
+
+// Recompute flags; return the bits that newly became set (for notify delta).
+static uint32_t jni_uart_update_flags(jni_uart_bridge_t* b)
+{
+    uint32_t flags = 0;
+    uint32_t prev  = atomic_load_uint32_relax(&b->flags);
+    if (ringbuf_avail(&b->rx)) {
+        flags |= CHARDEV_RX;
+    }
+    if (ringbuf_space(&b->tx)) {
+        flags |= CHARDEV_TX;
+    }
+    atomic_store_uint32_relax(&b->flags, flags);
+    return flags & ~prev;
+}
+
+static uint32_t jni_uart_poll(chardev_t* dev)
+{
+    jni_uart_bridge_t* b = dev->data;
+    return atomic_load_uint32_relax(&b->flags);
+}
+
+static size_t jni_uart_read(chardev_t* dev, void* buf, size_t nbytes)
+{
+    jni_uart_bridge_t* b   = dev->data;
+    size_t             ret = 0;
+    scoped_spin_lock (&b->lock) {
+        ret = ringbuf_read(&b->rx, buf, nbytes);
+        b->total_consumed += ret;
+        jni_uart_update_flags(b);
+    }
+    return ret;
+}
+
+static size_t jni_uart_write(chardev_t* dev, const void* buf, size_t nbytes)
+{
+    jni_uart_bridge_t* b = dev->data;
+    scoped_spin_lock (&b->lock) {
+        size_t space = ringbuf_space(&b->tx);
+        if (nbytes > space) {
+            size_t overflow = nbytes - space;
+            size_t avail    = ringbuf_avail(&b->tx);
+            size_t drop     = overflow > avail ? avail : overflow;
+            ringbuf_skip(&b->tx, drop);
+            b->tx_dropped += drop;
+        }
+        ringbuf_write(&b->tx, buf, nbytes);
+        b->total_pushed += nbytes;
+        jni_uart_update_flags(b);
+    }
+    // We always "accept" everything — overflow is absorbed by dropping old
+    // bytes. Matches the UART's expectation that writes don't back-pressure.
+    return nbytes;
+}
+
+static void jni_uart_update(chardev_t* dev)
+{
+    // Nothing to pump — our rings are fed and drained by Java, not by the
+    // event loop. Just recompute flags and notify on edge.
+    jni_uart_bridge_t* b     = dev->data;
+    uint32_t           delta = 0;
+    scoped_spin_lock (&b->lock) {
+        delta = jni_uart_update_flags(b);
+    }
+    if (delta) {
+        chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
+    }
+}
+
+static void jni_uart_remove(chardev_t* dev)
+{
+    jni_uart_bridge_t* b = dev->data;
+    ringbuf_destroy(&b->rx);
+    ringbuf_destroy(&b->tx);
+    free(b);
+}
+
+static jni_uart_bridge_t* jni_uart_bridge_create(void)
+{
+    jni_uart_bridge_t* b = safe_new_obj(jni_uart_bridge_t);
+    ringbuf_create(&b->rx, JNI_UART_RING_SIZE);
+    ringbuf_create(&b->tx, JNI_UART_RING_SIZE);
+    // TX is always "writable" while we have space; RX becomes set when fed.
+    b->flags             = CHARDEV_TX;
+    b->chardev.data      = b;
+    b->chardev.poll      = jni_uart_poll;
+    b->chardev.read      = jni_uart_read;
+    b->chardev.write     = jni_uart_write;
+    b->chardev.update    = jni_uart_update;
+    b->chardev.remove    = jni_uart_remove;
+    return b;
+}
+
+/*
+ * Attach an NS16550A wired to a JNI bridge. Returns a handle to the bridge
+ * (NOT the MMIO dev) — the MMIO dev's lifetime is tied to the machine and
+ * will call our chardev's remove() when the machine is freed.
+ *
+ * Returns 0 on failure.
+ */
+JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1init(JNIEnv* env, jclass cls, //
+                                                                           jlong machine)
+{
+    UNUSED(env);
+    UNUSED(cls);
+    jni_uart_bridge_t* b    = jni_uart_bridge_create();
+    rvvm_mmio_dev_t*   mmio = ns16550a_init_auto((rvvm_machine_t*)(size_t)machine, &b->chardev);
+    if (mmio == NULL) {
+        // Attach failed — chardev_free would call our remove which frees b.
+        chardev_free(&b->chardev);
+        return 0;
+    }
+    return (jlong)(size_t)b;
+}
+
+/*
+ * Drain up to `out.length` bytes of guest TX into the provided byte[].
+ * Returns the number of bytes written. Non-blocking.
+ */
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1poll(JNIEnv* env, jclass cls, //
+                                                                          jlong handle, jbyteArray out)
+{
+    UNUSED(cls);
+    if (handle == 0 || out == NULL) {
+        return 0;
+    }
+    jni_uart_bridge_t* b   = (jni_uart_bridge_t*)(size_t)handle;
+    jsize              cap = (*env)->GetArrayLength(env, out);
+    if (cap <= 0) {
+        return 0;
+    }
+
+    jbyte* buf = (*env)->GetByteArrayElements(env, out, NULL);
+    if (buf == NULL) {
+        return 0;
+    }
+
+    size_t   got   = 0;
+    uint32_t delta = 0;
+    scoped_spin_lock (&b->lock) {
+        got = ringbuf_read(&b->tx, buf, cap);
+        b->total_popped += got;
+        delta = jni_uart_update_flags(b);
+    }
+    (*env)->ReleaseByteArrayElements(env, out, buf, 0);
+
+    // TX space may have become available — wake the UART so its next write
+    // path re-evaluates. In practice the UART re-polls on every write anyway,
+    // but this keeps edge-triggered IRQ paths honest.
+    if (delta & CHARDEV_TX) {
+        chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
+    }
+    return (jint)got;
+}
+
+/*
+ * Push up to `in.length` bytes into guest RX. Returns how many were actually
+ * accepted (may be less than length if the RX ring was near-full).
+ */
+JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1feed(JNIEnv* env, jclass cls, //
+                                                                          jlong handle, jbyteArray in)
+{
+    UNUSED(cls);
+    if (handle == 0 || in == NULL) {
+        return 0;
+    }
+    jni_uart_bridge_t* b   = (jni_uart_bridge_t*)(size_t)handle;
+    jsize              len = (*env)->GetArrayLength(env, in);
+    if (len <= 0) {
+        return 0;
+    }
+
+    jbyte* buf = (*env)->GetByteArrayElements(env, in, NULL);
+    if (buf == NULL) {
+        return 0;
+    }
+
+    size_t   put   = 0;
+    uint32_t delta = 0;
+    scoped_spin_lock (&b->lock) {
+        put = ringbuf_write(&b->rx, buf, len);
+        b->total_fed += put;
+        delta = jni_uart_update_flags(b);
+    }
+    (*env)->ReleaseByteArrayElements(env, in, buf, JNI_ABORT);
+
+    if (delta & CHARDEV_RX) {
+        chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
+    }
+    return (jint)put;
+}
+
+/*
+ * Fill a long[5] with {total_pushed, total_popped, total_fed, total_consumed,
+ * tx_dropped}. Skips if the array is null or too short.
+ */
+JNIEXPORT void JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1stats(JNIEnv* env, jclass cls, //
+                                                                           jlong handle, jlongArray out)
+{
+    UNUSED(cls);
+    if (handle == 0 || out == NULL) {
+        return;
+    }
+    jni_uart_bridge_t* b = (jni_uart_bridge_t*)(size_t)handle;
+    if ((*env)->GetArrayLength(env, out) < 5) {
+        return;
+    }
+    jlong stats[5];
+    scoped_spin_lock (&b->lock) {
+        stats[0] = (jlong)b->total_pushed;
+        stats[1] = (jlong)b->total_popped;
+        stats[2] = (jlong)b->total_fed;
+        stats[3] = (jlong)b->total_consumed;
+        stats[4] = (jlong)b->tx_dropped;
+    }
+    (*env)->SetLongArrayRegion(env, out, 0, 5, stats);
 }
 
 POP_OPTIMIZATION_SIZE
