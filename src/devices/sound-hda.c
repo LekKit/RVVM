@@ -396,13 +396,50 @@ static bool sound_hda_mmio_read(rvvm_mmio_dev_t* dev, void* data, size_t offset,
         case SOUND_HDA_INTR_CTRL:
             write_uint32_le(data, hda->intr_ctrl);
             break;
-        case SOUND_HDA_INTSTS:
-            // As per specification and to simplify this code,
-            // we assume that interrupt always occured when
-            // guest reads this. Value represent interrupt
-            // on the outptut stream.
-            write_uint32_le(data, 1 << 29);
+        case SOUND_HDA_INTSTS: {
+            // INTSTS (HDA spec 3.3.13): bits 0..29 are per-stream SIS
+            // flags (SDnSTS has any latched IRQ), bit 30 CIS (CORB/RIRB),
+            // bit 31 GIS (overall OR).
+            //
+            // Stream indices follow the descriptor order ISS, OSS, BSS:
+            // we advertise 1 input + 1 output, so ISD0 is stream 0
+            // (mask 1<<0) and OSD0 is stream 1 (mask 1<<1).
+            //
+            // Prior code returned `1 << 29`, claiming "stream 29 has an
+            // IRQ". Linux's azx_interrupt does
+            //   if (status & azx_dev->sd_int_sta_mask) { ... }
+            // over its stream_list (indices 0 and 1 for us). Bit 29
+            // never matches, the output stream's IRQ is silently
+            // dropped before snd_pcm_period_elapsed runs — same
+            // "writers never wake" failure mode as a missing BCIS.
+            uint32_t sts = 0;
+            if (hda->stream_output.status & 0x1C) {
+                sts |= 1u << 1;   // OSD0 = stream index 1
+            }
+            if (sts) sts |= (1u << 31);  // GIS mirrors any pending SIS
+            write_uint32_le(data, sts);
             break;
+        }
+        case SOUND_HDA_WALL_CLOCK: {
+            // HDA spec 3.3.18: 32-bit counter clocked at 24 MHz. Used by
+            // the Linux HDA driver (intel.c:azx_position_ok) as a sanity
+            // gate: if (now - start_wallclk) < (period_wallclk * 2/3),
+            // the IRQ is declared bogus and dropped before
+            // snd_pcm_period_elapsed runs. Returning 0 meant every IRQ
+            // was rejected, hw_ptr never advanced from the driver's POV,
+            // writers blocked in wait_for_avail until a signal arrived
+            // (mpg123: "wrote only N of M"). With a real monotonic
+            // 24 MHz counter the driver compares correctly, the gate
+            // passes once per period, and period_elapsed wakes writers.
+            //
+            // aplay @ 22 kHz mono never saw this because its byte rate
+            // (44 KB/s) is well below our BDL drain rate (96 KB/s) —
+            // the runtime buffer never filled, so wait_for_avail was
+            // never entered and WALLCLK was irrelevant.
+            uint32_t wallclk = (uint32_t)rvtimer_clocksource(24000000ULL);
+            write_uint32_le(data, wallclk);
+            break;
+        }
         case SOUND_HDA_CORB_WP:
             write_uint16_le(data, hda->corb_wp);
             break;
@@ -820,7 +857,13 @@ static void sound_hda_stream_drain(sound_hda_dev_t *hda)
             // math below stays 1:1 with the bytes they see.
             if (hda->subsystem.write != NULL) {
                 void *pcm = pci_get_dma_ptr(hda->pci_func, addr, len);
-                if (channels == 1 || pcm == NULL) {
+                if (pcm == NULL) {
+                    // Bad guest BDL entry (zero addr, unmapped region, or
+                    // zero len). Don't feed NULL to the backend — ALSA's
+                    // snd_pcm_writei(NULL, n) is UB and ringbuf writes
+                    // memcpy from NULL. Pacing still advances below so
+                    // LPIB keeps moving and the guest can recover.
+                } else if (channels == 1) {
                     hda->subsystem.write(&hda->subsystem, pcm, len);
                 } else if (bits_per_sample == 16) {
                     // Common case: 16-bit multi-channel → 16-bit mono.
@@ -881,8 +924,21 @@ static void sound_hda_stream_drain(sound_hda_dev_t *hda)
             // When LPIB goes over BDL length, we are done.
             if (stream->bdl_len > 0 && stream->lpib > stream->bdl_len)
                 atomic_store_uint32_relax(&stream->running, 0);
-            if (ioc)
+            if (ioc) {
+                // Latch BCIS (SDnSTS bit 2) before raising the IRQ. Linux's
+                // HDA ISR (snd_hdac_bus_handle_stream_irq) reads SD_STS,
+                // and only calls snd_pcm_period_elapsed when SD_INT_COMPLETE
+                // (== BCIS) is set. Without this bit, the IRQ is ack'd and
+                // discarded — hw_ptr stops advancing from the driver's POV,
+                // writers blocked in wait_for_avail never wake, and the
+                // stream decays into a stall that userspace sees as short
+                // or zero writes from snd_pcm_writei.
+                //
+                // HDA spec 3.3.38: BCIS is RW1C. Guest clears it via the
+                // existing OSD0STS write handler at sound_hda_mmio_write().
+                hda->stream_output.status |= 0x04;
                 pci_send_irq(hda->pci_func, 0);
+            }
         }
     }
 }
