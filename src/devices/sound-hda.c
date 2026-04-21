@@ -488,7 +488,20 @@ static uint32_t sound_hda_codec_fg_output_cmd(uint32_t payload)
             return CODEC_PARAM_FUNC_GROUP_TYPE_AUDIO;
 
         case CODEC_PARAM_SUPP_PCM_SIZE_RATES:
-            return (0x1F << 16) | 0x7FF; // B8 - B32, 8.0 - 192.0kHz
+            // Advertise ONLY 48 kHz, 16-bit. If we advertised the full
+            // 8-192 kHz / 8-32 bit range, the Linux driver would let the
+            // application pick its file's native rate, but the stream
+            // worker has no per-stream rate awareness — it paces to a
+            // fixed bytes/sec. So playing a 48 kHz WAV against a codec
+            // that accepts 192 kHz caused 4× slow playback + aliasing.
+            //
+            // Fixing the codec to one format makes ALSA + the HDA driver
+            // handle any rate mismatch in software (linear-interp upsample
+            // or straight passthrough), with the emulator's rate
+            // always matching the pacing math. 48 kHz mono 16-bit is
+            // what every common audio file decodes to after ffmpeg/afconvert,
+            // so the hot path is pure passthrough.
+            return (1 << 17) | (1 << 6); // 16-bit, 48 kHz
 
         case CODEC_PARAM_SUPP_STREAM_FMTS:
             return CODEC_PARAM_SUPP_STREAM_FMTS_PCM;
@@ -515,14 +528,19 @@ static uint32_t sound_hda_codec_output_cmd(uint32_t payload)
             return 0x00010001; // 1 Subnode, StartNid = 1
 
         case CODEC_PARAM_AUDIO_WIDGET_CAPS:
+            // No STEREO bit: tell the guest driver this widget is mono
+            // only. Prevents Linux from configuring a stereo stream
+            // (which it will by default on stereo-capable widgets, even
+            // for mono input, and then silently downmixes the input
+            // duplicating mono → L+R — so the emulator byte rate
+            // doubles and pacing diverges).
             return CODEC_PARAM_AUDIO_WIDGET_CAPS_OUTPUT
                  | CODEC_PARAM_AUDIO_WIDGET_CAPS_FORMAT_OVR
                  | CODEC_PARAM_AUDIO_WIDGET_CAPS_AMP_OVR
-                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_AMP_OUT
-                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_STEREO;
+                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_AMP_OUT;
 
         case CODEC_PARAM_SUPP_PCM_SIZE_RATES:
-            return (0x1F << 16) | 0x7FF; // B8 - B32, 8.0 - 192.0kHz
+            return (1 << 17) | (1 << 6); // 16-bit, 48 kHz (see root-node comment)
 
         case CODEC_PARAM_SUPP_STREAM_FMTS:
             return CODEC_PARAM_SUPP_STREAM_FMTS_PCM;
@@ -543,9 +561,10 @@ static uint32_t sound_hda_codec_pin_output_cmd(uint32_t payload)
 {
     switch (payload) {
         case CODEC_PARAM_AUDIO_WIDGET_CAPS:
+            // Mono pin to match the output widget; see the output-widget
+            // caps comment above.
             return CODEC_PARAM_AUDIO_WIDGET_CAPS_PIN
-                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_CONN_LIST
-                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_STEREO;
+                 | CODEC_PARAM_AUDIO_WIDGET_CAPS_CONN_LIST;
 
         case CODEC_PARAM_PIN_CAPS:
             return CODEC_PARAM_PIN_CAPS_OUTPUT
@@ -714,18 +733,45 @@ static void *sound_hda_stream_worker(void *arg)
     sound_hda_dev_t *hda = arg;
     sound_hda_stream_t *stream = &hda->stream_output;
 
-    // Pace the worker to the hard-coded codec rate (192 kHz × 2 bytes mono
-    // = 384_000 bytes/s). Without pacing, non-blocking backends (ring
-    // buffers, null sinks, etc.) let this loop blast through the BDL as
-    // fast as the CPU allows: LPIB advances instantly, the guest HDA
-    // driver sees its DMA "consume" data faster than it can refill, and
-    // aplay trips ALSA's position-consistency assertion ("pcm_plugin.c
-    // Assertion status->appl_ptr == *pcm->appl.ptr failed").
+    // Pace the worker to the stream's configured bytes-per-second.
+    // Without pacing, non-blocking backends (ring buffers, null sinks)
+    // let this loop blast through the BDL as fast as the CPU allows:
+    // LPIB advances instantly, the guest HDA driver sees its DMA
+    // "consume" data faster than it can refill, and aplay trips ALSA's
+    // position-consistency assertion ("pcm_plugin.c Assertion
+    // status->appl_ptr == *pcm->appl.ptr failed"). Blocking backends
+    // (ALSA's snd_pcm_writei) dodge this accidentally because writei
+    // blocks when the host buffer fills.
     //
-    // Blocking backends (ALSA's snd_pcm_writei) dodge this accidentally —
-    // the writei call blocks when the host buffer is full. Now every
-    // backend gets pacing for free.
-    const uint64_t SAMPLE_RATE_BYTES_PER_SEC = 192000ULL * 2;
+    // The rate is derived from stream->fmt per HDA spec 7.3.3.10:
+    //   bit  14      : base rate        (0=48000, 1=44100)
+    //   bits 13:11   : rate multiplier  (N+1: 1×, 2×, 3×, 4×)
+    //   bits 10:8    : rate divisor     (N+1: /1 .. /8)
+    //   bits 6:4     : bits/sample      (0=8, 1=16, 2=20, 3=24, 4=32)
+    //   bits 3:0     : channels minus 1 (0=1ch, 1=2ch, …)
+    //
+    // A previous iteration hardcoded 192 kHz mono then later 48 kHz
+    // mono — both broke when the guest driver chose a different stream
+    // format (Linux HDA likes to configure stereo streams even for mono
+    // content, doubling the true byte rate). Deriving from fmt is the
+    // only way to be robust across guest driver choices.
+    uint16_t fmt             = stream->fmt;
+    uint32_t channels        = (fmt & 0xF) + 1;
+    uint32_t bits_code       = (fmt >> 4) & 7;
+    uint32_t bits_per_sample = bits_code == 0 ? 8  : bits_code == 1 ? 16 :
+                               bits_code == 2 ? 20 : bits_code == 3 ? 24 : 32;
+    uint32_t bytes_per_frame = channels * ((bits_per_sample + 7) / 8);
+    uint32_t div             = ((fmt >> 8)  & 7) + 1;
+    uint32_t mult            = ((fmt >> 11) & 7) + 1;
+    uint32_t base_hz         = (fmt & (1 << 14)) ? 44100 : 48000;
+    uint64_t sample_rate_hz  = (uint64_t)base_hz * mult / div;
+    uint64_t SAMPLE_RATE_BYTES_PER_SEC = sample_rate_hz * bytes_per_frame;
+    if (SAMPLE_RATE_BYTES_PER_SEC == 0) {
+        // Guest wrote run=1 before configuring the format. Bail out
+        // like the NULL-dma case — driver will retry properly.
+        atomic_store_uint32_relax(&stream->running, 0);
+        return NULL;
+    }
     uint64_t       paced_start_ns  = 0;
     uint64_t       paced_bytes_out = 0;
 
@@ -754,9 +800,45 @@ static void *sound_hda_stream_worker(void *arg)
             // device enumerates on the PCI bus but this path is a no-op —
             // the guest sees a working device and the LPIB counter advances
             // so its driver doesn't stall, but PCM data is silently dropped.
+            //
+            // Backend contract: always receives MONO 16-bit LE at the
+            // stream's configured rate. If the guest driver configured a
+            // multi-channel stream (Linux's HDA code likes stereo even
+            // when the codec widget advertises mono capability), we
+            // downmix here by averaging channels. Keeps backends simple
+            // (they don't need to know channel count) and the pacing
+            // math below stays 1:1 with the bytes they see.
             if (hda->subsystem.write != NULL) {
                 void *pcm = pci_get_dma_ptr(hda->pci_func, addr, len);
-                hda->subsystem.write(&hda->subsystem, pcm, len);
+                if (channels == 1 || pcm == NULL) {
+                    hda->subsystem.write(&hda->subsystem, pcm, len);
+                } else if (bits_per_sample == 16) {
+                    // Common case: 16-bit multi-channel → 16-bit mono.
+                    // Stack-allocate — BDL entries are small (256-4096 B).
+                    size_t frame_bytes_in = (size_t)bytes_per_frame;
+                    size_t frames         = len / frame_bytes_in;
+                    int16_t *src = (int16_t*)pcm;
+                    int16_t  mono_buf[4096];
+                    size_t bytes_emitted = 0;
+                    while (bytes_emitted < frames * 2) {
+                        size_t chunk_frames = frames - (bytes_emitted / 2);
+                        if (chunk_frames > 4096) chunk_frames = 4096;
+                        for (size_t f = 0; f < chunk_frames; f++) {
+                            int32_t sum = 0;
+                            size_t base = (bytes_emitted / 2 + f) * channels;
+                            for (uint32_t c = 0; c < channels; c++) {
+                                sum += src[base + c];
+                            }
+                            mono_buf[f] = (int16_t)(sum / (int32_t)channels);
+                        }
+                        hda->subsystem.write(&hda->subsystem, mono_buf, chunk_frames * 2);
+                        bytes_emitted += chunk_frames * 2;
+                    }
+                } else {
+                    // Rare: non-16-bit multi-channel. Pass raw; backends
+                    // that care can parse stream->fmt from the caller.
+                    hda->subsystem.write(&hda->subsystem, pcm, len);
+                }
             } else {
                 UNUSED(addr);
             }
