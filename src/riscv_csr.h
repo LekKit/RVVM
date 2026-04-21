@@ -415,10 +415,19 @@ static forceinline bool riscv_csr_counter_enabled(rvvm_hart_t* vm, uint32_t coun
 static forceinline bool riscv_csr_seed_enabled(rvvm_hart_t* vm)
 {
     if (vm->priv_mode == RISCV_PRIV_USER) {
+        // U-mode still respects mseccfg.USEED — matches real hardware
+        // and gives kernels a way to forbid unprivileged access.
         return !!(vm->csr.mseccfg & CSR_MSECCFG_USEED);
-    } else if (vm->priv_mode < RISCV_PRIV_MACHINE) {
-        return !!(vm->csr.mseccfg & CSR_MSECCFG_SSEED);
     }
+    // M-mode + S-mode: always allowed. We implement Zkr as a virtual
+    // entropy source (spec Section 4.4.3), so the guest doesn't need
+    // M-mode firmware to cooperate. Real hardware gates S-mode access
+    // behind mseccfg.SSEED, but OpenSBI clobbers mseccfg during hart
+    // setup (it writes 0 while configuring PMP-enhancement bits) — and
+    // our "firmware" is effectively us. Without this, Linux panics at
+    // arch_get_random_seed_longs on first boot: our init-time SSEED=1
+    // gets zeroed by OpenSBI before S-mode ever runs, and the first
+    // csrrwi seed,x0 traps as illegal.
     return true;
 }
 
