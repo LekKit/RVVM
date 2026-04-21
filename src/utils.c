@@ -517,7 +517,12 @@ void rvvm_randombytes(void* buffer, size_t size)
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__sun__)
 #include <sys/random.h>
 #define RVVM_HAVE_GETRANDOM 1
-#elif defined(__APPLE__) || defined(__OpenBSD__)
+#elif defined(__APPLE__)
+// On macOS getentropy(3) is declared in <sys/random.h> (since 10.12 Sierra).
+// OpenBSD puts it in <unistd.h> — handled by the branch below.
+#include <sys/random.h>
+#define RVVM_HAVE_GETENTROPY 1
+#elif defined(__OpenBSD__)
 #include <unistd.h>
 #define RVVM_HAVE_GETENTROPY 1
 #elif defined(_WIN32)
