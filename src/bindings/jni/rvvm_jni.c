@@ -920,19 +920,41 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1poll(JNIEnv
     }
 
     size_t   got   = 0;
-    uint32_t delta = 0;
+    uint32_t flags = 0;
     scoped_spin_lock (&b->lock) {
         got = ringbuf_read(&b->tx, buf, cap);
         b->total_popped += got;
-        delta = jni_uart_update_flags(b);
+        jni_uart_update_flags(b);
+        flags = atomic_load_uint32_relax(&b->flags);
     }
     (*env)->ReleaseByteArrayElements(env, out, buf, 0);
 
-    // TX space may have become available — wake the UART so its next write
-    // path re-evaluates. In practice the UART re-polls on every write anyway,
-    // but this keeps edge-triggered IRQ paths honest.
-    if (delta & CHARDEV_TX) {
-        chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
+    // Simulate the TX-complete rising edge when Java actually drains bytes.
+    //
+    // Background: our TX flag means "the bridge ring has space for more
+    // bytes from the guest" — which is true continuously because the 64KB
+    // ring is essentially never full in practice. The UART's ns16550a_notify
+    // only re-evaluates its IRQ line when the cached flag word changes, so
+    // a steady-state TX=1 never re-raises the TX-empty IRQ after the kernel
+    // enables IER.THR, acks the first IRQ, and waits for the next one. The
+    // kernel's IRQ-driven 8250 tx path then deadlocks on the tty close-time
+    // drain (strace shows a hang inside close()) and `echo > /dev/ttyS1`
+    // never returns.
+    //
+    // Real hardware: LSR.THRE pulses low for a few baud times after each
+    // write to THR, then re-asserts high — that rising edge is what the
+    // kernel's IRQ handler looks for. We emulate the same pulse whenever
+    // we actually drain bytes, by briefly re-notifying the UART with TX
+    // cleared, then with the real flags. The first notify deviates from
+    // the UART's cached flag word (forcing ns16550a_update_irq to lower
+    // the TX IRQ); the second restores TX=1 and re-raises, which is the
+    // edge the kernel needs.
+    //
+    // No-op when we drained zero bytes — spurious edges would pointlessly
+    // re-fire the IRQ handler every tick.
+    if (got > 0) {
+        chardev_notify(&b->chardev, flags & ~CHARDEV_TX);
+        chardev_notify(&b->chardev, flags);
     }
     return (jint)got;
 }
