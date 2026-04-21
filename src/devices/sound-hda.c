@@ -1084,9 +1084,9 @@ PUBLIC pci_dev_t *sound_hda_init_ex(pci_bus_t *pci_bus,
 
     // Backend selection priority:
     //   1. Caller-supplied write_fn (via sound_hda_init_ex) — skip the
-    //      compile-time default. Used by embedders that want to route audio
-    //      somewhere other than the host's native audio stack (JNI → JVM,
-    //      WAV capture fixtures, alternate backends, etc.).
+    //      compile-time default. Used by embedders that want to route
+    //      audio somewhere other than the host's native audio stack
+    //      (managed runtimes, IPC channels, WAV capture fixtures, etc.).
     //   2. Compile-time USE_ALSA — the traditional Linux host path.
     //   3. Neither — PCI device enumerates but the stream worker drops PCM.
     if (write_fn != NULL) {

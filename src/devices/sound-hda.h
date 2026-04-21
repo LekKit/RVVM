@@ -25,13 +25,13 @@ struct sound_subsystem_t {
  * host-side audio sink without going through a compile-time USE_* backend.
  *
  * The HDA stream worker invokes this callback on its own thread with a chunk
- * of 16-bit signed little-endian PCM data (mono, 192 kHz, matching the
- * hard-coded HDA codec format). `user_data` is whatever pointer was passed
+ * of 16-bit signed little-endian PCM data — mono, 48 kHz, matching the
+ * format the codec advertises. `user_data` is whatever pointer was passed
  * to sound_hda_init_ex / sound_hda_init_auto_ex.
  *
- * Consumers (e.g. JNI embedders routing audio into the JVM, or a WAV-capture
- * test harness) supply their own write function instead of relying on a
- * backend compiled into librvvm.
+ * Useful for embedders routing audio into a non-native audio stack (a
+ * managed runtime, an IPC channel, a WAV capture test harness, etc.)
+ * without relying on a backend compiled into librvvm.
  */
 typedef void (*sound_hda_backend_write_fn)(void *user_data, void *pcm_data, size_t size);
 
