@@ -18,6 +18,15 @@ typedef struct sound_subsystem_t sound_subsystem_t;
 struct sound_subsystem_t {
     void *sound_data;
     void (*write)(sound_subsystem_t *subsystem, void *data, size_t size);
+    // Optional. Called from sound_hda_remove() before it waits for the
+    // stream worker to exit. Backends whose write() can block (host
+    // ALSA PCM, any IPC sink without an internal queue) must implement
+    // this so a blocked worker unblocks quickly — otherwise remove()
+    // waits on a wedged backend while the caller expects to free the
+    // machine. Non-blocking backends (ring buffers, capture fixtures)
+    // can leave this NULL. After abort() returns, subsequent write()
+    // calls are allowed to be no-ops; the worker is tearing down.
+    void (*abort)(sound_subsystem_t *subsystem);
 };
 
 /*
@@ -35,6 +44,17 @@ struct sound_subsystem_t {
  */
 typedef void (*sound_hda_backend_write_fn)(void *user_data, void *pcm_data, size_t size);
 
+/*
+ * Optional abort callback paired with sound_hda_backend_write_fn. When the
+ * HDA device is being removed (machine teardown), the stream worker may be
+ * blocked inside write_fn. abort_fn is invoked on the teardown thread and
+ * must cause any in-flight or future write_fn call on this sink to return
+ * promptly — typically by setting a flag that write_fn checks, or by
+ * signalling whatever the sink is blocked on (closing an fd, dropping a
+ * host PCM, etc.). Leave NULL for non-blocking sinks (ring buffers, etc.).
+ */
+typedef void (*sound_hda_backend_abort_fn)(void *user_data);
+
 // Internal use
 bool alsa_sound_init(sound_subsystem_t *sound);
 
@@ -49,12 +69,18 @@ PUBLIC pci_dev_t* sound_hda_init_auto(rvvm_machine_t* machine);
  *
  * When a non-NULL `write_fn` is supplied, the HDA device skips any
  * compiled-in backend and routes every PCM chunk through `write_fn`.
+ *
+ * `abort_fn` is optional. Supply it when `write_fn` can block; it is
+ * invoked during device removal to unblock any in-flight write so the
+ * stream worker can exit promptly. Pass NULL if `write_fn` never blocks.
  */
 PUBLIC pci_dev_t* sound_hda_init_ex(pci_bus_t* pci_bus,
                                     sound_hda_backend_write_fn write_fn,
+                                    sound_hda_backend_abort_fn abort_fn,
                                     void* user_data);
 PUBLIC pci_dev_t* sound_hda_init_auto_ex(rvvm_machine_t* machine,
                                          sound_hda_backend_write_fn write_fn,
+                                         sound_hda_backend_abort_fn abort_fn,
                                          void* user_data);
 
 #endif

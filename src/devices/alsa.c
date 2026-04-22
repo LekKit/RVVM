@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #ifdef USE_ALSA
 
+#include "atomics.h"
 #include "compiler.h"
 #include "dlib.h"
 #include "sound-hda.h"
@@ -34,6 +35,7 @@ ASOUND_DLIB_SYM(snd_pcm_hw_params)
 ASOUND_DLIB_SYM(snd_pcm_writei)
 ASOUND_DLIB_SYM(snd_pcm_prepare)
 ASOUND_DLIB_SYM(snd_pcm_drain)
+ASOUND_DLIB_SYM(snd_pcm_drop)
 ASOUND_DLIB_SYM(snd_pcm_close)
 ASOUND_DLIB_SYM(snd_pcm_hw_params_free)
 
@@ -50,11 +52,19 @@ ASOUND_DLIB_SYM(snd_pcm_hw_params_free)
 #define snd_pcm_writei snd_pcm_writei_dlib
 #define snd_pcm_prepare snd_pcm_prepare_dlib
 #define snd_pcm_drain snd_pcm_drain_dlib
+#define snd_pcm_drop snd_pcm_drop_dlib
 #define snd_pcm_close snd_pcm_close_dlib
 #define snd_pcm_hw_params_free snd_pcm_hw_params_free_dlib
 
 typedef struct {
     snd_pcm_t *pcm_handle;
+    // Set by alsa_sound_abort() when the HDA device is being removed.
+    // alsa_sound_write() checks this on every iteration so a blocked
+    // writei that abort has unblocked (via snd_pcm_drop) does not loop
+    // back through snd_pcm_prepare + retry and stay stuck. Access is
+    // cross-thread: abort runs on the teardown thread, write on the
+    // stream worker.
+    uint32_t aborted;
 } alsa_subsystem_t;
 
 static void alsa_sound_write(sound_subsystem_t *subsystem, void *data, size_t size)
@@ -76,6 +86,12 @@ static void alsa_sound_write(sound_subsystem_t *subsystem, void *data, size_t si
     int xrun_retries = 4;
 
     while (remaining > 0) {
+        // Abort requested by teardown; drop the rest of the chunk so the
+        // stream worker unblocks promptly. Checked before writei so a
+        // post-drop retry (snd_pcm_drop forces the next writei to return
+        // -EPIPE) does not slip back into prepare+retry.
+        if (atomic_load_uint32_relax(&alsa->aborted)) return;
+
         snd_pcm_sframes_t n = snd_pcm_writei(alsa->pcm_handle, buf, remaining);
         if (n < 0) {
             if (n == -EAGAIN || n == -EINTR) {
@@ -96,6 +112,16 @@ static void alsa_sound_write(sound_subsystem_t *subsystem, void *data, size_t si
         buf       += n;     // int16_t* step = one sample per element
         remaining -= n;
     }
+}
+
+static void alsa_sound_abort(sound_subsystem_t *subsystem)
+{
+    alsa_subsystem_t *alsa = subsystem->sound_data;
+    // Publish the flag before unblocking writei. snd_pcm_drop causes any
+    // in-flight writei to return -EPIPE; the write loop then sees the
+    // flag and bails instead of looping through snd_pcm_prepare.
+    atomic_store_uint32_relax(&alsa->aborted, 1);
+    snd_pcm_drop(alsa->pcm_handle);
 }
 
 static bool alsa_load_symbols(void)
@@ -127,6 +153,7 @@ do { \
     ASOUND_DLIB_RESOLVE(libasound, snd_pcm_writei);
     ASOUND_DLIB_RESOLVE(libasound, snd_pcm_prepare);
     ASOUND_DLIB_RESOLVE(libasound, snd_pcm_drain);
+    ASOUND_DLIB_RESOLVE(libasound, snd_pcm_drop);
     ASOUND_DLIB_RESOLVE(libasound, snd_pcm_close);
     ASOUND_DLIB_RESOLVE(libasound, snd_pcm_hw_params_free);
 
@@ -187,6 +214,7 @@ bool alsa_sound_init(sound_subsystem_t *sound)
 
     sound->sound_data = subsystem;
     sound->write = alsa_sound_write;
+    sound->abort = alsa_sound_abort;
 
     return true;
 }

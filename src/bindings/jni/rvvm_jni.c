@@ -545,8 +545,12 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_sound_1hda_1init_1with_1ring
         return 0;
     }
 
+    // No abort callback: jni_sound_ring_write is non-blocking (mutex +
+    // memcpy, never waits on the Java side). Pass NULL to let the HDA
+    // remove path skip the abort indirection.
     pci_dev_t* dev = sound_hda_init_auto_ex((rvvm_machine_t*)(size_t)machine,
                                             jni_sound_ring_write,
+                                            NULL,
                                             ring);
     if (dev == NULL) {
         pthread_mutex_destroy(&ring->lock);
