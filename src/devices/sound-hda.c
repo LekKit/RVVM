@@ -343,23 +343,33 @@ static void sound_hda_remove(rvvm_mmio_dev_t* dev)
     // Without this, a worker still walking the BDL will call
     // pci_send_irq() / pci_get_dma_ptr() on a freed pci_func and crash.
     //
-    // running=0 asks the worker to exit at the top of its next drain
-    // iteration. worker_alive is cleared by the worker when it actually
-    // returns — polling it is a reliable join, since thread_create_task
-    // is fire-and-forget and RVVM has no matching thread handle here.
+    // running=0 asks the worker to exit. Paired with the running check
+    // inside the inner BDL loop in sound_hda_stream_drain, the worker
+    // bails within one backend write — it does not run the pacing
+    // sleep or IRQ dispatch on an entry observed after shutdown, so
+    // no pci_func access outlives this call.
+    //
+    // worker_alive is cleared by the worker when it actually returns —
+    // polling it is a reliable join, since thread_create_task is
+    // fire-and-forget and RVVM has no matching thread handle here.
+    //
+    // We wait unbounded: hanging on teardown is recoverable (the host
+    // notices and kills the process), but returning while the worker
+    // is still live and using hda->pci_func is a use-after-free the
+    // moment the caller frees the PCI state. Log a one-shot warning
+    // after 5 s as a diagnostic breadcrumb for a wedged backend.
     sound_hda_dev_t *hda = dev->data;
     if (hda != NULL) {
         sound_hda_stream_t *stream = &hda->stream_output;
         atomic_store_uint32_relax(&stream->running, 0);
-        // The worst-case drain-exit latency is one pacing-sleep period:
-        // at 48 kHz x 2 bytes, a 4 KiB BDL entry paces ~43 ms. Cap the
-        // wait at ~1 s as a liveness guard against a wedged backend
-        // (subsystem.write blocking inside the user callback). If we
-        // hit the cap, the device is being torn down anyway and the
-        // worst outcome is a brief thread leak — not a use-after-free.
-        for (int i = 0; i < 200; i++) {
-            if (!atomic_load_uint32_relax(&stream->worker_alive)) break;
+        uint32_t waited_ms = 0;
+        while (atomic_load_uint32_relax(&stream->worker_alive)) {
             sleep_ms(5);
+            waited_ms += 5;
+            if (waited_ms == 5000) {
+                DO_ONCE(rvvm_warn("sound_hda_remove: stream worker still alive"
+                                  " after 5 s; backend may be blocking"));
+            }
         }
     }
 }
@@ -895,6 +905,17 @@ static void sound_hda_stream_drain(sound_hda_dev_t *hda)
             } else {
                 UNUSED(addr);
             }
+
+            // Shutdown check between backend write and pacing / IRQ
+            // dispatch. The outer `while (running)` only gates the
+            // BDL pass; once started, a full pass is up to (lvi+1)
+            // entries × ~43 ms of pacing — several seconds the
+            // device might already be torn down behind us. Bailing
+            // here ensures no pci_send_irq / pci_get_dma_ptr call
+            // outlives sound_hda_remove(), which is how #208 got
+            // a freed pci_func under the IRQ dispatch.
+            if (!atomic_load_uint32_relax(&stream->running))
+                return;
 
             // Wall-clock pacing. Compute the ideal elapsed time for the
             // bytes we've emitted so far and sleep the difference.
