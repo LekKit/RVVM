@@ -362,6 +362,16 @@ static void sound_hda_remove(rvvm_mmio_dev_t* dev)
     if (hda != NULL) {
         sound_hda_stream_t *stream = &hda->stream_output;
         atomic_store_uint32_relax(&stream->running, 0);
+        // Unblock a worker stuck inside subsystem.write before we start
+        // waiting. Without this, blocking backends (ALSA PCM mid-xrun,
+        // IPC sinks, any callback that doesn't poll running itself)
+        // stall teardown for as long as the host takes to drain — which
+        // for PipeWire under load can be seconds. Non-blocking backends
+        // leave abort NULL; the running check in sound_hda_stream_drain
+        // is enough for them.
+        if (hda->subsystem.abort != NULL) {
+            hda->subsystem.abort(&hda->subsystem);
+        }
         uint32_t waited_ms = 0;
         while (atomic_load_uint32_relax(&stream->worker_alive)) {
             sleep_ms(5);
@@ -1160,6 +1170,7 @@ static bool sound_hda_mmio_write(rvvm_mmio_dev_t* dev, void* data, size_t offset
  */
 typedef struct {
     sound_hda_backend_write_fn user_fn;
+    sound_hda_backend_abort_fn abort_fn;
     void                       *user_data;
 } sound_hda_backend_bridge_t;
 
@@ -1171,8 +1182,17 @@ static void sound_hda_backend_bridge_write(sound_subsystem_t *sub, void *data, s
     }
 }
 
+static void sound_hda_backend_bridge_abort(sound_subsystem_t *sub)
+{
+    sound_hda_backend_bridge_t *bridge = (sound_hda_backend_bridge_t *)sub->sound_data;
+    if (bridge != NULL && bridge->abort_fn != NULL) {
+        bridge->abort_fn(bridge->user_data);
+    }
+}
+
 PUBLIC pci_dev_t *sound_hda_init_ex(pci_bus_t *pci_bus,
                                     sound_hda_backend_write_fn write_fn,
+                                    sound_hda_backend_abort_fn abort_fn,
                                     void *user_data)
 {
     sound_hda_dev_t *sound_hda = safe_new_obj(sound_hda_dev_t);
@@ -1208,9 +1228,16 @@ PUBLIC pci_dev_t *sound_hda_init_ex(pci_bus_t *pci_bus,
     if (write_fn != NULL) {
         sound_hda_backend_bridge_t *bridge = safe_new_obj(sound_hda_backend_bridge_t);
         bridge->user_fn = write_fn;
+        bridge->abort_fn = abort_fn;
         bridge->user_data = user_data;
         sound_hda->subsystem.sound_data = bridge;
         sound_hda->subsystem.write = sound_hda_backend_bridge_write;
+        // Only publish the bridge's abort indirection when the caller
+        // actually supplied one — otherwise sound_hda_remove would
+        // invoke a no-op indirection every teardown.
+        if (abort_fn != NULL) {
+            sound_hda->subsystem.abort = sound_hda_backend_bridge_abort;
+        }
     } else {
 #ifdef USE_ALSA
         if (!alsa_sound_init(&sound_hda->subsystem))
@@ -1223,14 +1250,15 @@ PUBLIC pci_dev_t *sound_hda_init_ex(pci_bus_t *pci_bus,
 
 PUBLIC pci_dev_t *sound_hda_init_auto_ex(rvvm_machine_t *machine,
                                          sound_hda_backend_write_fn write_fn,
+                                         sound_hda_backend_abort_fn abort_fn,
                                          void *user_data)
 {
-    return sound_hda_init_ex(rvvm_get_pci_bus(machine), write_fn, user_data);
+    return sound_hda_init_ex(rvvm_get_pci_bus(machine), write_fn, abort_fn, user_data);
 }
 
 PUBLIC pci_dev_t *sound_hda_init(pci_bus_t *pci_bus)
 {
-    return sound_hda_init_ex(pci_bus, NULL, NULL);
+    return sound_hda_init_ex(pci_bus, NULL, NULL, NULL);
 }
 
 PUBLIC pci_dev_t *sound_hda_init_auto(rvvm_machine_t *machine)
