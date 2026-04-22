@@ -819,36 +819,54 @@ static size_t jni_uart_read(chardev_t* dev, void* buf, size_t nbytes)
 static size_t jni_uart_write(chardev_t* dev, const void* buf, size_t nbytes)
 {
     jni_uart_bridge_t* b = dev->data;
+    size_t written = 0;
     scoped_spin_lock (&b->lock) {
-        size_t space = ringbuf_space(&b->tx);
-        if (nbytes > space) {
-            size_t overflow = nbytes - space;
+        if (nbytes > ringbuf_space(&b->tx)) {
+            // Overflow: drop oldest bytes to make room. If `nbytes` is
+            // larger than the whole ring, `drop` caps at `avail`, the
+            // subsequent ringbuf_write truncates at new free space, and
+            // the input tail is lost — pathological but harmless given
+            // the UART writes one byte at a time. Keep the drop/write
+            // split so the stats count drops and writes separately.
+            size_t overflow = nbytes - ringbuf_space(&b->tx);
             size_t avail    = ringbuf_avail(&b->tx);
             size_t drop     = overflow > avail ? avail : overflow;
             ringbuf_skip(&b->tx, drop);
             b->tx_dropped += drop;
         }
-        ringbuf_write(&b->tx, buf, nbytes);
-        b->total_pushed += nbytes;
+        written = ringbuf_write(&b->tx, buf, nbytes);
+        b->total_pushed += written;
         jni_uart_update_flags(b);
     }
-    // We always "accept" everything — overflow is absorbed by dropping old
-    // bytes. Matches the UART's expectation that writes don't back-pressure.
+    // Return `nbytes` rather than `written`: the UART expects writes
+    // don't back-pressure (dropping old data is our flow-control
+    // strategy). Returning a short count would make the caller treat
+    // the remainder as a retryable partial write, hanging the 8250 TX
+    // path waiting for THRE. total_pushed and tx_dropped reflect
+    // reality separately.
     return nbytes;
 }
 
 static void jni_uart_update(chardev_t* dev)
 {
-    // Nothing to pump — our rings are fed and drained by Java, not by the
-    // event loop. Just recompute flags and notify on edge.
-    jni_uart_bridge_t* b     = dev->data;
-    uint32_t           delta = 0;
+    // Nothing to pump — our rings are fed and drained by Java, not by
+    // the event loop. Just recompute flags and unconditionally notify
+    // the UART with the current value.
+    //
+    // Previously this only fired on rising-edge delta (flags & ~prev),
+    // which dropped 1→0 transitions and any case where uart->flags had
+    // drifted out of sync with b->flags. `ns16550a_notify` short-
+    // circuits on unchanged state via atomic_swap, so the cost of
+    // always-notify is one atomic swap per 16 ms eventloop tick when
+    // idle — cheaper than the class of intermittent stalls the delta
+    // guard could mask.
+    jni_uart_bridge_t* b = dev->data;
+    uint32_t flags;
     scoped_spin_lock (&b->lock) {
-        delta = jni_uart_update_flags(b);
+        jni_uart_update_flags(b);
+        flags = atomic_load_uint32_relax(&b->flags);
     }
-    if (delta) {
-        chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
-    }
+    chardev_notify(&b->chardev, flags);
 }
 
 static void jni_uart_remove(chardev_t* dev)
