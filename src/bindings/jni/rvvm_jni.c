@@ -894,6 +894,26 @@ JNIEXPORT jlong JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1init(JNIEn
         chardev_free(&b->chardev);
         return 0;
     }
+
+    // Initial flag sync to ns16550a's cached `uart->flags`. Without this,
+    // the UART's cache sits at zero-init (0) until something fires a
+    // chardev_notify, but ns16550a's own sync paths (ns16550a_poll) only
+    // run on THR writes and RX-available RBR reads — neither happens
+    // during kernel port-startup. Result: when the kernel enables THRI
+    // via IER for its first user-space write, ns16550a_update_irq sees
+    // flags=0, no TX bit, no IRQ raised. First TX IRQ never fires.
+    //
+    // The console on ttyS0 hides this because printk runs polled writes
+    // to THR (serial8250_console_write) that naturally sync through the
+    // THR path. ttyS1 has no such "free sync" — user-space writes go
+    // through the IRQ-driven 8250 tx path, which needs uart->flags live
+    // *before* the first start_tx.
+    //
+    // The earlier TX-empty-rising-edge-on-drain fix (commit 7638bb7)
+    // can't bootstrap this either: it only fires when got > 0, and
+    // `got` stays 0 until the kernel writes THR, which it won't do
+    // until it gets its first TX IRQ. Classic chicken-and-egg.
+    chardev_notify(&b->chardev, atomic_load_uint32_relax(&b->flags));
     return (jlong)(size_t)b;
 }
 
@@ -919,43 +939,25 @@ JNIEXPORT jint JNICALL Java_lekkit_rvvm_RVVMNative_ns16550a_1bridge_1poll(JNIEnv
         return 0;
     }
 
-    size_t   got   = 0;
-    uint32_t flags = 0;
+    size_t got = 0;
     scoped_spin_lock (&b->lock) {
         got = ringbuf_read(&b->tx, buf, cap);
         b->total_popped += got;
         jni_uart_update_flags(b);
-        flags = atomic_load_uint32_relax(&b->flags);
     }
     (*env)->ReleaseByteArrayElements(env, out, buf, 0);
 
-    // Simulate the TX-complete rising edge when Java actually drains bytes.
-    //
-    // Background: our TX flag means "the bridge ring has space for more
-    // bytes from the guest" — which is true continuously because the 64KB
-    // ring is essentially never full in practice. The UART's ns16550a_notify
-    // only re-evaluates its IRQ line when the cached flag word changes, so
-    // a steady-state TX=1 never re-raises the TX-empty IRQ after the kernel
-    // enables IER.THR, acks the first IRQ, and waits for the next one. The
-    // kernel's IRQ-driven 8250 tx path then deadlocks on the tty close-time
-    // drain (strace shows a hang inside close()) and `echo > /dev/ttyS1`
-    // never returns.
-    //
-    // Real hardware: LSR.THRE pulses low for a few baud times after each
-    // write to THR, then re-asserts high — that rising edge is what the
-    // kernel's IRQ handler looks for. We emulate the same pulse whenever
-    // we actually drain bytes, by briefly re-notifying the UART with TX
-    // cleared, then with the real flags. The first notify deviates from
-    // the UART's cached flag word (forcing ns16550a_update_irq to lower
-    // the TX IRQ); the second restores TX=1 and re-raises, which is the
-    // edge the kernel needs.
-    //
-    // No-op when we drained zero bytes — spurious edges would pointlessly
-    // re-fire the IRQ handler every tick.
-    if (got > 0) {
-        chardev_notify(&b->chardev, flags & ~CHARDEV_TX);
-        chardev_notify(&b->chardev, flags);
-    }
+    // No TX-edge pulse needed here. The previous impl simulated a
+    // THRE low→high transition per drain to wake the kernel's 8250 TX
+    // IRQ handler, because uart->flags was stuck at zero-init and our
+    // level-triggered IRQ line was never raised in the first place.
+    // With the initial flag sync in bridge_init the UART cache starts
+    // in lockstep with ours, and RISC-V PLIC's level-triggered rearm
+    // (plic_complete_irq() at riscv-plic.c:225) re-pends the IRQ on
+    // each kernel completion as long as our line stays high — so the
+    // kernel keeps draining xmit_fifo via back-to-back tx_chars calls
+    // within a single logical interrupt, at CPU speed, with no help
+    // from us.
     return (jint)got;
 }
 
