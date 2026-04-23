@@ -816,14 +816,57 @@ static void handle_arp(tap_dev_t* tap, const uint8_t* buffer, size_t size)
         // Packet too small
         return;
     }
-    uint8_t frame[ARPv4_HDR_SIZE + ETH2_HDR_SIZE];
     uint16_t ptype = read_uint16_be_m(buffer + 2);
     uint16_t oper  = read_uint16_be_m(buffer + 6);
-    if (oper == OP_REQUEST && ptype == ETH2_IPv4 && memcmp(buffer + 14, buffer + 24, 4)) {
-        uint8_t* arp = create_eth_frame(tap, frame, ETH2_ARP);
-        create_arp_frame(tap, arp, buffer + 24);
-        eth_send(tap, frame, ARPv4_HDR_SIZE + ETH2_HDR_SIZE);
+    if (oper != OP_REQUEST || ptype != ETH2_IPv4) {
+        // Only IPv4 ARP requests get replies.
+        return;
     }
+
+    const uint8_t* sender_ip = buffer + 14;
+    const uint8_t* target_ip = buffer + 24;
+
+    // Skip gratuitous ARP (announcement, sender == target). The original
+    // check was `memcmp != 0` — kept here with the same semantics.
+    if (!memcmp(sender_ip, target_ip, PLEN_IPv4)) {
+        return;
+    }
+
+    // Skip ARP probe / Duplicate Address Detection. An ARP probe has
+    // `sender_ip = 0.0.0.0` and `target_ip = <address the client is
+    // about to claim>`. dhcpcd (and systemd-networkd, NetworkManager,
+    // Windows, …) sends this right after a DHCP OFFER to make sure
+    // nobody else on the LAN already owns the offered address.
+    //
+    // Without this check the gateway here would reply "GATEWAY_MAC
+    // claims <offered_ip>" — exactly the reply a duplicate host would
+    // have sent, so the client sees its own offered address as
+    // conflicted, aborts the lease commit, and loops through
+    // DHCPDISCOVER / DAD / conflict forever. Symptom on the guest:
+    //
+    //     eth0: offered 192.168.0.100 from 192.168.0.1
+    //     eth0: probing address 192.168.0.100/24
+    //     eth0: 00:08:97:de:c0:de claims 192.168.0.100
+    //     eth0: DAD detected 192.168.0.100
+    //     eth0: soliciting a DHCP lease
+    //     … (repeats until the client gives up)
+    //
+    // We are user-mode networking — there IS no other host on the
+    // virtual LAN besides the gateway and the client. So ARP probes
+    // for any address are, by construction, unique. Stay silent.
+    static const uint8_t zero_ip[PLEN_IPv4] = {0, 0, 0, 0};
+    if (!memcmp(sender_ip, zero_ip, PLEN_IPv4)) {
+        return;
+    }
+
+    // Reply with ourselves as the owner of target_ip. User-mode
+    // networking proxies all off-LAN traffic through GATEWAY_MAC, so
+    // answering broadly here is correct once we've filtered out the
+    // cases above.
+    uint8_t frame[ARPv4_HDR_SIZE + ETH2_HDR_SIZE];
+    uint8_t* arp = create_eth_frame(tap, frame, ETH2_ARP);
+    create_arp_frame(tap, arp, target_ip);
+    eth_send(tap, frame, ARPv4_HDR_SIZE + ETH2_HDR_SIZE);
 }
 
 bool tap_send(tap_dev_t* tap, const void* data, size_t size)
