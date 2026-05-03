@@ -25,7 +25,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <rvvm/rvvm.h>
 
+#include <util/threading.h>
 #include <util/utils.h>
+
+#include <stdio.h>  // parport sink/source use FILE* on all targets
 
 #include <core/rvvm_isolation.h>
 #include <core/gdbstub.h>
@@ -37,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <devices/i2c-oc.h>
 #include <devices/ns16550a.h>
 #include <devices/nvme.h>
+#include <devices/parport-pci.h>
 #include <devices/pci-bus.h>
 #include <devices/pci-vfio.h>
 #include <devices/riscv-aclint.h>
@@ -199,6 +203,9 @@ static void rvvm_print_help(void)
         "    -ata        ...  Explicitly attach storage image as ATA (IDE) device\n"
         "    -nogui           Disable display GUI\n"
         "    -nosound         Disable sound support\n"
+        "    -parport    ...  Attach a parallel port (NetMos 9900): out=<path> sinks\n"
+        "                     guest output, in=<path> sources the reverse channel,\n"
+        "                     e.g. out=lp0.txt,in=rev.fifo; bare path = out; or null\n"
         "    -nonet           Disable networking\n"
         "    -serial     ...  Add more serial ports (Via pty/pipe path), or null\n"
         "    -dtb        ...  Pass custom Device Tree Blob to the machine\n"
@@ -210,6 +217,58 @@ static void rvvm_print_help(void)
         "    -nojit           Disable RVJIT (For debug purposes, slow!)\n"
         "\n";
     print_stderr(help);
+}
+
+// Extract a "<key>=<value>" field from a -parport spec ("out=a,in=b").
+// Returns a malloc'd value (caller frees), or NULL if the key is absent.
+static char* parport_spec_field(const char* spec, const char* key)
+{
+    const char* p = rvvm_strfind(spec, key);
+    if (p == NULL) {
+        return NULL;
+    }
+    const char* val = p + rvvm_strlen(key);
+    const char* end = rvvm_strfind(val, ",");
+    size_t      len = end ? (size_t)(end - val) : rvvm_strlen(val);
+    char* out = safe_new_arr(char, len + 1);
+    rvvm_strlcpy(out, val, len + 1);
+    return out;
+}
+
+// Bridge for the -parport output sink: each byte the guest strobes out of
+// its parallel port is appended to a host file. user_data carries the FILE*
+// opened in rvvm_cli_main. Called outside the device's lock so the write
+// may safely block briefly.
+static void parport_main_write_fn(void* user_data, uint8_t byte)
+{
+    FILE* fp = (FILE*)user_data;
+    if (fp) fputc(byte, fp);
+}
+
+// Reader thread for the -parport in= field: blocks reading from a host
+// file or fifo and pushes each byte into the device's reverse-channel ring.
+// EOF / error ends the thread, leaving any further guest reads to see
+// nFault asserted (end-of-data) on Status.
+typedef struct {
+    pci_dev_t* dev;
+    FILE*      fp;
+} parport_in_ctx_t;
+
+static void* parport_in_thread(void* arg)
+{
+    parport_in_ctx_t* ctx = arg;
+    uint8_t byte;
+    while (fread(&byte, 1, 1, ctx->fp) == 1) {
+        // Spin until the ring has space. Slow guest readers shouldn't
+        // burn the CPU, so back off when full — sched_yield is plenty
+        // for ringbuffer pacing.
+        while (!parport_pci_inject_byte(ctx->dev, byte)) {
+            rvvm_sched_yield();
+        }
+    }
+    fclose(ctx->fp);
+    free(ctx);
+    return NULL;
 }
 
 static bool rvvm_cli_configure(rvvm_machine_t* machine, const char* bios, tap_dev_t* tap)
@@ -372,6 +431,59 @@ static int rvvm_cli_main(int argc, char** argv)
 
     if (rvvm_has_arg("hda_test")) {
         sound_hda_init_auto(machine);
+    }
+
+    if (rvvm_has_arg("parport")) {
+        // -parport <spec>: attach a parallel port. spec is "null" (attach
+        // with no backend), a bare path (forward output sink), or a
+        // comma-separated field list "out=<path>,in=<path>" where out=
+        // sinks guest output and in= sources the reverse (nibble) channel.
+        const char* spec      = rvvm_getarg("parport");
+        char*       out_alloc = NULL;   // freed at end if allocated
+        char*       in_alloc  = NULL;
+        const char* out_path  = NULL;
+        const char* in_path   = NULL;
+        if (spec != NULL && !rvvm_strcmp(spec, "null")) {
+            if (rvvm_strfind(spec, "=")) {
+                out_alloc = parport_spec_field(spec, "out=");
+                in_alloc  = parport_spec_field(spec, "in=");
+                out_path  = out_alloc;
+                in_path   = in_alloc;
+            } else {
+                out_path = spec;  // bare path shorthand = output sink
+            }
+        }
+
+        pci_dev_t* parport_dev = NULL;
+        if (out_path != NULL) {
+            FILE* fp = fopen(out_path, "wb");
+            if (fp) {
+                setvbuf(fp, NULL, _IONBF, 0);  // unbuffered — bytes appear immediately
+                rvvm_info("parport: output -> %s", out_path);
+                parport_dev = parport_pci_init_auto(machine, parport_main_write_fn, fp);
+            } else {
+                rvvm_warn("parport: failed to open %s, attaching with no backend", out_path);
+            }
+        }
+        if (parport_dev == NULL) {
+            parport_dev = parport_pci_init_auto(machine, NULL, NULL);
+        }
+
+        if (parport_dev && in_path != NULL) {
+            FILE* in_fp = fopen(in_path, "rb");
+            if (in_fp) {
+                rvvm_info("parport: reverse-channel input <- %s", in_path);
+                parport_in_ctx_t* ctx = safe_new_obj(parport_in_ctx_t);
+                ctx->dev = parport_dev;
+                ctx->fp  = in_fp;
+                rvvm_thread_detach(rvvm_thread_create(parport_in_thread, ctx));
+            } else {
+                rvvm_warn("parport: failed to open %s for reverse channel", in_path);
+            }
+        }
+
+        free(out_alloc);
+        free(in_alloc);
     }
 
     tap_dev_t* tap = NULL;
