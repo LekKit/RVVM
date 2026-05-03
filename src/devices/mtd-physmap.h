@@ -21,19 +21,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
  * different firmware into the board memory chip
  */
 
-RVVM_PUBLIC rvvm_reg_dev_t* rvvm_mtd_ram_init(rvvm_machine_t* machine, /**/
-                                              rvvm_blk_dev_t* blk,     /**/
-                                              rvvm_addr_t     addr,    /**/
-                                              bool            fw);
+RVVM_PUBLIC rvvm_reg_dev_t* mtd_ram_init_blk(rvvm_machine_t* machine, /**/
+                                             rvvm_addr_t     addr,    /**/
+                                             rvvm_blk_dev_t* blk);
 
 static inline rvvm_reg_dev_t* mtd_physmap_init(rvvm_machine_t* machine, /**/
                                                const char*     image,   /**/
                                                rvvm_addr_t     addr,    /**/
                                                bool            fw)
 {
+    (void)fw;
     rvvm_blk_dev_t* blk = rvvm_blk_open(image, NULL, RVVM_BLK_RW);
     if (blk) {
-        return rvvm_mtd_ram_init(machine, blk, addr, fw);
+        return mtd_ram_init_blk(machine, addr, blk);
     }
     return NULL;
 }

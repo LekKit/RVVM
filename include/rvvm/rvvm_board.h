@@ -345,17 +345,15 @@ static inline rvvm_pci_func_t* rvvm_bochs_display_init_auto(rvvm_machine_t* mach
  * however it may be used as a very simplistic storage device
  *
  * \param machine Machine handle
- * \param blk     Block device handle (Nullable)
  * \param addr    Base MMIO address
- * \param fw      Load guest firmware from this device on reset
+ * \param blk     Block device handle (Nullable)
  * \return        Region device handle or NULL
  *
  * This device is hot-removable via rvvm_region_free()
  */
-RVVM_PUBLIC rvvm_reg_dev_t* rvvm_mtd_ram_init(rvvm_machine_t* machine,    /**/
-                                              rvvm_blk_dev_t* blk, /**/
-                                              rvvm_addr_t     addr,     /**/
-                                              bool            fw);
+RVVM_PUBLIC rvvm_reg_dev_t* mtd_ram_init_blk(rvvm_machine_t* machine, /**/
+                                             rvvm_addr_t     addr,    /**/
+                                             rvvm_blk_dev_t* blk);
 
 /**
  * Attach NVMe block device to the machine (PCI-based)
