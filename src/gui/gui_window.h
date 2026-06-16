@@ -408,6 +408,7 @@ static inline void gui_backend_on_mouse_scroll(gui_window_t* win, int32_t offset
 
 bool win32_window_init(gui_window_t* win);
 bool haiku_window_init(gui_window_t* win);
+bool cocoa_window_init(gui_window_t* win);
 bool wayland_window_init(gui_window_t* win);
 bool x11_window_init(gui_window_t* win);
 bool sdl_window_init(gui_window_t* win);

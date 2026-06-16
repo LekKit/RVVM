@@ -45,6 +45,12 @@ static bool gui_backend_init(gui_window_t* win)
     }
     gui_backend_free(win);
 #endif
+#if defined(USE_COCOA_GUI)
+    if ((!gui || rvvm_strcmp(gui, "cocoa")) && cocoa_window_init(win)) {
+        return true;
+    }
+    gui_backend_free(win);
+#endif
 #if defined(USE_WAYLAND)
     if ((!gui || rvvm_strcmp(gui, "wayland")) && wayland_window_init(win)) {
         return true;

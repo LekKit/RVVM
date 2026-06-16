@@ -667,6 +667,11 @@ override LDFLAGS_USE_HAIKU_GUI := -lbe
 override LDFLAGS_USE_NET       := -lnetwork
 endif
 
+ifeq ($(OS),darwin)
+# macOS-specific frameworks to link to
+override LDFLAGS_USE_COCOA_GUI := -framework Cocoa
+endif
+
 ifeq ($(OS),sunos)
 # Solaris-specific libraries to link to
 override LDFLAGS_USE_NET := $(call check_cc_flags,-lsocket)
@@ -755,7 +760,7 @@ $(if $(LIBS_ERR),$(call log_warn,Missing pkg-config metadata for libraries: $(LI
 override src_has_cxx = $(filter %.cpp %.cxx %.cc,$1)
 
 # Convert source paths to object file paths
-override src_to_obj = $(if $(call var_use,USE_OBJ_STAGE),$(patsubst %.c,$(OBJDIR)/%.o,$(patsubst %.cpp,$(OBJDIR)/%.o,$(patsubst %.cxx,$(OBJDIR)/%.o,$(patsubst %.cc,$(OBJDIR)/%.o,$1)))))
+override src_to_obj = $(if $(call var_use,USE_OBJ_STAGE),$(patsubst %.m,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(patsubst %.cpp,$(OBJDIR)/%.o,$(patsubst %.cxx,$(OBJDIR)/%.o,$(patsubst %.cc,$(OBJDIR)/%.o,$1))))))
 
 # Get full source tree for list of libraries (For USE_LIB_SHARING), up to 8 levels of nesting is supported
 override lib_walk_src = $(filter-out $(LIBS_ALL),$1) $(foreach lib,$(filter-out $(LIBS_OFF),$(filter $(LIB_BASE_LIST),$1)),$(filter-out $(SRC_OFF),$(call lib_base_src,$(lib))) $(call lib_base_libs,$(lib)))
@@ -990,7 +995,7 @@ export DYLD_LIBRARY_PATH := $(BUILDDIR)$(if $(call var_def,DYLD_LIBRARY_PATH),:$
 sinclude $(DEPS)
 
 # Ignore deleted header/dependency files
-%.h %.hpp %.hh %.hxx %.d %.c %.cpp %.cxx %.cc:
+%.h %.hpp %.hh %.hxx %.d %.c %.cpp %.cxx %.cc %.m:
 	@:
 
 # Ignore not yet created CC/LD rebuild triggers
@@ -1022,6 +1027,13 @@ $(call path_shell,$(OBJDIR)/%.o: %.cc Makefile project.mk $(CC_TRIGGER))
 	$(call println,$(TEXT)[$(YELLOW)CC$(TEXT)] $< $(RESET))
 	@$(foreach out,$(call path_wrap,$@),$(call shell_esc,$(CXX) $(CXX_STD) $(CPPFLAGS) $(CFLAGS) $(if $(CC_IS_GNU),-MMD -MF $(patsubst %.o,%.d,$(out))) -o $(out) -c $(call path_wrap,$<)))
 	@$(if $(call var_use,USE_ANALYZER),$(if $(call clang_min_ver,9.0),$(call shell_esc,$(CC) $(CPPFLAGS) $(CFLAGS) --analyze $(call path_wrap,$<))))
+
+
+
+# Objective-C object files (.m), compiled by the C compiler (macOS Cocoa backend)
+$(call path_shell,$(OBJDIR)/%.o: %.m Makefile project.mk $(CC_TRIGGER))
+	$(call println,$(TEXT)[$(YELLOW)CC$(TEXT)] $< $(RESET))
+	@$(foreach out,$(call path_wrap,$@),$(call shell_esc,$(CC) $(CC_STD) $(CPPFLAGS) $(CFLAGS) $(if $(CC_IS_GNU),-MMD -MF $(patsubst %.o,%.d,$(out))) -o $(out) -c $(call path_wrap,$<)))
 
 
 
