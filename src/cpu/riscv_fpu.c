@@ -93,7 +93,7 @@ static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t
     }
 }
 
-slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
