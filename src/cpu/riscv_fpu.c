@@ -57,10 +57,11 @@ static const uint32_t riscv_fli_table[32] = {
 /*
  * RMM (round to nearest, ties to max magnitude) == IEEE 754 roundTiesToAway.
  *
- * The host FPU has no such mode, so when frm == RMM the host is left in
- * round-to-nearest-even (see fpu_set_rounding_mode()). RNE and roundTiesToAway
- * produce identical results EXCEPT on an exact halfway tie, where RNE rounds to
- * even and roundTiesToAway rounds to the larger-magnitude neighbour.
+ * The host FPU has no such mode. RMM may be requested via the dynamic frm CSR or
+ * a static instruction rm field; either way riscv_emulate_f_opc_op() runs the op
+ * in round-to-nearest. RNE and roundTiesToAway produce identical results EXCEPT
+ * on an exact halfway tie, where RNE rounds to even and roundTiesToAway rounds to
+ * the larger-magnitude neighbour.
  *
  * So we compute the op in RNE, recover the EXACT rounding error via the library's
  * error-free transforms (TwoSum / TwoProduct), and only when that error is
@@ -111,7 +112,7 @@ static forceinline fpu_f64_t riscv_rmm_apply_f64(fpu_f64_t n, fpu_f64_t err)
     return n;
 }
 
-slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+static slow_path func_opt_size void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn, const bool rmm)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
@@ -119,10 +120,6 @@ slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint3
     const size_t   rs2 = bit_ext_u32(insn, 20, 5);
 
     if (likely(riscv_fpu_is_enabled(vm))) {
-
-        // roundTiesToAway is active only for dynamic-rounding ops while frm == RMM;
-        // the fadd/fsub/fmul cases below apply an exact ties-away fixup when set.
-        const bool rmm = unlikely(vm->csr.fcsr >> 5 == 0x04) && rm == 0x07;
 
         switch (insn & 0xFE007000UL) {
             /*
@@ -439,6 +436,25 @@ slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint3
     }
 
     riscv_illegal_insn(vm, insn);
+}
+
+// RMM (roundTiesToAway) has no host rounding mode. It may be requested by the
+// dynamic frm CSR (rm == DYN) or a static rm field; in both cases run the op in
+// round-to-nearest so the error-free transforms used by the fadd/fsub/fmul cases
+// are valid, then restore the host mode so a directed frm survives for later
+// dynamic-rounding ops.
+slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+{
+    const uint32_t rm  = bit_ext_u32(insn, 12, 3);
+    const bool     rmm = (rm == 0x04) || (rm == 0x07 && (vm->csr.fcsr >> 5) == 0x04);
+    if (unlikely(rmm)) {
+        const uint32_t host = fpu_get_rounding_mode();
+        fpu_set_rounding_mode(FPU_LIB_ROUND_NE);
+        riscv_emulate_f_opc_op_impl(vm, insn, true);
+        fpu_set_rounding_mode(host);
+    } else {
+        riscv_emulate_f_opc_op_impl(vm, insn, false);
+    }
 }
 
 #endif
