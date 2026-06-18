@@ -30,6 +30,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdio.h>  // parport sink/source use FILE* on all targets
 
+#if !defined(HOST_TARGET_WINNT)
+#include <fcntl.h>   // open(), O_WRONLY/O_CREAT/O_TRUNC for the parport sink
+#include <unistd.h>  // close()
+#endif
+
 #include <core/rvvm_isolation.h>
 #include <core/gdbstub.h>
 #include <core/rvvm_user.h>
@@ -233,6 +238,29 @@ static char* parport_spec_field(const char* spec, const char* key)
     char* out = safe_new_arr(char, len + 1);
     rvvm_strlcpy(out, val, len + 1);
     return out;
+}
+
+// Open the -parport output sink for writing. We keep stdio (FILE*) so the
+// sink may be a pipe/fifo, but create regular files with owner-only perms
+// rather than letting fopen() default to a world-writable 0666 & ~umask.
+static FILE* parport_open_sink(const char* path)
+{
+#if !defined(HOST_TARGET_WINNT)
+    // O_CREAT honours the 0600 mode only when the file is created; existing
+    // files and fifos keep their perms. fdopen adopts the fd on success.
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        return NULL;
+    }
+    FILE* fp = fdopen(fd, "wb");
+    if (fp == NULL) {
+        close(fd);
+    }
+    return fp;
+#else
+    // Windows inherits ACLs from the parent directory; no umask-style window.
+    return fopen(path, "wb");
+#endif
 }
 
 // Bridge for the -parport output sink: each byte the guest strobes out of
@@ -456,7 +484,7 @@ static int rvvm_cli_main(int argc, char** argv)
 
         pci_dev_t* parport_dev = NULL;
         if (out_path != NULL) {
-            FILE* fp = fopen(out_path, "wb");
+            FILE* fp = parport_open_sink(out_path);
             if (fp) {
                 setvbuf(fp, NULL, _IONBF, 0);  // unbuffered — bytes appear immediately
                 rvvm_info("parport: output -> %s", out_path);
