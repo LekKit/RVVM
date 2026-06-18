@@ -54,43 +54,61 @@ static const uint32_t riscv_fli_table[32] = {
     0x7FC00000UL, // Canonical NaN
 };
 
-static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t rs1, const size_t rs2)
+/*
+ * RMM (round to nearest, ties to max magnitude) == IEEE 754 roundTiesToAway.
+ *
+ * The host FPU has no such mode, so when frm == RMM the host is left in
+ * round-to-nearest-even (see fpu_set_rounding_mode()). RNE and roundTiesToAway
+ * produce identical results EXCEPT on an exact halfway tie, where RNE rounds to
+ * even and roundTiesToAway rounds to the larger-magnitude neighbour.
+ *
+ * So we compute the op in RNE, recover the EXACT rounding error via the library's
+ * error-free transforms (TwoSum / TwoProduct), and only when that error is
+ * exactly half a ULP away from zero do we step the result outward by one ULP.
+ * (The previous implementation rounded toward +/-inf unconditionally, which is
+ * correct on ties but wrong for every inexact non-tie. See issue #204.)
+ *
+ * Only fadd/fsub/fmul need this: a quotient or square root is never an exact
+ * halfway case, so RNE already equals roundTiesToAway for fdiv/fsqrt.
+ */
+static forceinline fpu_f32_t riscv_rmm_apply_f32(fpu_f32_t n, fpu_f32_t err)
 {
-    bool neg = false;
-
-    // Decide the sign of the output
-    switch (insn & 0xFE000000UL) {
-        case 0x00000000UL: // fadd.s
-            neg = fpu_signbit32(fpu_add32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
-            break;;
-        case 0x02000000UL: // fadd.d
-            neg = fpu_signbit64(fpu_add64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
-            break;
-        case 0x08000000UL: // fsub.s
-            neg = fpu_signbit32(fpu_sub32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
-            break;
-        case 0x0A000000UL: // fsub.d
-            neg = fpu_signbit64(fpu_sub64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
-            break;
-        case 0x10000000UL: // fmul.s
-        case 0x18000000UL: // fdiv.s
-            neg = fpu_signbit32(riscv_view_s(vm, rs1)) != fpu_signbit32(riscv_view_s(vm, rs2));
-            break;
-        case 0x12000000UL: // fmul.d
-        case 0x1A000000UL: // fdiv.d
-            neg = fpu_signbit64(riscv_view_d(vm, rs1)) != fpu_signbit64(riscv_view_d(vm, rs2));
-            break;
-        default:
-            neg = fpu_signbit64(riscv_view_d(vm, rs1));
-            break;
+    if (unlikely(!fpu_is_finite32(n))) {
+        return n;
     }
-
-    // Round to positive/negative infinity based on the result sign
-    if (neg) {
-        fpu_set_rounding_mode(FPU_LIB_ROUND_DN);
-    } else {
-        fpu_set_rounding_mode(FPU_LIB_ROUND_UP);
+    const uint32_t un = fpu_bit_f32_to_u32(n);
+    const uint32_t ue = fpu_bit_f32_to_u32(err);
+    // Skip exact results (err == +/-0) and errors pointing toward zero: in both
+    // cases RNE already delivers the roundTiesToAway value.
+    if ((ue << 1) == 0 || (un >> 31) != (ue >> 31)) {
+        return n;
     }
+    // n + 1 ULP toward larger magnitude, and the exact gap to it.
+    const fpu_f32_t away    = fpu_bit_u32_to_f32(un + 1);
+    const fpu_f32_t spacing = fpu_sub32(away, n);  // exact: adjacent floats
+    // Tie iff the exact result is the midpoint, i.e. 2*err == spacing.
+    if (fpu_is_bit_equal32(fpu_add32(err, err), spacing)) {
+        return away;
+    }
+    return n;
+}
+
+static forceinline fpu_f64_t riscv_rmm_apply_f64(fpu_f64_t n, fpu_f64_t err)
+{
+    if (unlikely(!fpu_is_finite64(n))) {
+        return n;
+    }
+    const uint64_t un = fpu_bit_f64_to_u64(n);
+    const uint64_t ue = fpu_bit_f64_to_u64(err);
+    if ((ue << 1) == 0 || (un >> 63) != (ue >> 63)) {
+        return n;
+    }
+    const fpu_f64_t away    = fpu_bit_u64_to_f64(un + 1);
+    const fpu_f64_t spacing = fpu_sub64(away, n);
+    if (fpu_is_bit_equal64(fpu_add64(err, err), spacing)) {
+        return away;
+    }
+    return n;
 }
 
 slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
@@ -102,33 +120,50 @@ slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint3
 
     if (likely(riscv_fpu_is_enabled(vm))) {
 
-        if (unlikely(vm->csr.fcsr >> 5 == 0x04)) {
-            // Handle RMM rounding
-            riscv_prepare_rmm(vm, insn, rs1, rs2);
-        }
+        // roundTiesToAway is active only for dynamic-rounding ops while frm == RMM;
+        // the fadd/fsub/fmul cases below apply an exact ties-away fixup when set.
+        const bool rmm = unlikely(vm->csr.fcsr >> 5 == 0x04) && rm == 0x07;
 
         switch (insn & 0xFE007000UL) {
             /*
              * FPU computations
              */
-            case RISCV_FPU_GEN_RM_CASES(0x00000000UL): // fadd.s
-                riscv_emit_s(vm, rds, fpu_add32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
+            case RISCV_FPU_GEN_RM_CASES(0x00000000UL): { // fadd.s
+                const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
+                const fpu_f32_t n = fpu_add32(a, b);
+                riscv_emit_s(vm, rds, rmm ? riscv_rmm_apply_f32(n, fpu_add_error32(n, a, b)) : n);
                 return;
-            case RISCV_FPU_GEN_RM_CASES(0x02000000UL): // fadd.d
-                riscv_emit_d(vm, rds, fpu_add64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+            }
+            case RISCV_FPU_GEN_RM_CASES(0x02000000UL): { // fadd.d
+                const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
+                const fpu_f64_t n = fpu_add64(a, b);
+                riscv_emit_d(vm, rds, rmm ? riscv_rmm_apply_f64(n, fpu_add_error64(n, a, b)) : n);
                 return;
-            case RISCV_FPU_GEN_RM_CASES(0x08000000UL): // fsub.s
-                riscv_write_s(vm, rds, fpu_sub32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
+            }
+            case RISCV_FPU_GEN_RM_CASES(0x08000000UL): { // fsub.s
+                const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
+                const fpu_f32_t n = fpu_sub32(a, b);
+                riscv_write_s(vm, rds, rmm ? riscv_rmm_apply_f32(n, fpu_add_error32(n, a, fpu_neg32(b))) : n);
                 return;
-            case RISCV_FPU_GEN_RM_CASES(0x0A000000UL): // fsub.d
-                riscv_write_d(vm, rds, fpu_sub64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+            }
+            case RISCV_FPU_GEN_RM_CASES(0x0A000000UL): { // fsub.d
+                const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
+                const fpu_f64_t n = fpu_sub64(a, b);
+                riscv_write_d(vm, rds, rmm ? riscv_rmm_apply_f64(n, fpu_add_error64(n, a, fpu_neg64(b))) : n);
                 return;
-            case RISCV_FPU_GEN_RM_CASES(0x10000000UL): // fmul.s
-                riscv_emit_s(vm, rds, fpu_mul32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
+            }
+            case RISCV_FPU_GEN_RM_CASES(0x10000000UL): { // fmul.s
+                const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
+                const fpu_f32_t n = fpu_mul32(a, b);
+                riscv_emit_s(vm, rds, rmm ? riscv_rmm_apply_f32(n, fpu_mul_error32(n, a, b)) : n);
                 return;
-            case RISCV_FPU_GEN_RM_CASES(0x12000000UL): // fmul.d
-                riscv_emit_d(vm, rds, fpu_mul64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+            }
+            case RISCV_FPU_GEN_RM_CASES(0x12000000UL): { // fmul.d
+                const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
+                const fpu_f64_t n = fpu_mul64(a, b);
+                riscv_emit_d(vm, rds, rmm ? riscv_rmm_apply_f64(n, fpu_mul_error64(n, a, b)) : n);
                 return;
+            }
             case RISCV_FPU_GEN_RM_CASES(0x18000000UL): // fdiv.s
                 riscv_emit_s(vm, rds, fpu_div32(riscv_view_s(vm, rs1), riscv_view_s(vm, rs2)));
                 return;
