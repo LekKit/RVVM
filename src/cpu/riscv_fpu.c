@@ -210,7 +210,7 @@ static forceinline fpu_f64_t riscv_rmm_div_apply_f64(fpu_f64_t n, fpu_f64_t a, f
     return r;
 }
 
-static slow_path func_opt_size void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn, const bool rmm)
+static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn, const bool rmm)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
@@ -551,7 +551,7 @@ static slow_path func_opt_size void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm,
  * in RNE. funct3 == rm only carries a rounding mode on rounding-capable ops, so
  * this never misfires on fsgnj/fcmp/fclass/fmv.
  */
-slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
 {
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
     const uint32_t frm = vm->csr.fcsr >> 5;
