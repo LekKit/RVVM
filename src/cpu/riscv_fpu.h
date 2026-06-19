@@ -26,13 +26,13 @@ static forceinline bool riscv_fpu_rm_is_valid(uint32_t rm)
     return rm > 1;
 }
 
-// Bit-precise register reads
+// Bit-precise register read (raw low 32 bits, no NaN-box check) — for fmv.x.w
 static forceinline fpu_f32_t riscv_view_s(rvvm_hart_t* vm, size_t reg)
 {
     return fpu_unpack_f32_from_f64(vm->fpu_registers[reg]);
 }
 
-// Normalized register reads
+// Value register read: a mal-boxed narrow operand reads as the canonical NaN
 static forceinline fpu_f32_t riscv_read_s(rvvm_hart_t* vm, size_t reg)
 {
     return fpu_nan_unbox_f32(vm->fpu_registers[reg]);
@@ -174,9 +174,9 @@ static forceinline void riscv_emulate_f_fmadd(rvvm_hart_t* vm, const uint32_t in
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fmadd.s
                 riscv_write_s(vm, rds,
-                             riscv_fma_round_f32(vm, rm, riscv_view_s(vm, rs1), //
-                                       riscv_view_s(vm, rs2), //
-                                       riscv_view_s(vm, rs3)));
+                             riscv_fma_round_f32(vm, rm, riscv_read_s(vm, rs1), //
+                                       riscv_read_s(vm, rs2), //
+                                       riscv_read_s(vm, rs3)));
                 return;
             case 0x1: // fmadd.d
                 riscv_write_d(vm, rds,
@@ -202,9 +202,9 @@ static forceinline void riscv_emulate_f_fmsub(rvvm_hart_t* vm, const uint32_t in
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fmsub.s
                 riscv_write_s(vm, rds,
-                             riscv_fma_round_f32(vm, rm, riscv_view_s(vm, rs1), //
-                                       riscv_view_s(vm, rs2), //
-                                       fpu_neg32(riscv_view_s(vm, rs3))));
+                             riscv_fma_round_f32(vm, rm, riscv_read_s(vm, rs1), //
+                                       riscv_read_s(vm, rs2), //
+                                       fpu_neg32(riscv_read_s(vm, rs3))));
                 return;
             case 0x1: // fmsub.d
                 riscv_write_d(vm, rds,
@@ -230,9 +230,9 @@ static forceinline void riscv_emulate_f_fnmsub(rvvm_hart_t* vm, const uint32_t i
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fnmsub.s
                 riscv_write_s(vm, rds,
-                             riscv_fma_round_f32(vm, rm, fpu_neg32(riscv_view_s(vm, rs1)), //
-                                       riscv_view_s(vm, rs2),            //
-                                       riscv_view_s(vm, rs3)));
+                             riscv_fma_round_f32(vm, rm, fpu_neg32(riscv_read_s(vm, rs1)), //
+                                       riscv_read_s(vm, rs2),            //
+                                       riscv_read_s(vm, rs3)));
                 return;
             case 0x1: // fnmsub.d
                 riscv_write_d(vm, rds,
@@ -259,9 +259,9 @@ static forceinline void riscv_emulate_f_fnmadd(rvvm_hart_t* vm, const uint32_t i
             case 0x0: // fnmadd.s = -(rs1*rs2) - rs3; negate operands so the single
                        // rounding sees the correctly-signed result (directed modes)
                 riscv_write_s(vm, rds,
-                             riscv_fma_round_f32(vm, rm, fpu_neg32(riscv_view_s(vm, rs1)), //
-                                                 riscv_view_s(vm, rs2), //
-                                                 fpu_neg32(riscv_view_s(vm, rs3))));
+                             riscv_fma_round_f32(vm, rm, fpu_neg32(riscv_read_s(vm, rs1)), //
+                                                 riscv_read_s(vm, rs2), //
+                                                 fpu_neg32(riscv_read_s(vm, rs3))));
                 return;
             case 0x1: // fnmadd.d
                 riscv_write_d(vm, rds,
