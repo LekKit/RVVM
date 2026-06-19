@@ -210,7 +210,7 @@ static forceinline fpu_f64_t riscv_rmm_div_apply_f64(fpu_f64_t n, fpu_f64_t a, f
     return r;
 }
 
-slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+static slow_path func_opt_size void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn, const bool rmm)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
@@ -218,10 +218,6 @@ slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint3
     const size_t   rs2 = bit_ext_u32(insn, 20, 5);
 
     if (likely(riscv_fpu_is_enabled(vm))) {
-
-        // roundTiesToAway is active for dynamic-rounding ops while frm == RMM; the
-        // fadd/fsub/fmul/fdiv cases below apply the exact ties-away fixup when set.
-        const bool rmm = unlikely(vm->csr.fcsr >> 5 == 0x04) && rm == 0x07;
 
         switch (insn & 0xFE007000UL) {
             /*
@@ -544,6 +540,34 @@ slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint3
     }
 
     riscv_illegal_insn(vm, insn);
+}
+
+/*
+ * RISC-V selects the rounding mode either dynamically (the frm CSR, when the
+ * instruction's rm field is DYN) or statically (the rm field itself). The host
+ * FPU tracks frm, so a static rm field that differs from frm must be applied
+ * around the op. RMM has no host mode at all and is synthesized in RNE by the
+ * fixups above (riscv_rmm_apply / riscv_rmm_div_apply), so its sub-ops must run
+ * in RNE. funct3 == rm only carries a rounding mode on rounding-capable ops, so
+ * this never misfires on fsgnj/fcmp/fclass/fmv.
+ */
+slow_path func_opt_size void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+{
+    const uint32_t rm  = bit_ext_u32(insn, 12, 3);
+    const uint32_t frm = vm->csr.fcsr >> 5;
+    // Effective rounding mode: a static rm field overrides the dynamic frm CSR.
+    const uint32_t eff = (rm == 0x07) ? frm : rm;
+    const bool     rmm = (eff == 0x04);
+    // Override the host mode when synthesizing RMM (run sub-ops in RNE) or when a
+    // static rm field selects a host-native mode other than the one frm left set.
+    if (unlikely(rmm || (rm != 0x07 && eff != frm))) {
+        const uint32_t host = fpu_get_rounding_mode();
+        fpu_set_rounding_mode(rmm ? FPU_LIB_ROUND_NE : eff);
+        riscv_emulate_f_opc_op_impl(vm, insn, rmm);
+        fpu_set_rounding_mode(host);
+    } else {
+        riscv_emulate_f_opc_op_impl(vm, insn, false);
+    }
 }
 
 #endif
