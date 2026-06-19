@@ -138,14 +138,62 @@ static forceinline fpu_f64_t riscv_rmm_add_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64
     return r;
 }
 
-// roundTiesToAway fixup for fmul. Flag-isolated.
+/*
+ * Dekker's product error (fpu_mul_error) loses bits once the product error drops
+ * below the smallest subnormal -- not only for a subnormal result, but throughout
+ * the smallest normal binades (the half-ULP ~2^(e-53) underflows for e <= -969).
+ * Those results need an exact tie test.
+ *
+ * For f32 the exact product widens losslessly into f64 (48 <= 53 bits) and the
+ * away-side midpoint is exact there (<= 25 bits, down to 2^-150), so the op is a
+ * tie iff a*b == m. This is exact for every f32 result, so fmul.s always uses it.
+ *
+ * For f64 there is no wider type, so scale both operands by 2^512 to lift the
+ * product into a binade where the fma-based TwoProduct is exact (a small product
+ * bounds |a|,|b|, so a*2^512 cannot overflow). The midpoint of two normals needs
+ * one bit more than the format holds, so rather than form it we test the residual:
+ * the op is a tie iff 2*(a*b - n) == ULP, evaluated in the scaled domain with an
+ * exact TwoSum cancellation. Mirrors the scaling in riscv_rmm_div_apply_f64.
+ */
+static forceinline fpu_f32_t riscv_rmm_mul_exact_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
+{
+    const fpu_f32_t away = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);
+    const fpu_f64_t half = fpu_bit_u64_to_f64(0x3FE0000000000000ULL);  // 0.5
+    const fpu_f64_t dn   = fpu_fcvt_f32_to_f64(n);
+    const fpu_f64_t dab  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));  // exact
+    const fpu_f64_t m    = fpu_add64(dn, fpu_mul64(fpu_sub64(fpu_fcvt_f32_to_f64(away), dn), half));
+    return ((fpu_bit_f64_to_u64(fpu_sub64(dab, m)) << 1) == 0) ? away : n;  // tie iff a*b == m
+}
+
+static forceinline fpu_f64_t riscv_rmm_mul_small_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
+{
+    const fpu_f64_t S    = fpu_bit_u64_to_f64(0x5FF0000000000000ULL);  // 2^512
+    const fpu_f64_t as   = fpu_mul64(a, S), bs = fpu_mul64(b, S);      // exact: |a|,|b| bounded
+    const fpu_f64_t ps   = fpu_mul64(as, bs);                          // a*b * 2^1024, normal
+    const fpu_f64_t pe   = fpu_fma64(as, bs, fpu_neg64(ps));           // exact: a*b*2^1024 = ps + pe
+    const fpu_f64_t away = fpu_bit_u64_to_f64(fpu_bit_f64_to_u64(n) + 1);
+    const fpu_f64_t ns   = fpu_mul64(fpu_mul64(n, S), S);              // n * 2^1024, exact
+    const fpu_f64_t gaps = fpu_mul64(fpu_mul64(fpu_sub64(away, n), S), S);  // ULP * 2^1024
+    // residual (a*b - n)*2^1024 = dr + pe (dr exact, Sterbenz). Tie iff 2*(a*b-n)
+    // == ULP, i.e. 2*dr + 2*pe == gaps, via an exact TwoSum(2*dr, -gaps).
+    const fpu_f64_t dr   = fpu_sub64(ps, ns);
+    const fpu_f64_t td   = fpu_add64(dr, dr), tp = fpu_add64(pe, pe), ng = fpu_neg64(gaps);
+    const fpu_f64_t vh   = fpu_add64(td, ng);
+    const fpu_f64_t vl   = fpu_add_error64(vh, td, ng);               // exact: (td - gaps) = vh + vl
+    return (((fpu_bit_f64_to_u64(vl) << 1) == 0) && ((fpu_bit_f64_to_u64(fpu_add64(vh, tp)) << 1) == 0))
+               ? away : n;                                            // tie iff td - gaps == -2*pe
+}
+
+// roundTiesToAway fixup for fmul. Flag-isolated. fmul.s always uses the exact f64
+// widening; fmul.d uses the exact scaled test for small results (where the product
+// error underflows) and the cheaper Dekker product error otherwise.
 static forceinline fpu_f32_t riscv_rmm_mul_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
 {
     if (unlikely(!fpu_is_finite32(n))) {
         return n;
     }
     const uint32_t exc = fpu_get_exceptions();
-    const fpu_f32_t r  = riscv_rmm_apply_f32(n, fpu_mul_error32(n, a, b));
+    const fpu_f32_t r  = riscv_rmm_mul_exact_f32(n, a, b);
     fpu_set_exceptions(exc);
     return r;
 }
@@ -156,7 +204,11 @@ static forceinline fpu_f64_t riscv_rmm_mul_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64
         return n;
     }
     const uint32_t exc = fpu_get_exceptions();
-    const fpu_f64_t r  = riscv_rmm_apply_f64(n, fpu_mul_error64(n, a, b));
+    // |n| >= 2^-959 (exp field >= 64): the product error stays representable, so
+    // the cheap Dekker path is exact. Below that, use the scaled residual test.
+    const fpu_f64_t r  = (((fpu_bit_f64_to_u64(n) >> 52) & 0x7FFU) >= 64)
+                             ? riscv_rmm_apply_f64(n, fpu_mul_error64(n, a, b))
+                             : riscv_rmm_mul_small_f64(n, a, b);
     fpu_set_exceptions(exc);
     return r;
 }
