@@ -82,6 +82,48 @@ static forceinline void riscv_write_d(rvvm_hart_t* vm, size_t reg, fpu_f64_t val
 
 slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn);
 
+/*
+ * roundTiesToAway core fixup, shared by the OP-FP dispatch (riscv_fpu.c) and the
+ * FMA family (riscv_rmm_fma_apply, below). Given a round-to-nearest-even result n
+ * and the EXACT rounding error err = (true result) - n, step n one ULP outward
+ * only on an exact halfway tie (err exactly half a ULP, pointing away from zero);
+ * otherwise RNE already equals roundTiesToAway. See the strategy comment in
+ * riscv_fpu.c.
+ */
+static forceinline fpu_f32_t riscv_rmm_apply_f32(fpu_f32_t n, fpu_f32_t err)
+{
+    const uint32_t un = fpu_bit_f32_to_u32(n);
+    const uint32_t ue = fpu_bit_f32_to_u32(err);
+    // Skip exact results (err == +/-0) and errors pointing toward zero: in both
+    // cases RNE already delivers the roundTiesToAway value.
+    if ((ue << 1) == 0 || (un >> 31) != (ue >> 31)) {
+        return n;
+    }
+    // n + 1 ULP toward larger magnitude, and the exact gap to it.
+    const fpu_f32_t away    = fpu_bit_u32_to_f32(un + 1);
+    const fpu_f32_t spacing = fpu_sub32(away, n);  // exact: adjacent floats
+    // Tie iff the exact result is the midpoint, i.e. 2*err == spacing.
+    if (fpu_is_bit_equal32(fpu_add32(err, err), spacing)) {
+        return away;
+    }
+    return n;
+}
+
+static forceinline fpu_f64_t riscv_rmm_apply_f64(fpu_f64_t n, fpu_f64_t err)
+{
+    const uint64_t un = fpu_bit_f64_to_u64(n);
+    const uint64_t ue = fpu_bit_f64_to_u64(err);
+    if ((ue << 1) == 0 || (un >> 63) != (ue >> 63)) {
+        return n;
+    }
+    const fpu_f64_t away    = fpu_bit_u64_to_f64(un + 1);
+    const fpu_f64_t spacing = fpu_sub64(away, n);
+    if (fpu_is_bit_equal64(fpu_add64(err, err), spacing)) {
+        return away;
+    }
+    return n;
+}
+
 #if defined(RISCV32) || defined(RISCV64)
 
 static forceinline void riscv_emulate_f_opc_load(rvvm_hart_t* vm, const uint32_t insn)
@@ -188,14 +230,80 @@ static forceinline void riscv_fma_fixup_uf64(fpu_f64_t r, fpu_f64_t a, fpu_f64_t
     fpu_set_exceptions(tiny ? (exc | FPU_LIB_FLAG_UF) : (exc & ~FPU_LIB_FLAG_UF));
 }
 
+/*
+ * roundTiesToAway fixup for the FMA family. As with the OP-FP ops, the host runs
+ * in RNE under frm == RMM, so only an exact halfway tie needs correcting. Both are
+ * flag-isolated: the error-free arithmetic does raw host ops whose intermediate
+ * steps can raise spurious exceptions, while the genuine flags are already set by
+ * the base fma.
+ *
+ * f32: widen to f64, where a*b is exact (48 <= 53 bits) and the away-side midpoint
+ * m is exact (<= 25 significant bits, including the subnormal range). The op is an
+ * exact tie iff a*b + c == m, tested as ((a*b + c) - m) == 0 with every term
+ * exact. A subnormal f32 result is covered too: it widens to a normal f64.
+ */
+static forceinline fpu_f32_t riscv_rmm_fma_apply_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b, fpu_f32_t c)
+{
+    if (unlikely(!fpu_is_finite32(n))) {
+        return n;
+    }
+    const uint32_t  exc   = fpu_get_exceptions();
+    const fpu_f32_t away  = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);  // toward larger magnitude
+    const fpu_f64_t dab   = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));  // exact
+    const fpu_f64_t dc    = fpu_fcvt_f32_to_f64(c);
+    const fpu_f64_t s1    = fpu_add64(dab, dc);
+    const fpu_f64_t s1e   = fpu_add_error64(s1, dab, dc);  // exact: dab + dc == s1 + s1e
+    const fpu_f64_t dn    = fpu_fcvt_f32_to_f64(n);
+    const fpu_f64_t half  = fpu_bit_u64_to_f64(0x3FE0000000000000ULL);  // 0.5
+    const fpu_f64_t m     = fpu_add64(dn, fpu_mul64(fpu_sub64(fpu_fcvt_f32_to_f64(away), dn), half));
+    const fpu_f64_t resid = fpu_add64(fpu_sub64(s1, m), s1e);  // (a*b + c) - m, exactly 0 only on a tie
+    const fpu_f32_t r     = ((fpu_bit_f64_to_u64(resid) << 1) == 0) ? away : n;
+    fpu_set_exceptions(exc);
+    return r;
+}
+
+/*
+ * f64: there is no wider host type, so recover the exact residual a*b + c - n via
+ * the Boldo-Muller error-free FMA (TwoProduct + two TwoSums + a final FastTwoSum),
+ * which splits it into a non-overlapping pair (r2, r3). An exact tie has the
+ * residual equal to +/- half a ULP -- a single float -- so r3 == 0 and r2 is that
+ * half-ULP, exactly the condition riscv_rmm_apply_f64 already tests.
+ */
+static forceinline fpu_f64_t riscv_rmm_fma_apply_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
+{
+    if (unlikely(!fpu_is_finite64(n))) {
+        return n;
+    }
+    const uint32_t  exc = fpu_get_exceptions();
+    const fpu_f64_t p   = fpu_mul64(a, b);
+    const fpu_f64_t pe  = fpu_fma64(a, b, fpu_neg64(p));  // TwoProduct tail: a*b == p + pe
+    const fpu_f64_t a1  = fpu_add64(c, pe);
+    const fpu_f64_t a2  = fpu_add_error64(a1, c, pe);     // TwoSum(c, pe)
+    const fpu_f64_t b1  = fpu_add64(p, a1);
+    const fpu_f64_t b2  = fpu_add_error64(b1, p, a1);     // TwoSum(p, a1)
+    const fpu_f64_t g   = fpu_add64(fpu_sub64(b1, n), b2);
+    const fpu_f64_t r2  = fpu_add64(g, a2);               // FastTwoSum(g, a2): residual == r2 + r3
+    const fpu_f64_t r3  = fpu_sub64(a2, fpu_sub64(r2, g));
+    const fpu_f64_t r   = ((fpu_bit_f64_to_u64(r3) << 1) == 0) ? riscv_rmm_apply_f64(n, r2) : n;
+    fpu_set_exceptions(exc);
+    return r;
+}
+
 static forceinline fpu_f32_t riscv_fma_round_f32(rvvm_hart_t* vm, uint32_t rm, fpu_f32_t a, fpu_f32_t b, fpu_f32_t c)
 {
     const uint32_t frm = vm->csr.fcsr >> 5;
     const uint32_t eff = (rm == 0x07) ? frm : rm;
     fpu_f32_t r;
-    if (unlikely(eff == 0x04 || (rm != 0x07 && eff != frm))) {
+    if (unlikely(eff == 0x04)) {
+        // RMM: compute in RNE, then apply the roundTiesToAway fixup.
         const uint32_t host = fpu_get_rounding_mode();
-        fpu_set_rounding_mode(eff == 0x04 ? FPU_LIB_ROUND_NE : eff);
+        fpu_set_rounding_mode(FPU_LIB_ROUND_NE);
+        r = riscv_rmm_fma_apply_f32(fpu_fma32(a, b, c), a, b, c);
+        fpu_set_rounding_mode(host);
+    } else if (rm != 0x07 && eff != frm) {
+        // Static host-native mode that differs from frm.
+        const uint32_t host = fpu_get_rounding_mode();
+        fpu_set_rounding_mode(eff);
         r = fpu_fma32(a, b, c);
         fpu_set_rounding_mode(host);
     } else {
@@ -210,9 +318,16 @@ static forceinline fpu_f64_t riscv_fma_round_f64(rvvm_hart_t* vm, uint32_t rm, f
     const uint32_t frm = vm->csr.fcsr >> 5;
     const uint32_t eff = (rm == 0x07) ? frm : rm;
     fpu_f64_t r;
-    if (unlikely(eff == 0x04 || (rm != 0x07 && eff != frm))) {
+    if (unlikely(eff == 0x04)) {
+        // RMM: compute in RNE, then apply the roundTiesToAway fixup.
         const uint32_t host = fpu_get_rounding_mode();
-        fpu_set_rounding_mode(eff == 0x04 ? FPU_LIB_ROUND_NE : eff);
+        fpu_set_rounding_mode(FPU_LIB_ROUND_NE);
+        r = riscv_rmm_fma_apply_f64(fpu_fma64(a, b, c), a, b, c);
+        fpu_set_rounding_mode(host);
+    } else if (rm != 0x07 && eff != frm) {
+        // Static host-native mode that differs from frm.
+        const uint32_t host = fpu_get_rounding_mode();
+        fpu_set_rounding_mode(eff);
         r = fpu_fma64(a, b, c);
         fpu_set_rounding_mode(host);
     } else {

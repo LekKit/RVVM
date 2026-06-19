@@ -68,7 +68,8 @@ static const uint32_t riscv_fli_table[32] = {
  * (The previous implementation rounded toward +/-inf unconditionally, which is
  * correct on ties but wrong for every inexact non-tie. See issue #204.)
  *
- * fadd/fsub/fmul use riscv_rmm_apply (below). fsqrt never needs a fixup: a square
+ * fadd/fsub/fmul use riscv_rmm_apply (in riscv_fpu.h, shared with the FMA family).
+ * fsqrt never needs a fixup: a square
  * root is irrational unless exact, and its result is always normal (the square
  * root of even the smallest subnormal is ~2^-75), so RNE == roundTiesToAway. A
  * *normally-rounded* quotient is likewise never an exact halfway case — but a
@@ -81,40 +82,6 @@ static const uint32_t riscv_fli_table[32] = {
  * spurious exceptions (inf-inf -> NV, near-FLT_MAX -> OF) that must not leak into
  * fflags. The genuine flags are already set by the base op.
  */
-static forceinline fpu_f32_t riscv_rmm_apply_f32(fpu_f32_t n, fpu_f32_t err)
-{
-    const uint32_t un = fpu_bit_f32_to_u32(n);
-    const uint32_t ue = fpu_bit_f32_to_u32(err);
-    // Skip exact results (err == +/-0) and errors pointing toward zero: in both
-    // cases RNE already delivers the roundTiesToAway value.
-    if ((ue << 1) == 0 || (un >> 31) != (ue >> 31)) {
-        return n;
-    }
-    // n + 1 ULP toward larger magnitude, and the exact gap to it.
-    const fpu_f32_t away    = fpu_bit_u32_to_f32(un + 1);
-    const fpu_f32_t spacing = fpu_sub32(away, n);  // exact: adjacent floats
-    // Tie iff the exact result is the midpoint, i.e. 2*err == spacing.
-    if (fpu_is_bit_equal32(fpu_add32(err, err), spacing)) {
-        return away;
-    }
-    return n;
-}
-
-static forceinline fpu_f64_t riscv_rmm_apply_f64(fpu_f64_t n, fpu_f64_t err)
-{
-    const uint64_t un = fpu_bit_f64_to_u64(n);
-    const uint64_t ue = fpu_bit_f64_to_u64(err);
-    if ((ue << 1) == 0 || (un >> 63) != (ue >> 63)) {
-        return n;
-    }
-    const fpu_f64_t away    = fpu_bit_u64_to_f64(un + 1);
-    const fpu_f64_t spacing = fpu_sub64(away, n);
-    if (fpu_is_bit_equal64(fpu_add64(err, err), spacing)) {
-        return away;
-    }
-    return n;
-}
-
 // roundTiesToAway fixup for fadd/fsub (fsub passes b negated). Flag-isolated.
 static forceinline fpu_f32_t riscv_rmm_add_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
 {
