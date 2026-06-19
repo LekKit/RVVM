@@ -407,52 +407,76 @@ slow_path uint32_t fpu_fclass64(fpu_f64_t d)
 
 slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
 {
-    uint32_t u = fpu_bit_f32_to_u32(f);
-    uint32_t s = u & FPU_LIB_FP32_SIGNEDFP_MASK;
+    // A non-fractional value (integer, +/-0, inf, NaN) is already rounded. Return it
+    // unchanged: the round-to-nearest path below adds +/-0.5, which is inexact once
+    // 0.5 underflows a large value's ULP and would raise a spurious INEXACT -- e.g.
+    // on an out-of-range fcvt-to-int, leaving NX wrongly set alongside NV.
+    if (likely(!fpu_is_fractional32(f))) {
+        return f;
+    }
+    // f is finite with a fractional part. The magic-number rounding (add/sub of 0.5
+    // or 1.0) is itself inexact for the discarded fraction; snapshot and restore the
+    // exception flags so it leaks none. Each fcvt-to-int caller determines INEXACT
+    // itself from the round-trip (and only when the result is in range), so the
+    // rounding step must not pre-set a spurious NX -- e.g. alongside an NV from an
+    // out-of-range or negative-to-unsigned conversion.
+    const uint32_t exc = fpu_get_exceptions();
+    const uint32_t s   = fpu_bit_f32_to_u32(f) & FPU_LIB_FP32_SIGNEDFP_MASK;
+    fpu_f32_t r = f;
     if (unlikely(mode > FPU_LIB_ROUND_UP)) {
         mode = fpu_get_rounding_mode();
     }
     switch (mode) {
         case FPU_LIB_ROUND_NE:
         case FPU_LIB_ROUND_MM:
-            return fpu_add32(f, fpu_bit_u32_to_f32(0x3F000000U | s));
+            r = fpu_add32(f, fpu_bit_u32_to_f32(0x3F000000U | s));
+            break;
         case FPU_LIB_ROUND_DN:
-            if (s && fpu_is_fractional32(f)) {
-                return fpu_sub32(f, fpu_bit_u32_to_f32(0x3F800000U));
+            if (s) {
+                r = fpu_sub32(f, fpu_bit_u32_to_f32(0x3F800000U));
             }
             break;
         case FPU_LIB_ROUND_UP:
-            if (!s && fpu_is_fractional32(f)) {
-                return fpu_add32(f, fpu_bit_u32_to_f32(0x3F800000U));
+            if (!s) {
+                r = fpu_add32(f, fpu_bit_u32_to_f32(0x3F800000U));
             }
             break;
     }
-    return f;
+    fpu_set_exceptions(exc);
+    return r;
 }
 
 slow_path fpu_f64_t fpu_round_f64_internal(fpu_f64_t d, uint32_t mode)
 {
-    uint64_t u = fpu_bit_f64_to_u64(d);
-    uint64_t s = u & FPU_LIB_FP64_SIGNEDFP_MASK;
+    // See fpu_round_f32_internal: a non-fractional value needs no rounding, and
+    // skipping it avoids a spurious INEXACT from the +/-0.5 round-to-nearest add.
+    if (likely(!fpu_is_fractional64(d))) {
+        return d;
+    }
+    const uint32_t exc = fpu_get_exceptions();
+    const uint64_t s   = fpu_bit_f64_to_u64(d) & FPU_LIB_FP64_SIGNEDFP_MASK;
+    fpu_f64_t r = d;
     if (unlikely(mode > FPU_LIB_ROUND_UP)) {
         mode = fpu_get_rounding_mode();
     }
     switch (mode) {
         case FPU_LIB_ROUND_NE:
         case FPU_LIB_ROUND_MM:
-            return fpu_add64(d, fpu_bit_u64_to_f64(0x3FE0000000000000ULL | s));
+            r = fpu_add64(d, fpu_bit_u64_to_f64(0x3FE0000000000000ULL | s));
+            break;
         case FPU_LIB_ROUND_DN:
-            if (s && fpu_is_fractional64(d)) {
-                return fpu_sub64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
+            if (s) {
+                r = fpu_sub64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
             }
             break;
         case FPU_LIB_ROUND_UP:
-            if (!s && fpu_is_fractional64(d)) {
-                return fpu_add64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
+            if (!s) {
+                r = fpu_add64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
             }
             break;
     }
-    return d;
+    fpu_set_exceptions(exc);
+    return r;
 }
 
 #if defined(USE_SOFT_FPU_SQRT)
