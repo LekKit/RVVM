@@ -245,13 +245,13 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
             case RISCV_FPU_GEN_RM_CASES(0x00000000UL): { // fadd.s
                 const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
                 const fpu_f32_t n = fpu_add32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_add_f32(n, a, b) : n);
+                riscv_write_s(vm, rds, rmm ? riscv_rmm_add_f32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x02000000UL): { // fadd.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_add64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_add_f64(n, a, b) : n);
+                riscv_write_d(vm, rds, rmm ? riscv_rmm_add_f64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x08000000UL): { // fsub.s
@@ -269,36 +269,36 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
             case RISCV_FPU_GEN_RM_CASES(0x10000000UL): { // fmul.s
                 const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
                 const fpu_f32_t n = fpu_mul32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_mul_f32(n, a, b) : n);
+                riscv_write_s(vm, rds, rmm ? riscv_rmm_mul_f32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x12000000UL): { // fmul.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_mul64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_mul_f64(n, a, b) : n);
+                riscv_write_d(vm, rds, rmm ? riscv_rmm_mul_f64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x18000000UL): { // fdiv.s
                 const fpu_f32_t a = riscv_view_s(vm, rs1), b = riscv_view_s(vm, rs2);
                 const fpu_f32_t n = fpu_div32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_div_apply_f32(n, a, b) : n);
+                riscv_write_s(vm, rds, rmm ? riscv_rmm_div_apply_f32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x1A000000UL): { // fdiv.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_div64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_div_apply_f64(n, a, b) : n);
+                riscv_write_d(vm, rds, rmm ? riscv_rmm_div_apply_f64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x58000000UL): // fsqrt.s
                 if (likely(!rs2)) {
-                    riscv_emit_s(vm, rds, fpu_sqrt32(riscv_view_s(vm, rs1)));
+                    riscv_write_s(vm, rds, fpu_sqrt32(riscv_view_s(vm, rs1)));
                     return;
                 }
                 break;
             case RISCV_FPU_GEN_RM_CASES(0x5A000000UL): // fsqrt.s
                 if (likely(!rs2)) {
-                    riscv_emit_d(vm, rds, fpu_sqrt64(riscv_view_d(vm, rs1)));
+                    riscv_write_d(vm, rds, fpu_sqrt64(riscv_view_d(vm, rs1)));
                     return;
                 }
                 break;
