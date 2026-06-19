@@ -134,32 +134,66 @@ static forceinline void riscv_emulate_f_opc_store(rvvm_hart_t* vm, const uint32_
  * from RNE only on an exact halfway tie, and an exact FMA tie is vanishingly rare
  * — the remaining ties-away gap is shared with the rest of the FP path.)
  */
+// RISC-V detects tininess *after* rounding; some hosts (e.g. aarch64) detect it
+// *before*, raising a spurious UF when the result rounds up to the smallest
+// normal. UF is valid only for a subnormal result, so clear it otherwise. On
+// after-rounding hosts the host never sets UF for a normal result, so this is a
+// no-op there.
+// The before-rounding UF is spurious only when the result rounded up across the
+// subnormal boundary, i.e. its magnitude is exactly the smallest normal; gate the
+// (relatively costly) fenv read on that so the common FMA path pays only a compare.
+static forceinline void riscv_fma_fixup_uf32(fpu_f32_t r)
+{
+    if (unlikely((fpu_bit_f32_to_u32(r) & 0x7FFFFFFFU) == 0x00800000U)) {
+        const uint32_t exc = fpu_get_exceptions();
+        if (exc & FPU_LIB_FLAG_UF) {
+            fpu_set_exceptions(exc & ~FPU_LIB_FLAG_UF);
+        }
+    }
+}
+
+static forceinline void riscv_fma_fixup_uf64(fpu_f64_t r)
+{
+    if (unlikely((fpu_bit_f64_to_u64(r) & 0x7FFFFFFFFFFFFFFFULL) == 0x0010000000000000ULL)) {
+        const uint32_t exc = fpu_get_exceptions();
+        if (exc & FPU_LIB_FLAG_UF) {
+            fpu_set_exceptions(exc & ~FPU_LIB_FLAG_UF);
+        }
+    }
+}
+
 static forceinline fpu_f32_t riscv_fma_round_f32(rvvm_hart_t* vm, uint32_t rm, fpu_f32_t a, fpu_f32_t b, fpu_f32_t c)
 {
     const uint32_t frm = vm->csr.fcsr >> 5;
     const uint32_t eff = (rm == 0x07) ? frm : rm;
+    fpu_f32_t r;
     if (unlikely(eff == 0x04 || (rm != 0x07 && eff != frm))) {
         const uint32_t host = fpu_get_rounding_mode();
         fpu_set_rounding_mode(eff == 0x04 ? FPU_LIB_ROUND_NE : eff);
-        const fpu_f32_t r = fpu_fma32(a, b, c);
+        r = fpu_fma32(a, b, c);
         fpu_set_rounding_mode(host);
-        return r;
+    } else {
+        r = fpu_fma32(a, b, c);
     }
-    return fpu_fma32(a, b, c);
+    riscv_fma_fixup_uf32(r);
+    return r;
 }
 
 static forceinline fpu_f64_t riscv_fma_round_f64(rvvm_hart_t* vm, uint32_t rm, fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
 {
     const uint32_t frm = vm->csr.fcsr >> 5;
     const uint32_t eff = (rm == 0x07) ? frm : rm;
+    fpu_f64_t r;
     if (unlikely(eff == 0x04 || (rm != 0x07 && eff != frm))) {
         const uint32_t host = fpu_get_rounding_mode();
         fpu_set_rounding_mode(eff == 0x04 ? FPU_LIB_ROUND_NE : eff);
-        const fpu_f64_t r = fpu_fma64(a, b, c);
+        r = fpu_fma64(a, b, c);
         fpu_set_rounding_mode(host);
-        return r;
+    } else {
+        r = fpu_fma64(a, b, c);
     }
-    return fpu_fma64(a, b, c);
+    riscv_fma_fixup_uf64(r);
+    return r;
 }
 
 static forceinline void riscv_emulate_f_fmadd(rvvm_hart_t* vm, const uint32_t insn)
