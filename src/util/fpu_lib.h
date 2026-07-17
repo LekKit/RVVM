@@ -311,6 +311,9 @@ fpu_f64_t fpu_sqrt64_soft_internal(fpu_f64_t d);
 #define FPU_LIB_FP32_NEGATIVE_ZERO 0x80000000U
 #define FPU_LIB_FP64_NEGATIVE_ZERO 0x8000000000000000ULL
 
+#define FPU_LIB_FP32_MINIMUM_NORM  0x00800000U
+#define FPU_LIB_FP64_MINIMUM_NORM  0x0010000000000000ULL
+
 static forceinline uint16_t fpu_bit_f16_to_u16(fpu_f16_t f)
 {
 #if defined(USE_SOFT_FPU_ENCAP)
@@ -1005,6 +1008,32 @@ static forceinline fpu_f64_t fpu_div64(fpu_f64_t a, fpu_f64_t b)
     return div;
 }
 
+/*
+ * IEEE (and RISC-V) underflow means tiny *after* rounding: the result, rounded to
+ * full precision with an unbounded exponent range, lies below the minimum normal.
+ * Some hosts (e.g. aarch64) detect tininess before rounding instead; the two
+ * disagree exactly when the result is +/- the minimum normal, so on that boundary
+ * the after-rounding verdict is recomputed and the UF flag forced to match.
+ * old_exceptions preserves a UF that was already sticky before the op.
+ */
+static forceinline void fpu_fma32_fixup_uf(fpu_f32_t a, fpu_f32_t b, fpu_f32_t c, uint32_t old_exceptions)
+{
+    uint32_t exceptions = fpu_get_exceptions();
+    // The product is exact in f64, the sum rounds once at 53 bits, the scaled
+    // conversion once at 24: 53 >= 2*24 + 2 makes the double rounding innocuous,
+    // so |rn| is the result of unbounded-exponent rounding, tiny iff below 1.0
+    fpu_f64_t sum = fpu_add64(fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b)),
+                              fpu_fcvt_f32_to_f64(c));
+    fpu_f32_t rn  = fpu_fcvt_f64_to_f32(fpu_mul64(sum, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
+    bool     tiny = (fpu_bit_f32_to_u32(rn) & FPU_LIB_FP32_NOSIGNED_MASK) < 0x3F800000U;
+    if (tiny) {
+        exceptions |= FPU_LIB_FLAG_UF;
+    } else {
+        exceptions = (exceptions & ~FPU_LIB_FLAG_UF) | (old_exceptions & FPU_LIB_FLAG_UF);
+    }
+    fpu_set_exceptions(exceptions);
+}
+
 static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, fpu_f32_t c)
 {
     uint32_t old_exceptions = fpu_get_exceptions();
@@ -1024,6 +1053,10 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
 #endif
 #endif
 
+    if (unlikely((fpu_bit_f32_to_u32(ret) & FPU_LIB_FP32_NOSIGNED_MASK) == FPU_LIB_FP32_MINIMUM_NORM)) {
+        fpu_fma32_fixup_uf(a, b, c, old_exceptions);
+    }
+
     uint32_t exceptions = fpu_get_exceptions();
     if (invalid) {
         fpu_raise_invalid();
@@ -1034,13 +1067,11 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
     return ret;
 }
 
-static forceinline fpu_f64_t fpu_fma64(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
+// The bare fused op: no soft NV check, no flag fixups
+static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
 {
-    uint32_t old_exceptions = fpu_get_exceptions();
-    bool invalid = fpu_fma64_invalid_soft(a, b, c);
-
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
-    fpu_f64_t ret = fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
+    return fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
 #else
     fpu_f64_t mul = fpu_mul64(a, b);
     fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
@@ -1048,8 +1079,49 @@ static forceinline fpu_f64_t fpu_fma64(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
     fpu_f64_t e_s = fpu_add_error64(sum, mul, c);
     fpu_f64_t e_f = fpu_add64(e_m, e_s);
     fpu_f64_t err = fpu_odd_round64(e_f, fpu_add_error64(e_f, e_s, e_m));
-    fpu_f64_t ret = fpu_add64(sum, err);
+    return fpu_add64(sum, err);
 #endif
+}
+
+/*
+ * f64 counterpart of fpu_fma32_fixup_uf: no wider type exists, so rescale the op
+ * by 2^52 into the normal range, where the single fused rounding is already
+ * unbounded-equivalent, and test the scaled result against 2^-970.
+ *
+ * The scaling is safe: the result rounds to +/-2^-1022, so at least one of a*b, c
+ * has a set bit at 2^-1022 or below (else the sum is either 0 or larger). If it is
+ * in c, |c| <= 2^-969 and by triangle inequality |a*b| <= 2^-968; if it is in the
+ * exact product (up to 106 bits wide), |a*b| <= 2^-916 and |c| <= 2^-915. Either
+ * way |c|*2^52 is tiny and, for b != 0, |b| >= 2^-1074 gives |a| <= 2^159, so
+ * a*2^52 cannot overflow. If b == 0 then a is unbounded and a*2^52 may overflow to
+ * inf, making rs NaN -- which correctly reads as "not tiny", since a result of
+ * exactly +/-2^-1022 from b == 0 is the exact value of c, and exact never
+ * underflows.
+ */
+static forceinline void fpu_fma64_fixup_uf(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c, uint32_t old_exceptions)
+{
+    uint32_t exceptions = fpu_get_exceptions();
+    fpu_f64_t scale = fpu_bit_u64_to_f64(0x4330000000000000ULL); // 2^52
+    fpu_f64_t rs    = fpu_fma64_raw(fpu_mul64(a, scale), b, fpu_mul64(c, scale));
+    bool      tiny  = (fpu_bit_f64_to_u64(rs) & FPU_LIB_FP64_NOSIGNED_MASK) < 0x0350000000000000ULL; // 2^-970
+    if (tiny) {
+        exceptions |= FPU_LIB_FLAG_UF;
+    } else {
+        exceptions = (exceptions & ~FPU_LIB_FLAG_UF) | (old_exceptions & FPU_LIB_FLAG_UF);
+    }
+    fpu_set_exceptions(exceptions);
+}
+
+static forceinline fpu_f64_t fpu_fma64(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
+{
+    uint32_t old_exceptions = fpu_get_exceptions();
+    bool invalid = fpu_fma64_invalid_soft(a, b, c);
+
+    fpu_f64_t ret = fpu_fma64_raw(a, b, c);
+
+    if (unlikely((fpu_bit_f64_to_u64(ret) & FPU_LIB_FP64_NOSIGNED_MASK) == FPU_LIB_FP64_MINIMUM_NORM)) {
+        fpu_fma64_fixup_uf(a, b, c, old_exceptions);
+    }
 
     uint32_t exceptions = fpu_get_exceptions();
     if (invalid) {
