@@ -93,7 +93,31 @@ static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t
     }
 }
 
-slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+// funct3 is an rm field only on the rounding-capable OP-FP ops; on
+// fsgnj/fmin/fmax/fcmp/fclass/fmv it encodes the operation itself
+static forceinline bool riscv_f_op_is_rounding(const uint32_t insn)
+{
+    switch (insn & 0xFE000000UL) {
+        case 0x00000000UL: // fadd.s
+        case 0x02000000UL: // fadd.d
+        case 0x08000000UL: // fsub.s
+        case 0x0A000000UL: // fsub.d
+        case 0x10000000UL: // fmul.s
+        case 0x12000000UL: // fmul.d
+        case 0x18000000UL: // fdiv.s
+        case 0x1A000000UL: // fdiv.d
+        case 0x58000000UL: // fsqrt.s
+        case 0x5A000000UL: // fsqrt.d
+        case 0x40000000UL: // fcvt.s.d, fround.s (Zfa)
+        case 0x42000000UL: // fcvt.d.s, fround.d (Zfa)
+        case 0xD0000000UL: // fcvt.s.w[u]/l[u]
+        case 0xD2000000UL: // fcvt.d.w[u]/l[u]
+            return true;
+    }
+    return false;
+}
+
+static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
@@ -102,8 +126,8 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
 
     if (likely(riscv_fpu_is_enabled(vm))) {
 
-        if (unlikely(vm->csr.fcsr >> 5 == 0x04)) {
-            // Handle RMM rounding
+        if (unlikely(vm->csr.fcsr >> 5 == 0x04) && rm == 0x07) {
+            // Handle dynamic RMM rounding; a static rm field overrides frm
             riscv_prepare_rmm(vm, insn, rs1, rs2);
         }
 
@@ -404,6 +428,24 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
     }
 
     riscv_illegal_insn(vm, insn);
+}
+
+slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+{
+    const uint32_t rm = bit_ext_u32(insn, 12, 3);
+    // A static rm field on a rounding-capable op overrides the frm-tracked host
+    // mode around the op; ops taking rm as an argument consume the field directly
+    if (unlikely(rm != 0x07) && riscv_fpu_rm_is_valid(rm) && riscv_f_op_is_rounding(insn)) {
+        const uint32_t prev = fpu_get_rounding_mode();
+        const uint32_t need = riscv_fpu_host_rm(rm);
+        if (need != prev) {
+            fpu_set_rounding_mode(need);
+            riscv_emulate_f_opc_op_impl(vm, insn);
+            fpu_set_rounding_mode(prev);
+            return;
+        }
+    }
+    riscv_emulate_f_opc_op_impl(vm, insn);
 }
 
 #endif

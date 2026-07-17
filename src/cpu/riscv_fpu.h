@@ -26,6 +26,13 @@ static forceinline bool riscv_fpu_rm_is_valid(uint32_t rm)
     return rm > 1;
 }
 
+// Host mode implementing a given rm: RMM has no host equivalent and runs in RNE,
+// which differs only on exact halfway ties
+static forceinline uint32_t riscv_fpu_host_rm(uint32_t rm)
+{
+    return (rm == FPU_LIB_ROUND_MM) ? FPU_LIB_ROUND_NE : rm;
+}
+
 // Bit-precise register read (raw low 32 bits, no NaN-box check) -- for fmv.x.w
 static forceinline fpu_f32_t riscv_view_s(rvvm_hart_t* vm, size_t reg)
 {
