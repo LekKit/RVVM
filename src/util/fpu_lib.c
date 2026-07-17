@@ -405,54 +405,109 @@ slow_path uint32_t fpu_fclass64(fpu_f64_t d)
     return ret;
 }
 
+/*
+ * Round to an integral value directly on the encoding: no host FP arithmetic, so
+ * no spurious exception flags and no double rounding. Only DYN falls back to the
+ * tracked mode; an explicit RMM request is honored as-is.
+ */
 slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
 {
-    uint32_t u = fpu_bit_f32_to_u32(f);
-    uint32_t s = u & FPU_LIB_FP32_SIGNEDFP_MASK;
-    if (unlikely(mode > FPU_LIB_ROUND_UP)) {
+    const uint32_t u = fpu_bit_f32_to_u32(f);
+    const uint32_t s = u & FPU_LIB_FP32_SIGNEDFP_MASK;
+    const int32_t  e = fpu_exponent32(f);
+    bool away = false;
+    if (unlikely(mode > FPU_LIB_ROUND_MM)) {
         mode = fpu_get_rounding_mode();
     }
+    if (e >= 23 || !(u << 1)) {
+        return f; // Already integral: |f| >= 2^23, +/-0, inf, NaN
+    }
+    if (e < 0) {
+        // |f| in (0, 1) rounds to +/-0 or +/-1; the 0.5 tie goes to even == 0
+        switch (mode) {
+            case FPU_LIB_ROUND_NE:
+                away = (e == -1) && (u & FPU_LIB_FP32_MANTISSA_MASK);
+                break;
+            case FPU_LIB_ROUND_MM:
+                away = (e == -1);
+                break;
+            case FPU_LIB_ROUND_DN:
+                away = !!s;
+                break;
+            case FPU_LIB_ROUND_UP:
+                away = !s;
+                break;
+        }
+        return fpu_bit_u32_to_f32(s | (away ? 0x3F800000U : 0));
+    }
+    // |f| in [1, 2^23): split the mantissa into integer part and fraction bits
+    const uint32_t frac = u & (FPU_LIB_FP32_MANTISSA_MASK >> e);
+    const uint32_t half = 0x00400000U >> e;
+    const uint32_t step = 0x00800000U >> e; // 1.0 at this exponent; carries into a new binade
     switch (mode) {
         case FPU_LIB_ROUND_NE:
+            away = frac > half || (frac == half && (u & step));
+            break;
         case FPU_LIB_ROUND_MM:
-            return fpu_add32(f, fpu_bit_u32_to_f32(0x3F000000U | s));
+            away = frac >= half;
+            break;
         case FPU_LIB_ROUND_DN:
-            if (s && fpu_is_fractional32(f)) {
-                return fpu_sub32(f, fpu_bit_u32_to_f32(0x3F800000U));
-            }
+            away = s && frac;
             break;
         case FPU_LIB_ROUND_UP:
-            if (!s && fpu_is_fractional32(f)) {
-                return fpu_add32(f, fpu_bit_u32_to_f32(0x3F800000U));
-            }
+            away = !s && frac;
             break;
     }
-    return f;
+    return fpu_bit_u32_to_f32((u - frac) + (away ? step : 0));
 }
 
 slow_path fpu_f64_t fpu_round_f64_internal(fpu_f64_t d, uint32_t mode)
 {
-    uint64_t u = fpu_bit_f64_to_u64(d);
-    uint64_t s = u & FPU_LIB_FP64_SIGNEDFP_MASK;
-    if (unlikely(mode > FPU_LIB_ROUND_UP)) {
+    const uint64_t u = fpu_bit_f64_to_u64(d);
+    const uint64_t s = u & FPU_LIB_FP64_SIGNEDFP_MASK;
+    const int32_t  e = fpu_exponent64(d);
+    bool away = false;
+    if (unlikely(mode > FPU_LIB_ROUND_MM)) {
         mode = fpu_get_rounding_mode();
     }
+    if (e >= 52 || !(u << 1)) {
+        return d; // Already integral: |d| >= 2^52, +/-0, inf, NaN
+    }
+    if (e < 0) {
+        switch (mode) {
+            case FPU_LIB_ROUND_NE:
+                away = (e == -1) && (u & FPU_LIB_FP64_MANTISSA_MASK);
+                break;
+            case FPU_LIB_ROUND_MM:
+                away = (e == -1);
+                break;
+            case FPU_LIB_ROUND_DN:
+                away = !!s;
+                break;
+            case FPU_LIB_ROUND_UP:
+                away = !s;
+                break;
+        }
+        return fpu_bit_u64_to_f64(s | (away ? 0x3FF0000000000000ULL : 0));
+    }
+    const uint64_t frac = u & (FPU_LIB_FP64_MANTISSA_MASK >> e);
+    const uint64_t half = 0x0008000000000000ULL >> e;
+    const uint64_t step = 0x0010000000000000ULL >> e;
     switch (mode) {
         case FPU_LIB_ROUND_NE:
+            away = frac > half || (frac == half && (u & step));
+            break;
         case FPU_LIB_ROUND_MM:
-            return fpu_add64(d, fpu_bit_u64_to_f64(0x3FE0000000000000ULL | s));
+            away = frac >= half;
+            break;
         case FPU_LIB_ROUND_DN:
-            if (s && fpu_is_fractional64(d)) {
-                return fpu_sub64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
-            }
+            away = s && frac;
             break;
         case FPU_LIB_ROUND_UP:
-            if (!s && fpu_is_fractional64(d)) {
-                return fpu_add64(d, fpu_bit_u64_to_f64(0x3FF0000000000000ULL));
-            }
+            away = !s && frac;
             break;
     }
-    return d;
+    return fpu_bit_u64_to_f64((u - frac) + (away ? step : 0));
 }
 
 #if defined(USE_SOFT_FPU_SQRT)
