@@ -54,214 +54,6 @@ static const uint32_t riscv_fli_table[32] = {
     0x7FC00000UL, // Canonical NaN
 };
 
-/*
- * RMM (round to nearest, ties to max magnitude) == IEEE 754 roundTiesToAway.
- *
- * The host FPU has no such mode, so when frm == RMM the host is left in
- * round-to-nearest-even (see fpu_set_rounding_mode()). RNE and roundTiesToAway
- * produce identical results EXCEPT on an exact halfway tie, where RNE rounds to
- * even and roundTiesToAway rounds to the larger-magnitude neighbour.
- *
- * So we compute the op in RNE, recover the EXACT rounding error via the library's
- * error-free transforms (TwoSum / TwoProduct), and only when that error is
- * exactly half a ULP away from zero do we step the result outward by one ULP.
- * (The previous implementation rounded toward +/-inf unconditionally, which is
- * correct on ties but wrong for every inexact non-tie. See issue #204.)
- *
- * fadd/fsub/fmul use riscv_rmm_apply (below). fsqrt never needs a fixup: a square
- * root is irrational unless exact, and its result is always normal (the square
- * root of even the smallest subnormal is ~2^-75), so RNE == roundTiesToAway. A
- * *normally-rounded* quotient is likewise never an exact halfway case — but a
- * *subnormal* quotient has reduced precision and CAN land exactly on a tie, so
- * fdiv gets a dedicated subnormal fixup (riscv_rmm_div_apply).
- *
- * The error-free transforms run only for a finite result, and the per-op wrappers
- * (riscv_rmm_add/mul/div) snapshot and restore the exception flags around them:
- * TwoSum/TwoProduct do raw host arithmetic whose intermediate steps can raise
- * spurious exceptions (inf-inf -> NV, near-FLT_MAX -> OF) that must not leak into
- * fflags. The genuine flags are already set by the base op.
- */
-static forceinline fpu_f32_t riscv_rmm_apply_f32(fpu_f32_t n, fpu_f32_t err)
-{
-    const uint32_t un = fpu_bit_f32_to_u32(n);
-    const uint32_t ue = fpu_bit_f32_to_u32(err);
-    // Skip exact results (err == +/-0) and errors pointing toward zero: in both
-    // cases RNE already delivers the roundTiesToAway value.
-    if ((ue << 1) == 0 || (un >> 31) != (ue >> 31)) {
-        return n;
-    }
-    // n + 1 ULP toward larger magnitude, and the exact gap to it.
-    const fpu_f32_t away    = fpu_bit_u32_to_f32(un + 1);
-    const fpu_f32_t spacing = fpu_sub32(away, n);  // exact: adjacent floats
-    // Tie iff the exact result is the midpoint, i.e. 2*err == spacing.
-    if (fpu_is_bit_equal32(fpu_add32(err, err), spacing)) {
-        return away;
-    }
-    return n;
-}
-
-static forceinline fpu_f64_t riscv_rmm_apply_f64(fpu_f64_t n, fpu_f64_t err)
-{
-    const uint64_t un = fpu_bit_f64_to_u64(n);
-    const uint64_t ue = fpu_bit_f64_to_u64(err);
-    if ((ue << 1) == 0 || (un >> 63) != (ue >> 63)) {
-        return n;
-    }
-    const fpu_f64_t away    = fpu_bit_u64_to_f64(un + 1);
-    const fpu_f64_t spacing = fpu_sub64(away, n);
-    if (fpu_is_bit_equal64(fpu_add64(err, err), spacing)) {
-        return away;
-    }
-    return n;
-}
-
-// roundTiesToAway fixup for fadd/fsub (fsub passes b negated). Flag-isolated.
-static forceinline fpu_f32_t riscv_rmm_add_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
-{
-    if (unlikely(!fpu_is_finite32(n))) {
-        return n;
-    }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f32_t r  = riscv_rmm_apply_f32(n, fpu_add_error32(n, a, b));
-    fpu_set_exceptions(exc);
-    return r;
-}
-
-static forceinline fpu_f64_t riscv_rmm_add_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
-{
-    if (unlikely(!fpu_is_finite64(n))) {
-        return n;
-    }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f64_t r  = riscv_rmm_apply_f64(n, fpu_add_error64(n, a, b));
-    fpu_set_exceptions(exc);
-    return r;
-}
-
-/*
- * Dekker's product error (fpu_mul_error) loses bits once the product error drops
- * below the smallest subnormal -- not only for a subnormal result, but throughout
- * the smallest normal binades (the half-ULP ~2^(e-53) underflows for e <= -969).
- * Those results need an exact tie test.
- *
- * For f32 the exact product widens losslessly into f64 (48 <= 53 bits) and the
- * away-side midpoint is exact there (<= 25 bits, down to 2^-150), so the op is a
- * tie iff a*b == m. This is exact for every f32 result, so fmul.s always uses it.
- *
- * For f64 there is no wider type, so scale both operands by 2^512 to lift the
- * product into a binade where the fma-based TwoProduct is exact (a small product
- * bounds |a|,|b|, so a*2^512 cannot overflow). The midpoint of two normals needs
- * one bit more than the format holds, so rather than form it we test the residual:
- * the op is a tie iff 2*(a*b - n) == ULP, evaluated in the scaled domain with an
- * exact TwoSum cancellation. Mirrors the scaling in riscv_rmm_div_apply_f64.
- */
-static forceinline fpu_f32_t riscv_rmm_mul_exact_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
-{
-    const fpu_f32_t away = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);
-    const fpu_f64_t half = fpu_bit_u64_to_f64(0x3FE0000000000000ULL);  // 0.5
-    const fpu_f64_t dn   = fpu_fcvt_f32_to_f64(n);
-    const fpu_f64_t dab  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));  // exact
-    const fpu_f64_t m    = fpu_add64(dn, fpu_mul64(fpu_sub64(fpu_fcvt_f32_to_f64(away), dn), half));
-    return ((fpu_bit_f64_to_u64(fpu_sub64(dab, m)) << 1) == 0) ? away : n;  // tie iff a*b == m
-}
-
-static forceinline fpu_f64_t riscv_rmm_mul_small_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
-{
-    const fpu_f64_t S    = fpu_bit_u64_to_f64(0x5FF0000000000000ULL);  // 2^512
-    const fpu_f64_t as   = fpu_mul64(a, S), bs = fpu_mul64(b, S);      // exact: |a|,|b| bounded
-    const fpu_f64_t ps   = fpu_mul64(as, bs);                          // a*b * 2^1024, normal
-    const fpu_f64_t pe   = fpu_fma64(as, bs, fpu_neg64(ps));           // exact: a*b*2^1024 = ps + pe
-    const fpu_f64_t away = fpu_bit_u64_to_f64(fpu_bit_f64_to_u64(n) + 1);
-    const fpu_f64_t ns   = fpu_mul64(fpu_mul64(n, S), S);              // n * 2^1024, exact
-    const fpu_f64_t gaps = fpu_mul64(fpu_mul64(fpu_sub64(away, n), S), S);  // ULP * 2^1024
-    // residual (a*b - n)*2^1024 = dr + pe (dr exact, Sterbenz). Tie iff 2*(a*b-n)
-    // == ULP, i.e. 2*dr + 2*pe == gaps, via an exact TwoSum(2*dr, -gaps).
-    const fpu_f64_t dr   = fpu_sub64(ps, ns);
-    const fpu_f64_t td   = fpu_add64(dr, dr), tp = fpu_add64(pe, pe), ng = fpu_neg64(gaps);
-    const fpu_f64_t vh   = fpu_add64(td, ng);
-    const fpu_f64_t vl   = fpu_add_error64(vh, td, ng);               // exact: (td - gaps) = vh + vl
-    return (((fpu_bit_f64_to_u64(vl) << 1) == 0) && ((fpu_bit_f64_to_u64(fpu_add64(vh, tp)) << 1) == 0))
-               ? away : n;                                            // tie iff td - gaps == -2*pe
-}
-
-// roundTiesToAway fixup for fmul. Flag-isolated. fmul.s always uses the exact f64
-// widening; fmul.d uses the exact scaled test for small results (where the product
-// error underflows) and the cheaper Dekker product error otherwise.
-static forceinline fpu_f32_t riscv_rmm_mul_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
-{
-    if (unlikely(!fpu_is_finite32(n))) {
-        return n;
-    }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f32_t r  = riscv_rmm_mul_exact_f32(n, a, b);
-    fpu_set_exceptions(exc);
-    return r;
-}
-
-static forceinline fpu_f64_t riscv_rmm_mul_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
-{
-    if (unlikely(!fpu_is_finite64(n))) {
-        return n;
-    }
-    const uint32_t exc = fpu_get_exceptions();
-    // |n| >= 2^-959 (exp field >= 64): the product error stays representable, so
-    // the cheap Dekker path is exact. Below that, use the scaled residual test.
-    const fpu_f64_t r  = (((fpu_bit_f64_to_u64(n) >> 52) & 0x7FFU) >= 64)
-                             ? riscv_rmm_apply_f64(n, fpu_mul_error64(n, a, b))
-                             : riscv_rmm_mul_small_f64(n, a, b);
-    fpu_set_exceptions(exc);
-    return r;
-}
-
-/*
- * roundTiesToAway fixup for fdiv. Only a subnormal (or zero) quotient can be an
- * exact tie; a normal quotient never is, so the common path returns immediately
- * (non-finite results also have a non-zero exponent field and return unchanged).
- *
- * For a subnormal result the exact residual rho = a - n*b is representable, so
- * fma(-n, b, a) recovers it exactly. The true quotient is n + rho/b, so it is the
- * exact midpoint (a tie, rounded away) iff 2*rho == gap*b, where gap = away - n
- * (= +/- the subnormal step). |rho| <= |b|*2^-1075, so every value below stays in
- * range and exact. Flag-isolated, as the residual machinery can raise spurious
- * exceptions.
- */
-static forceinline fpu_f32_t riscv_rmm_div_apply_f32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
-{
-    if (likely(fpu_bit_f32_to_u32(n) & FPU_LIB_FP32_EXPONENT_MASK)) {
-        return n;  // normal / inf / nan: RNE already == roundTiesToAway
-    }
-    const uint32_t  exc  = fpu_get_exceptions();
-    const fpu_f32_t rho  = fpu_fma32(fpu_neg32(n), b, a);  // exact residual a - n*b
-    const fpu_f32_t away = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);
-    const fpu_f32_t gap  = fpu_sub32(away, n);             // +/- 2^-149, exact
-    // Tie iff 2*rho == gap*b, evaluated in fp64 where both sides are exact
-    // (operands widen losslessly and gap*b ~ 2^-22 stays well inside the range).
-    const fpu_f64_t two_rho = fpu_add64(fpu_fcvt_f32_to_f64(rho), fpu_fcvt_f32_to_f64(rho));
-    const fpu_f64_t gap_b   = fpu_mul64(fpu_fcvt_f32_to_f64(gap), fpu_fcvt_f32_to_f64(b));
-    const fpu_f32_t r       = fpu_is_bit_equal64(two_rho, gap_b) ? away : n;
-    fpu_set_exceptions(exc);
-    return r;
-}
-
-static forceinline fpu_f64_t riscv_rmm_div_apply_f64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
-{
-    if (likely(fpu_bit_f64_to_u64(n) & FPU_LIB_FP64_EXPONENT_MASK)) {
-        return n;
-    }
-    const uint32_t  exc  = fpu_get_exceptions();
-    const fpu_f64_t rho  = fpu_fma64(fpu_neg64(n), b, a);
-    const fpu_f64_t away = fpu_bit_u64_to_f64(fpu_bit_f64_to_u64(n) + 1);
-    const fpu_f64_t gap  = fpu_sub64(away, n);             // +/- 2^-1074, exact
-    // fp64 has no wider type; gap*b underflows, so rescale 2*rho == gap*b by the
-    // gap magnitude (2^1074) as two exact power-of-two steps: rho*2^1075 == +/-b.
-    const fpu_f64_t scaled = fpu_mul64(fpu_mul64(rho, fpu_bit_u64_to_f64(0x7FE0000000000000ULL)),  // 2^1023
-                                       fpu_bit_u64_to_f64(0x4330000000000000ULL));                 // 2^52
-    const fpu_f64_t target = (fpu_bit_f64_to_u64(gap) >> 63) ? fpu_neg64(b) : b;
-    const fpu_f64_t r      = fpu_is_bit_equal64(scaled, target) ? away : n;
-    fpu_set_exceptions(exc);
-    return r;
-}
-
 slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
@@ -272,7 +64,8 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
     if (likely(riscv_fpu_is_enabled(vm))) {
 
         // roundTiesToAway is active for dynamic-rounding ops while frm == RMM; the
-        // fadd/fsub/fmul/fdiv cases below apply the exact ties-away fixup when set.
+        // fadd/fsub/fmul/fdiv cases below apply the exact ties-away fixup when set
+        // (fpu_rmm_* in fpu_lib.h — RMM is a RISC-V-specific mode, see notes there).
         const bool rmm = unlikely(vm->csr.fcsr >> 5 == 0x04) && rm == 0x07;
 
         switch (insn & 0xFE007000UL) {
@@ -282,49 +75,49 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
             case RISCV_FPU_GEN_RM_CASES(0x00000000UL): { // fadd.s
                 const fpu_f32_t a = riscv_read_s(vm, rs1), b = riscv_read_s(vm, rs2);
                 const fpu_f32_t n = fpu_add32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_add_f32(n, a, b) : n);
+                riscv_emit_s(vm, rds, rmm ? fpu_rmm_add32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x02000000UL): { // fadd.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_add64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_add_f64(n, a, b) : n);
+                riscv_emit_d(vm, rds, rmm ? fpu_rmm_add64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x08000000UL): { // fsub.s
                 const fpu_f32_t a = riscv_read_s(vm, rs1), b = riscv_read_s(vm, rs2);
                 const fpu_f32_t n = fpu_sub32(a, b);
-                riscv_write_s(vm, rds, rmm ? riscv_rmm_add_f32(n, a, fpu_neg32(b)) : n);
+                riscv_write_s(vm, rds, rmm ? fpu_rmm_add32(n, a, fpu_neg32(b)) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x0A000000UL): { // fsub.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_sub64(a, b);
-                riscv_write_d(vm, rds, rmm ? riscv_rmm_add_f64(n, a, fpu_neg64(b)) : n);
+                riscv_write_d(vm, rds, rmm ? fpu_rmm_add64(n, a, fpu_neg64(b)) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x10000000UL): { // fmul.s
                 const fpu_f32_t a = riscv_read_s(vm, rs1), b = riscv_read_s(vm, rs2);
                 const fpu_f32_t n = fpu_mul32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_mul_f32(n, a, b) : n);
+                riscv_emit_s(vm, rds, rmm ? fpu_rmm_mul32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x12000000UL): { // fmul.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_mul64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_mul_f64(n, a, b) : n);
+                riscv_emit_d(vm, rds, rmm ? fpu_rmm_mul64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x18000000UL): { // fdiv.s
                 const fpu_f32_t a = riscv_read_s(vm, rs1), b = riscv_read_s(vm, rs2);
                 const fpu_f32_t n = fpu_div32(a, b);
-                riscv_emit_s(vm, rds, rmm ? riscv_rmm_div_apply_f32(n, a, b) : n);
+                riscv_emit_s(vm, rds, rmm ? fpu_rmm_div32(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x1A000000UL): { // fdiv.d
                 const fpu_f64_t a = riscv_view_d(vm, rs1), b = riscv_view_d(vm, rs2);
                 const fpu_f64_t n = fpu_div64(a, b);
-                riscv_emit_d(vm, rds, rmm ? riscv_rmm_div_apply_f64(n, a, b) : n);
+                riscv_emit_d(vm, rds, rmm ? fpu_rmm_div64(n, a, b) : n);
                 return;
             }
             case RISCV_FPU_GEN_RM_CASES(0x58000000UL): // fsqrt.s
