@@ -41,11 +41,11 @@ static forceinline uint32_t riscv_fpu_host_rm(uint32_t rm)
 static forceinline uint32_t riscv_fpu_static_rm_enter(uint32_t rm)
 {
     if (unlikely(rm != 0x07)) {
+        // Always report a mode to restore: the op itself may change it further
+        // (the RMM preparation), and leave must undo that too
         const uint32_t prev = fpu_get_rounding_mode();
-        if (riscv_fpu_host_rm(rm) != prev) {
-            fpu_set_rounding_mode(riscv_fpu_host_rm(rm));
-            return prev;
-        }
+        fpu_set_rounding_mode(riscv_fpu_host_rm(rm));
+        return prev;
     }
     return 0x07;
 }

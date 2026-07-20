@@ -81,8 +81,9 @@ static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t
             neg = fpu_signbit64(riscv_view_d(vm, rs1)) != fpu_signbit64(riscv_view_d(vm, rs2));
             break;
         default:
-            neg = fpu_signbit64(riscv_view_d(vm, rs1));
-            break;
+            // Only add/sub/mul/div need the directed synthesis: sqrt has no exact
+            // ties, and ops taking rm as an argument handle RMM natively
+            return;
     }
 
     // Round to positive/negative infinity based on the result sign
