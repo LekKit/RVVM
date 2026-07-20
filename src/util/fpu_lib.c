@@ -423,9 +423,11 @@ slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
         return f; // Already integral: |f| >= 2^23, +/-0, inf, NaN
     }
     if (e < 0) {
-        // |f| in (0, 1) rounds to +/-0 or +/-1; the 0.5 tie goes to even == 0
+        // |f| in (0, 1) rounds to +/-0 or +/-1
         switch (mode) {
             case FPU_LIB_ROUND_NE:
+                // |f| in (0.5, 1) is nearest to 1; exactly 0.5 is a tie and goes
+                // to the even neighbour, which is 0
                 away = (e == -1) && (u & FPU_LIB_FP32_MANTISSA_MASK);
                 break;
             case FPU_LIB_ROUND_MM:
@@ -438,14 +440,17 @@ slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
                 away = !s;
                 break;
         }
-        return fpu_bit_u32_to_f32(s | (away ? 0x3F800000U : 0));
+        return fpu_bit_u32_to_f32(s | (away ? 0x3F800000U : 0)); // +/-1.0 or +/-0.0
     }
     // |f| in [1, 2^23): split the mantissa into integer part and fraction bits
     const uint32_t frac = u & (FPU_LIB_FP32_MANTISSA_MASK >> e);
-    const uint32_t half = 0x00400000U >> e;
-    const uint32_t step = 0x00800000U >> e; // 1.0 at this exponent; carries into a new binade
+    const uint32_t half = (1U << 22) >> e;
+    const uint32_t step = (1U << 23) >> e; // 1.0 at this exponent
     switch (mode) {
         case FPU_LIB_ROUND_NE:
+            // On a tie, round up iff the integer part is odd. For e == 0 the step
+            // bit is the exponent LSB rather than a mantissa bit, but the biased
+            // exponent of [1, 2) is odd (0x7F/0x3FF), matching its odd integer 1.
             away = frac > half || (frac == half && (u & step));
             break;
         case FPU_LIB_ROUND_MM:
@@ -458,6 +463,10 @@ slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
             away = !s && frac;
             break;
     }
+    // Adding step may carry from the mantissa into the exponent field: that only
+    // happens when the truncated mantissa wraps to zero, i.e. when rounding away
+    // lands exactly on the next power of two, where the carry is the intended
+    // encoding (the same trick as the classic nextafter bit-increment).
     return fpu_bit_u32_to_f32((u - frac) + (away ? step : 0));
 }
 
@@ -488,11 +497,11 @@ slow_path fpu_f64_t fpu_round_f64_internal(fpu_f64_t d, uint32_t mode)
                 away = !s;
                 break;
         }
-        return fpu_bit_u64_to_f64(s | (away ? 0x3FF0000000000000ULL : 0));
+        return fpu_bit_u64_to_f64(s | (away ? 0x3FF0000000000000ULL : 0)); // +/-1.0 or +/-0.0
     }
     const uint64_t frac = u & (FPU_LIB_FP64_MANTISSA_MASK >> e);
-    const uint64_t half = 0x0008000000000000ULL >> e;
-    const uint64_t step = 0x0010000000000000ULL >> e;
+    const uint64_t half = (1ULL << 51) >> e;
+    const uint64_t step = (1ULL << 52) >> e; // 1.0 at this exponent
     switch (mode) {
         case FPU_LIB_ROUND_NE:
             away = frac > half || (frac == half && (u & step));
