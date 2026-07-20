@@ -1940,7 +1940,7 @@ static forceinline fpu_f32_t fpu_rmm_fixup32(fpu_f32_t n, fpu_f32_t err)
     }
     // n + 1 ULP toward larger magnitude, and the exact gap to it.
     const fpu_f32_t away    = fpu_bit_u32_to_f32(un + 1);
-    const fpu_f32_t spacing = fpu_sub32(away, n);  // exact: adjacent floats
+    const fpu_f32_t spacing = fpu_sub32(away, n); // exact: adjacent floats
     // Tie iff the exact result is the midpoint, i.e. 2*err == spacing.
     if (fpu_is_bit_equal32(fpu_add32(err, err), spacing)) {
         return away;
@@ -1969,8 +1969,8 @@ static forceinline fpu_f32_t fpu_rmm_add32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b
     if (unlikely(!fpu_is_finite32(n))) {
         return n;
     }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f32_t r  = fpu_rmm_fixup32(n, fpu_add_error32(n, a, b));
+    const uint32_t  exc = fpu_get_exceptions();
+    const fpu_f32_t r   = fpu_rmm_fixup32(n, fpu_add_error32(n, a, b));
     fpu_set_exceptions(exc);
     return r;
 }
@@ -1980,8 +1980,8 @@ static forceinline fpu_f64_t fpu_rmm_add64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b
     if (unlikely(!fpu_is_finite64(n))) {
         return n;
     }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f64_t r  = fpu_rmm_fixup64(n, fpu_add_error64(n, a, b));
+    const uint32_t  exc = fpu_get_exceptions();
+    const fpu_f64_t r   = fpu_rmm_fixup64(n, fpu_add_error64(n, a, b));
     fpu_set_exceptions(exc);
     return r;
 }
@@ -2006,30 +2006,31 @@ static forceinline fpu_f64_t fpu_rmm_add64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b
 static forceinline fpu_f32_t fpu_rmm_mul_exact32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
 {
     const fpu_f32_t away = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);
-    const fpu_f64_t half = fpu_bit_u64_to_f64(0x3FE0000000000000ULL);  // 0.5
+    const fpu_f64_t half = fpu_bit_u64_to_f64(0x3FE0000000000000ULL); // 0.5
     const fpu_f64_t dn   = fpu_fcvt_f32_to_f64(n);
-    const fpu_f64_t dab  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));  // exact
+    const fpu_f64_t dab  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b)); // exact
     const fpu_f64_t m    = fpu_add64(dn, fpu_mul64(fpu_sub64(fpu_fcvt_f32_to_f64(away), dn), half));
-    return ((fpu_bit_f64_to_u64(fpu_sub64(dab, m)) << 1) == 0) ? away : n;  // tie iff a*b == m
+    return ((fpu_bit_f64_to_u64(fpu_sub64(dab, m)) << 1) == 0) ? away : n; // tie iff a*b == m
 }
 
 static forceinline fpu_f64_t fpu_rmm_mul_small64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b)
 {
-    const fpu_f64_t S    = fpu_bit_u64_to_f64(0x5FF0000000000000ULL);  // 2^512
-    const fpu_f64_t as   = fpu_mul64(a, S), bs = fpu_mul64(b, S);      // exact: |a|,|b| bounded
-    const fpu_f64_t ps   = fpu_mul64(as, bs);                          // a*b * 2^1024, normal
-    const fpu_f64_t pe   = fpu_fma64(as, bs, fpu_neg64(ps));           // exact: a*b*2^1024 = ps + pe
+    const fpu_f64_t S  = fpu_bit_u64_to_f64(0x5FF0000000000000ULL); // 2^512
+    const fpu_f64_t as = fpu_mul64(a, S), bs = fpu_mul64(b, S);     // exact: |a|,|b| bounded
+    const fpu_f64_t ps   = fpu_mul64(as, bs);                       // a*b * 2^1024, normal
+    const fpu_f64_t pe   = fpu_fma64(as, bs, fpu_neg64(ps));        // exact: a*b*2^1024 = ps + pe
     const fpu_f64_t away = fpu_bit_u64_to_f64(fpu_bit_f64_to_u64(n) + 1);
-    const fpu_f64_t ns   = fpu_mul64(fpu_mul64(n, S), S);              // n * 2^1024, exact
-    const fpu_f64_t gaps = fpu_mul64(fpu_mul64(fpu_sub64(away, n), S), S);  // ULP * 2^1024
+    const fpu_f64_t ns   = fpu_mul64(fpu_mul64(n, S), S);                  // n * 2^1024, exact
+    const fpu_f64_t gaps = fpu_mul64(fpu_mul64(fpu_sub64(away, n), S), S); // ULP * 2^1024
     // residual (a*b - n)*2^1024 = dr + pe (dr exact, Sterbenz). Tie iff 2*(a*b-n)
     // == ULP, i.e. 2*dr + 2*pe == gaps, via an exact TwoSum(2*dr, -gaps).
-    const fpu_f64_t dr   = fpu_sub64(ps, ns);
-    const fpu_f64_t td   = fpu_add64(dr, dr), tp = fpu_add64(pe, pe), ng = fpu_neg64(gaps);
-    const fpu_f64_t vh   = fpu_add64(td, ng);
-    const fpu_f64_t vl   = fpu_add_error64(vh, td, ng);               // exact: (td - gaps) = vh + vl
+    const fpu_f64_t dr = fpu_sub64(ps, ns);
+    const fpu_f64_t td = fpu_add64(dr, dr), tp = fpu_add64(pe, pe), ng = fpu_neg64(gaps);
+    const fpu_f64_t vh = fpu_add64(td, ng);
+    const fpu_f64_t vl = fpu_add_error64(vh, td, ng); // exact: (td - gaps) = vh + vl
     return (((fpu_bit_f64_to_u64(vl) << 1) == 0) && ((fpu_bit_f64_to_u64(fpu_add64(vh, tp)) << 1) == 0))
-               ? away : n;                                            // tie iff td - gaps == -2*pe
+             ? away
+             : n; // tie iff td - gaps == -2*pe
 }
 
 // roundTiesToAway fixup for fmul. Flag-isolated. f32 always uses the exact f64
@@ -2040,8 +2041,8 @@ static forceinline fpu_f32_t fpu_rmm_mul32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b
     if (unlikely(!fpu_is_finite32(n))) {
         return n;
     }
-    const uint32_t exc = fpu_get_exceptions();
-    const fpu_f32_t r  = fpu_rmm_mul_exact32(n, a, b);
+    const uint32_t  exc = fpu_get_exceptions();
+    const fpu_f32_t r   = fpu_rmm_mul_exact32(n, a, b);
     fpu_set_exceptions(exc);
     return r;
 }
@@ -2054,9 +2055,8 @@ static forceinline fpu_f64_t fpu_rmm_mul64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b
     const uint32_t exc = fpu_get_exceptions();
     // |n| >= 2^-959 (exp field >= 64): the product error stays representable, so
     // the cheap Dekker path is exact. Below that, use the scaled residual test.
-    const fpu_f64_t r  = (((fpu_bit_f64_to_u64(n) >> 52) & 0x7FFU) >= 64)
-                             ? fpu_rmm_fixup64(n, fpu_mul_error64(n, a, b))
-                             : fpu_rmm_mul_small64(n, a, b);
+    const fpu_f64_t r = (((fpu_bit_f64_to_u64(n) >> 52) & 0x7FFU) >= 64) ? fpu_rmm_fixup64(n, fpu_mul_error64(n, a, b))
+                                                                         : fpu_rmm_mul_small64(n, a, b);
     fpu_set_exceptions(exc);
     return r;
 }
@@ -2076,12 +2076,12 @@ static forceinline fpu_f64_t fpu_rmm_mul64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b
 static forceinline fpu_f32_t fpu_rmm_div32(fpu_f32_t n, fpu_f32_t a, fpu_f32_t b)
 {
     if (likely(fpu_bit_f32_to_u32(n) & FPU_LIB_FP32_EXPONENT_MASK)) {
-        return n;  // normal / inf / nan: RNE already == roundTiesToAway
+        return n; // normal / inf / nan: RNE already == roundTiesToAway
     }
     const uint32_t  exc  = fpu_get_exceptions();
-    const fpu_f32_t rho  = fpu_fma32(fpu_neg32(n), b, a);  // exact residual a - n*b
+    const fpu_f32_t rho  = fpu_fma32(fpu_neg32(n), b, a); // exact residual a - n*b
     const fpu_f32_t away = fpu_bit_u32_to_f32(fpu_bit_f32_to_u32(n) + 1);
-    const fpu_f32_t gap  = fpu_sub32(away, n);             // +/- 2^-149, exact
+    const fpu_f32_t gap  = fpu_sub32(away, n); // +/- 2^-149, exact
     // Tie iff 2*rho == gap*b, evaluated in fp64 where both sides are exact
     // (operands widen losslessly and gap*b ~ 2^-22 stays well inside the range).
     const fpu_f64_t two_rho = fpu_add64(fpu_fcvt_f32_to_f64(rho), fpu_fcvt_f32_to_f64(rho));
@@ -2099,11 +2099,11 @@ static forceinline fpu_f64_t fpu_rmm_div64(fpu_f64_t n, fpu_f64_t a, fpu_f64_t b
     const uint32_t  exc  = fpu_get_exceptions();
     const fpu_f64_t rho  = fpu_fma64(fpu_neg64(n), b, a);
     const fpu_f64_t away = fpu_bit_u64_to_f64(fpu_bit_f64_to_u64(n) + 1);
-    const fpu_f64_t gap  = fpu_sub64(away, n);             // +/- 2^-1074, exact
+    const fpu_f64_t gap  = fpu_sub64(away, n); // +/- 2^-1074, exact
     // fp64 has no wider type; gap*b underflows, so rescale 2*rho == gap*b by the
     // gap magnitude (2^1074) as two exact power-of-two steps: rho*2^1075 == +/-b.
-    const fpu_f64_t scaled = fpu_mul64(fpu_mul64(rho, fpu_bit_u64_to_f64(0x7FE0000000000000ULL)),  // 2^1023
-                                       fpu_bit_u64_to_f64(0x4330000000000000ULL));                 // 2^52
+    const fpu_f64_t scaled = fpu_mul64(fpu_mul64(rho, fpu_bit_u64_to_f64(0x7FE0000000000000ULL)), // 2^1023
+                                       fpu_bit_u64_to_f64(0x4330000000000000ULL));                // 2^52
     const fpu_f64_t target = (fpu_bit_f64_to_u64(gap) >> 63) ? fpu_neg64(b) : b;
     const fpu_f64_t r      = fpu_is_bit_equal64(scaled, target) ? away : n;
     fpu_set_exceptions(exc);
