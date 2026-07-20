@@ -1023,12 +1023,12 @@ static forceinline void fpu_fma32_fixup_uf(fpu_f32_t a, fpu_f32_t b, fpu_f32_t c
     // scaled 24-bit conversion cannot double-round across a tie (53 >= 24 + 2):
     // |rn| is the unbounded-exponent rounding of the exact result, tiny iff the
     // 2^126-scaled magnitude stays below 1.0
-    fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
-    fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
-    fpu_f64_t sum = fpu_add64(mul, add);
-    fpu_f64_t res = fpu_odd_round64(sum, fpu_add_error64(sum, mul, add));
-    fpu_f32_t rn  = fpu_fcvt_f64_to_f32(fpu_mul64(res, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
-    bool     tiny = (fpu_bit_f32_to_u32(rn) & FPU_LIB_FP32_NOSIGNED_MASK) < 0x3F800000U;
+    fpu_f64_t mul  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
+    fpu_f64_t add  = fpu_fcvt_f32_to_f64(c);
+    fpu_f64_t sum  = fpu_add64(mul, add);
+    fpu_f64_t res  = fpu_odd_round64(sum, fpu_add_error64(sum, mul, add));
+    fpu_f32_t rn   = fpu_fcvt_f64_to_f32(fpu_mul64(res, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
+    bool      tiny = (fpu_bit_f32_to_u32(rn) & FPU_LIB_FP32_NOSIGNED_MASK) < 0x3F800000U;
     if (tiny) {
         exceptions |= FPU_LIB_FLAG_UF;
     } else {
@@ -1103,10 +1103,10 @@ static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
  */
 static forceinline void fpu_fma64_fixup_uf(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c, uint32_t old_exceptions)
 {
-    uint32_t exceptions = fpu_get_exceptions();
-    fpu_f64_t scale = fpu_bit_u64_to_f64(0x4330000000000000ULL); // 2^52
-    fpu_f64_t rs    = fpu_fma64_raw(fpu_mul64(a, scale), b, fpu_mul64(c, scale));
-    bool      tiny  = (fpu_bit_f64_to_u64(rs) & FPU_LIB_FP64_NOSIGNED_MASK) < 0x0350000000000000ULL; // 2^-970
+    uint32_t  exceptions = fpu_get_exceptions();
+    fpu_f64_t scale      = fpu_bit_u64_to_f64(0x4330000000000000ULL); // 2^52
+    fpu_f64_t rs         = fpu_fma64_raw(fpu_mul64(a, scale), b, fpu_mul64(c, scale));
+    bool      tiny       = (fpu_bit_f64_to_u64(rs) & FPU_LIB_FP64_NOSIGNED_MASK) < 0x0350000000000000ULL; // 2^-970
     if (tiny) {
         exceptions |= FPU_LIB_FLAG_UF;
     } else {
@@ -1118,7 +1118,7 @@ static forceinline void fpu_fma64_fixup_uf(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
 static forceinline fpu_f64_t fpu_fma64(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
 {
     uint32_t old_exceptions = fpu_get_exceptions();
-    bool invalid = fpu_fma64_invalid_soft(a, b, c);
+    bool     invalid        = fpu_fma64_invalid_soft(a, b, c);
 
     fpu_f64_t ret = fpu_fma64_raw(a, b, c);
 

@@ -412,10 +412,10 @@ slow_path uint32_t fpu_fclass64(fpu_f64_t d)
  */
 slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
 {
-    const uint32_t u = fpu_bit_f32_to_u32(f);
-    const uint32_t s = u & FPU_LIB_FP32_SIGNEDFP_MASK;
-    const int32_t  e = fpu_exponent32(f);
-    bool away = false;
+    const uint32_t u    = fpu_bit_f32_to_u32(f);
+    const uint32_t s    = u & FPU_LIB_FP32_SIGNEDFP_MASK;
+    const int32_t  e    = fpu_exponent32(f);
+    bool           away = false;
     if (unlikely(mode > FPU_LIB_ROUND_MM)) {
         mode = fpu_get_rounding_mode();
     }
@@ -472,10 +472,10 @@ slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
 
 slow_path fpu_f64_t fpu_round_f64_internal(fpu_f64_t d, uint32_t mode)
 {
-    const uint64_t u = fpu_bit_f64_to_u64(d);
-    const uint64_t s = u & FPU_LIB_FP64_SIGNEDFP_MASK;
-    const int32_t  e = fpu_exponent64(d);
-    bool away = false;
+    const uint64_t u    = fpu_bit_f64_to_u64(d);
+    const uint64_t s    = u & FPU_LIB_FP64_SIGNEDFP_MASK;
+    const int32_t  e    = fpu_exponent64(d);
+    bool           away = false;
     if (unlikely(mode > FPU_LIB_ROUND_MM)) {
         mode = fpu_get_rounding_mode();
     }
