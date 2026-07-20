@@ -1019,16 +1019,37 @@ static forceinline fpu_f64_t fpu_div64(fpu_f64_t a, fpu_f64_t b)
 static forceinline void fpu_fma32_fixup_uf(fpu_f32_t a, fpu_f32_t b, fpu_f32_t c, uint32_t old_exceptions)
 {
     uint32_t exceptions = fpu_get_exceptions();
-    // The product is exact in f64 and the sum is odd-rounded at 53 bits, so the
-    // scaled 24-bit conversion cannot double-round across a tie (53 >= 24 + 2):
-    // |rn| is the unbounded-exponent rounding of the exact result, tiny iff the
-    // 2^126-scaled magnitude stays below 1.0
+    // The product is exact in f64, so sum is the exact result rounded once at 53
+    // bits; tininess is decided by comparing it in f64 against the mode-dependent
+    // magnitude below which the unbounded 24-bit rounding falls under 2^-126:
+    // - to-nearest: the midpoint 2^-126 - 2^-151, exclusive (both NE and MM
+    //   resolve an exact-midpoint tie up to 2^-126). Only here can sum sit exactly
+    //   on the threshold with the true result on either side; the exact TwoSum
+    //   error breaks the tie (2Sum is exact in round-to-nearest).
+    // - rounding away from zero: the largest 24-bit value below, 2^-126 - 2^-150,
+    //   inclusive. sum is rounded away too, so sum <= T already implies the exact
+    //   result is <= T.
+    // - rounding toward zero: 2^-126 itself, exclusive; likewise sum < T implies
+    //   the exact result is < T.
     fpu_f64_t mul  = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
     fpu_f64_t add  = fpu_fcvt_f32_to_f64(c);
     fpu_f64_t sum  = fpu_add64(mul, add);
-    fpu_f64_t res  = fpu_odd_round64(sum, fpu_add_error64(sum, mul, add));
-    fpu_f32_t rn   = fpu_fcvt_f64_to_f32(fpu_mul64(res, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
-    bool      tiny = (fpu_bit_f32_to_u32(rn) & FPU_LIB_FP32_NOSIGNED_MASK) < 0x3F800000U;
+    uint64_t  bits = fpu_bit_f64_to_u64(sum);
+    uint64_t  mag  = bits & FPU_LIB_FP64_NOSIGNED_MASK;
+    uint32_t  mode = fpu_get_rounding_mode();
+    bool      away = (mode == FPU_LIB_ROUND_UP) == !(bits >> 63);
+    bool      tiny;
+    if (mode == FPU_LIB_ROUND_NE || mode == FPU_LIB_ROUND_MM) {
+        tiny = mag < 0x380FFFFFF0000000ULL; // 2^-126 - 2^-151
+        if (mag == 0x380FFFFFF0000000ULL) {
+            uint64_t err = fpu_bit_f64_to_u64(fpu_add_error64(sum, mul, add));
+            tiny         = (err << 1) != 0 && ((err ^ bits) >> 63); // exact result below the midpoint
+        }
+    } else if ((mode == FPU_LIB_ROUND_UP || mode == FPU_LIB_ROUND_DN) && away) {
+        tiny = mag <= 0x380FFFFFE0000000ULL; // 2^-126 - 2^-150
+    } else {
+        tiny = mag < 0x3810000000000000ULL; // 2^-126
+    }
     if (tiny) {
         exceptions |= FPU_LIB_FLAG_UF;
     } else {
