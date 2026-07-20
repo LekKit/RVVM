@@ -1019,12 +1019,15 @@ static forceinline fpu_f64_t fpu_div64(fpu_f64_t a, fpu_f64_t b)
 static forceinline void fpu_fma32_fixup_uf(fpu_f32_t a, fpu_f32_t b, fpu_f32_t c, uint32_t old_exceptions)
 {
     uint32_t exceptions = fpu_get_exceptions();
-    // The product is exact in f64, the sum rounds once at 53 bits, the scaled
-    // conversion once at 24: 53 >= 2*24 + 2 makes the double rounding innocuous,
-    // so |rn| is the result of unbounded-exponent rounding, tiny iff below 1.0
-    fpu_f64_t sum = fpu_add64(fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b)),
-                              fpu_fcvt_f32_to_f64(c));
-    fpu_f32_t rn  = fpu_fcvt_f64_to_f32(fpu_mul64(sum, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
+    // The product is exact in f64 and the sum is odd-rounded at 53 bits, so the
+    // scaled 24-bit conversion cannot double-round across a tie (53 >= 24 + 2):
+    // |rn| is the unbounded-exponent rounding of the exact result, tiny iff the
+    // 2^126-scaled magnitude stays below 1.0
+    fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
+    fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
+    fpu_f64_t sum = fpu_add64(mul, add);
+    fpu_f64_t res = fpu_odd_round64(sum, fpu_add_error64(sum, mul, add));
+    fpu_f32_t rn  = fpu_fcvt_f64_to_f32(fpu_mul64(res, fpu_bit_u64_to_f64(0x47D0000000000000ULL))); // 2^126
     bool     tiny = (fpu_bit_f32_to_u32(rn) & FPU_LIB_FP32_NOSIGNED_MASK) < 0x3F800000U;
     if (tiny) {
         exceptions |= FPU_LIB_FLAG_UF;
@@ -1092,7 +1095,7 @@ static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
  * has a set bit at 2^-1022 or below (else the sum is either 0 or larger). If it is
  * in c, |c| <= 2^-969 and by triangle inequality |a*b| <= 2^-968; if it is in the
  * exact product (up to 106 bits wide), |a*b| <= 2^-916 and |c| <= 2^-915. Either
- * way |c|*2^52 is tiny and, for b != 0, |b| >= 2^-1074 gives |a| <= 2^159, so
+ * way |c|*2^52 is tiny and, for b != 0, |b| >= 2^-1074 gives |a| <= 2^158, so
  * a*2^52 cannot overflow. If b == 0 then a is unbounded and a*2^52 may overflow to
  * inf, making rs NaN -- which correctly reads as "not tiny", since a result of
  * exactly +/-2^-1022 from b == 0 is the exact value of c, and exact never
