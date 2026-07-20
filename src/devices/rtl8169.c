@@ -10,7 +10,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 /*
  * TODO: Replace "tap_api.h" with <rvvm/rvvm_net.h>
  * TODO: Make network devices build with !USE_NET and use dummy backend
- * TODO: Snapshots
  */
 
 #ifdef USE_NET
@@ -20,8 +19,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <rvvm/rvvm_region.h>
 #include <rvvm/rvvm_snapshot.h>
 
-#include <util/bit_ops.h>
-#include <util/locking.h>
 #include <util/mem_ops.h>
 #include <util/utils.h>
 
@@ -103,20 +100,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 /*
  * Transmit Configuration bits
  */
-#define RTL8169_TCR_IFG       0x03000000 // 96ns for 1Gbit
-#define RTL8169_TCR_NOCRC     0x00010000 // No CRC applied for TX
-#define RTL8169_TCR_MXDMA     0x00000700 // Unlimited DMA burst
+#define RTL8169_TCR_IFG       0x03000000UL // 96ns for 1Gbit
+#define RTL8169_TCR_NOCRC     0x00010000UL // No CRC applied for TX
+#define RTL8169_TCR_MXDMA     0x00000700UL // Unlimited DMA burst
 #define RTL8169_TCR_DEFAULT   (RTL8169_TCR_IFG | RTL8169_TCR_MXDMA)
 
 /*
  * RTL8169 Family Models (XIDs)
  */
-#define RTL8169_XID_RTL8169S  0x00800000 // RTL_GIGA_MAC_VER_02
-#define RTL8169_XID_RTL8168B  0x38000000 // RTL_GIGA_MAC_VER_17
-#define RTL8169_XID_RTL8168CP 0x3C800000 // RTL_GIGA_MAC_VER_24
-#define RTL8169_XID_RTL8168DP 0x28B00000 // RTL_GIGA_MAC_VER_31
-#define RTL8169_XID_RTL8168EP 0x50200000 // RTL_GIGA_MAC_VER_51
-#define RTL8169_XID_RTL8117   0x54B00000 // RTL_GIGA_MAC_VER_53
+#define RTL8169_XID_RTL8169S  0x00800000UL // RTL_GIGA_MAC_VER_02
+#define RTL8169_XID_RTL8168B  0x38000000UL // RTL_GIGA_MAC_VER_17
+#define RTL8169_XID_RTL8168CP 0x3C800000UL // RTL_GIGA_MAC_VER_24
+#define RTL8169_XID_RTL8168DP 0x28B00000UL // RTL_GIGA_MAC_VER_31
+#define RTL8169_XID_RTL8168EP 0x50200000UL // RTL_GIGA_MAC_VER_51
+#define RTL8169_XID_RTL8117   0x54B00000UL // RTL_GIGA_MAC_VER_53
 
 /*
  * Receive Configuration bits
@@ -144,26 +141,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 /*
  * Common Descriptor flags
  */
-#define RTL8169_DESC_OWN      0x80000000 // Descriptor owned by RTL8169
-#define RTL8169_DESC_EOR      0x40000000 // End of Descriptor Ring
-#define RTL8169_DESC_FS       0x20000000 // First Segment Descriptor
-#define RTL8169_DESC_LS       0x10000000 // Last Segment Descriptor
+#define RTL8169_DESC_OWN      0x80000000UL // Descriptor owned by RTL8169
+#define RTL8169_DESC_EOR      0x40000000UL // End of Descriptor Ring
+#define RTL8169_DESC_FS       0x20000000UL // First Segment Descriptor
+#define RTL8169_DESC_LS       0x10000000UL // Last Segment Descriptor
 
 /*
  * TX Descriptor flags
  */
-#define RTL8169_DESC_LGSEN    0x08000000 // Enable Large Send Offload
-#define RTL8169_DESC_TXSTA    0x70000000 // EOR | FS | LS
+#define RTL8169_DESC_LGSEN    0x08000000UL // Enable Large Send Offload
+#define RTL8169_DESC_TXSTA    0x70000000UL // EOR | FS | LS
 
 /*
  * RX Descriptor flags
  */
-#define RTL8169_DESC_PAM      0x04000000 // Physical Address Matched
-#define RTL8169_DESC_BAR      0x02000000 // Broadcast Address Received
-#define RTL8169_DESC_RSV1     0x00800000 // Reserved (Always 1)
-#define RTL8169_DESC_UDP      0x00040000 // UDP/IP Received
-#define RTL8169_DESC_TCP      0x00020000 // TCP/IP Received
-#define RTL8169_DESC_RXSTA    0x34820000 // FS | LS | PAM | TCP
+#define RTL8169_DESC_PAM      0x04000000UL // Physical Address Matched
+#define RTL8169_DESC_BAR      0x02000000UL // Broadcast Address Received
+#define RTL8169_DESC_RSV1     0x00800000UL // Reserved (Always 1)
+#define RTL8169_DESC_UDP      0x00040000UL // UDP/IP Received
+#define RTL8169_DESC_TCP      0x00020000UL // TCP/IP Received
+#define RTL8169_DESC_RXSTA    0x34820000UL // FS | LS | PAM | TCP
 
 /*
  * PHY registers
@@ -190,53 +187,112 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 #define RTL8169_MAX_FIFO_SIZE 0x0400 // 1024 FIFO entries
 #define RTL8169_MAC_SIZE      0x0006
-#define RTL8169_MAX_PKT_SIZE  0x4000
 #define RTL8169_RMS           0x1FFF // RX Packet Maximum Size: 8191
 #define RTL8169_MTPS          0x003B // TX Packet Maximum Size: 7552
 
 typedef struct {
-    rvvm_lock_t lock;
-    uint32_t    addr;
-    uint32_t    addr_h;
-    uint32_t    index;
+    uint32_t addr;
+    uint32_t addr_h;
+    uint32_t index;
 } rtl8169_ring_t;
 
 typedef struct {
-    uint8_t  pins;
-    uint8_t  addr;
-    uint16_t word;
-    bitcnt_t cur_bit;
-    bool     addr_ok;
-} at93c56_state_t;
+    uint32_t pins;
+    uint32_t addr;
+    uint32_t word;
+    uint32_t cbit;
+    uint32_t read;
+} rtl8169_at93c56_t;
 
 typedef struct {
     rvvm_pci_func_t* func;
     tap_dev_t*       tap;
 
-    // RTL8169 EEPROM (Used to retreive MAC address)
-    rvvm_lock_t     mac_lock;
-    at93c56_state_t eeprom;
+    // EEPROM (Used to retreive MAC address)
+    rtl8169_at93c56_t eeprom;
 
     // RX / TX / High priority TX queues
     rtl8169_ring_t rx;
     rtl8169_ring_t tx;
     rtl8169_ring_t txp;
 
+    // RTL8169 registers
     uint32_t cr;
     uint32_t imr;
     uint32_t isr;
     uint32_t phydr;
     uint32_t phyar;
 
-    uint8_t mac[RTL8169_MAC_SIZE];
-
-    // Descriptor segmentation reassembly buffer
-    uint8_t seg_buff[RTL8169_MAX_PKT_SIZE];
-    size_t  seg_size;
+    // Frame segmentation reassembly buffer
+    uint8_t  seg_buff[0x1000];
+    uint32_t seg_size;
 
     // Cleanup region counter
     uint32_t cleanup;
 } rtl8169_dev_t;
+
+/*
+ * Ring handling
+ */
+
+static inline rvvm_addr_t rtl8169_ring_addr(const rtl8169_ring_t* ring)
+{
+    return atomic_load_uint32_relax(&ring->addr) | (((uint64_t)atomic_load_uint32_relax(&ring->addr_h)) << 32);
+}
+
+static uint8_t* rtl8169_ring_prepare_desc(rtl8169_dev_t* rtl8169, rtl8169_ring_t* ring)
+{
+    uint8_t*    desc = NULL;
+    rvvm_addr_t base = rtl8169_ring_addr(ring);
+    uint32_t    curr = atomic_load_uint32_relax(&ring->index);
+    uint32_t    next = 0;
+    uint32_t    flag = 0;
+    while (true) {
+        desc = rvvm_pci_get_dma(rtl8169->func, base + (curr << 4), 0x10);
+        if (unlikely(!desc)) {
+            rvvm_debug("rtl8169: descriptor dma error");
+            return NULL;
+        }
+        flag = read_uint32_le(desc);
+        if (unlikely(!(flag & RTL8169_DESC_OWN))) {
+            // End of TX ring / TX ring full
+            rvvm_pci_end_dma(rtl8169->func, desc);
+            return NULL;
+        }
+        next = curr + 1;
+        if (unlikely((flag & RTL8169_DESC_EOR) || curr >= RTL8169_MAX_FIFO_SIZE)) {
+            // RX ring wrapped
+            next = 0;
+        }
+        if (atomic_cas_uint32(&ring->index, curr, next)) {
+            // Claimed RX descriptor
+            break;
+        } else {
+            // Retry
+            rvvm_pci_end_dma(rtl8169->func, desc);
+            desc = NULL;
+        }
+    }
+    return desc;
+}
+
+static void rtl8169_ring_reset(rtl8169_ring_t* ring)
+{
+    atomic_store_uint32_relax(&ring->addr, 0);
+    atomic_store_uint32_relax(&ring->addr_h, 0);
+    atomic_store_uint32_relax(&ring->index, 0);
+}
+
+static void rtl8169_ring_suspend(rvvm_snapshot_t* snap, rtl8169_ring_t* ring)
+{
+    rvvm_snapshot_field(snap, ring->addr);
+    rvvm_snapshot_field(snap, ring->addr_h);
+    rvvm_snapshot_field(snap, ring->index);
+}
+
+/*
+ * Interrupt handling
+ */
 
 static void rtl8169_update_irqs(rtl8169_dev_t* rtl8169)
 {
@@ -254,43 +310,100 @@ static void rtl8169_interrupt(rtl8169_dev_t* rtl8169, size_t irq)
     }
 }
 
-static inline rvvm_addr_t rtl8169_ring_addr(const rtl8169_ring_t* ring)
-{
-    return atomic_load_uint32_relax(&ring->addr) | (((uint64_t)atomic_load_uint32_relax(&ring->addr_h)) << 32);
-}
+/*
+ * EEPROM handling (For MAC retrieval)
+ */
 
-static void rtl8169_reset_ring(rtl8169_ring_t* ring)
+static uint16_t rtl8169_at93c56_read_word(rtl8169_dev_t* rtl8169, uint8_t addr)
 {
-    atomic_store_uint32_relax(&ring->addr, 0);
-    atomic_store_uint32_relax(&ring->addr_h, 0);
-    atomic_store_uint32_relax(&ring->index, 0);
-}
-
-static void rtl8169_reset(rvvm_reg_dev_t* dev)
-{
-    rtl8169_dev_t* rtl8169 = rvvm_region_data(dev);
-
-    // Reset EEPROM
-    rvvm_scoped_lock (&rtl8169->mac_lock) {
-        memset(&rtl8169->eeprom, 0, sizeof(at93c56_state_t));
+    switch (addr) {
+        case 0x00: // Device ID
+            return 0x8129;
+        case 0x07: // MAC words
+        case 0x08:
+        case 0x09: {
+            uint8_t mac[6] = {0};
+            tap_get_mac(rtl8169->tap, mac);
+            return read_uint16_le_m(mac + ((addr - 7) << 1));
+        }
     }
-
-    // Reset rings
-    rtl8169_reset_ring(&rtl8169->rx);
-    rtl8169_reset_ring(&rtl8169->tx);
-    rtl8169_reset_ring(&rtl8169->txp);
-
-    // Reset registers
-    atomic_store_uint32_relax(&rtl8169->cr, 0);
-    atomic_store_uint32_relax(&rtl8169->imr, 0);
-    atomic_store_uint32_relax(&rtl8169->isr, 0);
-    atomic_store_uint32_relax(&rtl8169->phydr, 0);
-    atomic_store_uint32_relax(&rtl8169->phyar, 0);
-
-    rtl8169_update_irqs(rtl8169);
+    return 0;
 }
 
-static uint16_t rtl8169_read_phy(uint32_t reg)
+static void rtl8169_at93c56_write_pins(rtl8169_dev_t* rtl8169, uint8_t pins)
+{
+    rtl8169_at93c56_t* eeprom = &rtl8169->eeprom;
+    if (pins & RTL8169_EEMODE_PRG) {
+        uint32_t prev = atomic_load_uint32_relax(&eeprom->pins);
+        if ((pins & ~prev) & RTL8169_EEPROM_CLK) {
+            // Clock pulled high
+            uint32_t cbit = atomic_load_uint32_relax(&eeprom->cbit);
+            uint32_t addr = atomic_load_uint32_relax(&eeprom->addr);
+            if (atomic_load_uint32_relax(&eeprom->read)) {
+                // Push data bits
+                uint32_t word = atomic_load_uint32_relax(&eeprom->word);
+                if (!cbit) {
+                    word = rtl8169_at93c56_read_word(rtl8169, addr);
+                    atomic_store_uint32_relax(&eeprom->word, word);
+                }
+                if (word & (0x8000 >> cbit)) {
+                    pins |= RTL8169_EEPROM_DOU;
+                } else {
+                    pins &= ~RTL8169_EEPROM_DOU;
+                }
+                if (cbit >= 15) {
+                    atomic_store_uint32_relax(&eeprom->cbit, 0);
+                    atomic_store_uint32_relax(&eeprom->addr, addr + 1);
+                } else {
+                    atomic_store_uint32_relax(&eeprom->cbit, cbit + 1);
+                }
+            } else {
+                // Get starting addr, ignore command (Act as readonly eeprom)
+                if (cbit >= 3) {
+                    addr = (addr << 1) | !!(pins & RTL8169_EEPROM_DIN);
+                    atomic_store_uint32_relax(&eeprom->addr, addr);
+                }
+                if (cbit >= 11) {
+                    atomic_store_uint32_relax(&eeprom->cbit, 0);
+                    atomic_store_uint32_relax(&eeprom->read, true);
+                } else {
+                    atomic_store_uint32_relax(&eeprom->cbit, cbit + 1);
+                }
+            }
+        }
+        if (!(pins & RTL8169_EEPROM_SEL)) {
+            // End of transfer, request addr next time
+            atomic_store_uint32_relax(&eeprom->addr, 0);
+            atomic_store_uint32_relax(&eeprom->cbit, 0);
+            atomic_store_uint32_relax(&eeprom->read, false);
+        }
+    }
+    atomic_store_uint32_relax(&rtl8169->eeprom.pins, pins);
+}
+
+static void rtl8169_at93c56_reset(rtl8169_at93c56_t* eeprom)
+{
+    atomic_store_uint32_relax(&eeprom->pins, 0);
+    atomic_store_uint32_relax(&eeprom->addr, 0);
+    atomic_store_uint32_relax(&eeprom->word, 0);
+    atomic_store_uint32_relax(&eeprom->cbit, 0);
+    atomic_store_uint32_relax(&eeprom->read, 0);
+}
+
+static void rtl8169_at93c56_suspend(rvvm_snapshot_t* snap, rtl8169_at93c56_t* eeprom)
+{
+    rvvm_snapshot_field(snap, eeprom->pins);
+    rvvm_snapshot_field(snap, eeprom->addr);
+    rvvm_snapshot_field(snap, eeprom->word);
+    rvvm_snapshot_field(snap, eeprom->cbit);
+    rvvm_snapshot_field(snap, eeprom->read);
+}
+
+/*
+ * PHY handling (For link state detection)
+ */
+
+static uint16_t rtl8169_phy_read(uint32_t reg)
 {
     switch (reg) {
         case RTL8169_PHY_BMCR:
@@ -311,215 +424,173 @@ static uint16_t rtl8169_read_phy(uint32_t reg)
     return 0;
 }
 
-static void rtl8169_handle_phy(rtl8169_dev_t* rtl8169, uint32_t cmd)
+static void rtl8169_phy_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = (cmd >> 16) & 0x1F;
-    uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000) | rtl8169_read_phy(reg);
+    uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000) | rtl8169_phy_read(reg);
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
-static void rtl8169_handle_eri_phy(rtl8169_dev_t* rtl8169, uint32_t cmd)
+static void rtl8169_phy_eri_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = cmd & 0x0FFF;
     uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000);
-    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_read_phy(reg));
+    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(reg));
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
-static void rtl8169_handle_ocp_phy(rtl8169_dev_t* rtl8169, uint32_t cmd)
+static void rtl8169_phy_ocp_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = (cmd >> 16) & 0x1F;
     uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000);
-    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_read_phy(reg));
+    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(reg));
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
-static uint16_t rtl8169_93c56_read_word(rtl8169_dev_t* rtl8169, uint8_t addr)
-{
-    switch (addr) {
-        case 0x00: // Device ID
-            return 0x8129;
-        case 0x07: // MAC words
-        case 0x08:
-        case 0x09:
-            tap_get_mac(rtl8169->tap, rtl8169->mac);
-            return read_uint16_le_m(rtl8169->mac + ((addr - 7) << 1));
-    }
-    return 0;
-}
+/*
+ * Transmit / Receive
+ */
 
-static void rtl8169_93c56_write_pins(rtl8169_dev_t* rtl8169, uint8_t pins)
-{
-    rvvm_lock(&rtl8169->mac_lock);
-    if (pins & RTL8169_EEMODE_PRG) {
-        if ((pins & RTL8169_EEPROM_CLK) && !(rtl8169->eeprom.pins & RTL8169_EEPROM_CLK)) {
-            // Clock pulled high
-            if (rtl8169->eeprom.addr_ok) {
-                // Push data bits
-                if (rtl8169->eeprom.cur_bit == 0) {
-                    rtl8169->eeprom.word = rtl8169_93c56_read_word(rtl8169, rtl8169->eeprom.addr);
-                }
-                if (rtl8169->eeprom.word & (0x8000 >> rtl8169->eeprom.cur_bit)) {
-                    pins |= RTL8169_EEPROM_DOU;
-                } else {
-                    pins &= ~RTL8169_EEPROM_DOU;
-                }
-                if (rtl8169->eeprom.cur_bit++ >= 15) {
-                    rtl8169->eeprom.cur_bit = 0;
-                    rtl8169->eeprom.addr++;
-                }
-            } else {
-                // Get starting addr, ignore command (Act as readonly eeprom)
-                if (rtl8169->eeprom.cur_bit >= 3) {
-                    rtl8169->eeprom.addr <<= 1;
-                    if (pins & RTL8169_EEPROM_DIN) {
-                        rtl8169->eeprom.addr |= 1;
-                    }
-                }
-                if (rtl8169->eeprom.cur_bit++ >= 11) {
-                    rtl8169->eeprom.cur_bit = 0;
-                    rtl8169->eeprom.addr_ok = true;
-                }
-            }
-        }
-        if (!(pins & RTL8169_EEPROM_SEL)) {
-            // End of transfer, request addr next time
-            rtl8169->eeprom.addr_ok = false;
-            rtl8169->eeprom.addr    = 0;
-            rtl8169->eeprom.cur_bit = 0;
-        }
-    }
-    rtl8169->eeprom.pins = pins;
-    rvvm_unlock(&rtl8169->mac_lock);
-}
-
-static uint8_t rtl8169_93c56_read_pins(rtl8169_dev_t* rtl8169)
-{
-    rvvm_lock(&rtl8169->mac_lock);
-    uint8_t ret = rtl8169->eeprom.pins;
-    rvvm_unlock(&rtl8169->mac_lock);
-    return ret;
-}
-
-static bool rtl8169_feed_rx(void* net_dev, const void* data, size_t size)
+static bool rtl8169_feed_rx(void* net_dev, const void* pkt_data, size_t pkt_size)
 {
     rtl8169_dev_t* rtl8169 = net_dev;
     if (likely(atomic_load_uint32_relax(&rtl8169->cr) & RTL8169_CR_RE)) {
-        // Receiver enabled
-        rvvm_addr_t ring_addr = rtl8169_ring_addr(&rtl8169->rx);
-        rvvm_lock(&rtl8169->rx.lock);
-        uint8_t* desc = rvvm_pci_get_dma(rtl8169->func, ring_addr + (rtl8169->rx.index << 4), 0x10);
-        if (unlikely(!desc)) {
-            // RX descriptor DMA error
-            rvvm_unlock(&rtl8169->rx.lock);
-            rvvm_debug("rtl8169 RX descriptor DMA error");
-            return false;
+        // Receiver enabled, prepare RX descriptor
+        uint8_t* desc = rtl8169_ring_prepare_desc(rtl8169, &rtl8169->rx);
+        if (likely(desc)) {
+            uint32_t    flag = read_uint32_le(desc);
+            rvvm_addr_t addr = read_uint64_le(desc + 8);
+            size_t      size = flag & 0x3FFF;
+            uint8_t*    ptr  = rvvm_pci_get_dma(rtl8169->func, addr, size);
+            if (likely(ptr && size >= pkt_size + 4)) {
+                memcpy(ptr, pkt_data, pkt_size);
+                memset(ptr + pkt_size, 0, 4); // Append fake CRC32
+            } else {
+                rvvm_debug("rtl8169: rx packet dma error");
+            }
+            rvvm_pci_end_dma(rtl8169->func, ptr);
+            atomic_store_uint32_le(desc, (flag & RTL8169_DESC_EOR) | RTL8169_DESC_RXSTA | (pkt_size + 4));
+            rvvm_pci_end_dma(rtl8169->func, desc);
+            rtl8169_interrupt(rtl8169, RTL8169_IRQ_ROK);
+            return true;
         }
-
-        uint32_t flags = read_uint32_le(desc);
-        if (unlikely(!(flags & RTL8169_DESC_OWN))) {
-            // RX descriptor unavailable
-            rvvm_unlock(&rtl8169->rx.lock);
-            rtl8169_interrupt(rtl8169, RTL8169_IRQ_RDU);
-            return false;
-        }
-
-        rvvm_addr_t packet_addr = read_uint64_le(desc + 8);
-        size_t      packet_size = flags & 0x3FFF;
-        uint8_t*    packet_ptr  = rvvm_pci_get_dma(rtl8169->func, packet_addr, packet_size);
-        if (likely(packet_ptr && packet_size >= size + 4)) {
-            memcpy(packet_ptr, data, size);
-            memset(packet_ptr + size, 0, 4); // Append fake CRC32
-        } else {
-            // Keep going as if nothing happened, maybe next descriptor will be OK
-            rvvm_debug("rtl8169 RX packet DMA error");
-        }
-        rvvm_pci_end_dma(rtl8169->func, packet_ptr);
-
-        rtl8169->rx.index++;
-        if ((flags & RTL8169_DESC_EOR) || rtl8169->rx.index >= RTL8169_MAX_FIFO_SIZE) {
-            rtl8169->rx.index = 0;
-        }
-        rvvm_unlock(&rtl8169->rx.lock);
-
-        atomic_store_uint32_le(desc, (flags & RTL8169_DESC_EOR) | RTL8169_DESC_RXSTA | (size + 4));
-        rvvm_pci_end_dma(rtl8169->func, desc);
-        rtl8169_interrupt(rtl8169, RTL8169_IRQ_ROK);
-        return true;
     }
     return false;
 }
 
+// Reassemble transmitted segmented frame
+static void rtl8169_tx_segmented(rtl8169_dev_t* rtl8169, void* seg_ptr, size_t seg_size, uint32_t flag)
+{
+    uint32_t size = 0;
+    if (flag & RTL8169_DESC_FS) {
+        // Start assembling a new packet
+        atomic_store_uint32_relax(&rtl8169->seg_size, 0);
+    } else {
+        size = atomic_load_uint32_relax(&rtl8169->seg_size);
+    }
+    if (size + seg_size <= sizeof(rtl8169->seg_buff)) {
+        memcpy(rtl8169->seg_buff + size, seg_ptr, seg_size);
+        size += seg_size;
+        if (flag & RTL8169_DESC_LS) {
+            // Last segment found
+            tap_send(rtl8169->tap, rtl8169->seg_buff, size);
+            atomic_store_uint32_relax(&rtl8169->seg_size, -1);
+        } else {
+            atomic_store_uint32_relax(&rtl8169->seg_size, size);
+        }
+    } else {
+        // Transmit error
+        rtl8169_interrupt(rtl8169, RTL8169_IRQ_TER);
+        atomic_store_uint32_relax(&rtl8169->seg_size, -1);
+    }
+}
+
 static void rtl8169_tx_doorbell(rtl8169_dev_t* rtl8169, rtl8169_ring_t* ring)
 {
+    bool tx_irq = false;
     if (likely(atomic_load_uint32_relax(&rtl8169->cr) & RTL8169_CR_TE)) {
-        // Transmitter enabled
-        rvvm_addr_t ring_addr = rtl8169_ring_addr(ring);
-        bool        tx_irq    = false;
-        rvvm_lock(&ring->lock);
-        while (true) {
-            uint8_t* desc = rvvm_pci_get_dma(rtl8169->func, ring_addr + (ring->index << 4), 0x10);
-            if (unlikely(!desc)) {
-                // TX descriptor DMA error
-                rvvm_debug("rtl8169 TX descriptor DMA error");
-                break;
-            }
-            uint32_t flags = read_uint32_le(desc);
-            if (!(flags & RTL8169_DESC_OWN)) {
-                // Nothing more to transmit
-                break;
-            }
-
+        // Transmitter enabled, prepare TX descriptor
+        uint8_t* desc = NULL;
+        while ((desc = rtl8169_ring_prepare_desc(rtl8169, ring))) {
+            uint32_t    flag = read_uint32_le(desc);
             rvvm_addr_t addr = read_uint64_le(desc + 8);
-            size_t      size = flags & 0x3FFF;
+            size_t      size = flag & 0x3FFF;
             void*       ptr  = rvvm_pci_get_dma(rtl8169->func, addr, size);
-
             if (likely(ptr)) {
-                if ((flags & RTL8169_DESC_FS) && (flags & RTL8169_DESC_LS)) {
-                    // This is a non-segmented packet, just send directly
+                if ((flag & RTL8169_DESC_FS) && (flag & RTL8169_DESC_LS)) {
+                    // Normal contiguous frame
                     tap_send(rtl8169->tap, ptr, size);
                 } else {
-                    // Reassemble segmented packet from descriptors
-                    if (flags & RTL8169_DESC_FS) {
-                        // Start assembling a new packet
-                        rtl8169->seg_size = 0;
-                    }
-                    if (rtl8169->seg_size < RTL8169_MAX_PKT_SIZE - size) {
-                        memcpy(rtl8169->seg_buff + rtl8169->seg_size, ptr, size);
-                        rtl8169->seg_size += size;
-                        if (flags & RTL8169_DESC_LS) {
-                            // Last segment found
-                            tap_send(rtl8169->tap, rtl8169->seg_buff, rtl8169->seg_size);
-                            rtl8169->seg_size = 0;
-                        }
-                    } else {
-                        // Transmit error
-                        rtl8169_interrupt(rtl8169, RTL8169_IRQ_TER);
-                        rtl8169->seg_size = -1;
-                    }
+                    // Segmented frame
+                    rtl8169_tx_segmented(rtl8169, ptr, size, flag);
                 }
                 rvvm_pci_end_dma(rtl8169->func, ptr);
             } else {
-                // Keep going as if nothing happened, maybe next descriptor will be OK
-                rvvm_debug("rtl8169 TX packet DMA error");
-                rtl8169->seg_size = -1;
+                rvvm_debug("rtl8169: tx packet dma error");
+                atomic_store_uint32_relax(&rtl8169->seg_size, -1);
             }
-
-            ring->index++;
-            if ((flags & RTL8169_DESC_EOR) || (ring->index >= RTL8169_MAX_FIFO_SIZE)) {
-                ring->index = 0;
-            }
-
-            atomic_store_uint32_le(desc, flags & RTL8169_DESC_TXSTA);
+            atomic_store_uint32_le(desc, flag & RTL8169_DESC_TXSTA);
             rvvm_pci_end_dma(rtl8169->func, desc);
             tx_irq = true;
         }
-        rvvm_unlock(&ring->lock);
-
         if (tx_irq) {
             rtl8169_interrupt(rtl8169, RTL8169_IRQ_TOK);
         }
     }
+}
+
+/*
+ * Device frontend
+ */
+
+static void rtl8169_reset(rvvm_reg_dev_t* dev)
+{
+    rtl8169_dev_t* rtl8169 = rvvm_region_data(dev);
+
+    // Reset registers
+    atomic_store_uint32_relax(&rtl8169->cr, 0);
+    atomic_store_uint32_relax(&rtl8169->imr, 0);
+    atomic_store_uint32_relax(&rtl8169->isr, 0);
+    atomic_store_uint32_relax(&rtl8169->phydr, 0);
+    atomic_store_uint32_relax(&rtl8169->phyar, 0);
+    atomic_store_uint32_relax(&rtl8169->seg_size, 0);
+    rtl8169_update_irqs(rtl8169);
+
+    // Reset rings
+    rtl8169_ring_reset(&rtl8169->rx);
+    rtl8169_ring_reset(&rtl8169->tx);
+    rtl8169_ring_reset(&rtl8169->txp);
+
+    // Reset EEPROM
+    rtl8169_at93c56_reset(&rtl8169->eeprom);
+}
+
+static void rtl8169_suspend(rvvm_reg_dev_t* dev, rvvm_snapshot_t* snap, bool resume)
+{
+    if (snap) {
+        rtl8169_dev_t* rtl8169 = rvvm_region_data(dev);
+
+        // Pause NIC RX, snapshot registers
+        uint32_t cr = atomic_swap_uint32(&rtl8169->cr, 0);
+        rvvm_snapshot_field(snap, cr);
+        rvvm_snapshot_field(snap, rtl8169->imr);
+        rvvm_snapshot_field(snap, rtl8169->isr);
+        rvvm_snapshot_field(snap, rtl8169->phydr);
+        rvvm_snapshot_field(snap, rtl8169->phyar);
+        rtl8169_update_irqs(rtl8169);
+
+        // Snapshot rings
+        rtl8169_ring_suspend(snap, &rtl8169->rx);
+        rtl8169_ring_suspend(snap, &rtl8169->tx);
+        rtl8169_ring_suspend(snap, &rtl8169->txp);
+
+        // Snapshot EEPROM
+        rtl8169_at93c56_suspend(snap, &rtl8169->eeprom);
+
+        // Resume
+        atomic_swap_uint32(&rtl8169->cr, cr);
+    }
+    UNUSED(resume);
 }
 
 static void rtl8169_pci_read(rvvm_reg_dev_t* dev, void* data, size_t size, size_t off)
@@ -527,19 +598,14 @@ static void rtl8169_pci_read(rvvm_reg_dev_t* dev, void* data, size_t size, size_
     rtl8169_dev_t* rtl8169 = rvvm_region_data(dev);
     uint32_t       val     = 0;
 
-    switch (off & (~0x03)) {
+    switch (off & ~0x03) {
         case RTL8169_REG_IDR0:
-            rvvm_scoped_lock (&rtl8169->mac_lock) {
-                tap_get_mac(rtl8169->tap, rtl8169->mac);
-                val = read_uint32_le(rtl8169->mac);
-            }
+        case RTL8169_REG_IDR4: {
+            uint8_t mac[6] = {0};
+            tap_get_mac(rtl8169->tap, mac);
+            val = read_uint32_le(mac + (off & ~0x03));
             break;
-        case RTL8169_REG_IDR4:
-            rvvm_scoped_lock (&rtl8169->mac_lock) {
-                tap_get_mac(rtl8169->tap, rtl8169->mac);
-                val = read_uint16_le(rtl8169->mac + 4);
-            }
-            break;
+        }
         case RTL8169_REG_IMR:
             val  = atomic_load_uint32_relax(&rtl8169->imr);
             val |= atomic_load_uint32_relax(&rtl8169->isr) << 16;
@@ -554,7 +620,7 @@ static void rtl8169_pci_read(rvvm_reg_dev_t* dev, void* data, size_t size, size_
             val = RTL8169_RCR_DEFAULT;
             break;
         case RTL8169_REG_9346:
-            val = rtl8169_93c56_read_pins(rtl8169);
+            val = atomic_load_uint32_relax(&rtl8169->eeprom.pins);
             break;
         case RTL8169_REG_ERIDR:
         case RTL8169_REG_OCPDR:
@@ -617,17 +683,13 @@ static void rtl8169_pci_write(rvvm_reg_dev_t* dev, const void* data, size_t size
 
     switch (off) {
         case RTL8169_REG_IDR0:
-            rvvm_scoped_lock (&rtl8169->mac_lock) {
-                memcpy(rtl8169->mac, data, size);
-                tap_set_mac(rtl8169->tap, rtl8169->mac);
-            }
+        case RTL8169_REG_IDR4: {
+            uint8_t mac[6] = {0};
+            tap_get_mac(rtl8169->tap, mac);
+            memcpy(mac + off, data, EVAL_MIN(size, 6 - off));
+            tap_set_mac(rtl8169->tap, mac);
             break;
-        case RTL8169_REG_IDR4:
-            rvvm_scoped_lock (&rtl8169->mac_lock) {
-                memcpy(rtl8169->mac + 4, data, EVAL_MIN(size, 2));
-                tap_set_mac(rtl8169->tap, rtl8169->mac);
-            }
-            break;
+        }
         case RTL8169_REG_IMR:
             atomic_store_uint32_relax(&rtl8169->imr, (uint16_t)val);
             rtl8169_update_irqs(rtl8169);
@@ -655,7 +717,7 @@ static void rtl8169_pci_write(rvvm_reg_dev_t* dev, const void* data, size_t size
             }
             break;
         case RTL8169_REG_9346:
-            rtl8169_93c56_write_pins(rtl8169, val);
+            rtl8169_at93c56_write_pins(rtl8169, val);
             break;
         case RTL8169_REG_TXDA1:
             atomic_store_uint32_relax(&rtl8169->tx.addr, val & ~0xFFU);
@@ -677,13 +739,13 @@ static void rtl8169_pci_write(rvvm_reg_dev_t* dev, const void* data, size_t size
             break;
         case RTL8169_REG_PHYAR:
         case RTL8169_REG_EPHAR:
-            rtl8169_handle_phy(rtl8169, val);
+            rtl8169_phy_handle(rtl8169, val);
             break;
         case RTL8169_REG_ERIAR:
-            rtl8169_handle_eri_phy(rtl8169, val);
+            rtl8169_phy_eri_handle(rtl8169, val);
             break;
         case RTL8169_REG_OCPAR:
-            rtl8169_handle_ocp_phy(rtl8169, val);
+            rtl8169_phy_ocp_handle(rtl8169, val);
             break;
     }
 }
@@ -703,6 +765,7 @@ static rvvm_reg_type_t rtl8169_type = {
     .read     = rtl8169_pci_read,
     .write    = rtl8169_pci_write,
     .reset    = rtl8169_reset,
+    .suspend  = rtl8169_suspend,
     .cleanup  = rtl8169_cleanup,
     .min_size = 1,
     .max_size = 4,
