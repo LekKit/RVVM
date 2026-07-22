@@ -81,8 +81,9 @@ static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t
             neg = fpu_signbit64(riscv_view_d(vm, rs1)) != fpu_signbit64(riscv_view_d(vm, rs2));
             break;
         default:
-            neg = fpu_signbit64(riscv_view_d(vm, rs1));
-            break;
+            // Only add/sub/mul/div need the directed synthesis: sqrt has no exact
+            // ties, and ops taking rm as an argument handle RMM natively
+            return;
     }
 
     // Round to positive/negative infinity based on the result sign
@@ -93,7 +94,33 @@ static void riscv_prepare_rmm(rvvm_hart_t* vm, const uint32_t insn, const size_t
     }
 }
 
-slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+// funct3 is an rm field only on the rounding-capable OP-FP ops; on
+// fsgnj/fmin/fmax/fcmp/fclass/fmv it encodes the operation itself. "Implicitly"
+// rounding: ops that take rm as an argument (fcvt to integer, fround) consume
+// the field themselves and are not listed here.
+static forceinline bool riscv_f_op_is_implicitly_rounding(const uint32_t insn)
+{
+    switch (insn & 0xFE000000UL) {
+        case 0x00000000UL: // fadd.s
+        case 0x02000000UL: // fadd.d
+        case 0x08000000UL: // fsub.s
+        case 0x0A000000UL: // fsub.d
+        case 0x10000000UL: // fmul.s
+        case 0x12000000UL: // fmul.d
+        case 0x18000000UL: // fdiv.s
+        case 0x1A000000UL: // fdiv.d
+        case 0x58000000UL: // fsqrt.s
+        case 0x5A000000UL: // fsqrt.d
+        case 0x40000000UL: // fcvt.s.d, fround.s (Zfa)
+        case 0x42000000UL: // fcvt.d.s, fround.d (Zfa)
+        case 0xD0000000UL: // fcvt.s.w[u]/l[u]
+        case 0xD2000000UL: // fcvt.d.w[u]/l[u]
+            return true;
+    }
+    return false;
+}
+
+static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_t insn)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
@@ -102,8 +129,9 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
 
     if (likely(riscv_fpu_is_enabled(vm))) {
 
-        if (unlikely(vm->csr.fcsr >> 5 == 0x04)) {
-            // Handle RMM rounding
+        if (unlikely(((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == 0x04)) {
+            // Handle RMM rounding in the effective mode: a static rmm field
+            // behaves exactly like frm == RMM
             riscv_prepare_rmm(vm, insn, rs1, rs2);
         }
 
@@ -404,6 +432,20 @@ slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
     }
 
     riscv_illegal_insn(vm, insn);
+}
+
+slow_path void riscv_emulate_f_opc_op(rvvm_hart_t* vm, const uint32_t insn)
+{
+    const uint32_t rm = bit_ext_u32(insn, 12, 3);
+    // A static rm field on an implicitly rounding op overrides the frm-tracked
+    // host mode around the op
+    if (unlikely(rm != 0x07) && riscv_fpu_rm_is_valid(rm) && riscv_f_op_is_implicitly_rounding(insn)) {
+        const uint32_t prev_rm = riscv_fpu_static_rm_enter(rm);
+        riscv_emulate_f_opc_op_impl(vm, insn);
+        riscv_fpu_static_rm_leave(prev_rm);
+    } else {
+        riscv_emulate_f_opc_op_impl(vm, insn);
+    }
 }
 
 #endif
