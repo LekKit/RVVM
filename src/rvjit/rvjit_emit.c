@@ -716,6 +716,7 @@ void rvjit32_jalr(rvjit_block_t* block, regid_t rds, regid_t rs, int32_t imm, ui
     regid_t hrs  = rvjit_map_reg(block, rs, REG_SRC);
     regid_t hjmp = rvjit_claim_hreg(block);
     rvjit32_native_addi(block, hjmp, hrs, imm);
+    rvjit32_native_andi(block, hjmp, hjmp, -2);
     if (rds != RVJIT_REGISTER_ZERO) {
         int32_t new_imm = block->pc_off + isize;
         regid_t hrds    = rvjit_map_reg(block, rds, REG_DST);
@@ -726,7 +727,7 @@ void rvjit32_jalr(rvjit_block_t* block, regid_t rds, regid_t rs, int32_t imm, ui
     }
 
     if (block->regs[rs].flags & REG_AUIPC) {
-        block->pc_off  = block->regs[rs].auipc_off + imm;
+        block->pc_off  = (block->regs[rs].auipc_off + imm) & ~1;
         block->linkage = LINKAGE_JMP;
     } else {
         block->pc_off  = 0;
@@ -770,6 +771,7 @@ void rvjit64_jalr(rvjit_block_t* block, regid_t rds, regid_t rs, int32_t imm, ui
     regid_t hrs  = rvjit_map_reg(block, rs, REG_SRC);
     regid_t hjmp = rvjit_claim_hreg(block);
     rvjit64_native_addi(block, hjmp, hrs, imm);
+    rvjit64_native_andi(block, hjmp, hjmp, -2);
     if (rds != RVJIT_REGISTER_ZERO) {
         int32_t new_imm = block->pc_off + isize;
         regid_t hrds    = rvjit_map_reg(block, rds, REG_DST);
@@ -780,7 +782,7 @@ void rvjit64_jalr(rvjit_block_t* block, regid_t rds, regid_t rs, int32_t imm, ui
     }
 
     if (block->regs[rs].flags & REG_AUIPC) {
-        block->pc_off  = block->regs[rs].auipc_off + imm;
+        block->pc_off  = (block->regs[rs].auipc_off + imm) & ~1;
         block->linkage = LINKAGE_JMP;
     } else {
         block->pc_off  = 0;
