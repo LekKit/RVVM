@@ -961,9 +961,9 @@ static inline void rvjit_x86_div_rem(rvjit_block_t* block, bool rem, regid_t hrd
         //rvjit_native_push(block, cmp_reg);
         cmp_reg = rvjit_claim_hreg(block);
         rvjit_native_setregw(block, cmp_reg, (size_t)0x8000000000000000ULL);
-        l1 = rvjit_x86_branch(block, X86_BNE, hrs2, cmp_reg, BRANCH_NEW, false, bits_64);
+        l1 = rvjit_x86_branch(block, X86_BNE, hrs1, cmp_reg, BRANCH_NEW, false, bits_64);
     } else {
-        l1 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, 0x80000000U, BRANCH_NEW, false, bits_64);
+        l1 = rvjit_x86_branch_imm(block, X86_BNE, hrs1, 0x80000000U, BRANCH_NEW, false, bits_64);
     }
 
     branch_t l2 = rvjit_x86_branch_imm(block, X86_BNE, hrs2, -1, BRANCH_NEW, false, bits_64);
