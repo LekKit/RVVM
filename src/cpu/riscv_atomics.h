@@ -423,7 +423,7 @@ static forceinline void riscv_emulate_atomic_dwcas(rvvm_hart_t* vm, const uint32
         write_uint64_le(&exp, riscv_read_reg(vm, rds) | (((uint64_t)riscv_read_reg(vm, rds + 1)) << 32));
     }
     if (rs2) {
-        write_uint64_le(&val, riscv_read_reg(vm, rs2) | (((uint64_t)riscv_read_reg(vm, rs2)) << 32));
+        write_uint64_le(&val, riscv_read_reg(vm, rs2) | (((uint64_t)riscv_read_reg(vm, rs2 + 1)) << 32));
     }
     atomic_cas_uint64_ex(ptr, &exp, val, false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE);
     if (rds) {
