@@ -473,7 +473,8 @@ static forceinline void riscv_emulate_c_c2(rvvm_hart_t* vm, const uint32_t insn)
                 return;
             } else if (likely(rds)) { // c.jr
                 rvjit_trace_jalr(RISCV_REG_ZERO, rds, 0, 2);
-                riscv_write_reg(vm, RISCV_REG_PC, riscv_read_reg(vm, rds) - 2);
+                riscv_write_reg(vm, RISCV_REG_PC,
+                                (riscv_read_reg(vm, rds) & ~(xlen_t) 1) - 2);
                 riscv_voluntary_preempt(vm);
                 return;
             }
@@ -485,7 +486,8 @@ static forceinline void riscv_emulate_c_c2(rvvm_hart_t* vm, const uint32_t insn)
             } else if (likely(rds)) { // c.jalr
                 rvjit_trace_jalr(RISCV_REG_X1, rds, 0, 2);
                 riscv_write_reg(vm, RISCV_REG_X1, riscv_read_reg(vm, RISCV_REG_PC) + 2);
-                riscv_write_reg(vm, RISCV_REG_PC, riscv_read_reg(vm, rds) - 2);
+                riscv_write_reg(vm, RISCV_REG_PC,
+                                (riscv_read_reg(vm, rds) & ~(xlen_t) 1) - 2);
                 riscv_voluntary_preempt(vm);
             } else { // c.ebreak
                 riscv_breakpoint(vm);
