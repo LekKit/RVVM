@@ -252,7 +252,10 @@ static forceinline void riscv_emulate_c_c1(rvvm_hart_t* vm, const uint32_t insn)
                 riscv_write_reg(vm, rds, (int32_t)(riscv_read_reg(vm, rds) + imm));
                 return;
             }
-            break;
+            // c.addiw with rd == x0 is a reserved encoding (spec: valid only
+            // when rd != x0); trap instead of falling through or executing
+            riscv_illegal_insn(vm, insn);
+            return;
 #else
             const xlen_t  pc  = riscv_read_reg(vm, RISCV_REG_PC);
             const int32_t off = decode_c_jal_imm(insn);
@@ -286,7 +289,9 @@ static forceinline void riscv_emulate_c_c1(rvvm_hart_t* vm, const uint32_t insn)
             } else if ((rds & 0x01) && !(rds & 0x10)) { // c.mop.{1,15}
                 return;
             }
-            break;
+            // Reserved: c.lui/c.addi16sp with nzimm == 0 (and not a valid c.mop)
+            riscv_illegal_insn(vm, insn);
+            return;
         }
         case 0x05: { // c.j
             const int32_t off = decode_c_jal_imm(insn);
