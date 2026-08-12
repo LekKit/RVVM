@@ -1314,7 +1314,7 @@ static forceinline bool atomic_cas_uint16_ex(void* addr, uint16_t* exp, uint16_t
     return orig == chck;
 #elif defined(WIN32_ATOMICS_IMPL)
     uint16_t chck = *exp;
-    uint16_t orig = InterlockedCompareExchange16((SHORT*)addr, chck, val);
+    uint16_t orig = InterlockedCompareExchange16((SHORT*)addr, val, chck);
     *exp          = orig;
     return orig == chck;
 #elif defined(LIBATOMIC_IMPL)
@@ -1963,36 +1963,36 @@ static inline uint64_t atomic_minu_uint64_le(void* addr, uint64_t val)
     return tmp;
 }
 
-static inline int16_t atomic_max_int8(void* addr, int16_t val)
+static inline int8_t atomic_max_int8(void* addr, int8_t val)
 {
-    int16_t tmp;
+    int8_t tmp;
     do {
         tmp = atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline int16_t atomic_min_int8(void* addr, int16_t val)
+static inline int8_t atomic_min_int8(void* addr, int8_t val)
 {
-    int16_t tmp;
+    int8_t tmp;
     do {
         tmp = atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }
 
-static inline uint16_t atomic_maxu_uint8(void* addr, uint16_t val)
+static inline uint8_t atomic_maxu_uint8(void* addr, uint8_t val)
 {
-    uint16_t tmp;
+    uint8_t tmp;
     do {
         tmp = atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
 
-static inline uint16_t atomic_minu_uint8(void* addr, uint16_t val)
+static inline uint8_t atomic_minu_uint8(void* addr, uint8_t val)
 {
-    uint16_t tmp;
+    uint8_t tmp;
     do {
         tmp = atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp < val ? tmp : val));
@@ -2069,9 +2069,9 @@ static inline uint16_t atomic_and_uint16_le(void* addr, uint16_t val)
 #if defined(HOST_LITTLE_ENDIAN)
     return atomic_and_uint16(addr, val);
 #else
-    write_uint32_le(&val, val);
-    val = atomic_and_uint32(addr, val);
-    return read_uint32_le(&val);
+    write_uint16_le(&val, val);
+    val = atomic_and_uint16(addr, val);
+    return read_uint16_le(&val);
 #endif
 }
 
