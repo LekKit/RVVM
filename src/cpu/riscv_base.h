@@ -112,7 +112,7 @@ static inline func_clang_minsize uint64_t riscv_bit_xperm4(uint64_t val, uint64_
 static inline func_clang_minsize uint64_t riscv_bit_xperm8(uint64_t val, uint64_t lut)
 {
     uint64_t ret = 0;
-    for (size_t i = 0; i < 64; i += 4) {
+    for (size_t i = 0; i < 64; i += 8) {
         uint32_t idx = (lut >> i);
         if (!(idx & 0xF8)) {
             ret |= bit_ext_u64(val, (idx & 0x07) << 3, 8) << i;
