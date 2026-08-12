@@ -326,12 +326,24 @@ static forceinline void riscv_emulate_c_c1(rvvm_hart_t* vm, const uint32_t insn)
 
     switch (bit_ext_u32(insn, 10, 2)) {
         case 0x00: { // c.srli
+#if !defined(RISCV64)
+            if (unlikely(insn & 0x1000)) { // shamt[5] is reserved in RV32
+                riscv_illegal_insn(vm, insn);
+                return;
+            }
+#endif
             const bitcnt_t shamt = decode_c_shamt(insn);
             rvjit_trace_srli(rds, rds, shamt, 2);
             riscv_write_reg(vm, rds, reg1 >> shamt);
             return;
         }
         case 0x01: { // c.srai
+#if !defined(RISCV64)
+            if (unlikely(insn & 0x1000)) { // shamt[5] is reserved in RV32
+                riscv_illegal_insn(vm, insn);
+                return;
+            }
+#endif
             const bitcnt_t shamt = decode_c_shamt(insn);
             rvjit_trace_srai(rds, rds, shamt, 2);
             riscv_write_reg(vm, rds, ((sxlen_t)reg1) >> shamt);
@@ -421,6 +433,12 @@ static forceinline void riscv_emulate_c_c2(rvvm_hart_t* vm, const uint32_t insn)
     switch (bit_ext_u32(insn, 12, 4)) {
         case 0x00:
         case 0x01: { // c.slli
+#if !defined(RISCV64)
+            if (unlikely(insn & 0x1000)) { // shamt[5] is reserved in RV32
+                riscv_illegal_insn(vm, insn);
+                return;
+            }
+#endif
             const uint32_t shamt = decode_c_shamt(insn);
             rvjit_trace_slli(rds, rds, shamt, 2);
             riscv_write_reg(vm, rds, riscv_read_reg(vm, rds) << shamt);
