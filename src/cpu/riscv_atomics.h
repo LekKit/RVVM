@@ -186,6 +186,11 @@ static forceinline void riscv_emulate_atomic_w(rvvm_hart_t* vm, const uint32_t i
         riscv_illegal_insn(vm, insn);
         return;
     }
+    if (unlikely(op == RISCV_AMO_LR && rs2 != RISCV_REG_ZERO)) {
+        // LR.W encodes rs2 as a fixed zero field.
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
     if (unlikely(vaddr & 3)) {
         // Misaligned atomic
         uint32_t cause = (op == RISCV_AMO_LR) ? RISCV_TRAP_LOAD_MISALIGN : RISCV_TRAP_STORE_MISALIGN;
@@ -283,6 +288,11 @@ static forceinline void riscv_emulate_atomic_d(rvvm_hart_t* vm, const uint32_t i
 
     if (unlikely(!((1U << op) & 0x1111113F))) {
         // Illegal instruction
+        riscv_illegal_insn(vm, insn);
+        return;
+    }
+    if (unlikely(op == RISCV_AMO_LR && rs2 != RISCV_REG_ZERO)) {
+        // LR.D encodes rs2 as a fixed zero field.
         riscv_illegal_insn(vm, insn);
         return;
     }
