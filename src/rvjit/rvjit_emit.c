@@ -602,6 +602,26 @@ void rvjit_emit_end(rvjit_block_t* block, uint8_t linkage)
     RVJIT32_IMM(instr)                                                                                                 \
     RVJIT64_IMM(instr)
 
+#define RVJIT32_IMM_NO_ZERO_OPTIMIZE(instr)                                                                            \
+    void rvjit32_##instr(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)                                  \
+    {                                                                                                                  \
+        RVJIT_2REG_IMM_OP(rvjit32_native_##instr, rds, rs1, imm);                                                      \
+    }
+
+#ifdef RVJIT_NATIVE_64BIT
+#define RVJIT64_IMM_NO_ZERO_OPTIMIZE(instr)                                                                            \
+    void rvjit64_##instr(rvjit_block_t* block, regid_t rds, regid_t rs1, int32_t imm)                                  \
+    {                                                                                                                  \
+        RVJIT_2REG_IMM_OP(rvjit64_native_##instr, rds, rs1, imm);                                                      \
+    }
+#else
+#define RVJIT64_IMM_NO_ZERO_OPTIMIZE(instr)
+#endif
+
+#define RVJIT_IMM_NO_ZERO_OPTIMIZE(instr)                                                                              \
+    RVJIT32_IMM_NO_ZERO_OPTIMIZE(instr)                                                                                \
+    RVJIT64_IMM_NO_ZERO_OPTIMIZE(instr)
+
 /*
  * Branch intrinsics
  */
@@ -661,8 +681,8 @@ RVJIT_IMM(andi)
 RVJIT_IMM(srai)
 RVJIT_IMM(srli)
 RVJIT_IMM(slli)
-RVJIT_IMM(slti)
-RVJIT_IMM(sltiu)
+RVJIT_IMM_NO_ZERO_OPTIMIZE(slti)
+RVJIT_IMM_NO_ZERO_OPTIMIZE(sltiu)
 
 RVJIT64_3REG(addw)
 RVJIT64_3REG(subw)
