@@ -1967,7 +1967,7 @@ static inline int16_t atomic_max_int8(void* addr, int16_t val)
 {
     int16_t tmp;
     do {
-        tmp = atomic_load_uint8(addr);
+        tmp = (int16_t)(int8_t)atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp > val ? tmp : val));
     return tmp;
 }
@@ -1976,7 +1976,7 @@ static inline int16_t atomic_min_int8(void* addr, int16_t val)
 {
     int16_t tmp;
     do {
-        tmp = atomic_load_uint8(addr);
+        tmp = (int16_t)(int8_t)atomic_load_uint8(addr);
     } while (!atomic_cas_uint8(addr, tmp, tmp < val ? tmp : val));
     return tmp;
 }

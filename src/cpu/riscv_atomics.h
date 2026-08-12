@@ -42,7 +42,7 @@ static forceinline void riscv_emulate_atomic_b(rvvm_hart_t* vm, const uint32_t i
     const size_t   rs1   = bit_ext_u32(insn, 15, 5);
     const size_t   rs2   = bit_ext_u32(insn, 20, 5);
     const xaddr_t  vaddr = riscv_read_reg(vm, rs1);
-    const uint8_t  val   = riscv_read_reg(vm, rs2);
+    const int16_t  val   = (int16_t)(int8_t)riscv_read_reg(vm, rs2);
     uint8_t        buf   = 0;
     void*          ptr   = NULL;
 
