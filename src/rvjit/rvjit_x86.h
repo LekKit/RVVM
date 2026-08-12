@@ -921,12 +921,14 @@ static inline void rvjit_x86_mulh_div_rem(rvjit_block_t* block, uint8_t opcode, 
 static inline void rvjit_x86_mulhsu(rvjit_block_t* block, regid_t hrds, regid_t hrs1, regid_t hrs2, bool bits_64)
 {
     regid_t second_reg = X86_EAX;
-    rvjit_x86_mulh_div_rem(block, X86_MUL, true, hrds, hrs1, hrs2, bits_64);
     // Search for any non-clobbering register
     while (second_reg == hrds || second_reg == hrs1 || second_reg == hrs2) second_reg++;
+    // Compute the sign-correction (rs1 >> 63) * rs2 before mulhu writes into
+    // hrds: when hrds == hrs1, mulhu clobbers the source register we still need
     rvjit_native_push(block, second_reg);
     rvjit_x86_2reg_imm_shift_op(block, X86_SRA, second_reg, hrs1, bits_64 ? 63 : 31, bits_64);
     rvjit_x86_0f_2reg_op(block, X86_IMUL_2REG, second_reg, hrs2, bits_64);
+    rvjit_x86_mulh_div_rem(block, X86_MUL, true, hrds, hrs1, hrs2, bits_64);
     rvjit_x86_3reg_op(block, X86_ADD, hrds, hrds, second_reg, bits_64);
     rvjit_native_pop(block, second_reg);
 }
