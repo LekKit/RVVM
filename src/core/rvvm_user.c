@@ -363,9 +363,9 @@ static bool proc_mem_readable(const void* addr, size_t size)
 }
 
 #ifndef __riscv
-static char* prefix_path = "/home/lekkit/stuff/userland/debian";
+static const char* prefix_path = "/home/lekkit/stuff/userland/debian";
 #else
-static char* prefix_path = NULL;
+static const char* prefix_path = NULL;
 #endif
 
 static bool fake_root = true;
@@ -1850,7 +1850,7 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
     // empty RVVM_USER_PREFIX passes host paths through unchanged
     const char* env_prefix = getenv("RVVM_USER_PREFIX");
     if (env_prefix) {
-        prefix_path = env_prefix[0] ? (char*)env_prefix : NULL;
+        prefix_path = env_prefix[0] ? env_prefix : NULL;
     }
     stacktrace_init();
     user_fault_handler_install();
@@ -1909,9 +1909,10 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
         envp = environ;
     }
 
-    getcwd(path_buf, sizeof(path_buf));
-    if (!path_wrapped(path_buf)) {
-        chdir(prefix_path);
+    if (prefix_path && (!getcwd(path_buf, sizeof(path_buf)) || !path_wrapped(path_buf))) {
+        if (chdir(prefix_path)) {
+            rvvm_error("Failed to chdir to userland prefix %s", prefix_path);
+        }
     }
 
     //rvvm_set_loglevel(LOG_INFO);
