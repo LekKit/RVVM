@@ -9,6 +9,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <util/feature_test.h>
 
+#include <stdlib.h>
+
 #include <util/elf_load.h>
 #include <util/mem_ops.h>
 #include <util/spinlock.h>
@@ -1114,9 +1116,11 @@ PUBLIC rvvm_machine_t* rvvm_create_userland(const char* isa)
     rvvm_set_opt(machine, RVVM_OPT_TIME_FREQ, 1000000000ULL);
 
 #if defined(USE_JIT)
-    rvvm_set_opt(machine, RVVM_OPT_JIT, true);
-    rvvm_set_opt(machine, RVVM_OPT_JIT_HARVARD, true);
-    rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, 16U << 20);
+    if (!getenv("RVVM_NOJIT")) {
+        rvvm_set_opt(machine, RVVM_OPT_JIT, true);
+        rvvm_set_opt(machine, RVVM_OPT_JIT_HARVARD, true);
+        rvvm_set_opt(machine, RVVM_OPT_JIT_CACHE, 16U << 20);
+    }
 #endif
 
     return machine;

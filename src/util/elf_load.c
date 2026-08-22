@@ -33,6 +33,9 @@ PUSH_OPTIMIZATION_SIZE
 #define ELF_PF_W       0x02
 #define ELF_PF_R       0x04
 
+// Padding past the fixed ELF image, usable as guest brk heap
+#define ELF_USERLAND_HEAP_MARGIN 0x10000000
+
 // TODO: Handling >64k PHENTs
 #define ELF_PN_XNUM    0xFFFF
 
@@ -108,7 +111,9 @@ bool elf_load_file(rvfile_t* file, elf_desc_t* elf)
             WRAP_ERR(elf->base, "Failed to allocate dynamic ELF VMA");
         } else {
             // Non-relocatable ELF at fixed address
-            elf->base = vma_alloc((void*)(size_t)elf_loaddr, elf->buf_size, VMA_RDWR | VMA_FIXED);
+            // Extra pages past the image serve as the initial brk heap area,
+            // real kernels map them accessible right after the image
+            elf->base = vma_alloc((void*)(size_t)elf_loaddr, elf->buf_size + ELF_USERLAND_HEAP_MARGIN, VMA_RDWR | VMA_FIXED);
             WRAP_ERR(elf->base, "Failed to map fixed ELF VMA, address collision?");
         }
         if (elf->entry) {
