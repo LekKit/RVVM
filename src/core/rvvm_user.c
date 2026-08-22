@@ -54,6 +54,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Guard this for now
 #if defined(RVVM_USER_TEST)
 
+// Guest fd numbers passed through the syscall dispatch are not host fds,
+// GCC static analyzer (-fanalyzer) misinterprets them as leaked descriptors
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-use-after-close"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-double-close"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-access-mode-mismatch"
+#endif
+
 #include <stdio.h>
 
 #include <errno.h>

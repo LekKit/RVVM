@@ -169,22 +169,29 @@ override LIBS_USE_WAYLAND := wayland-client xkbcommon
 # Additional headers
 #
 
-override CPPFLAGS := $(CPPFLAGS) -I$(SRCDIR)/util -DRVVM_USER_TEST
+override CPPFLAGS := $(CPPFLAGS) -I$(SRCDIR)/util
 
 #
 # Prepare build targets
 #
 
-override BIN_TARGETS := rvvm rvvm_user
+override BIN_TARGETS := rvvm
 override LIB_TARGETS := rvvm # TODO: rvvm_libretro FTBFS
 
 override bin_src_rvvm          := $(SRCDIR)/main.c
-override bin_src_rvvm_user     := $(SRCDIR)/rvvm_user_main.c
 override lib_src_rvvm_libretro := $(SRCDIR)/bindings/libretro/libretro.c
+
+# The userland emulator is Linux-only, enable it solely on Linux targets
+ifneq (,$(filter linux,$(OS)))
+override BIN_TARGETS          := $(BIN_TARGETS) rvvm_user
+override CPPFLAGS             := $(CPPFLAGS) -DRVVM_USER_TEST
+override bin_src_rvvm_user    := $(SRCDIR)/rvvm_user_main.c
+override bin_libs_rvvm_user   := rvvm
+endif
+
 override lib_src_rvvm          := $(filter-out $(bin_src_rvvm) $(bin_src_rvvm_user) $(lib_src_rvvm_libretro),$(call recursive_match,$(SRCDIR),*.c *.cpp *.cc *.cxx))
 
 override bin_libs_rvvm := rvvm
-override bin_libs_rvvm_user := rvvm
 override lib_libs_rvvm := $(if $(call var_use,USE_LIBS_PROBE),,$(LIBS_USE_SDL) $(LIBS_USE_X11) $(LIBS_USE_WAYLAND))
 
 #
