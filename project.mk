@@ -182,11 +182,14 @@ override bin_src_rvvm          := $(SRCDIR)/main.c
 override bin_src_rvvm_user     := $(SRCDIR)/rvvm_user_main.c
 override lib_src_rvvm_libretro := $(SRCDIR)/bindings/libretro/libretro.c
 
-# The userland emulator is Linux-only, build it solely on Linux targets
+# The userland emulator is Linux-only and assumes a 64-bit host address space,
+# build it solely on non-i386 Linux targets
 ifneq (,$(filter linux,$(OS)))
+ifeq (,$(filter i386,$(ARCH)))
 override BIN_TARGETS        := $(BIN_TARGETS) rvvm_user
 override CPPFLAGS           := $(CPPFLAGS) -DRVVM_USER_TEST
 override bin_libs_rvvm_user := rvvm
+endif
 endif
 
 override lib_src_rvvm          := $(filter-out $(bin_src_rvvm) $(bin_src_rvvm_user) $(lib_src_rvvm_libretro),$(call recursive_match,$(SRCDIR),*.c *.cpp *.cc *.cxx))
