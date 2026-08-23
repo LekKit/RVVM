@@ -179,14 +179,14 @@ override BIN_TARGETS := rvvm
 override LIB_TARGETS := rvvm # TODO: rvvm_libretro FTBFS
 
 override bin_src_rvvm          := $(SRCDIR)/main.c
+override bin_src_rvvm_user     := $(SRCDIR)/rvvm_user_main.c
 override lib_src_rvvm_libretro := $(SRCDIR)/bindings/libretro/libretro.c
 
-# The userland emulator is Linux-only, enable it solely on Linux targets
+# The userland emulator is Linux-only, build it solely on Linux targets
 ifneq (,$(filter linux,$(OS)))
-override BIN_TARGETS          := $(BIN_TARGETS) rvvm_user
-override CPPFLAGS             := $(CPPFLAGS) -DRVVM_USER_TEST
-override bin_src_rvvm_user    := $(SRCDIR)/rvvm_user_main.c
-override bin_libs_rvvm_user   := rvvm
+override BIN_TARGETS        := $(BIN_TARGETS) rvvm_user
+override CPPFLAGS           := $(CPPFLAGS) -DRVVM_USER_TEST
+override bin_libs_rvvm_user := rvvm
 endif
 
 override lib_src_rvvm          := $(filter-out $(bin_src_rvvm) $(bin_src_rvvm_user) $(lib_src_rvvm_libretro),$(call recursive_match,$(SRCDIR),*.c *.cpp *.cc *.cxx))
