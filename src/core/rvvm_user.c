@@ -54,6 +54,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // Guard this for now
 #if defined(RVVM_USER_TEST)
 
+// Guest fd numbers passed through the syscall dispatch are not host fds,
+// GCC static analyzer (-fanalyzer) misinterprets them as leaked descriptors
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-use-after-close"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-double-close"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-access-mode-mismatch"
+#endif
+
 #include <stdio.h>
 
 #include <errno.h>
@@ -61,6 +70,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <time.h>     // clock_gettime(), etc
 #include <signal.h>   // sigaction(), etc
+
+#include <sched.h>    // sched_getaffinity()
+
+#include <fcntl.h>    // O_RDONLY
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -359,9 +372,9 @@ static bool proc_mem_readable(const void* addr, size_t size)
 }
 
 #ifndef __riscv
-static char* prefix_path = "/home/lekkit/stuff/userland/debian";
+static const char* prefix_path = "/home/lekkit/stuff/userland/debian";
 #else
-static char* prefix_path = NULL;
+static const char* prefix_path = NULL;
 #endif
 
 static bool fake_root = true;
@@ -415,6 +428,62 @@ static struct uapi_sigaction siga[64] = {0};
 void sig_handler(int signal)
 {
     rvvm_info("Received signal %d", signal);
+}
+
+// Debug: current running hart, for host fault diagnostics
+static rvvm_hart_t* current_user_hart = NULL;
+
+static void user_fault_hex(char** p, uint64_t val)
+{
+    char tmp[17];
+    uint32_t i = 0;
+    do {
+        uint32_t d = val & 0xF;
+        tmp[i++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+        val >>= 4;
+    } while (val);
+    while (i) {
+        *(*p)++ = tmp[--i];
+    }
+    *(*p)++ = '\n';
+}
+
+static void user_fault_handler(int sig, siginfo_t* info, void* ucontext)
+{
+    char buf[8192];
+    char* p = buf;
+    UNUSED(ucontext);
+    const char* hdr = "=== HOST FAULT inside guest === sig=";
+    while (*hdr) *p++ = *hdr++;
+    user_fault_hex(&p, (uint64_t)(size_t)sig);
+    const char* addr = "fault addr(si_addr): ";
+    while (*addr) *p++ = *addr++;
+    user_fault_hex(&p, (uint64_t)(size_t)info->si_addr);
+    rvvm_hart_t* cpu = current_user_hart;
+    if (cpu) {
+        const char* pch = "guest PC: ";
+        while (*pch) *p++ = *pch++;
+        user_fault_hex(&p, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC));
+        for (uint32_t i = 0; i < 32; ++i) {
+            *p++ = 'x';
+            user_fault_hex(&p, i);
+            const char* eq = "= ";
+            while (*eq) *p++ = *eq++;
+            user_fault_hex(&p, rvvm_read_cpu_reg(cpu, RVVM_REGID_X0 + i));
+        }
+    }
+    (void)!write(2, buf, (size_t)(p - buf));
+    _Exit(128 + sig);
+}
+
+static void user_fault_handler_install(void)
+{
+    struct sigaction sa = {0};
+    sa.sa_sigaction = user_fault_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
 }
 
 typedef struct {
@@ -502,7 +571,7 @@ static int rvvm_sys_clone(rvvm_hart_t* cpu, uint32_t flags, size_t stack, uint32
         rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 10, 0); // a0
 
         // Spawn the thread using portable RVVM thread facilities
-        thread_detach(thread_create_ex(rvvm_user_thread_wrap, thread, 0));
+        thread_detach(rvvm_thread_create_ex(rvvm_user_thread_wrap, thread, 0));
 
         uint32_t tid = atomic_load_uint32(&thread->tid);
         while (!tid) {
@@ -652,6 +721,7 @@ static inline int rvvm_sys_prot(int prot)
 
 static rvvm_addr_t rvvm_sys_mmap(void* addr, size_t size, int prot, int flags, int fd, uint64_t offset)
 {
+    rvvm_info("sys_mmap(%lx, %lx, %x, %x, %d, %lx)", (size_t)addr, size, prot, flags, fd, offset);
     int mmap_flags = 0;
     if (flags & UAPI_MAP_ILLEGAL) {
         return -UAPI_EINVAL;
@@ -769,14 +839,17 @@ static rvvm_addr_t rvvm_sys_readlinkat(int dirfd, const char* pathname, char* bu
     return unwrap_path(buffer, tmp, size);
 }
 
+#undef rvvm_info
 //#define rvvm_info(...) rvvm_warn(__VA_ARGS__);
-//#define rvvm_info(...)
+#define rvvm_info(...)
 
 static void* rvvm_user_thread_wrap(void* arg)
 {
     rvvm_user_thread_t* thread = arg;
     rvvm_hart_t* cpu = thread->cpu;
     bool running = true;
+
+    current_user_hart = cpu;
 
     char path_buf[UAPI_PATH_MAX] = {0};
     char path_buf1[UAPI_PATH_MAX] = {0};
@@ -813,16 +886,46 @@ static void* rvvm_user_thread_wrap(void* arg)
                     rvvm_info("sys_epoll_create1(%lx)", a0);
                     a0 = errno_ret(epoll_create1(a0));
                     break;
-                case 21: // epoll_ctl
-                    // TODO struct conversion
+                case 21: { // epoll_ctl
+                    // Host (x86-64) epoll_event is packed (12 bytes) while
+                    // RISC-V UAPI one is naturally aligned (16 bytes) - convert
                     rvvm_info("sys_epoll_ctl(%lx, %lx, %lx, %lx)", a0, a1, a2, a3);
-                    a0 = errno_ret(epoll_ctl(a0, a1, a2, to_ptr(a3)));
+                    struct epoll_event host_ev;
+                    struct epoll_event* host_ev_ptr = NULL;
+                    if (a3) {
+                        struct uapi_epoll_event guest_ev;
+                        memcpy(&guest_ev, to_ptr(a3), sizeof(guest_ev));
+                        host_ev.events = guest_ev.event;
+                        host_ev.data.u64 = guest_ev.data.u64;
+                        host_ev_ptr = &host_ev;
+                    }
+                    a0 = errno_ret(epoll_ctl(a0, a1, a2, host_ev_ptr));
                     break;
-                case 22: // epoll_pwait
-                    // TODO struct conversion
+                }
+                case 22: { // epoll_pwait (sigmask ignored)
                     rvvm_info("sys_epoll_pwait(%lx, %lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4, a5);
-                    a0 = errno_ret(epoll_wait(a0, to_ptr(a1), a2, a3));
+                    struct epoll_event stack_evs[128];
+                    struct epoll_event* host_evs = stack_evs;
+                    size_t maxev = a2 > 128 ? 128 : a2;
+                    if (a2 > 128) {
+                        host_evs = malloc(a2 * sizeof(struct epoll_event));
+                        if (!host_evs) {
+                            a0 = -UAPI_ENOMEM;
+                            break;
+                        }
+                        maxev = a2;
+                    }
+                    a0 = errno_ret(epoll_wait(a0, host_evs, maxev, a3));
+                    if ((ssize_t)a0 > 0 && a1) {
+                        struct uapi_epoll_event* guest_evs = to_ptr(a1);
+                        for (size_t i = 0; i < (size_t)a0; i++) {
+                            guest_evs[i].event = host_evs[i].events;
+                            guest_evs[i].data.u64 = host_evs[i].data.u64;
+                        }
+                    }
+                    if (host_evs != stack_evs) free(host_evs);
                     break;
+                }
 #endif
                 case 23: // dup
                     rvvm_info("sys_dup(%ld)", a0);
@@ -1068,13 +1171,23 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 122: // sched_setaffinity - ignore
                     a0 = 0;
                     break;
-                case 123: // sched_getaffinity - stub
+                case 123: { // sched_getaffinity - pass through the host affinity mask,
+                    // guest allocators (f.e. Zig SmpAllocator) size per-CPU arenas by it
                     if (a2 && a1) {
                         memset(to_ptr(a2), 0, a1);
-                        *(uint8_t*)to_ptr(a2) = 1;
+                        cpu_set_t host_mask;
+                        CPU_ZERO(&host_mask);
+                        if (!sched_getaffinity(0, sizeof(host_mask), &host_mask)) {
+                            size_t copy_len = sizeof(host_mask) < a1 ? sizeof(host_mask) : a1;
+                            memcpy(to_ptr(a2), &host_mask, copy_len);
+                        } else {
+                            *(uint8_t*)to_ptr(a2) = 1;
+                        }
                     }
-                    a0 = 0;
+                    // Syscall ABI: return the amount of bytes written into the mask
+                    a0 = (a1 >= sizeof(unsigned long)) ? sizeof(unsigned long) : a1;
                     break;
+                }
                 case 124: // sched_yield
                     sleep_ms(0);
                     a0 = 0;
@@ -1346,6 +1459,11 @@ static void* rvvm_user_thread_wrap(void* arg)
 #endif
                 case 220: // clone
                     rvvm_info("sys_clone(%lx, %lx, %lx, %lx, %lx)", a0, a1, a2, a3, a4);
+                    if (getenv("RVVM_USER_NO_THREADS")) {
+                        // Experimental knob: force the guest single-threaded
+                        a0 = -UAPI_EAGAIN;
+                        break;
+                    }
                     a0 = rvvm_sys_clone(cpu, a0, a1, to_ptr(a2), a3, to_ptr(a4));
                     break;
                 case 221: { // execve
@@ -1368,6 +1486,7 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = 0;
                     break;
                 case 226: // mprotect
+                    rvvm_info("sys_mprotect(%lx, %lx, %x)", a0, a1, a2);
                     a0 = errno_ret(mprotect(to_ptr(a0), a1, a2));
                     break;
 #ifdef __linux__
@@ -1387,6 +1506,22 @@ static void* rvvm_user_thread_wrap(void* arg)
                 case 259: // riscv_flush_icache
                     //rvvm_warn("riscv_flush_icache(%lx, %lx, %lx)", a0, a1, a2);
                     rvvm_flush_icache(userland, a0, a1 - a0);
+                    if (getenv("RVVM_JITDUMP") && a1 > a0) {
+                        static int jitdump_seq = 0;
+                        char dump_name[128];
+                        snprintf(dump_name, sizeof(dump_name), "jitdump_%03d_0x%lx.bin", jitdump_seq++, (unsigned long)a0);
+                        int dump_fd = open(dump_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (dump_fd >= 0) {
+                            const char* dump_src = to_ptr(a0);
+                            size_t dump_left = a1 - a0;
+                            while (dump_left) {
+                                ssize_t dw = write(dump_fd, dump_src, dump_left);
+                                if (dw <= 0) break;
+                                dump_src += dw; dump_left -= dw;
+                            }
+                            close(dump_fd);
+                        }
+                    }
                     a0 = 0;
                     break;
                 case 260: // wait4
@@ -1430,6 +1565,9 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(statx(a0, wrap_path(path_buf, to_str(a1)), a2, a3, to_ptr(a4)));
                     break;
 #endif
+                case 425: // io_uring_setup - guest event loop falls back to poll on ENOSYS
+                    a0 = -UAPI_ENOSYS;
+                    break;
                 case 435: // clone3
                     // FUCK THIS FUCKING SYSCALL FOR NOW
                     a0 = -UAPI_ENOSYS;
@@ -1453,7 +1591,7 @@ static void* rvvm_user_thread_wrap(void* arg)
             if ((int64_t)a0 < 0) {
                 //rvvm_warn("Syscall %ld failed: %ld", a7, a0);
             }
-            rvvm_info("  -> %lx", a0);
+            rvvm_info("  nr=%ld -> %lx", a7, a0);
             rvvm_write_cpu_reg(cpu, RVVM_REGID_X0 + 10, a0);
             rvvm_write_cpu_reg(cpu, RVVM_REGID_PC, rvvm_read_cpu_reg(cpu, RVVM_REGID_PC) + 4);
         } else {
@@ -1545,7 +1683,7 @@ static void jump_start(void* entry, void* stack_top)
         :
     );
 #else
-    userland = rvvm_create_userland(true);
+    userland = rvvm_create_userland("rv64");
     rvvm_user_thread_t* thread = safe_new_obj(rvvm_user_thread_t);
     thread->cpu = rvvm_create_user_thread(userland);
 
@@ -1700,7 +1838,7 @@ static char* rvvm_user_init_stack(void* stack, exec_desc_t* desc)
     return stack;
 }
 
-#define STACK_SIZE 0x800000
+#define STACK_SIZE 0x4000000
 
 extern char** environ;
 
@@ -1717,7 +1855,14 @@ static char* default_envp[] = {
 int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     char path_buf[UAPI_PATH_MAX] = {0};
+    // Allow overriding/disabling the userland path prefix,
+    // empty RVVM_USER_PREFIX passes host paths through unchanged
+    const char* env_prefix = getenv("RVVM_USER_PREFIX");
+    if (env_prefix) {
+        prefix_path = env_prefix[0] ? env_prefix : NULL;
+    }
     stacktrace_init();
+    user_fault_handler_install();
     /*elf_desc_t elf = {
         .base = NULL,
     };
@@ -1725,10 +1870,32 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
         .base = NULL,
     };*/
     rvfile_t* file = rvopen(wrap_path(path_buf, argv[0]), 0);
-    bool success = file && elf_load_file(file, &elf);
+    if (!file) {
+        // drvfs (WSL) sometimes fails opening big files right after host-side
+        // writes, retry a couple of times before giving up
+        for (int retry = 0; !file && retry < 10; retry++) {
+            sleep_ms(100);
+            file = rvopen(wrap_path(path_buf, argv[0]), 0);
+        }
+    }
+    if (!file) {
+        rvvm_error("Failed to open ELF file %s (errno %d)", argv[0], errno);
+        return -1;
+    }
+    bool success = elf_load_file(file, &elf);
     rvclose(file);
     if (!success) {
-        rvvm_error("Failed to load ELF %s", argv[0]);
+        rvvm_error("Failed to load ELF %s (fixed VMA collision?)", argv[0]);
+        // Dump the host memory map to find what occupies the guest region
+        int maps_fd = open("/proc/self/maps", O_RDONLY);
+        if (maps_fd != -1) {
+            char chunk[4096];
+            ssize_t rd;
+            while ((rd = read(maps_fd, chunk, sizeof(chunk))) > 0) {
+                if (write(STDERR_FILENO, chunk, rd) != rd) break;
+            }
+            close(maps_fd);
+        }
         return -1;
     }
     rvvm_info("Loaded ELF %s at base %lx, entry %lx,\n%ld PHDRs at %lx",
@@ -1751,9 +1918,10 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
         envp = environ;
     }
 
-    getcwd(path_buf, sizeof(path_buf));
-    if (!path_wrapped(path_buf)) {
-        chdir(prefix_path);
+    if (prefix_path && (!getcwd(path_buf, sizeof(path_buf)) || !path_wrapped(path_buf))) {
+        if (chdir(prefix_path)) {
+            rvvm_error("Failed to chdir to userland prefix %s", prefix_path);
+        }
     }
 
     //rvvm_set_loglevel(LOG_INFO);
