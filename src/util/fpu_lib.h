@@ -12,6 +12,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "fpu_types.h"
 #include "mem_ops.h"
+#include "bit_ops.h"
 
 /*
  * NOTE: Floating-point is actually subtly (or seriously) broken on many compilers and platforms
@@ -1357,12 +1358,14 @@ static forceinline bool fpu_f64_fits_u32(fpu_f64_t d)
 
 static forceinline bool fpu_f32_fits_i32(fpu_f32_t f)
 {
-    return (fpu_bit_f32_to_u32(f) << 1) < 0x9E000000U;
+    uint32_t u = fpu_bit_f32_to_u32(f);
+    return (bit_rotl32(u, 1) ^ 1) <= 0x9E000000U; // |f| < 2^31 or f == -2^31
 }
 
 static forceinline bool fpu_f64_fits_i32(fpu_f64_t d)
 {
-    return (fpu_bit_f64_to_u64(d) << 1) < 0x83C0000000000000ULL;
+    uint64_t u = fpu_bit_f64_to_u64(d);
+    return (bit_rotl64(u, 1) ^ 1) <= 0x83C0000000000000ULL; // |d| < 2^31 or d == -2^31
 }
 
 static forceinline bool fpu_f32_fits_u64(fpu_f32_t f)
@@ -1379,12 +1382,14 @@ static forceinline bool fpu_f64_fits_u64(fpu_f64_t d)
 
 static forceinline bool fpu_f32_fits_i64(fpu_f32_t f)
 {
-    return (fpu_bit_f32_to_u32(f) << 1) < 0xBE000000U;
+    uint32_t u = fpu_bit_f32_to_u32(f);
+    return (bit_rotl32(u, 1) ^ 1) <= 0xBE000000U; // |f| < 2^63 or f == -2^63
 }
 
 static forceinline bool fpu_f64_fits_i64(fpu_f64_t d)
 {
-    return (fpu_bit_f64_to_u64(d) << 1) < 0x87C0000000000000ULL;
+    uint64_t u = fpu_bit_f64_to_u64(d);
+    return (bit_rotl64(u, 1) ^ 1) <= 0x87C0000000000000ULL; // |d| < 2^63 or d == -2^63
 }
 
 /*
