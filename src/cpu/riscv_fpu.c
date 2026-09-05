@@ -324,10 +324,10 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                 riscv_emit_s(vm, rds, fpu_max32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case 0x28002000UL: // fminm.s (Zfa)
-                riscv_write_s(vm, rds, fpu_min32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
+                riscv_write_s(vm, rds, fpu_minm32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case 0x28003000UL: // fmaxm.s (Zfa)
-                riscv_write_s(vm, rds, fpu_max32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
+                riscv_write_s(vm, rds, fpu_maxm32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case 0x2A000000UL: // fmin.d
                 riscv_emit_d(vm, rds, fpu_min64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
@@ -336,10 +336,10 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                 riscv_emit_d(vm, rds, fpu_max64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case 0x2A002000UL: // fminm.d (Zfa)
-                riscv_write_d(vm, rds, fpu_min64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+                riscv_write_d(vm, rds, fpu_minm64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case 0x2A003000UL: // fmaxm.d (Zfa)
-                riscv_write_d(vm, rds, fpu_max64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+                riscv_write_d(vm, rds, fpu_maxm64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case 0xA0000000UL: // fle.s
                 riscv_write_reg(vm, rds, fpu_is_fle32_sig(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
