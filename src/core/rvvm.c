@@ -1161,7 +1161,7 @@ PUBLIC rvvm_hart_t* rvvm_create_user_thread(rvvm_machine_t* machine)
 #if defined(USE_FPU)
         // Initialize FPU by writing to status CSR
         rvvm_uxlen_t mstatus = (FS_INITIAL << 13);
-        riscv_csr_op(thread, CSR_MSTATUS, &mstatus, CSR_SETBITS);
+        riscv_csr_op(thread, CSR_MSTATUS, &mstatus, CSR_SETBITS, true);
 #endif
 
 #if defined(USE_JIT)

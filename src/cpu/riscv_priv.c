@@ -145,7 +145,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
             break;
         case 0x01: { // csrrw
             rvvm_uxlen_t val = vm->registers[rs1];
-            if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_SWAP, true)) {
                 vm->registers[rds] = val;
                 return;
             }
@@ -153,7 +153,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         }
         case 0x02: { // csrrs
             rvvm_uxlen_t val = vm->registers[rs1];
-            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS, rs1 != 0)) {
                 vm->registers[rds] = val;
                 return;
             }
@@ -161,7 +161,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         }
         case 0x03: { // csrrc
             rvvm_uxlen_t val = vm->registers[rs1];
-            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS, rs1 != 0)) {
                 vm->registers[rds] = val;
                 return;
             }
@@ -174,7 +174,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
             break;
         case 0x05: { // csrrwi
             rvvm_uxlen_t val = bit_ext_u32(insn, 15, 5);
-            if (riscv_csr_op(vm, csr, &val, CSR_SWAP)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_SWAP, true)) {
                 vm->registers[rds] = val;
                 return;
             }
@@ -182,7 +182,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         }
         case 0x06: { // csrrsi
             rvvm_uxlen_t val = bit_ext_u32(insn, 15, 5);
-            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_SETBITS, rs1 != 0)) {
                 vm->registers[rds] = val;
                 return;
             }
@@ -190,7 +190,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         }
         case 0x07: { // csrrci
             rvvm_uxlen_t val = bit_ext_u32(insn, 15, 5);
-            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS)) {
+            if (riscv_csr_op(vm, csr, &val, CSR_CLEARBITS, rs1 != 0)) {
                 vm->registers[rds] = val;
                 return;
             }
