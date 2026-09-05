@@ -390,7 +390,7 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                 if (likely(vm->rv64 && !rs2)) { // fmv.x.d (RV64)
                     riscv_write_reg(vm, rds, (int64_t)fpu_bit_f64_to_u64(riscv_view_d(vm, rs1)));
                     return;
-                } else if (rs2 == 1) { // fmvh.x.d (Zfa, RV32)
+                } else if (!vm->rv64 && rs2 == 1) { // fmvh.x.d (Zfa, RV32)
                     riscv_write_reg(vm, rds, (int32_t)(fpu_bit_f64_to_u64(riscv_view_d(vm, rs1)) >> 32));
                     return;
                 }
