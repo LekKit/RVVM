@@ -169,6 +169,7 @@ slow_path void riscv_emulate_opc_system(rvvm_hart_t* vm, const uint32_t insn)
         }
         case 0x04:
             if ((insn & 0xB0000000UL) == 0x80000000UL) { // mop.r.{0,31}, mop.rr.{0,7} (Zimop)
+                vm->registers[rds] = 0;
                 return;
             }
             break;
