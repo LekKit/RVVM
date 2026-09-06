@@ -1092,15 +1092,234 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
     return ret;
 }
 
+#if defined(__SIZEOF_INT128__)
+/*
+ * Exact rounding of a*b+c for all RISC-V rounding modes
+ * when the result magnitude is below 2^-970.  The host double rounding of
+ * the subnormal product has already lost the exact product bits, and the
+ * TwoSum error terms of the fallback path go subnormal there, so the
+ * error-recovery path cannot produce the correct directionally-rounded
+ * result.  This routine redoes the fused op with 128-bit integer
+ * arithmetic and returns the exactly rounded result bits.
+ *
+ * The caller only invokes it when the addend and the product stay below
+ * 2^127 (|c| <= 2^-1001 and a 128-bit product shift), so every
+ * intermediate here is representable.
+ *
+ * mode: FPU_LIB_ROUND_NE / FPU_LIB_ROUND_TZ / FPU_LIB_ROUND_DN /
+ * FPU_LIB_ROUND_UP / FPU_LIB_ROUND_MM.
+ * *inexact reports whether the exact result differs from the rounded one,
+ * *tiny whether the rounded result is subnormal (including zero); the
+ * caller uses both to repair the host exception flags polluted by the
+ * subnormal intermediate operations.
+ */
+static forceinline uint64_t fpu_fma64_tiny_exact_bits(uint64_t ua, uint64_t ub, uint64_t uc,
+                                                      uint32_t mode, bool* inexact, bool* tiny)
+{
+    const uint64_t ma = ua & FPU_LIB_FP64_MANTISSA_MASK;
+    const uint64_t mb = ub & FPU_LIB_FP64_MANTISSA_MASK;
+    const uint64_t mc = uc & FPU_LIB_FP64_MANTISSA_MASK;
+    const uint32_t ea = (uint32_t)(ua >> 52) & 0x7FFU;
+    const uint32_t eb = (uint32_t)(ub >> 52) & 0x7FFU;
+    const uint32_t ec = (uint32_t)(uc >> 52) & 0x7FFU;
+    const bool     sa = ua >> 63;
+    const bool     sb = ub >> 63;
+    const bool     sc = uc >> 63;
+
+    const uint64_t Ma = ea ? (UINT64_C(1) << 52) + ma : ma;
+    const uint64_t Mb = eb ? (UINT64_C(1) << 52) + mb : mb;
+    const uint64_t Mc = ec ? (UINT64_C(1) << 52) + mc : mc;
+    const int Ka = ea ? (int)ea - 1 : 0;
+    const int Kb = eb ? (int)eb - 1 : 0;
+    const int Kc = ec ? (int)ec - 1 : 0;
+
+    const __int128 P = (__int128)Ma * Mb;  /* 106-bit exact product */
+    const int      S = Ka + Kb - 1074;     /* product in 2^-1074 ulps */
+    const __int128 Y = (__int128)Mc << Kc; /* c in 2^-1074 ulps */
+
+    const int sprod = (sa == sb) ? 1 : -1;
+    int       sh = 0;
+    __int128  Xi = 0;
+    __int128  rem = 0;
+    if (S >= 0) {
+        Xi = P << S;
+    } else {
+        sh = -S;
+        if (sh >= 127) {
+            rem = P;
+        } else {
+            Xi = P >> sh;
+            rem = P & (((__int128)1 << sh) - 1);
+        }
+    }
+
+    /* exact = sprod * (Xi + rem/2^sh) + (sc ? -Y : Y) */
+    __int128 Ti = (__int128)sprod * Xi + (sc ? -Y : Y);
+    int tsign = (Ti > 0) - (Ti < 0);
+    bool sign = false;
+    __int128 Ai = 0;
+    __int128 af_num = 0;
+    bool af_comp = false;
+    bool has_frac = false;
+    if (tsign > 0) {
+        Ai = Ti;
+        if (rem) {
+            if (sprod > 0) {
+                af_num = rem;
+                has_frac = true;
+            } else {
+                Ai -= 1;
+                af_num = rem;
+                af_comp = true;
+                has_frac = true;
+            }
+        }
+    } else if (tsign < 0) {
+        sign = true;
+        Ai = -Ti;
+        if (rem) {
+            if (sprod < 0) {
+                af_num = rem;
+                has_frac = true;
+            } else {
+                Ai -= 1;
+                af_num = rem;
+                af_comp = true;
+                has_frac = true;
+            }
+        }
+    } else if (rem) {
+        has_frac = true;
+        af_num = rem;
+        sign = sprod < 0;
+    }
+
+    /* A = Ai + Af, Ai >= 0 in ulps; Af = af_num/2^sh or 1 - af_num/2^sh */
+    int n = -1;
+    if (Ai > 0) {
+        const uint64_t hi = (uint64_t)(Ai >> 64);
+        if (hi) {
+            n = 127 - __builtin_clzll(hi);
+        } else {
+            n = 63 - __builtin_clzll((uint64_t)Ai);
+        }
+    }
+
+    int guard = 0;
+    int sticky = 0;
+    __int128 quo = 0;
+    if (n >= 52) {
+        const int gshift = n - 52;
+        quo = Ai >> gshift;
+        if (gshift > 0) {
+            guard = (Ai >> (gshift - 1)) & 1;
+            __int128 lowmask = ((__int128)1 << (gshift - 1)) - 1;
+            sticky = (Ai & lowmask) != 0;
+        } else if (has_frac) {
+            /* n == 52: grid is 1 ulp, recover guard/sticky from Af */
+            if (sh > 0 && sh <= 127) {
+                const __int128 half = (__int128)1 << (sh - 1);
+                guard = af_comp ? (af_num <= half) : (af_num >= half);
+                sticky = af_comp ? (af_num < half) : (af_num > half);
+            } else {
+                guard = af_comp;
+                sticky = true;
+            }
+        }
+        if (has_frac) sticky = true;
+    } else if (has_frac) {
+        quo = Ai;
+        if (sh > 0 && sh <= 127) {
+            const __int128 half = (__int128)1 << (sh - 1);
+            guard = af_comp ? (af_num <= half) : (af_num >= half);
+            sticky = af_comp ? (af_num < half) : (af_num > half);
+        } else {
+            guard = af_comp;
+            sticky = true;
+        }
+    } else {
+        quo = Ai;
+    }
+
+    bool round_up = false;
+    if (mode == FPU_LIB_ROUND_NE) {
+        round_up = guard && (sticky || (quo & 1));
+    } else if (mode == FPU_LIB_ROUND_MM) {
+        round_up = guard;
+    } else if (mode == FPU_LIB_ROUND_DN) {
+        round_up = (guard || sticky || has_frac) && sign;
+    } else if (mode == FPU_LIB_ROUND_UP) {
+        round_up = (guard || sticky || has_frac) && !sign;
+    }
+    if (round_up) quo += 1;
+    if (n >= 52 && quo == (UINT64_C(1) << 53)) {
+        quo >>= 1;
+        n += 1;
+    } else if (n < 52 && quo == (UINT64_C(1) << 52)) {
+        n = 52;
+    }
+
+    bool inex = (n >= 52) ? (guard || sticky) : has_frac;
+    uint64_t bits;
+    if (n >= 52) {
+        bits = ((uint64_t)sign << 63) | ((uint64_t)(n - 51) << 52) |
+               ((uint64_t)quo & FPU_LIB_FP64_MANTISSA_MASK);
+        *tiny = false;
+    } else if (quo > 0) {
+        bits = ((uint64_t)sign << 63) | (uint64_t)quo;
+        *tiny = true;
+    } else {
+        bits = ((uint64_t)sign << 63);
+        *tiny = true;
+    }
+    *inexact = inex;
+    return bits;
+}
+#endif /* __SIZEOF_INT128__ */
+
 // The bare fused op: no soft NV check, no flag fixups
 static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
 {
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     return fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
 #else
+#if defined(__SIZEOF_INT128__)
+    const uint64_t ua = fpu_bit_f64_to_u64(a);
+    const uint64_t ub = fpu_bit_f64_to_u64(b);
+    const uint64_t uc = fpu_bit_f64_to_u64(c);
+    const uint32_t old_exceptions = fpu_get_exceptions();
+#endif
     fpu_f64_t mul = fpu_mul64(a, b);
-    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t sum = fpu_add64(mul, c);
+#if defined(__SIZEOF_INT128__)
+    if (unlikely(fpu_is_finite64(sum) &&
+                 (fpu_bit_f64_to_u64(sum) & FPU_LIB_FP64_NOSIGNED_MASK) < 0x0350000000000000ULL)) {
+        const uint32_t ea = (uint32_t)(ua >> 52) & 0x7FFU;
+        const uint32_t eb = (uint32_t)(ub >> 52) & 0x7FFU;
+        const uint32_t ec = (uint32_t)(uc >> 52) & 0x7FFU;
+        const int Ka = ea ? (int)ea - 1 : 0;
+        const int Kb = eb ? (int)eb - 1 : 0;
+        const int Kc = ec ? (int)ec - 1 : 0;
+        const int S = Ka + Kb - 1074;
+        if (unlikely(Kc <= 73 && S <= 20)) {
+            const uint32_t mode = fpu_get_rounding_mode();
+            if (mode == FPU_LIB_ROUND_TZ || mode == FPU_LIB_ROUND_DN || mode == FPU_LIB_ROUND_UP) {
+                bool inexact, tiny;
+                uint64_t bits = fpu_fma64_tiny_exact_bits(ua, ub, uc, mode, &inexact, &tiny);
+                uint32_t exceptions = fpu_get_exceptions();
+                exceptions = (exceptions & ~(FPU_LIB_FLAG_NX | FPU_LIB_FLAG_UF)) |
+                             (old_exceptions & (FPU_LIB_FLAG_NX | FPU_LIB_FLAG_UF));
+                if (inexact) {
+                    exceptions |= FPU_LIB_FLAG_NX;
+                    if (tiny) exceptions |= FPU_LIB_FLAG_UF;
+                }
+                fpu_set_exceptions(exceptions);
+                return fpu_bit_u64_to_f64(bits);
+            }
+        }
+    }
+#endif
+    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t e_s = fpu_add_error64(sum, mul, c);
     fpu_f64_t e_f = fpu_add64(e_m, e_s);
     fpu_f64_t err = fpu_odd_round64(e_f, fpu_add_error64(e_f, e_s, e_m));
