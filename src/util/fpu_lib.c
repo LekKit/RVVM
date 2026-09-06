@@ -407,8 +407,8 @@ slow_path uint32_t fpu_fclass64(fpu_f64_t d)
 
 /*
  * Round to an integral value directly on the encoding: no host FP arithmetic, so
- * no spurious exception flags and no double rounding. Only DYN falls back to the
- * tracked mode; an explicit RMM request is honored as-is.
+ * no spurious exception flags and no double rounding. The caller resolves RM_DYN
+ * to the guest frm before calling, so mode is never RM_DYN and RMM is honored.
  */
 slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
 {
@@ -416,9 +416,6 @@ slow_path fpu_f32_t fpu_round_f32_internal(fpu_f32_t f, uint32_t mode)
     const uint32_t s    = u & FPU_LIB_FP32_SIGNEDFP_MASK;
     const int32_t  e    = fpu_exponent32(f);
     bool           away = false;
-    if (unlikely(mode > FPU_LIB_ROUND_MM)) {
-        mode = fpu_get_rounding_mode();
-    }
     if (e >= 23 || !(u << 1)) {
         return f; // Already integral: |f| >= 2^23, +/-0, inf, NaN
     }
@@ -476,9 +473,6 @@ slow_path fpu_f64_t fpu_round_f64_internal(fpu_f64_t d, uint32_t mode)
     const uint64_t s    = u & FPU_LIB_FP64_SIGNEDFP_MASK;
     const int32_t  e    = fpu_exponent64(d);
     bool           away = false;
-    if (unlikely(mode > FPU_LIB_ROUND_MM)) {
-        mode = fpu_get_rounding_mode();
-    }
     if (e >= 52 || !(u << 1)) {
         return d; // Already integral: |d| >= 2^52, +/-0, inf, NaN
     }
