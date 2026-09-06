@@ -425,8 +425,8 @@ static void riscv_update_fcsr(rvvm_hart_t* vm, uint32_t old_fcsr, uint32_t new_f
         uint32_t new_fflags = bit_cut(new_fcsr, 0, 5);
         if (unlikely(new_frm != old_frm)) {
             if (new_frm > RM_RMM) {
-                // Invalid rounding mode written
-                return;
+                // Keep invalid frm, but still apply the other fcsr fields
+                new_frm = old_frm;
             } else {
                 // Set host rounding mode
                 fpu_set_rounding_mode(new_frm);
@@ -438,7 +438,7 @@ static void riscv_update_fcsr(rvvm_hart_t* vm, uint32_t old_fcsr, uint32_t new_f
                 fpu_set_exceptions(0);
             }
         }
-        vm->csr.fcsr = new_fcsr;
+        vm->csr.fcsr = new_fflags | (new_frm << 5);
     }
 }
 
