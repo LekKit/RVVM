@@ -1477,6 +1477,78 @@ static forceinline int32_t fpu_fcvt_f64_to_i32(fpu_f64_t d)
     return 0x7FFFFFFFU;
 }
 
+static forceinline int32_t fpu_fcvtmod_f64_to_i32(fpu_f64_t d)
+{
+    /*
+     * fcvtmod.w.d (Zfa): convert a double to int32 with round-towards-zero,
+     * returning the low 32 bits of the rounded two's complement result
+     * (modulo 2^32, no saturation). NaN and infinity convert to 0.
+     * Exception flags match fcvt.w.d: NV on NaN/inf/overflow, NX on
+     * inexact rounding.
+     */
+    const uint64_t u    = fpu_bit_f64_to_u64(d);
+    const uint64_t sign = u >> 63;
+    const uint64_t exp  = (u >> 52) & 0x7FF;
+    const uint64_t frac = u & 0xFFFFFFFFFFFFFULL;
+
+    if (unlikely(exp == 0x7FF)) {
+        // NaN or infinity: result is 0, raise NV
+        fpu_raise_invalid();
+        return 0;
+    }
+    if (unlikely(exp == 0)) {
+        // Zero or denormal: |d| < 2^-1022, RTZ gives 0
+        if (unlikely(frac != 0)) {
+            fpu_raise_inexact();
+        }
+        return 0;
+    }
+
+    const int64_t e = (int64_t)exp - 1023;      // unbiased exponent
+    const uint64_t m = frac | (1ULL << 52);     // implicit leading bit
+    uint64_t r;
+    bool overflow = false;
+    bool inexact  = false;
+
+    if (e <= 52) {
+        if (e >= 0) {
+            const int sh = 52 - (int)e;
+            r = m >> sh;
+            if (unlikely(m & ((1ULL << sh) - 1))) {
+                inexact = true;
+            }
+        } else {
+            // |d| < 1.0: RTZ gives 0
+            r = 0;
+            inexact = true;
+        }
+        if (e < 31) {
+            // Result fits in int32
+        } else if (e == 31) {
+            // Only INT32_MIN is exactly representable
+            overflow = !(sign && r == (1ULL << 31));
+        } else {
+            overflow = true;
+        }
+    } else {
+        // |d| >= 2^53: already an integer, may still have bits to return
+        const int sh = (int)e - 52;
+        r = (sh < 64) ? (m << sh) : 0;
+        overflow = true;
+    }
+
+    if (sign) {
+        r = 0 - r;
+    }
+
+    if (unlikely(overflow)) {
+        fpu_raise_invalid();
+    } else if (unlikely(inexact)) {
+        fpu_raise_inexact();
+    }
+    return (int32_t)r;
+}
+
 static forceinline uint64_t fpu_fcvt_f32_to_u64(fpu_f32_t f)
 {
     if (likely(fpu_f32_fits_u64(f))) {
