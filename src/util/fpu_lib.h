@@ -688,7 +688,7 @@ static inline fpu_f32_t fpu_odd_round32(fpu_f32_t val, fpu_f32_t err)
 {
     uint32_t uv = fpu_bit_f32_to_u32(val);
     uint32_t ue = fpu_bit_f32_to_u32(err);
-    if (ue && !(uv & 1)) {
+    if ((ue & 0x7FFFFFFFU) && !(uv & 1)) {
         if (ue >> 31) {
             return fpu_bit_u32_to_f32(uv - 1);
         } else {
@@ -702,7 +702,7 @@ static inline fpu_f64_t fpu_odd_round64(fpu_f64_t val, fpu_f64_t err)
 {
     uint64_t uv = fpu_bit_f64_to_u64(val);
     uint64_t ue = fpu_bit_f64_to_u64(err);
-    if (ue && !(uv & 1)) {
+    if ((ue & 0x7FFFFFFFFFFFFFFFULL) && !(uv & 1)) {
         if (ue >> 63) {
             return fpu_bit_u64_to_f64(uv - 1);
         } else {
@@ -1070,7 +1070,15 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
     fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
     fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
     fpu_f64_t sum = fpu_add64(mul, add);
+#if defined(FENV_SSE2_IMPL)
+    uint32_t sum_exceptions = fpu_get_exceptions();
+#endif
     fpu_f64_t err = fpu_add_error64(sum, mul, add);
+#if defined(FENV_SSE2_IMPL)
+    uint32_t cleared_exceptions = fpu_get_exceptions();
+    cleared_exceptions = (cleared_exceptions & ~FPU_LIB_FLAG_NX) | (sum_exceptions & FPU_LIB_FLAG_NX);
+    fpu_set_exceptions(cleared_exceptions);
+#endif
     fpu_f64_t res = fpu_odd_round64(sum, err);
     fpu_f32_t ret = fpu_fcvt_f64_to_f32(res);
 #if defined(USE_SOFT_FPU_FENV)
@@ -1098,13 +1106,26 @@ static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     return fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
 #else
+#if defined(FENV_SSE2_IMPL)
+    const uint32_t old_exceptions = fpu_get_exceptions();
+#endif
     fpu_f64_t mul = fpu_mul64(a, b);
     fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t sum = fpu_add64(mul, c);
     fpu_f64_t e_s = fpu_add_error64(sum, mul, c);
     fpu_f64_t e_f = fpu_add64(e_m, e_s);
     fpu_f64_t err = fpu_odd_round64(e_f, fpu_add_error64(e_f, e_s, e_m));
+#if defined(FENV_SSE2_IMPL)
+    fpu_f64_t ret = fpu_add64(sum, err);
+    fpu_f64_t final_error = fpu_add_error64(ret, sum, err);
+    uint32_t exceptions = fpu_get_exceptions();
+    exceptions = (exceptions & ~FPU_LIB_FLAG_NX) | (old_exceptions & FPU_LIB_FLAG_NX);
+    if (!fpu_is_zero64_soft(final_error)) exceptions |= FPU_LIB_FLAG_NX;
+    fpu_set_exceptions(exceptions);
+    return ret;
+#else
     return fpu_add64(sum, err);
+#endif
 #endif
 }
 
