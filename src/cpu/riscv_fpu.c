@@ -244,7 +244,7 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                         break;
                     case 0x08: // fcvtmod.w.d (Zfa)
                         if (likely(rm == 0x01)) {
-                            riscv_write_reg(vm, rds, (int32_t)fpu_fcvt_f64_to_i32(riscv_view_d(vm, rs1)));
+                            riscv_write_reg(vm, rds, fpu_fcvtmod_f64_to_i32(riscv_view_d(vm, rs1)));
                         }
                         break;
                 }
