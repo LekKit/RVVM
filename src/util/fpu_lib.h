@@ -1099,8 +1099,19 @@ static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
     return fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
 #else
     fpu_f64_t mul = fpu_mul64(a, b);
-    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t sum = fpu_add64(mul, c);
+    if (unlikely((fpu_bit_f64_to_u64(sum) & FPU_LIB_FP64_NOSIGNED_MASK) < 0x0350000000000000ULL &&
+                 (fpu_get_rounding_mode() == FPU_LIB_ROUND_NE || fpu_get_rounding_mode() == FPU_LIB_ROUND_MM))) {
+        const uint64_t mul_bits = fpu_bit_f64_to_u64(mul);
+        const uint64_t c_bits = fpu_bit_f64_to_u64(c);
+        const uint64_t sum_mag = fpu_bit_f64_to_u64(sum) & FPU_LIB_FP64_NOSIGNED_MASK;
+        const uint64_t mul_mag = mul_bits & FPU_LIB_FP64_NOSIGNED_MASK;
+        const uint64_t c_mag = c_bits & FPU_LIB_FP64_NOSIGNED_MASK;
+        const bool cancellation = ((mul_bits ^ c_bits) >> 63) &&
+                                   sum_mag < (mul_mag < c_mag ? mul_mag : c_mag);
+        if (!cancellation) return sum;
+    }
+    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t e_s = fpu_add_error64(sum, mul, c);
     fpu_f64_t e_f = fpu_add64(e_m, e_s);
     fpu_f64_t err = fpu_odd_round64(e_f, fpu_add_error64(e_f, e_s, e_m));
