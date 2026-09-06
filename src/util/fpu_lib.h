@@ -1341,6 +1341,90 @@ static forceinline fpu_f64_t fpu_round_i64_to_f64(int64_t i, uint32_t rm)
 }
 
 /*
+ * RMM (round to nearest, ties to max magnitude) integer -> float conversions.
+ * Host casts only provide RNE, so the exact-halfway case must be rounded away
+ * from zero explicitly; NX is raised when the conversion is inexact.
+ */
+static forceinline fpu_f32_t fpu_fcvt_mag_to_f32_rmm(uint64_t mag, bool neg)
+{
+    if (unlikely(!mag)) {
+        return fpu_bit_u32_to_f32(neg ? 0x80000000U : 0);
+    }
+    uint32_t exp = 0;
+    uint64_t tmp = mag;
+    while (tmp >>= 1) {
+        ++exp;
+    }
+    uint64_t sig = mag;
+    if (exp > 23) {
+        const uint32_t shift = exp - 23;
+        const uint64_t rem   = mag & ((1ULL << shift) - 1);
+        sig = mag >> shift;
+        if (rem >= (1ULL << (shift - 1))) {
+            ++sig; // Ties away from zero
+        }
+        if (unlikely(rem)) {
+            fpu_raise_inexact();
+        }
+    }
+    if (unlikely(sig == (1ULL << 24))) {
+        sig >>= 1;
+        ++exp;
+    }
+    uint32_t bits = (neg ? 0x80000000U : 0) | ((exp + 127U) << 23) | (sig & FPU_LIB_FP32_MANTISSA_MASK);
+    return fpu_bit_u32_to_f32(bits);
+}
+
+static forceinline fpu_f32_t fpu_fcvt_i32_to_f32_rmm(int32_t i)
+{
+    return fpu_fcvt_mag_to_f32_rmm((i < 0) ? (0 - (uint64_t)i) : (uint64_t)i, i < 0);
+}
+
+static forceinline fpu_f32_t fpu_fcvt_u32_to_f32_rmm(uint32_t u)
+{
+    return fpu_fcvt_mag_to_f32_rmm(u, false);
+}
+
+static forceinline fpu_f32_t fpu_fcvt_i64_to_f32_rmm(int64_t i)
+{
+    return fpu_fcvt_mag_to_f32_rmm((i < 0) ? (0 - (uint64_t)i) : (uint64_t)i, i < 0);
+}
+
+static forceinline fpu_f32_t fpu_fcvt_u64_to_f32_rmm(uint64_t u)
+{
+    return fpu_fcvt_mag_to_f32_rmm(u, false);
+}
+
+static forceinline fpu_f64_t fpu_fcvt_u64_to_f64_rmm(uint64_t u)
+{
+    if (unlikely(!u)) {
+        return fpu_bit_u64_to_f64(0);
+    }
+    uint32_t exp = 0;
+    uint64_t tmp = u;
+    while (tmp >>= 1) {
+        ++exp;
+    }
+    if (exp <= 52) {
+        return fpu_wrap_f64((actual_double_t)u);
+    }
+    const uint32_t shift = exp - 52;
+    const uint64_t rem   = u & ((1ULL << shift) - 1);
+    uint64_t sig = u >> shift;
+    if (rem >= (1ULL << (shift - 1))) {
+        ++sig; // Ties away from zero
+    }
+    if (unlikely(rem)) {
+        fpu_raise_inexact();
+    }
+    if (unlikely(sig == (1ULL << 53))) {
+        sig >>= 1;
+        ++exp;
+    }
+    uint64_t bits = ((uint64_t)(exp + 0x3FF) << 52) | (sig & FPU_LIB_FP64_MANTISSA_MASK);
+    return fpu_bit_u64_to_f64(bits);
+}
+/*
  * Check whether floating-point value fits an integer type, never raises exceptions
  */
 

@@ -252,20 +252,28 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
             case RISCV_FPU_GEN_RM_CASES(0xD0000000UL):
                 switch (rs2) {
                     case 0x00: // fcvt.s.w
-                        riscv_emit_s(vm, rds, fpu_fcvt_i32_to_f32(riscv_read_reg(vm, rs1)));
+                        riscv_emit_s(vm, rds, ((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == FPU_LIB_ROUND_MM
+                            ? fpu_fcvt_i32_to_f32_rmm((int32_t)riscv_read_reg(vm, rs1))
+                            : fpu_fcvt_i32_to_f32(riscv_read_reg(vm, rs1)));
                         return;
                     case 0x01: // fcvt.s.wu
-                        riscv_emit_s(vm, rds, fpu_fcvt_u32_to_f32(riscv_read_reg(vm, rs1)));
+                        riscv_emit_s(vm, rds, ((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == FPU_LIB_ROUND_MM
+                            ? fpu_fcvt_u32_to_f32_rmm((uint32_t)riscv_read_reg(vm, rs1))
+                            : fpu_fcvt_u32_to_f32(riscv_read_reg(vm, rs1)));
                         return;
                     case 0x02: // fcvt.s.l
                         if (likely(vm->rv64)) {
-                            riscv_emit_s(vm, rds, fpu_fcvt_i64_to_f32(riscv_read_reg(vm, rs1)));
+                            riscv_emit_s(vm, rds, ((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == FPU_LIB_ROUND_MM
+                                ? fpu_fcvt_i64_to_f32_rmm((int64_t)riscv_read_reg(vm, rs1))
+                                : fpu_fcvt_i64_to_f32(riscv_read_reg(vm, rs1)));
                             return;
                         }
                         break;
                     case 0x03: // fcvt.s.lu
                         if (likely(vm->rv64)) {
-                            riscv_emit_s(vm, rds, fpu_fcvt_u64_to_f32(riscv_read_reg(vm, rs1)));
+                            riscv_emit_s(vm, rds, ((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == FPU_LIB_ROUND_MM
+                                ? fpu_fcvt_u64_to_f32_rmm(riscv_read_reg(vm, rs1))
+                                : fpu_fcvt_u64_to_f32(riscv_read_reg(vm, rs1)));
                             return;
                         }
                         break;
@@ -281,13 +289,15 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                         return;
                     case 0x02: // fcvt.d.l
                         if (likely(vm->rv64)) {
-                            riscv_emit_d(vm, rds, fpu_round_i64_to_f64(riscv_read_reg(vm, rs1), rm));
+                            riscv_emit_d(vm, rds, fpu_round_i64_to_f64(riscv_read_reg(vm, rs1), (rm == 0x07) ? vm->csr.fcsr >> 5 : rm));
                             return;
                         }
                         break;
                     case 0x03: // fcvt.d.lu
                         if (likely(vm->rv64)) {
-                            riscv_emit_d(vm, rds, fpu_fcvt_u64_to_f64(riscv_read_reg(vm, rs1)));
+                            riscv_emit_d(vm, rds, ((rm == 0x07) ? vm->csr.fcsr >> 5 : rm) == FPU_LIB_ROUND_MM
+                                ? fpu_fcvt_u64_to_f64_rmm(riscv_read_reg(vm, rs1))
+                                : fpu_fcvt_u64_to_f64(riscv_read_reg(vm, rs1)));
                             return;
                         }
                         break;
