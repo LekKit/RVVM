@@ -184,11 +184,8 @@ typedef struct {
     /** Called on machine reset */
     void (*reset)(rvvm_mmio_dev_t* dev);
 
-    /*
-     * TODO
-     * void (*suspend)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
-     * void (*resume)(rvvm_mmio_dev_t* dev, rvvm_state_t* state);
-     */
+    /** Called to serialize/deserialize device state on a paused machine */
+    void (*suspend)(rvvm_mmio_dev_t* dev, rvvm_snapshot_t* snap, bool resume);
 
 } rvvm_mmio_type_t;
 
