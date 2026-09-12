@@ -22,6 +22,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #define SNAP_MAGIC "\x7Frvvm-snapshot0\xFF"
 
+// Bumped whenever the machine, hart or device state layout changes
+#define RVVM_SNAPSHOT_VERSION 1
+
 PUSH_OPTIMIZATION_SIZE
 
 struct rvvm_snapshot {
@@ -270,13 +273,18 @@ RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_snapshot_t*
     bool     resume     = !rvvm_snapshot_writing(snap);
     uint64_t mem_size   = machine->mem.size;
     uint64_t hart_count = vector_size(machine->harts);
+    uint64_t freq       = machine->timer.freq;
     uint64_t time       = rvtimer_get(&machine->timer);
     uint8_t  rv64       = machine->rv64;
 
+    uint32_t version = RVVM_SNAPSHOT_VERSION;
+
     bool ok = rvvm_snapshot_section(snap, "machine");
+    ok &= rvvm_snapshot_field(snap, version);
     ok &= rvvm_snapshot_field(snap, mem_size);
     ok &= rvvm_snapshot_field(snap, hart_count);
     ok &= rvvm_snapshot_field(snap, rv64);
+    ok &= rvvm_snapshot_field(snap, freq);
     ok &= rvvm_snapshot_field(snap, time);
     ok &= rvvm_snapshot_field(snap, machine->power_state);
     if (!ok) {
@@ -284,11 +292,19 @@ RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_snapshot_t*
     }
 
     if (resume) {
+        if (version != RVVM_SNAPSHOT_VERSION) {
+            rvvm_error("Snapshot version %u is not supported", version);
+            return false;
+        }
+
         // A snapshot only fits the machine it was taken from
         if (mem_size != machine->mem.size || hart_count != vector_size(machine->harts) || rv64 != machine->rv64) {
             rvvm_error("Snapshot does not match this machine");
             return false;
         }
+
+        // The timebase is set up by a machine reset, which resuming skips over
+        rvtimer_init(&machine->timer, freq);
         rvtimer_rebase(&machine->timer, time);
     }
 
