@@ -412,20 +412,17 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                 }
                 break;
             case 0xF2000000UL:
-                if (likely(vm->rv64)) {
-                    switch (rs2) {
-                        case 0x00: // fmv.d.x
-                            riscv_emit_d(vm, rds, fpu_bit_u64_to_f64(riscv_read_reg(vm, rs1)));
-                            return;
-                        case 0x01: // fli.d (Zfa)
-                            if (rs1 == 1) {
-                                // Minimum normal exponent differs for fp64
-                                riscv_emit_d(vm, rds, fpu_bit_u64_to_f64(0x0010000000000000ULL));
-                            } else {
-                                riscv_emit_d(vm, rds, fpu_fcvt_f32_to_f64(fpu_bit_u32_to_f32(riscv_fli_table[rs1])));
-                            }
-                            return;
+                if (rs2 == 0x01) { // fli.d (Zfa, RV32 and RV64 with D)
+                    if (rs1 == 1) {
+                        // Minimum normal exponent differs for fp64
+                        riscv_emit_d(vm, rds, fpu_bit_u64_to_f64(0x0010000000000000ULL));
+                    } else {
+                        riscv_emit_d(vm, rds, fpu_fcvt_f32_to_f64(fpu_bit_u32_to_f32(riscv_fli_table[rs1])));
                     }
+                    return;
+                } else if (likely(vm->rv64 && rs2 == 0x00)) { // fmv.d.x (RV64)
+                    riscv_emit_d(vm, rds, fpu_bit_u64_to_f64(riscv_read_reg(vm, rs1)));
+                    return;
                 }
                 break;
         }
