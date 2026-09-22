@@ -2001,4 +2001,48 @@ static forceinline fpu_f64_t fpu_max64(fpu_f64_t a, fpu_f64_t b)
 #endif
 }
 
+static forceinline fpu_f32_t fpu_minm32(fpu_f32_t a, fpu_f32_t b)
+{
+    if (fpu_is_nan32_soft(a) || fpu_is_nan32_soft(b)) {
+        if (fpu_is_snan32_soft(a) || fpu_is_snan32_soft(b)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
+    }
+    return fpu_min32(a, b);
+}
+
+static forceinline fpu_f32_t fpu_maxm32(fpu_f32_t a, fpu_f32_t b)
+{
+    if (fpu_is_nan32_soft(a) || fpu_is_nan32_soft(b)) {
+        if (fpu_is_snan32_soft(a) || fpu_is_snan32_soft(b)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
+    }
+    return fpu_max32(a, b);
+}
+
+static forceinline fpu_f64_t fpu_minm64(fpu_f64_t a, fpu_f64_t b)
+{
+    if (fpu_is_nan64_soft(a) || fpu_is_nan64_soft(b)) {
+        if (fpu_is_snan64_soft(a) || fpu_is_snan64_soft(b)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
+    }
+    return fpu_min64(a, b);
+}
+
+static forceinline fpu_f64_t fpu_maxm64(fpu_f64_t a, fpu_f64_t b)
+{
+    if (fpu_is_nan64_soft(a) || fpu_is_nan64_soft(b)) {
+        if (fpu_is_snan64_soft(a) || fpu_is_snan64_soft(b)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
+    }
+    return fpu_max64(a, b);
+}
+
 #endif
