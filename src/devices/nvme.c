@@ -738,6 +738,14 @@ static void nvme_delete_io_queue(nvme_dev_t* nvme, nvme_cmd_t* cmd, bool is_cq)
 
 static void nvme_get_log_page(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
+    uint64_t numd = (read_uint32_le(cmd->sqe + NVME_SQE_CDW10) >> 16)
+                  | ((uint64_t)read_uint16_le(cmd->sqe + NVME_SQE_CDW11) << 16);
+    uint64_t offset = read_uint64_le(cmd->sqe + NVME_SQE_CDW12);
+    uint64_t length = (numd + 1) * 4;
+    if ((offset & 3) || offset >= NVME_PAGE_SIZE || length > NVME_PAGE_SIZE - offset) {
+        nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_FIELD);
+        return;
+    }
     uint8_t* buf = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
     uint8_t  log = cmd->sqe[NVME_SQE_CDW10];
     switch (log) {
@@ -755,18 +763,22 @@ static void nvme_get_log_page(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             safe_free(buf);
             return;
     }
-    nvme_prepare_prp(cmd, read_uint32_le(&cmd->sqe[NVME_SQE_CDW10]) >> 16);
-    nvme_copy_to_prp(nvme, cmd, buf, NVME_PAGE_SIZE);
+    nvme_prepare_prp(cmd, length);
+    nvme_copy_to_prp(nvme, cmd, buf + offset, length);
     nvme_complete_cmd(nvme, cmd, NVME_SC_SUCCESS);
     safe_free(buf);
 }
 
 static void nvme_identify(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
-    uint8_t* buf = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
-    uint8_t  idt = cmd->sqe[NVME_SQE_CDW10];
+    uint8_t* buf  = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
+    uint8_t  idt  = cmd->sqe[NVME_SQE_CDW10];
+    uint32_t nsid = read_uint32_le(cmd->sqe + NVME_SQE_NSID);
     switch (idt) {
         case NVME_CNS_NAMESPACE: {
+            if (nsid != 1) {
+                break;
+            }
             // Namespace usage
             uint64_t lbas = rvvm_blk_get_size(nvme->blk) >> NVME_LBA_SHIFT;
             write_uint64_le(&buf[0], lbas);
@@ -801,9 +813,16 @@ static void nvme_identify(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             break;
         }
         case NVME_CNS_NSID_LIST:
-            write_uint32_le(buf, 0x01); // Namespace #1
+            if (nsid < 1) {
+                write_uint32_le(buf, 0x01); // Namespace #1
+            }
             break;
         case NVME_CNS_NSID_DESC:
+            if (nsid != 1) {
+                nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_NAMESPACE);
+                safe_free(buf);
+                return;
+            }
             buf[0] = 0x03; // Namespace uses UUID
             buf[1] = 0x10; // UUID length
             break;
@@ -883,8 +902,7 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             return;
         case NVME_ADM_SET_FEATURE:
         case NVME_ADM_GET_FEATURE:
-            nvme_handle_feature(nvme, cmd, opcode == NVME_ADM_DELETE_IO_CQ);
-            return;
+            nvme_handle_feature(nvme, cmd, opcode == NVME_ADM_SET_FEATURE);
             return;
         case NVME_ADM_ASYNC_EVENT_REQ:
             // Nothing ever happens
@@ -899,6 +917,10 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
     uint8_t opcode = cmd->sqe[NVME_SQE_CDW0];
+    if (read_uint32_le(cmd->sqe + NVME_SQE_NSID) != 1) {
+        nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_NAMESPACE);
+        return;
+    }
     switch (opcode) {
         case NVME_IO_READ:
         case NVME_IO_WRITE: {
@@ -926,8 +948,7 @@ static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             break;
         }
         case NVME_IO_FLUSH:
-            rvvm_blk_sync(nvme->blk);
-            nvme_complete_cmd(nvme, cmd, NVME_SC_SUCCESS);
+            nvme_complete_cmd(nvme, cmd, rvvm_blk_sync(nvme->blk) ? NVME_SC_SUCCESS : NVME_SC_DATA_ERR);
             break;
         case NVME_IO_DTSM:
             if (cmd->sqe[NVME_SQE_CDW11] & 0x4) {
