@@ -140,10 +140,10 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
              * FPU computations
              */
             case RISCV_FPU_GEN_RM_CASES(0x00000000UL): // fadd.s
-                riscv_emit_s(vm, rds, fpu_add32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
+                riscv_write_s(vm, rds, fpu_add32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x02000000UL): // fadd.d
-                riscv_emit_d(vm, rds, fpu_add64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+                riscv_write_d(vm, rds, fpu_add64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x08000000UL): // fsub.s
                 riscv_write_s(vm, rds, fpu_sub32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
@@ -152,16 +152,16 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                 riscv_write_d(vm, rds, fpu_sub64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x10000000UL): // fmul.s
-                riscv_emit_s(vm, rds, fpu_mul32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
+                riscv_write_s(vm, rds, fpu_mul32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x12000000UL): // fmul.d
-                riscv_emit_d(vm, rds, fpu_mul64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+                riscv_write_d(vm, rds, fpu_mul64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x18000000UL): // fdiv.s
-                riscv_emit_s(vm, rds, fpu_div32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
+                riscv_write_s(vm, rds, fpu_div32(riscv_read_s(vm, rs1), riscv_read_s(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x1A000000UL): // fdiv.d
-                riscv_emit_d(vm, rds, fpu_div64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
+                riscv_write_d(vm, rds, fpu_div64(riscv_view_d(vm, rs1), riscv_view_d(vm, rs2)));
                 return;
             case RISCV_FPU_GEN_RM_CASES(0x58000000UL): // fsqrt.s
                 if (likely(!rs2)) {
