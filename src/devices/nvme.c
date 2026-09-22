@@ -738,6 +738,14 @@ static void nvme_delete_io_queue(nvme_dev_t* nvme, nvme_cmd_t* cmd, bool is_cq)
 
 static void nvme_get_log_page(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
+    uint64_t numd = (read_uint32_le(cmd->sqe + NVME_SQE_CDW10) >> 16)
+                  | ((uint64_t)read_uint16_le(cmd->sqe + NVME_SQE_CDW11) << 16);
+    uint64_t offset = read_uint64_le(cmd->sqe + NVME_SQE_CDW12);
+    uint64_t length = (numd + 1) * 4;
+    if ((offset & 3) || offset >= NVME_PAGE_SIZE || length > NVME_PAGE_SIZE - offset) {
+        nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_FIELD);
+        return;
+    }
     uint8_t* buf = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
     uint8_t  log = cmd->sqe[NVME_SQE_CDW10];
     switch (log) {
@@ -755,8 +763,8 @@ static void nvme_get_log_page(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             safe_free(buf);
             return;
     }
-    nvme_prepare_prp(cmd, read_uint32_le(&cmd->sqe[NVME_SQE_CDW10]) >> 16);
-    nvme_copy_to_prp(nvme, cmd, buf, NVME_PAGE_SIZE);
+    nvme_prepare_prp(cmd, length);
+    nvme_copy_to_prp(nvme, cmd, buf + offset, length);
     nvme_complete_cmd(nvme, cmd, NVME_SC_SUCCESS);
     safe_free(buf);
 }
