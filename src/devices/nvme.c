@@ -925,8 +925,7 @@ static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             break;
         }
         case NVME_IO_FLUSH:
-            rvvm_blk_sync(nvme->blk);
-            nvme_complete_cmd(nvme, cmd, NVME_SC_SUCCESS);
+            nvme_complete_cmd(nvme, cmd, rvvm_blk_sync(nvme->blk) ? NVME_SC_SUCCESS : NVME_SC_DATA_ERR);
             break;
         case NVME_IO_DTSM:
             if (cmd->sqe[NVME_SQE_CDW11] & 0x4) {
