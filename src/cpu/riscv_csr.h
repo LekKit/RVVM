@@ -377,7 +377,7 @@ static forceinline bool riscv_csr_readonly(uint32_t csr_id)
 
 // Perform a CSR operation, set *dest to original CSR value
 // Returns false on failure (To raise exception afterwards)
-bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op);
+bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op, bool write);
 
 // Initialize CSRs on a new hart
 void riscv_csr_init(rvvm_hart_t* vm);

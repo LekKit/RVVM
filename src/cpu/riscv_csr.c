@@ -815,11 +815,11 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
     return false;
 }
 
-bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op)
+bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op, bool write)
 {
     if (riscv_csr_readonly(csr_id)) {
-        // This is a readonly CSR, only set/clear zero bits is allowed
-        if (unlikely(op == CSR_SWAP || *dest != 0)) {
+        // CSRRS/CSRRC with rs1/zimm = x0/0 are reads, not writes
+        if (unlikely(write)) {
             return false;
         }
     }
