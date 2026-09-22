@@ -601,7 +601,7 @@ static void rtl8169_pci_read(rvvm_reg_dev_t* dev, void* data, size_t size, size_
     switch (off & ~0x03) {
         case RTL8169_REG_IDR0:
         case RTL8169_REG_IDR4: {
-            uint8_t mac[6] = {0};
+            uint8_t mac[8] = {0};
             tap_get_mac(rtl8169->tap, mac);
             val = read_uint32_le(mac + (off & ~0x03));
             break;
