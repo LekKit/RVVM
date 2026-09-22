@@ -126,6 +126,7 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
     const uint32_t rm  = bit_ext_u32(insn, 12, 3);
     const size_t   rs1 = bit_ext_u32(insn, 15, 5);
     const size_t   rs2 = bit_ext_u32(insn, 20, 5);
+    const uint32_t eff_rm = rm == RM_DYN ? bit_cut(vm->csr.fcsr, 5, 3) : rm;
 
     if (likely(riscv_fpu_is_enabled(vm))) {
 
@@ -184,8 +185,8 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                         riscv_write_s(vm, rds, fpu_fcvt_f64_to_f32(riscv_view_d(vm, rs1)));
                         return;
                     case 0x04: // fround.s (Zfa)
-                    case 0x05: // TODO: froundx.s (Zfa)
-                        riscv_emit_s(vm, rds, fpu_fcvt_i64_to_f32(fpu_round_f32_to_i64(riscv_read_s(vm, rs1), rm)));
+                    case 0x05: // froundnx.s (Zfa)
+                        riscv_emit_s(vm, rds, fpu_round_to_integral32(riscv_read_s(vm, rs1), eff_rm, rs2 == 0x05));
                         return;
                 }
                 break;
@@ -195,8 +196,8 @@ static slow_path void riscv_emulate_f_opc_op_impl(rvvm_hart_t* vm, const uint32_
                         riscv_write_d(vm, rds, fpu_fcvt_f32_to_f64(riscv_read_s(vm, rs1)));
                         return;
                     case 0x04: // fround.s (Zfa)
-                    case 0x05: // TODO: froundx.s (Zfa)
-                        riscv_emit_d(vm, rds, fpu_fcvt_i64_to_f64(fpu_round_f64_to_i64(riscv_view_d(vm, rs1), rm)));
+                    case 0x05: // froundnx.d (Zfa)
+                        riscv_emit_d(vm, rds, fpu_round_to_integral64(riscv_view_d(vm, rs1), eff_rm, rs2 == 0x05));
                         return;
                 }
                 break;
