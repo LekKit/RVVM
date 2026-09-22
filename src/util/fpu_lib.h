@@ -1069,10 +1069,28 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
 #else
     fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
     fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
-    fpu_f64_t sum = fpu_add64(mul, add);
-    fpu_f64_t err = fpu_add_error64(sum, mul, add);
-    fpu_f64_t res = fpu_odd_round64(sum, err);
-    fpu_f32_t ret = fpu_fcvt_f64_to_f32(res);
+    fpu_f64_t sum = fpu_wrap_f64(0);
+    fpu_f64_t err = fpu_wrap_f64(0);
+    fpu_f32_t ret;
+    if (unlikely(fpu_is_nan64(mul) || fpu_is_nan64(add))) {
+        // NaN operand, or an inf*0 product: the fused result is the
+        // canonical qNaN; NV is raised by the soft invalid check below
+        ret = fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
+    } else if (unlikely(!fpu_is_finite64(mul) || !fpu_is_finite64(add))) {
+        // inf participates without NaN: a host f64 add of inf + (-inf)
+        // would raise a spurious FE_INVALID and the TwoSum error would be
+        // NaN, so resolve the sign by bits
+        if (fpu_is_inf64_soft(mul) && fpu_is_inf64_soft(add) &&
+            ((fpu_bit_f64_to_u64(mul) ^ fpu_bit_f64_to_u64(add)) >> 63)) {
+            ret = fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
+        } else {
+            ret = fpu_fcvt_f64_to_f32(fpu_is_inf64_soft(add) ? add : mul);
+        }
+    } else {
+        sum = fpu_add64(mul, add);
+        err = fpu_add_error64(sum, mul, add);
+        ret = fpu_fcvt_f64_to_f32(fpu_odd_round64(sum, err));
+    }
 #if defined(USE_SOFT_FPU_FENV)
     fpu_soft_fenv_check_add64(fpu_fcvt_f32_to_f64(ret), sum, err);
 #endif
@@ -1098,9 +1116,49 @@ static forceinline fpu_f64_t fpu_fma64_raw(fpu_f64_t a, fpu_f64_t b, fpu_f64_t c
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     return fpu_wrap_f64(__builtin_fma(fpu_raw_f64(a), fpu_raw_f64(b), fpu_raw_f64(c)));
 #else
+    const uint64_t ua = fpu_bit_f64_to_u64(a);
+    const uint64_t ub = fpu_bit_f64_to_u64(b);
+    const uint64_t uc = fpu_bit_f64_to_u64(c);
+    const uint64_t ma = ua & FPU_LIB_FP64_NOSIGNED_MASK;
+    const uint64_t mb = ub & FPU_LIB_FP64_NOSIGNED_MASK;
+    const uint64_t mc = uc & FPU_LIB_FP64_NOSIGNED_MASK;
+    if (unlikely(ma >= FPU_LIB_FP64_POSITIVE_INF || mb >= FPU_LIB_FP64_POSITIVE_INF ||
+                 mc >= FPU_LIB_FP64_POSITIVE_INF)) {
+        // inf/NaN operand: resolve by bits so the host FPU never executes
+        // the fused op on specials (spurious flags, and the TwoSum error
+        // would be NaN and the odd-round bit pokes would corrupt the result)
+        const bool a_nan = ma > FPU_LIB_FP64_POSITIVE_INF;
+        const bool b_nan = mb > FPU_LIB_FP64_POSITIVE_INF;
+        const bool c_nan = mc > FPU_LIB_FP64_POSITIVE_INF;
+        const bool a_inf = ma == FPU_LIB_FP64_POSITIVE_INF;
+        const bool b_inf = mb == FPU_LIB_FP64_POSITIVE_INF;
+        const bool c_inf = mc == FPU_LIB_FP64_POSITIVE_INF;
+        const bool a_zero = ma == 0;
+        const bool b_zero = mb == 0;
+        if (a_nan || b_nan || c_nan || (a_inf && b_zero) || (b_inf && a_zero)) {
+            // NaN operand or inf*0
+            return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
+        }
+        const bool product_inf = a_inf || b_inf;
+        if (c_inf) {
+            if (product_inf && (((ua ^ ub ^ uc) >> 63) != 0)) {
+                // inf + (-inf)
+                return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
+            }
+            return c;
+        }
+        // +/-inf product with a finite addend
+        return fpu_bit_u64_to_f64(((ua ^ ub) >> 63) ? 0xFFF0000000000000ULL
+                                                    : 0x7FF0000000000000ULL);
+    }
     fpu_f64_t mul = fpu_mul64(a, b);
-    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t sum = fpu_add64(mul, c);
+    if (unlikely(!fpu_is_finite64(sum))) {
+        // mul overflowed to +/-inf: host OF/NX are already correct; the
+        // error-recovery path is only valid for finite intermediates
+        return sum;
+    }
+    fpu_f64_t e_m = fpu_mul_error64(mul, a, b);
     fpu_f64_t e_s = fpu_add_error64(sum, mul, c);
     fpu_f64_t e_f = fpu_add64(e_m, e_s);
     fpu_f64_t err = fpu_odd_round64(e_f, fpu_add_error64(e_f, e_s, e_m));
