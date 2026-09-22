@@ -1170,14 +1170,14 @@ static forceinline fpu_f32_t fpu_sqrt32(fpu_f32_t f)
         fpu_soft_fenv_check_mul32(f, ret, ret, false);
 #endif
         return ret;
-    }
-    if (fpu_is_negative32(f) && fpu_bit_f32_to_u32(f) != FPU_LIB_FP32_NEGATIVE_ZERO) {
-        // Negative non-zero: raise invalid, return canonical NaN
+    } else if (fpu_bit_f32_to_u32(f) == FPU_LIB_FP32_NEGATIVE_ZERO) {
+        // Negative zero, return as-is
+        return f;
+    } else if (fpu_is_negative32(f) || fpu_is_snan32_soft(f)) {
+        // Raise exception for negative non-zero and signaling NaN
         fpu_raise_invalid();
-        return fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
     }
-    // NaN propagation, and sqrt(-0.0) == -0.0 (no exception)
-    return f;
+    return fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
 }
 
 static forceinline fpu_f64_t fpu_sqrt64(fpu_f64_t d)
@@ -1192,14 +1192,14 @@ static forceinline fpu_f64_t fpu_sqrt64(fpu_f64_t d)
         fpu_soft_fenv_check_mul64(d, ret, ret, false);
 #endif
         return ret;
-    }
-    if (fpu_is_negative64(d) && fpu_bit_f64_to_u64(d) != FPU_LIB_FP64_NEGATIVE_ZERO) {
-        // Negative non-zero: raise invalid, return canonical NaN
+    } else if (fpu_bit_f64_to_u64(d) == FPU_LIB_FP64_NEGATIVE_ZERO) {
+        // Negative zero, return as-is
+        return d;
+    } else if (fpu_is_negative64(d) || fpu_is_snan64_soft(d)) {
+        // Raise exception for negative non-zero and signaling NaN
         fpu_raise_invalid();
-        return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
     }
-    // NaN propagation, and sqrt(-0.0) == -0.0 (no exception)
-    return d;
+    return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
 }
 
 /*
