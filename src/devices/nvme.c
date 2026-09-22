@@ -771,10 +771,14 @@ static void nvme_get_log_page(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 
 static void nvme_identify(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
-    uint8_t* buf = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
-    uint8_t  idt = cmd->sqe[NVME_SQE_CDW10];
+    uint8_t* buf  = safe_new_arr(uint8_t, NVME_PAGE_SIZE);
+    uint8_t  idt  = cmd->sqe[NVME_SQE_CDW10];
+    uint32_t nsid = read_uint32_le(cmd->sqe + NVME_SQE_NSID);
     switch (idt) {
         case NVME_CNS_NAMESPACE: {
+            if (nsid != 1) {
+                break;
+            }
             // Namespace usage
             uint64_t lbas = rvvm_blk_get_size(nvme->blk) >> NVME_LBA_SHIFT;
             write_uint64_le(&buf[0], lbas);
@@ -809,9 +813,16 @@ static void nvme_identify(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             break;
         }
         case NVME_CNS_NSID_LIST:
-            write_uint32_le(buf, 0x01); // Namespace #1
+            if (nsid < 1) {
+                write_uint32_le(buf, 0x01); // Namespace #1
+            }
             break;
         case NVME_CNS_NSID_DESC:
+            if (nsid != 1) {
+                nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_NAMESPACE);
+                safe_free(buf);
+                return;
+            }
             buf[0] = 0x03; // Namespace uses UUID
             buf[1] = 0x10; // UUID length
             break;
@@ -906,6 +917,10 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 static void nvme_io_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
 {
     uint8_t opcode = cmd->sqe[NVME_SQE_CDW0];
+    if (read_uint32_le(cmd->sqe + NVME_SQE_NSID) != 1) {
+        nvme_complete_cmd(nvme, cmd, NVME_SC_BAD_NAMESPACE);
+        return;
+    }
     switch (opcode) {
         case NVME_IO_READ:
         case NVME_IO_WRITE: {
