@@ -883,8 +883,7 @@ static void nvme_admin_cmd(nvme_dev_t* nvme, nvme_cmd_t* cmd)
             return;
         case NVME_ADM_SET_FEATURE:
         case NVME_ADM_GET_FEATURE:
-            nvme_handle_feature(nvme, cmd, opcode == NVME_ADM_DELETE_IO_CQ);
-            return;
+            nvme_handle_feature(nvme, cmd, opcode == NVME_ADM_SET_FEATURE);
             return;
         case NVME_ADM_ASYNC_EVENT_REQ:
             // Nothing ever happens
