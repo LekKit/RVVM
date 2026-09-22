@@ -587,6 +587,11 @@ static void rtl8169_suspend(rvvm_reg_dev_t* dev, rvvm_snapshot_t* snap, bool res
         // Snapshot EEPROM
         rtl8169_at93c56_suspend(snap, &rtl8169->eeprom);
 
+        uint8_t mac[6];
+        tap_get_mac(rtl8169->tap, mac);
+        rvvm_snapshot_field(snap, mac);
+        tap_set_mac(rtl8169->tap, mac);
+
         // Resume
         atomic_swap_uint32(&rtl8169->cr, cr);
     }
