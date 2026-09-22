@@ -72,6 +72,14 @@ static void rvvm_region_legacy_reset(rvvm_mmio_dev_t* mmio)
     }
 }
 
+static void rvvm_region_legacy_suspend(rvvm_mmio_dev_t* mmio, rvvm_snapshot_t* snap, bool resume)
+{
+    rvvm_reg_dev_t* dev = (rvvm_reg_dev_t*)mmio->data;
+    if (dev->desc.type && dev->desc.type->suspend) {
+        dev->desc.type->suspend(dev, snap, resume);
+    }
+}
+
 RVVM_PUBLIC rvvm_reg_dev_t* rvvm_region_init(rvvm_machine_t* machine, const rvvm_reg_desc_t* desc)
 {
     rvvm_reg_dev_t* dev = safe_new_obj(rvvm_reg_dev_t);
@@ -107,6 +115,7 @@ RVVM_PUBLIC rvvm_reg_dev_t* rvvm_region_init(rvvm_machine_t* machine, const rvvm
         mmio_type->remove     = rvvm_region_legacy_remove;
         mmio_type->update     = rvvm_region_legacy_update;
         mmio_type->reset      = rvvm_region_legacy_reset;
+        mmio_type->suspend    = rvvm_region_legacy_suspend;
         rvvm_mmio_dev_t* mmio = rvvm_attach_mmio(machine, &mmio_desc);
         if (mmio) {
             dev->mmio = mmio;

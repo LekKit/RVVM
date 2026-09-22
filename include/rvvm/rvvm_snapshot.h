@@ -119,6 +119,25 @@ RVVM_PUBLIC bool rvvm_snapshot_host(rvvm_snapshot_t* snap, void* data, size_t si
  */
 #define rvvm_snapshot_field(snap, field) rvvm_snapshot_host(snap, &(field), sizeof(field))
 
+/**
+ * Serialize or deserialize whole machine state to/from a snapshot
+ *
+ * The machine must be paused (See rvvm_pause_machine()), and is left paused
+ *
+ * Writes or reads RAM, hart state and every device state in a fixed section order
+ *
+ * A machine is only resumable from a snapshot of an identically constructed machine:
+ * same RAM size, hart count and device set, as built by the same machine description
+ *
+ * Block devices backing the machine storage are not part of a snapshot and must be
+ * restored to their matching state by the caller
+ *
+ * \param machine Machine handle
+ * \param snap    Snapshot handle, opened for reading or writing
+ * \return        Success (No IO error or corruption)
+ */
+RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_snapshot_t* snap);
+
 /** @}*/
 
 RVVM_EXTERN_C_END

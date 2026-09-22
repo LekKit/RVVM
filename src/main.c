@@ -24,6 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <util/feature_test.h>
 
 #include <rvvm/rvvm.h>
+#include <rvvm/rvvm_blk.h>
+#include <rvvm/rvvm_snapshot.h>
 #include <rvvm/rvvm_board.h>
 
 #include <util/utils.h>
@@ -193,6 +195,8 @@ static void rvvm_print_help(void)
         "    -serial     ...  Add more serial ports (Via pty/pipe path), or null\n"
         "    -dtb        ...  Pass custom Device Tree Blob to the machine\n"
         "    -dumpdtb    ...  Dump auto-generated DTB to file\n"
+        "    -loadsnap   ...  Resume machine state from a snapshot file\n"
+        "    -savesnap   ...  Save machine state to a snapshot file on shutdown\n"
         "    -v, -verbose     Enable verbose logging\n"
         "    -h, -help        Show this help message\n"
         "\n"
@@ -271,6 +275,20 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, const char* bios, tap_de
         }
     }
     return true;
+}
+
+static bool rvvm_cli_snapshot(rvvm_machine_t* machine, const char* path, bool write)
+{
+    uint32_t        opts = write ? (RVVM_BLK_RW | RVVM_BLK_CREAT | RVVM_BLK_TRUNC | RVVM_BLK_GROW) : RVVM_BLK_READ;
+    rvvm_blk_dev_t* blk  = rvvm_blk_open(path, NULL, opts);
+    if (!blk) {
+        rvvm_error("Failed to open snapshot %s", path);
+        return false;
+    }
+
+    rvvm_snapshot_t* snap = rvvm_snapshot_open(blk, write);
+    bool             ok   = rvvm_machine_snapshot(machine, snap);
+    return rvvm_snapshot_close(snap) && ok;
 }
 
 static int rvvm_cli_main(int argc, char** argv)
@@ -392,10 +410,23 @@ static int rvvm_cli_main(int argc, char** argv)
         rvvm_restrict_process();
     }
 
+    if (rvvm_getarg("loadsnap") && !rvvm_cli_snapshot(machine, rvvm_getarg("loadsnap"), false)) {
+        rvvm_error("Failed to load machine snapshot");
+        rvvm_free_machine(machine);
+        return -1;
+    }
+
     rvvm_start_machine(machine);
 
     // Returns on machine shutdown
     rvvm_run_eventloop();
+
+    if (rvvm_getarg("savesnap")) {
+        rvvm_pause_machine(machine);
+        if (!rvvm_cli_snapshot(machine, rvvm_getarg("savesnap"), true)) {
+            rvvm_error("Failed to save machine snapshot");
+        }
+    }
 
     rvvm_free_machine(machine);
     return 0;
