@@ -932,6 +932,24 @@ RVVM_PUBLIC void rvvm_pci_end_dma(rvvm_pci_func_t* func, void* ptr)
     UNUSED(func && ptr);
 }
 
+RVVM_PUBLIC bool rvvm_pci_read_dma(rvvm_pci_func_t* func, rvvm_addr_t addr, void* data, size_t size)
+{
+    // TODO: DMA core
+    if (likely(func && size && (atomic_load_uint32_relax(&func->command) & PCI_CMD_BUS_MASTER))) {
+        return rvvm_read_ram(func->bus->machine, data, addr, size);
+    }
+    return false;
+}
+
+RVVM_PUBLIC bool rvvm_pci_write_dma(rvvm_pci_func_t* func, rvvm_addr_t addr, const void* data, size_t size)
+{
+    // TODO: DMA core
+    if (likely(func && size && (atomic_load_uint32_relax(&func->command) & PCI_CMD_BUS_MASTER))) {
+        return rvvm_write_ram(func->bus->machine, addr, data, size);
+    }
+    return false;
+}
+
 /*
  * PCIe ECAM
  */
