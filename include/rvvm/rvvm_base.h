@@ -165,6 +165,11 @@ typedef struct rvvm_reg_dev rvvm_reg_dev_t;
 typedef struct rvvm_char_dev rvvm_char_dev_t;
 
 /**
+ * Network device handle
+ */
+typedef struct rvvm_net_dev rvvm_net_dev_t;
+
+/**
  * GPIO device handle
  */
 typedef struct rvvm_gpio_dev rvvm_gpio_dev_t;

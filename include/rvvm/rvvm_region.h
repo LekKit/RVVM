@@ -20,23 +20,23 @@ RVVM_EXTERN_C_BEGIN
  * @{
  */
 
-/*
- * Region attributes
+/**
+ * @name Region attributes
+ * Passed to `rvvm_reg_desc_t::attr`
+ * @{
  */
-#define RVVM_REG_ATTR_RSV   0x01 /**< Region is reserved and ignored    */
-#define RVVM_REG_ATTR_ROM   0x02 /**< Region ignores writes             */
-#define RVVM_REG_ATTR_FIX   0x04 /**< Region address is fixed           */
-#define RVVM_REG_ATTR_PIO   0x08 /**< Region accessed via Port IO (x86) */
+#define RVVM_REG_ATTR_RSV   0x0001 /**< Region is reserved and ignored    */
+#define RVVM_REG_ATTR_ROM   0x0002 /**< Region ignores writes             */
+#define RVVM_REG_ATTR_FIX   0x0004 /**< Region address is fixed           */
+#define RVVM_REG_ATTR_PIO   0x0008 /**< Region accessed via Port IO (x86) */
+#define RVVM_REG_ATTR_BAR64 0x0100 /**< Region is a 64-bit BAR (PCI)      */
 
-/*
- * Special region attributes
- */
-#define RVVM_REG_ATTR_BAR64 0x10000 /**< Region is a 64-bit PCI BAR */
+/** @} */
 
 /**
  * Region-based device callbacks
  *
- * Must be valid during device lifetime, or static
+ * Must remain valid during device lifetime.
  *
  * Callbacks are optional (Nullable)
  */
@@ -44,7 +44,7 @@ typedef struct {
     /**
      * Device identifier string
      *
-     * Used in logger, snapshot and registry
+     * Used in logger, snapshot and registry.
      */
     const char* name;
 
@@ -75,7 +75,7 @@ typedef struct {
     /**
      * Periodic poll callback
      *
-     * Ticks at host refresh rate, suitable for input polling / display refresh
+     * Ticks at host refresh rate, suitable for input polling / display refresh.
      *
      * \param dev Region device handle
      *
@@ -106,8 +106,8 @@ typedef struct {
     /**
      * Cleanup callback, should drop device private data / mappings
      *
-     * Called on machine cleanup, failure to attach device, or
-     * explicit rvvm_region_remove() / rvvm_region_free_desc() calls
+     * Called on machine cleanup, failure to attach device, or explicit
+     * `rvvm_region_remove()` / `rvvm_region_free_desc()` calls.
      *
      * \param dev Region device handle
      *
@@ -118,20 +118,20 @@ typedef struct {
     /**
      * Minimum operation size and alignment allowed
      *
-     * This transparently normalizes partial/multiple register accesses
+     * This transparently normalizes partial/multiple register accesses.
      *
-     * Must be power of two, or zero for no limit
-     * Should specify minimum device register size
+     * Must be power of two, or zero for no limit.
+     * Should specify minimum device register size.
      */
     uint32_t min_size;
 
     /**
      * Maximum operation size allowed
      *
-     * This transparently normalizes partial/multiple register accesses
+     * This transparently normalizes partial/multiple register accesses.
      *
-     * Must be power of two, or zero for no limit
-     * Should specify maximum device register size
+     * Must be power of two, or zero for no limit.
+     * Should specify maximum device register size.
      */
     uint32_t max_size;
 
@@ -140,7 +140,7 @@ typedef struct {
 /**
  * Region device instance description
  *
- * Copied by value by rvvm_region_init(), rvvm_region_set_desc()
+ * Copied by value by `rvvm_region_init()`, `rvvm_region_set_desc()`.
  */
 typedef struct {
     /**
@@ -156,7 +156,7 @@ typedef struct {
     /**
      * Private device data, opaque
      *
-     * Lifetime and ownership are managed by the device implementation
+     * Lifetime and ownership are managed by the device implementation.
      */
     void* data;
 
@@ -164,10 +164,10 @@ typedef struct {
      * Directly mapped memory region for RAM-like devices
      *
      * If this is non-null, memory accesses are served directly,
-     * instead of invoking read/write callbacks
+     * instead of invoking read/write callbacks.
      *
-     * Must remain valid until cleanup or until replaced using rvvm_region_set_desc()
-     * Should be page-aligned for best performance
+     * Must remain valid until cleanup or until replaced using `rvvm_region_set_desc()`.
+     * Should be page-aligned for best performance.
      */
     void* mmap;
 
@@ -179,7 +179,7 @@ typedef struct {
     /**
      * Region attributes
      *
-     * Defaults to read-write memory with address allocation
+     * Defaults to read-write memory with address allocation.
      */
     uint32_t attr;
 
@@ -188,14 +188,15 @@ typedef struct {
 /**
  * Attach region device to machine
  *
- * Region device unconditionally transfers ownership
+ * Region device unconditionally transfers ownership.
+ * In case of a failed attach, the device description is cleaned up.
  *
- * If the requested address is busy and RVVM_REG_ATTR_FIX is not set,
- * nearest usable address is automatically picked for the region
+ * If the requested address is busy and `RVVM_REG_ATTR_FIX` is not set,
+ * nearest usable address is automatically picked for the region.
  *
- * \param machine Machine handle (Nullable, invokes cleanup)
+ * \param machine Machine handle (Nullable, guarantees description cleanup)
  * \param desc    Region description
- * \return        Region device handle (NULL on failure)
+ * \return        Region device handle (`NULL` on failure)
  *
  * This function is thread-safe
  */
@@ -204,10 +205,11 @@ RVVM_PUBLIC rvvm_reg_dev_t* rvvm_region_init(rvvm_machine_t* machine, const rvvm
 /**
  * Remove region device from machine
  *
- * This should only be used for device hot-removal, cleanup is automatic
+ * This should only be used for device hot-removal.
+ * Cleanup on machine destruction is automatic.
  *
  * \param dev Region device handle (Nullable)
- * \note      Must not be called after rvvm_machine_free() on owning machine,
+ * \note      Must not be called after `rvvm_machine_free()` on owning machine,
  *            nor from device's own callbacks or internal threads
  *
  * This function is thread-safe
@@ -217,7 +219,7 @@ RVVM_PUBLIC void rvvm_region_remove(rvvm_reg_dev_t* dev);
 /**
  * Invoke region device cleanup via description
  *
- * This may be used to properly clean up multi-region devices without attaching
+ * Can be used to clean up device descriptions without attaching to a machine.
  *
  * \param desc Region description
  */
@@ -240,7 +242,7 @@ RVVM_PUBLIC void* rvvm_region_data(rvvm_reg_dev_t* dev);
  * Get region device owning machine
  *
  * \param dev Region device handle (Nullable)
- * \return    Machine handle (NULL on failure)
+ * \return    Machine handle (`NULL` on failure)
  *
  * This function is thread-safe
  */
@@ -250,7 +252,7 @@ RVVM_PUBLIC rvvm_machine_t* rvvm_region_machine(rvvm_reg_dev_t* dev);
  * Get region device description
  *
  * \param dev  Region device handle (Nullable)
- * \param desc Region description to fill
+ * \param desc Region description (Filled by pointer)
  * \return     Success
  *
  * This function is thread-safe
@@ -260,9 +262,9 @@ RVVM_PUBLIC bool rvvm_region_get_desc(rvvm_reg_dev_t* dev, rvvm_reg_desc_t* desc
 /**
  * Update region device description
  *
- * This may be used to relocate or resize, update region private data, etc
+ * Can be used to relocate, resize, update region private data or mapping.
  *
- * Region updates are atomic with respect to running vCPUs
+ * Region updates are atomic in respect to running vCPUs.
  *
  * \param dev  Region device handle (Nullable)
  * \param desc Region description
@@ -275,14 +277,15 @@ RVVM_PUBLIC bool rvvm_region_set_desc(rvvm_reg_dev_t* dev, const rvvm_reg_desc_t
 /**
  * Attach region device to machine, obtain resulting description back
  *
- * Region device unconditionally transfers ownership
+ * Region device unconditionally transfers ownership.
+ * In case of a failed attach, the device description is cleaned up.
  *
- * If the requested address is busy and RVVM_REG_ATTR_FIX is not set,
- * nearest usable address is automatically picked for the region
+ * If the requested address is busy and `RVVM_REG_ATTR_FIX` is not set,
+ * nearest usable address is automatically picked for the region.
  *
- * \param machine Machine handle (Nullable, invokes cleanup)
+ * \param machine Machine handle (Nullable, guarantees description cleanup)
  * \param desc    Region description
- * \return        Region device handle (NULL on failure)
+ * \return        Region device handle (`NULL` on failure)
  *
  * This function is thread-safe
  */
