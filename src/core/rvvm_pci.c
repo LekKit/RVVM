@@ -979,10 +979,66 @@ static void pci_ecam_cleanup(rvvm_reg_dev_t* ecam)
     free(bus);
 }
 
+static void pci_func_suspend(rvvm_snapshot_t* snap, rvvm_pci_func_t* func)
+{
+    rvvm_snapshot_field(snap, func->command);
+    rvvm_snapshot_field(snap, func->status);
+    rvvm_snapshot_field(snap, func->irq_line);
+    rvvm_snapshot_field(snap, func->bridge_io);
+    rvvm_snapshot_field(snap, func->bridge_mem);
+    rvvm_snapshot_field(snap, func->pm_csr);
+
+    rvvm_snapshot_field(snap, func->msi_ctl);
+    rvvm_snapshot_field(snap, func->msi_addr_low);
+    rvvm_snapshot_field(snap, func->msi_addr_high);
+    rvvm_snapshot_field(snap, func->msi_data);
+    rvvm_snapshot_field(snap, func->msi_mask);
+    rvvm_snapshot_field(snap, func->msi_pending);
+
+    rvvm_snapshot_field(snap, func->msix_ctl);
+    rvvm_snapshot_field(snap, func->msix_bar);
+    for (size_t i = 0; i < PCI_MSIX_BAR_SIZE; ++i) {
+        rvvm_snapshot_field(snap, func->msix[i]);
+    }
+
+    // Where the guest mapped each BAR, which the regions are placed at on resume
+    for (size_t bar_id = 0; bar_id < PCI_FUNC_BARS; ++bar_id) {
+        rvvm_reg_desc_t desc = ZERO_INIT;
+        uint64_t        addr = 0;
+        bool            bar  = rvvm_region_get_desc(func->bar[bar_id], &desc);
+        if (bar) {
+            addr = desc.addr;
+        }
+        rvvm_snapshot_field(snap, addr);
+        if (bar && !rvvm_snapshot_writing(snap) && desc.addr != addr) {
+            desc.addr = addr;
+            rvvm_region_set_desc(func->bar[bar_id], &desc);
+        }
+    }
+}
+
+static void pci_ecam_suspend(rvvm_reg_dev_t* ecam, rvvm_snapshot_t* snap, bool resume)
+{
+    if (snap) {
+        rvvm_pci_bus_t* bus = rvvm_region_data(ecam);
+        rvvm_snapshot_section(snap, "pci-ecam");
+        vector_foreach (bus->dev, i) {
+            rvvm_pci_dev_t* dev = vector_at(bus->dev, i);
+            for (size_t fn_id = 0; fn_id < PCI_DEV_FUNCS; ++fn_id) {
+                if (dev->func[fn_id]) {
+                    pci_func_suspend(snap, dev->func[fn_id]);
+                }
+            }
+        }
+    }
+    UNUSED(resume);
+}
+
 static const rvvm_reg_type_t pci_ecam_type = {
     .name     = "pci-ecam",
     .read     = pci_ecam_read,
     .write    = pci_ecam_write,
+    .suspend  = pci_ecam_suspend,
     .cleanup  = pci_ecam_cleanup,
     .min_size = 4,
     .max_size = 4,

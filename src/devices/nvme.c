@@ -1138,10 +1138,46 @@ static void nvme_cleanup(rvvm_reg_dev_t* dev)
     free(nvme);
 }
 
+static void nvme_queue_suspend(rvvm_snapshot_t* snap, nvme_queue_t* queue)
+{
+    rvvm_snapshot_field(snap, queue->addr_l);
+    rvvm_snapshot_field(snap, queue->addr_h);
+    rvvm_snapshot_field(snap, queue->size);
+    rvvm_snapshot_field(snap, queue->head);
+    rvvm_snapshot_field(snap, queue->tail);
+    rvvm_snapshot_field(snap, queue->data);
+}
+
+static void nvme_suspend(rvvm_reg_dev_t* dev, rvvm_snapshot_t* snap, bool resume)
+{
+    nvme_dev_t* nvme = rvvm_region_data(dev);
+
+    // Commands are processed by worker threads, which must be done before
+    // the queues are read out or overwritten
+    while (atomic_load_uint32(&nvme->threads)) {
+        rvvm_sched_yield();
+    }
+
+    if (snap) {
+        rvvm_snapshot_section(snap, "nvme");
+        for (size_t qid = 0; qid < STATIC_ARRAY_SIZE(nvme->sq); ++qid) {
+            nvme_queue_suspend(snap, &nvme->sq[qid]);
+        }
+        for (size_t qid = 0; qid < STATIC_ARRAY_SIZE(nvme->cq); ++qid) {
+            nvme_queue_suspend(snap, &nvme->cq[qid]);
+        }
+        rvvm_snapshot_field(snap, nvme->conf);
+        rvvm_snapshot_field(snap, nvme->irq_mask);
+        rvvm_snapshot_field(snap, nvme->temp_thresh);
+    }
+    UNUSED(resume);
+}
+
 static rvvm_reg_type_t nvme_type = {
     .name     = "nvme",
     .read     = nvme_pci_read,
     .write    = nvme_pci_write,
+    .suspend  = nvme_suspend,
     .cleanup  = nvme_cleanup,
     .min_size = 4,
     .max_size = 4,

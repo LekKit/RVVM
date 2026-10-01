@@ -7,6 +7,8 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
+#include <rvvm/rvvm_snapshot.h>
+
 #include "i2c-oc.h"
 #include "fdtlib.h"
 #include "mem_ops.h"
@@ -188,9 +190,25 @@ static void i2c_oc_remove(rvvm_mmio_dev_t* dev)
     free(bus);
 }
 
+static void i2c_oc_suspend(rvvm_mmio_dev_t* dev, rvvm_snapshot_t* snap, bool resume)
+{
+    if (snap) {
+        i2c_bus_t* bus = dev->data;
+        rvvm_snapshot_section(snap, "i2c_opencores");
+        rvvm_snapshot_field(snap, bus->sel_addr);
+        rvvm_snapshot_field(snap, bus->clock);
+        rvvm_snapshot_field(snap, bus->control);
+        rvvm_snapshot_field(snap, bus->status);
+        rvvm_snapshot_field(snap, bus->tx_byte);
+        rvvm_snapshot_field(snap, bus->rx_byte);
+    }
+    UNUSED(resume);
+}
+
 static rvvm_mmio_type_t i2c_oc_dev_type = {
-    .name   = "i2c_opencores",
-    .remove = i2c_oc_remove,
+    .name    = "i2c_opencores",
+    .remove  = i2c_oc_remove,
+    .suspend = i2c_oc_suspend,
 };
 
 PUBLIC i2c_bus_t* i2c_oc_init(rvvm_machine_t* machine, rvvm_addr_t addr, rvvm_intc_t* intc, rvvm_irq_t irq)
