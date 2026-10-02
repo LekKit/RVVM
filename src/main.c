@@ -25,13 +25,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <rvvm/rvvm.h>
 #include <rvvm/rvvm_blk.h>
-#include <rvvm/rvvm_snapshot.h>
 #include <rvvm/rvvm_board.h>
+#include <rvvm/rvvm_pci.h>
 
 #include <util/utils.h>
 
-#include <core/rvvm_isolation.h>
 #include <core/gdbstub.h>
+#include <core/rvvm_isolation.h>
 #include <core/rvvm_user.h>
 
 #include <devices/framebuffer.h>
@@ -39,6 +39,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <devices/ns16550a.h>
 #include <devices/rtl8169.h>
 #include <devices/sound-hda.h>
+
+#include <devices/tap_api.h>
 
 #include <gui/gui_window.h>
 
@@ -251,9 +253,9 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, const char* bios, tap_de
             } else if (rvvm_strcmp(arg_name, "res")) {
                 size_t    len = 0;
                 rvvm_fb_t fb  = {
-                     .width  = str_to_uint_base(arg_val, &len, 10),
-                     .height = str_to_uint_base(arg_val + len + 1, NULL, 10),
-                     .format = RVVM_RGB_XRGB8888,
+                    .width  = str_to_uint_base(arg_val, &len, 10),
+                    .height = str_to_uint_base(arg_val + len + 1, NULL, 10),
+                    .format = RVVM_RGB_XRGB8888,
                 };
                 if (arg_val[len] == 'x' && rvvm_fb_size(&fb)) {
                     rvvm_simplefb_init_auto(machine, gui_window_get_fbdev(gui_rvvm_init(0, &fb, machine)));
@@ -275,20 +277,6 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, const char* bios, tap_de
         }
     }
     return true;
-}
-
-static bool rvvm_cli_snapshot(rvvm_machine_t* machine, const char* path, bool write)
-{
-    uint32_t        opts = write ? (RVVM_BLK_RW | RVVM_BLK_CREAT | RVVM_BLK_TRUNC | RVVM_BLK_GROW) : RVVM_BLK_READ;
-    rvvm_blk_dev_t* blk  = rvvm_blk_open(path, NULL, opts);
-    if (!blk) {
-        rvvm_error("Failed to open snapshot %s", path);
-        return false;
-    }
-
-    rvvm_snapshot_t* snap = rvvm_snapshot_open(blk, write);
-    bool             ok   = rvvm_machine_snapshot(machine, snap);
-    return rvvm_snapshot_close(snap) && ok;
 }
 
 static int rvvm_cli_main(int argc, char** argv)
@@ -359,12 +347,12 @@ static int rvvm_cli_main(int argc, char** argv)
         if (rvvm_has_arg("xe2_test")) {
             // The Battlemage GPU drives the display: open a window sized to the
             // panel's native mode and hand its fbdev to the device to scan out.
-            rvvm_fb_t     hint = {
-                    .width  = 1920,
-                    .height = 1080,
-                    .format = RVVM_RGB_XRGB8888,
+            rvvm_fb_t hint = {
+                .width  = 1920,
+                .height = 1080,
+                .format = RVVM_RGB_XRGB8888,
             };
-            gui_window_t* win = gui_rvvm_init(rvvm_fb_size(&hint), &hint, machine);
+            gui_window_t* win       = gui_rvvm_init(rvvm_fb_size(&hint), &hint, machine);
             rvvm_fbdev_t* gpu_fbdev = gui_window_get_fbdev(win);
             rvvm_gpu_xe2_init_auto(machine, gpu_fbdev);
         } else if (rvvm_has_arg("bochs_display")) {
@@ -405,28 +393,33 @@ static int rvvm_cli_main(int argc, char** argv)
         rvvm_dump_fdt(machine, rvvm_getarg("dumpdtb"));
     }
 
+    rvvm_blk_dev_t* snap_blk = NULL;
+    if (rvvm_getarg("snapshot")) {
+        // Open snapshot image, load & wipe it
+        snap_blk = rvvm_blk_open(rvvm_getarg("snapshot"), NULL, RVVM_BLK_RW | RVVM_BLK_CREAT | RVVM_BLK_GROW);
+        if (!rvvm_machine_snapshot(machine, snap_blk, false)) {
+            rvvm_error("Failed to load machine snapshot");
+            rvvm_blk_close(snap_blk);
+            rvvm_free_machine(machine);
+            return -1;
+        }
+        rvvm_blk_set_size(snap_blk, 0);
+    }
+
     if (!rvvm_has_arg("noisolation")) {
         // Preparations are done, isolate the process as much as possible
         rvvm_restrict_process();
     }
 
-    if (rvvm_getarg("loadsnap") && !rvvm_cli_snapshot(machine, rvvm_getarg("loadsnap"), false)) {
-        rvvm_error("Failed to load machine snapshot");
-        rvvm_free_machine(machine);
-        return -1;
-    }
-
     rvvm_start_machine(machine);
 
-    // Returns on machine shutdown
+    // Returns on machine pause
     rvvm_run_eventloop();
 
-    if (rvvm_getarg("savesnap")) {
-        rvvm_pause_machine(machine);
-        if (!rvvm_cli_snapshot(machine, rvvm_getarg("savesnap"), true)) {
-            rvvm_error("Failed to save machine snapshot");
-        }
+    if (snap_blk && !rvvm_machine_snapshot(machine, snap_blk, true)) {
+        rvvm_error("Failed to save machine snapshot");
     }
+    rvvm_blk_close(snap_blk);
 
     rvvm_free_machine(machine);
     return 0;

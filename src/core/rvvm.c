@@ -11,6 +11,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <stdlib.h>
 
+#include <rvvm/rvvm.h>
+#include <rvvm/rvvm_blk.h>
+#include <rvvm/rvvm_snapshot.h>
+
 #include <util/elf_load.h>
 #include <util/mem_ops.h>
 #include <util/spinlock.h>
@@ -19,7 +23,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <util/utils.h>
 #include <util/vector.h>
 
-#include <core/rvvm.h>
 #include <core/rvvm_isolation.h>
 
 #include <cpu/riscv_cpu.h>
@@ -771,6 +774,141 @@ PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine)
 {
     if (likely(machine)) {
         return atomic_load_uint32_relax(&machine->power_state) != RVVM_POWER_OFF;
+    }
+    return false;
+}
+
+static void rvvm_snapshot_hart(rvvm_snapshot_t* snap, rvvm_hart_t* vm)
+{
+    rvvm_snapshot_section(snap, "riscv-hart");
+    for (size_t i = 0; i < RISCV_REGS_MAX; ++i) {
+        rvvm_snapshot_field(snap, vm->registers[i]);
+    }
+#if defined(USE_FPU)
+    for (size_t i = 0; i < RISCV_FPU_REGS_MAX; ++i) {
+        rvvm_snapshot_field(snap, vm->fpu_registers[i]);
+    }
+#endif
+#if defined(USE_RVV)
+    rvvm_snapshot_data(snap, vm->rvv_state, sizeof(vm->rvv_state));
+#endif
+    rvvm_snapshot_field(snap, vm->root_page_table);
+    rvvm_snapshot_field(snap, vm->mmu_mode);
+    rvvm_snapshot_field(snap, vm->priv_mode);
+    rvvm_snapshot_field(snap, vm->trap);
+    rvvm_snapshot_field(snap, vm->trap_pc);
+    rvvm_snapshot_field(snap, vm->lrsc);
+    rvvm_snapshot_field(snap, vm->lrsc_addr);
+    rvvm_snapshot_field(snap, vm->lrsc_cas);
+
+    rvvm_snapshot_field(snap, vm->csr.status);
+    rvvm_snapshot_field(snap, vm->csr.ie);
+    rvvm_snapshot_field(snap, vm->csr.ip);
+    rvvm_snapshot_field(snap, vm->csr.isa);
+    for (size_t i = 0; i < RISCV_PRIVS_MAX; ++i) {
+        rvvm_snapshot_field(snap, vm->csr.edeleg[i]);
+        rvvm_snapshot_field(snap, vm->csr.ideleg[i]);
+        rvvm_snapshot_field(snap, vm->csr.tvec[i]);
+        rvvm_snapshot_field(snap, vm->csr.scratch[i]);
+        rvvm_snapshot_field(snap, vm->csr.epc[i]);
+        rvvm_snapshot_field(snap, vm->csr.cause[i]);
+        rvvm_snapshot_field(snap, vm->csr.tval[i]);
+        rvvm_snapshot_field(snap, vm->csr.iselect[i]);
+        rvvm_snapshot_field(snap, vm->csr.counteren[i]);
+        rvvm_snapshot_field(snap, vm->csr.envcfg[i]);
+    }
+    rvvm_snapshot_field(snap, vm->csr.mseccfg);
+    rvvm_snapshot_field(snap, vm->csr.fcsr);
+    rvvm_snapshot_field(snap, vm->csr.vcsr);
+    rvvm_snapshot_field(snap, vm->csr.vtype);
+    rvvm_snapshot_field(snap, vm->csr.hartid);
+
+    // AIA register files are allocated in pairs for M/S modes
+    uint8_t aia = !!vm->aia;
+    rvvm_snapshot_field(snap, aia);
+    if (aia) {
+        if (!vm->aia) {
+            riscv_hart_aia_init(vm);
+        }
+        for (size_t i = 0; i < 2; ++i) {
+            rvvm_snapshot_field(snap, vm->aia[i].eidelivery);
+            rvvm_snapshot_field(snap, vm->aia[i].eithreshold);
+            for (size_t j = 0; j < RVVM_AIA_ARR_LEN; ++j) {
+                rvvm_snapshot_field(snap, vm->aia[i].eip[j]);
+                rvvm_snapshot_field(snap, vm->aia[i].eie[j]);
+            }
+        }
+    }
+
+    uint64_t mtimecmp = rvtimecmp_get(&vm->mtimecmp);
+    uint64_t stimecmp = rvtimecmp_get(&vm->stimecmp);
+    rvvm_snapshot_field(snap, mtimecmp);
+    rvvm_snapshot_field(snap, stimecmp);
+    rvvm_snapshot_field(snap, vm->pending_irqs);
+    if (!rvvm_snapshot_writing(snap)) {
+        rvtimecmp_set(&vm->mtimecmp, mtimecmp);
+        rvtimecmp_set(&vm->stimecmp, stimecmp);
+        riscv_tlb_flush(vm);
+#if defined(USE_JIT)
+        if (vm->jit_enabled) {
+            riscv_jit_flush_cache(vm);
+        }
+#endif
+        riscv_hart_check_timer(vm);
+    }
+}
+
+RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_blk_dev_t* blk, bool out)
+{
+    if (machine && blk && !atomic_load_uint32(&machine->running)) {
+        uint64_t msize = machine->mem.size;
+        uint64_t harts = vector_size(machine->harts);
+        uint64_t freq  = machine->timer.freq;
+        uint64_t time  = rvtimer_get(&machine->timer);
+        uint8_t  rv64  = machine->rv64;
+
+        if (!out && !rvvm_blk_get_size(blk)) {
+            // No-op on empty snapshot load
+            return true;
+        }
+
+        rvvm_snapshot_t* snap = rvvm_snapshot_open(blk, out);
+        if (!snap) {
+            return false;
+        }
+
+        // A snapshot only fits the machine it was taken from
+        rvvm_snapshot_section(snap, "rvvm-machine");
+        rvvm_snapshot_field(snap, msize);
+        rvvm_snapshot_field(snap, harts);
+        rvvm_snapshot_field(snap, rv64);
+        rvvm_snapshot_field(snap, freq);
+        rvvm_snapshot_field(snap, time);
+        if (msize != machine->mem.size || harts != vector_size(machine->harts) || rv64 != machine->rv64) {
+            rvvm_snapshot_close(snap);
+            return false;
+        }
+
+        rvvm_snapshot_section(snap, "rvvm-ram");
+        rvvm_snapshot_data(snap, machine->mem.data, machine->mem.size);
+
+        vector_foreach (machine->harts, i) {
+            rvvm_snapshot_hart(snap, vector_at(machine->harts, i));
+        }
+
+        vector_foreach (machine->mmio_devs, i) {
+            rvvm_mmio_dev_t* dev = vector_at(machine->mmio_devs, i);
+            if (dev->type && dev->type->suspend) {
+                dev->type->suspend(dev, snap, !rvvm_snapshot_writing(snap));
+            }
+        }
+
+        if (!rvvm_snapshot_writing(snap)) {
+            rvtimer_init(&machine->timer, freq);
+            rvtimer_rebase(&machine->timer, time);
+            atomic_store_uint32(&machine->power_state, RVVM_POWER_ON);
+        }
+        return rvvm_snapshot_close(snap);
     }
     return false;
 }

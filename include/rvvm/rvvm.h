@@ -144,6 +144,11 @@ RVVM_PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine);
 RVVM_PUBLIC bool rvvm_machine_powered(rvvm_machine_t* machine);
 
 /**
+ * Snapshot machine
+ */
+RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_blk_dev_t* blk, bool out);
+
+/**
  * Full machine state cleanup (Frees memory, attached devices, internal structures)
  *
  * \warning After this call, none of the handles previously attached to this machine are valid
