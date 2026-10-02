@@ -596,7 +596,7 @@ static void ata_bmdma_write(rvvm_reg_dev_t* dev, const void* data, size_t size, 
     }
 }
 
-static rvvm_reg_type_t ata_data_type = {
+static const rvvm_reg_type_t ata_data_type = {
     .name     = "ata-data",
     .read     = ata_data_read,
     .write    = ata_data_write,
@@ -605,7 +605,7 @@ static rvvm_reg_type_t ata_data_type = {
     .max_size = 4,
 };
 
-static rvvm_reg_type_t ata_ctl_type = {
+static const rvvm_reg_type_t ata_ctl_type = {
     .name     = "ata-ctl",
     .read     = ata_ctl_read,
     .write    = ata_ctl_write,
@@ -613,7 +613,7 @@ static rvvm_reg_type_t ata_ctl_type = {
     .max_size = 4,
 };
 
-static rvvm_reg_type_t ata_bmdma_type = {
+static const rvvm_reg_type_t ata_bmdma_type = {
     .name     = "ata-bmdma",
     .read     = ata_bmdma_read,
     .write    = ata_bmdma_write,
