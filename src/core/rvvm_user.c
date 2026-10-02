@@ -1852,7 +1852,7 @@ static char* default_envp[] = {
 };
 */
 
-int rvvm_user_linux(int argc, char** argv, char** envp)
+RVVM_PUBLIC int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     char path_buf[UAPI_PATH_MAX] = {0};
     // Allow overriding/disabling the userland path prefix,
@@ -1957,7 +1957,7 @@ int rvvm_user_linux(int argc, char** argv, char** envp)
 
 #include "utils.h"
 
-int rvvm_user_linux(int argc, char** argv, char** envp)
+RVVM_PUBLIC int rvvm_user_linux(int argc, char** argv, char** envp)
 {
     UNUSED(argc); UNUSED(argv); UNUSED(envp);
     rvvm_warn("Userland emulation not available, define RVVM_USER_TEST");
