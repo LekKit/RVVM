@@ -473,7 +473,7 @@ static int32_t rvread_chunk(rvfile_t* file, void* dst, size_t size, uint64_t off
 }
 
 // Unlocked version of rvread(), requires a valid file offset
-static int32_t rvread_unlocked(rvfile_t* file, void* dst, size_t size, uint64_t offset)
+static size_t rvread_unlocked(rvfile_t* file, void* dst, size_t size, uint64_t offset)
 {
     uint8_t* buffer = dst;
     size_t   ret    = 0;
@@ -570,7 +570,7 @@ static int32_t rvwrite_chunk(rvfile_t* file, const void* src, size_t size, uint6
 }
 
 // Unlocked version of rvwrite(), requires a valid file offset
-static int32_t rvwrite_unlocked(rvfile_t* file, const void* src, size_t size, uint64_t offset)
+static size_t rvwrite_unlocked(rvfile_t* file, const void* src, size_t size, uint64_t offset)
 {
     const uint8_t* buffer = src;
     size_t         ret    = 0;
