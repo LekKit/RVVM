@@ -860,7 +860,7 @@ static void rvvm_snapshot_hart(rvvm_snapshot_t* snap, rvvm_hart_t* vm)
 
 RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_blk_dev_t* blk, bool out)
 {
-    if (machine && blk && !atomic_load_uint32(&machine->running)) {
+    if (machine && blk && !rvvm_machine_running(machine)) {
         uint64_t msize = machine->mem.size;
         uint64_t harts = vector_size(machine->harts);
         uint64_t freq  = machine->timer.freq;
@@ -869,6 +869,11 @@ RVVM_PUBLIC bool rvvm_machine_snapshot(rvvm_machine_t* machine, rvvm_blk_dev_t* 
 
         if (!out && !rvvm_blk_get_size(blk)) {
             // No-op on empty snapshot load
+            return true;
+        }
+        if (out && !rvvm_machine_powered(machine)) {
+            // Empty the snapshot on powered down machine
+            rvvm_blk_set_size(blk, 0);
             return true;
         }
 
