@@ -42,6 +42,9 @@ static spinlock_t                global_lock     = ZERO_INIT;
 static vector_t(rvvm_machine_t*) global_machines = ZERO_INIT;
 static bool                      global_manual   = false;
 
+// Set under global_lock when the eventloop thread stops on its own; its handle still needs a join
+static bool eventloop_exited = false;
+
 static spinlock_t    eventloop_lock   = ZERO_INIT;
 static cond_var_t*   eventloop_cond   = NULL;
 static thread_ctx_t* eventloop_thread = NULL;
@@ -423,6 +426,9 @@ static void* rvvm_eventloop(void* manual)
 
             scoped_spin_lock (&global_lock) {
                 running = !rvvm_eventloop_tick(!!manual);
+                if (!running && !manual) {
+                    eventloop_exited = true;
+                }
             }
         }
     }
@@ -443,12 +449,15 @@ static void rvvm_reconfigure_eventloop(void)
 #else
     bool needs_cond   = false;
     bool needs_thread = false;
+    bool exited       = false;
     scoped_spin_lock (&global_lock) {
-        needs_cond   = global_manual || vector_size(global_machines);
-        needs_thread = !global_manual && vector_size(global_machines);
+        needs_cond       = global_manual || vector_size(global_machines);
+        needs_thread     = !global_manual && vector_size(global_machines);
+        exited           = eventloop_exited;
+        eventloop_exited = false;
     }
     scoped_spin_lock (&eventloop_lock) {
-        if (!needs_thread && eventloop_thread) {
+        if ((!needs_thread || exited) && eventloop_thread) {
             condvar_wake(eventloop_cond);
             thread_join(eventloop_thread);
             eventloop_thread = NULL;
