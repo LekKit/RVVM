@@ -125,7 +125,8 @@ slow_path bool riscv_jit_tlb_lookup(rvvm_hart_t* vm)
 
 slow_path void riscv_jit_finalize(rvvm_hart_t* vm)
 {
-    if (rvjit_block_nonempty(&vm->jit)) {
+    // A cross-page jump to x0 may emit no instructions until the PC-update epilogue.
+    if (rvjit_block_nonempty(&vm->jit) || vm->jit.pc_off != 0) {
         rvjit_func_t block = rvjit_block_finalize(&vm->jit);
 
         if (block) {

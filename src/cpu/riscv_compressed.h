@@ -507,10 +507,12 @@ static forceinline void riscv_emulate_c_c2(rvvm_hart_t* vm, const uint32_t insn)
                 rvjit_trace_add(rds, rds, rs2, 2);
                 riscv_write_reg(vm, rds, riscv_read_reg(vm, rds) + riscv_read_reg(vm, rs2));
             } else if (likely(rds)) { // c.jalr
+                // The source can be ra itself; preserve it before writing the link.
+                const xlen_t target = riscv_read_reg(vm, rds);
                 rvjit_trace_jalr(RISCV_REG_X1, rds, 0, 2);
                 riscv_write_reg(vm, RISCV_REG_X1, riscv_read_reg(vm, RISCV_REG_PC) + 2);
                 riscv_write_reg(vm, RISCV_REG_PC,
-                                (riscv_read_reg(vm, rds) & ~(xlen_t) 1) - 2);
+                                (target & ~(xlen_t) 1) - 2);
                 riscv_voluntary_preempt(vm);
             } else { // c.ebreak
                 riscv_breakpoint(vm);
