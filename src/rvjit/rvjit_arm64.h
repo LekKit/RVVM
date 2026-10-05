@@ -667,11 +667,12 @@ static inline bool rvjit_arm64_ldst_is_fp(uint32_t insn)
 // Convert STRB->STURB, LDRFD->LDURFD, etc
 static inline uint32_t rvjit_arm64_ldst_to_unscaled(uint32_t insn)
 {
-    return insn - 0x09000000U;
+    // Scaled and unscaled base opcodes differ only in bit 24.
+    // Subtracting 0x09000000U would also clear the fixed opcode bit 27.
+    return insn & ~0x01000000U;
 }
 
 // Load/store with an unscaled signed imm9 offset
-// NOTE: This never worked correctly for me, I am not sure why
 static inline void rvjit_arm64_insn_ldst_unscaled(rvjit_block_t* block, uint32_t insn, uint32_t rd, //
                                                   uint32_t base, uint32_t imm9)
 {
@@ -935,7 +936,8 @@ static void rvjit_arm64_arith_cmp_imm_slow(rvjit_block_t* block, uint32_t insn, 
 // Emit compare with imm64, trearing X31 as XZR (Fast path)
 static inline void rvjit_arm64_cmp_imm(rvjit_block_t* block, uint32_t insn, uint32_t reg, int64_t imm)
 {
-    if (imm < 0) {
+    // INT64_MIN cannot be negated in signed arithmetic; compare it via a register.
+    if (imm < 0 && imm != INT64_MIN) {
         // Invert imm and instruction
         imm  = -imm;
         insn = rvjit_arm64_arith_invert(insn);
@@ -974,6 +976,12 @@ static inline void rvjit_arm64_arith_imm24(rvjit_block_t* block, uint32_t insn, 
 static inline void rvjit_arm64_arith_imm(rvjit_block_t* block, uint32_t insn, uint32_t rd, uint32_t rs, int64_t imm)
 {
     if (likely(rd != RVJIT_HOST_REG_ZERO)) {
+        if (rs == RVJIT_HOST_REG_ZERO) {
+            // Fold before normalizing the sign; XZR is not SP here.
+            uint64_t value = (insn & 0x40000000U) ? -(uint64_t)imm : (uint64_t)imm;
+            rvjit_arm64_load_imm(block, rd, (insn & ARM64_WIDE_MASK) ? value : (uint32_t)value);
+            return;
+        }
         if (imm < 0) {
             // Invert imm and instruction
             imm  = -imm;
@@ -981,10 +989,8 @@ static inline void rvjit_arm64_arith_imm(rvjit_block_t* block, uint32_t insn, ui
         }
         if (!imm) {
             rvjit_arm64_insn_reg3(block, ARM64_INSN_ORR, rd, rs, RVJIT_HOST_REG_ZERO);
-        } else if (likely(rvjit_arm64_is_imm24(imm) && (rs != RVJIT_HOST_REG_ZERO))) {
+        } else if (likely(rvjit_arm64_is_imm24(imm))) {
             rvjit_arm64_arith_imm24(block, insn, rd, rs, imm);
-        } else if (rs == RVJIT_HOST_REG_ZERO) {
-            rvjit_arm64_load_imm(block, rd, imm);
         } else {
             rvjit_arm64_lower_reg2_imm(block, rvjit_arm64_arith_imm_to_reg(insn), rd, rs, imm);
         }
