@@ -150,6 +150,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
  * TX Descriptor flags
  */
 #define RTL8169_DESC_LGSEN    0x08000000UL // Enable Large Send Offload
+#define RTL8169_DESC_IPCS     0x00040000UL
+#define RTL8169_DESC_UDPCS    0x00020000UL
+#define RTL8169_DESC_TCPCS    0x00010000UL
+#define RTL8169_DESC_CSUM     (RTL8169_DESC_IPCS | RTL8169_DESC_UDPCS | RTL8169_DESC_TCPCS)
 #define RTL8169_DESC_TXSTA    0x70000000UL // EOR | FS | LS
 
 /*
@@ -224,8 +228,9 @@ typedef struct {
     uint32_t phyar;
 
     // Frame segmentation reassembly buffer
-    uint8_t  seg_buff[0x1000];
+    uint8_t  seg_buff[0x10000 + 18];
     uint32_t seg_size;
+    uint32_t seg_flags;
 
     // Cleanup region counter
     uint32_t cleanup;
@@ -478,6 +483,130 @@ static bool rtl8169_feed_rx(void* net_dev, const void* pkt_data, size_t pkt_size
     return false;
 }
 
+static uint32_t rtl8169_checksum_sum(const uint8_t* data, size_t size, uint32_t sum)
+{
+    while (size >= 2) {
+        sum += read_uint16_be_m(data);
+        data += 2;
+        size -= 2;
+    }
+    if (size) sum += (uint32_t)data[0] << 8;
+    return sum;
+}
+
+static uint16_t rtl8169_checksum_finish(uint32_t sum)
+{
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+static size_t rtl8169_ipv4_offset(const uint8_t* frame, size_t size)
+{
+    size_t offset = 14;
+    if (size < offset) return 0;
+    uint16_t type = read_uint16_be_m(frame + 12);
+    while (type == 0x8100 || type == 0x88A8) {
+        if (size - offset < 4) return 0;
+        type = read_uint16_be_m(frame + offset + 2);
+        offset += 4;
+    }
+    if (type != 0x0800 || size - offset < 20 || frame[offset] >> 4 != 4) return 0;
+    size_t header = (frame[offset] & 0xF) * 4;
+    return header >= 20 && size - offset >= header ? offset : 0;
+}
+
+static bool rtl8169_tx_checksums(uint8_t* frame, size_t size, uint32_t flags)
+{
+    size_t offset = rtl8169_ipv4_offset(frame, size);
+    if (!offset) return false;
+    uint8_t* ip = frame + offset;
+    size_t header = (ip[0] & 0xF) * 4;
+    size_t length = read_uint16_be_m(ip + 2);
+    if (length < header || length > size - offset) return false;
+
+    if (flags & RTL8169_DESC_IPCS) {
+        write_uint16_be_m(ip + 10, 0);
+        write_uint16_be_m(ip + 10, rtl8169_checksum_finish(rtl8169_checksum_sum(ip, header, 0)));
+    }
+    if (!(flags & (RTL8169_DESC_TCPCS | RTL8169_DESC_UDPCS))) return true;
+    if (read_uint16_be_m(ip + 6) & 0x3FFF) return false;
+
+    uint8_t* transport = ip + header;
+    size_t transport_size = length - header;
+    size_t checksum_offset;
+    if (ip[9] == 6 && (flags & RTL8169_DESC_TCPCS)) {
+        if (transport_size < 20 || transport[12] >> 4 < 5 || (transport[12] >> 4) * 4 > transport_size) return false;
+        checksum_offset = 16;
+    } else if (ip[9] == 17 && (flags & RTL8169_DESC_UDPCS)) {
+        if (transport_size < 8) return false;
+        size_t udp_size = read_uint16_be_m(transport + 4);
+        if (udp_size < 8 || udp_size > transport_size) return false;
+        transport_size = udp_size;
+        checksum_offset = 6;
+    } else {
+        return false;
+    }
+    write_uint16_be_m(transport + checksum_offset, 0);
+    uint32_t sum = rtl8169_checksum_sum(ip + 12, 8, ip[9] + (uint32_t)transport_size);
+    uint16_t checksum = rtl8169_checksum_finish(rtl8169_checksum_sum(transport, transport_size, sum));
+    if (ip[9] == 17 && !checksum) checksum = 0xFFFF;
+    write_uint16_be_m(transport + checksum_offset, checksum);
+    return true;
+}
+
+static bool rtl8169_tx_large(rtl8169_dev_t* rtl8169, const uint8_t* frame, size_t size, uint32_t flags)
+{
+    size_t offset = rtl8169_ipv4_offset(frame, size);
+    size_t mss = (flags >> 16) & 0x7FF;
+    if (!offset || !mss) return false;
+    const uint8_t* ip = frame + offset;
+    size_t ip_header = (ip[0] & 0xF) * 4;
+    if (ip[9] != 6 || (read_uint16_be_m(ip + 6) & 0x3FFF) || size - offset - ip_header < 20) return false;
+    const uint8_t* tcp = ip + ip_header;
+    size_t tcp_header = (tcp[12] >> 4) * 4;
+    size_t headers = offset + ip_header + tcp_header;
+    if (tcp_header < 20 || headers > size) return false;
+
+    uint8_t segment[0x1000];
+    if (headers + mss > sizeof(segment)) return false;
+    size_t payload = size - headers;
+    uint32_t sequence = read_uint32_be_m(tcp + 4);
+    uint16_t id = read_uint16_be_m(ip + 4);
+    size_t sent = 0;
+    do {
+        size_t chunk = EVAL_MIN(mss, payload - sent);
+        memcpy(segment, frame, headers);
+        memcpy(segment + headers, frame + headers + sent, chunk);
+        uint8_t* segment_ip = segment + offset;
+        uint8_t* segment_tcp = segment_ip + ip_header;
+        write_uint16_be_m(segment_ip + 2, (uint16_t)(ip_header + tcp_header + chunk));
+        write_uint16_be_m(segment_ip + 4, id++);
+        write_uint32_be_m(segment_tcp + 4, sequence + (uint32_t)sent);
+        if (sent + chunk < payload) segment_tcp[13] &= ~0x09; // FIN and PSH belong to the last segment.
+        if (sent) segment_tcp[13] &= ~0x80; // CWR belongs to the first segment.
+        if (!rtl8169_tx_checksums(segment, headers + chunk, RTL8169_DESC_IPCS | RTL8169_DESC_TCPCS)
+            || !tap_send(rtl8169->tap, segment, headers + chunk)) return false;
+        sent += chunk;
+    } while (sent < payload);
+    return true;
+}
+
+static void rtl8169_tx_frame(rtl8169_dev_t* rtl8169, const void* data, size_t size, uint32_t flags)
+{
+    bool sent;
+    if (flags & RTL8169_DESC_LGSEN) {
+        sent = rtl8169_tx_large(rtl8169, data, size, flags);
+    } else if (flags & RTL8169_DESC_CSUM) {
+        uint8_t* frame = safe_malloc(size);
+        memcpy(frame, data, size);
+        sent = rtl8169_tx_checksums(frame, size, flags) && tap_send(rtl8169->tap, frame, size);
+        free(frame);
+    } else {
+        sent = tap_send(rtl8169->tap, data, size);
+    }
+    if (!sent) rtl8169_interrupt(rtl8169, RTL8169_IRQ_TER);
+}
+
 // Reassemble transmitted segmented frame
 static void rtl8169_tx_segmented(rtl8169_dev_t* rtl8169, void* seg_ptr, size_t seg_size, uint32_t flag)
 {
@@ -485,15 +614,16 @@ static void rtl8169_tx_segmented(rtl8169_dev_t* rtl8169, void* seg_ptr, size_t s
     if (flag & RTL8169_DESC_FS) {
         // Start assembling a new packet
         atomic_store_uint32_relax(&rtl8169->seg_size, 0);
+        rtl8169->seg_flags = flag;
     } else {
         size = atomic_load_uint32_relax(&rtl8169->seg_size);
     }
-    if (size + seg_size <= sizeof(rtl8169->seg_buff)) {
+    if (size <= sizeof(rtl8169->seg_buff) && seg_size <= sizeof(rtl8169->seg_buff) - size) {
         memcpy(rtl8169->seg_buff + size, seg_ptr, seg_size);
         size += seg_size;
         if (flag & RTL8169_DESC_LS) {
             // Last segment found
-            tap_send(rtl8169->tap, rtl8169->seg_buff, size);
+            rtl8169_tx_frame(rtl8169, rtl8169->seg_buff, size, rtl8169->seg_flags);
             atomic_store_uint32_relax(&rtl8169->seg_size, -1);
         } else {
             atomic_store_uint32_relax(&rtl8169->seg_size, size);
@@ -519,7 +649,7 @@ static void rtl8169_tx_doorbell(rtl8169_dev_t* rtl8169, rtl8169_ring_t* ring)
             if (likely(ptr)) {
                 if ((flag & RTL8169_DESC_FS) && (flag & RTL8169_DESC_LS)) {
                     // Normal contiguous frame
-                    tap_send(rtl8169->tap, ptr, size);
+                    rtl8169_tx_frame(rtl8169, ptr, size, flag);
                 } else {
                     // Segmented frame
                     rtl8169_tx_segmented(rtl8169, ptr, size, flag);
