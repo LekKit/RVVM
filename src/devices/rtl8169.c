@@ -207,6 +207,7 @@ typedef struct {
 typedef struct {
     rvvm_pci_func_t* func;
     tap_dev_t*       tap;
+    uint32_t        link_up;
 
     // EEPROM (Used to retreive MAC address)
     rtl8169_at93c56_t eeprom;
@@ -403,13 +404,21 @@ static void rtl8169_at93c56_suspend(rvvm_snapshot_t* snap, rtl8169_at93c56_t* ee
  * PHY handling (For link state detection)
  */
 
-static uint16_t rtl8169_phy_read(uint32_t reg)
+static void rtl8169_link_changed(void* net_dev, bool connected)
+{
+    rtl8169_dev_t* rtl8169 = net_dev;
+    if (atomic_swap_uint32(&rtl8169->link_up, connected) != connected && rtl8169->func) {
+        rtl8169_interrupt(rtl8169, RTL8169_IRQ_LCG);
+    }
+}
+
+static uint16_t rtl8169_phy_read(rtl8169_dev_t* rtl8169, uint32_t reg)
 {
     switch (reg) {
         case RTL8169_PHY_BMCR:
             return 0x1140; // Full-duplex 1Gbps, Auto-Negotiation Enabled
         case RTL8169_PHY_BMSR:
-            return 0x796D; // Link is up; Supports GBESR
+            return atomic_load_uint32_relax(&rtl8169->link_up) ? 0x796D : 0x7949;
         case RTL8169_PHY_ID1:
             return 0x001C; // Realtek
         case RTL8169_PHY_ID2:
@@ -417,7 +426,7 @@ static uint16_t rtl8169_phy_read(uint32_t reg)
         case RTL8169_PHY_GBCR:
             return 0x0200; // Advertise 1000BASE-T Full duplex
         case RTL8169_PHY_GBSR:
-            return 0x3800; // Link partner is capable of 1000BASE-T Full duplex
+            return atomic_load_uint32_relax(&rtl8169->link_up) ? 0x3800 : 0;
         case RTL8169_PHY_GBESR:
             return 0xA000; // 1000BASE-T Full duplex capable
     }
@@ -427,7 +436,7 @@ static uint16_t rtl8169_phy_read(uint32_t reg)
 static void rtl8169_phy_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = (cmd >> 16) & 0x1F;
-    uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000) | rtl8169_phy_read(reg);
+    uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000) | rtl8169_phy_read(rtl8169, reg);
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
@@ -435,7 +444,7 @@ static void rtl8169_phy_eri_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = cmd & 0x0FFF;
     uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000);
-    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(reg));
+    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(rtl8169, reg));
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
@@ -443,7 +452,7 @@ static void rtl8169_phy_ocp_handle(rtl8169_dev_t* rtl8169, uint32_t cmd)
 {
     uint32_t reg = (cmd >> 16) & 0x1F;
     uint32_t val = ((cmd & 0xFFFF0000) ^ 0x80000000);
-    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(reg));
+    atomic_store_uint32_relax(&rtl8169->phydr, rtl8169_phy_read(rtl8169, reg));
     atomic_store_uint32_relax(&rtl8169->phyar, val);
 }
 
@@ -633,7 +642,7 @@ static void rtl8169_pci_read(rvvm_reg_dev_t* dev, void* data, size_t size, size_
             val = atomic_load_uint32_relax(&rtl8169->phyar);
             break;
         case RTL8169_REG_PHYS:
-            val = RTL8169_PHY_STATUS;
+            val = atomic_load_uint32_relax(&rtl8169->link_up) ? RTL8169_PHY_STATUS : 0;
             break;
         case RTL8169_REG_TXDA1:
             val = atomic_load_uint32_relax(&rtl8169->tx.addr);
@@ -777,9 +786,11 @@ RVVM_PUBLIC rvvm_pci_func_t* rvvm_rtl8169_init(rvvm_machine_t* machine, tap_dev_
     tap_net_dev_t  nic     = {
         .net_dev = rtl8169,
         .feed_rx = rtl8169_feed_rx,
+        .link_changed = rtl8169_link_changed,
     };
 
     rtl8169->tap = tap;
+    rtl8169->link_up = 1;
     tap_attach(tap, &nic);
     if (rtl8169->tap == NULL) {
         rvvm_error("Failed to create TAP device!");
