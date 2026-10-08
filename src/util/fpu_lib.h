@@ -1070,12 +1070,21 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
     fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
     fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
     fpu_f64_t sum = fpu_add64(mul, add);
-    fpu_f64_t err = fpu_add_error64(sum, mul, add);
-    fpu_f64_t res = fpu_odd_round64(sum, err);
-    fpu_f32_t ret = fpu_fcvt_f64_to_f32(res);
+    const uint32_t mode = fpu_get_rounding_mode();
+    fpu_f32_t ret;
+    if (mode == FPU_LIB_ROUND_TZ || mode == FPU_LIB_ROUND_DN || mode == FPU_LIB_ROUND_UP) {
+        ret = fpu_fcvt_f64_to_f32(sum);
+        if ((fpu_get_exceptions() & ~old_exceptions & FPU_LIB_FLAG_NX) &&
+            (fpu_bit_f32_to_u32(ret) & FPU_LIB_FP32_NOSIGNED_MASK) < FPU_LIB_FP32_MINIMUM_NORM) {
+            fpu_raise_exceptions(FPU_LIB_FLAG_UF);
+        }
+    } else {
+        fpu_f64_t err = fpu_add_error64(sum, mul, add);
+        ret = fpu_fcvt_f64_to_f32(fpu_odd_round64(sum, err));
 #if defined(USE_SOFT_FPU_FENV)
-    fpu_soft_fenv_check_add64(fpu_fcvt_f32_to_f64(ret), sum, err);
+        fpu_soft_fenv_check_add64(fpu_fcvt_f32_to_f64(ret), sum, err);
 #endif
+    }
 #endif
 
     if (unlikely((fpu_bit_f32_to_u32(ret) & FPU_LIB_FP32_NOSIGNED_MASK) == FPU_LIB_FP32_MINIMUM_NORM)) {
