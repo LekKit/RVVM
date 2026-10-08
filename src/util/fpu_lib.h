@@ -1272,72 +1272,112 @@ static forceinline fpu_f64_t fpu_fcvt_i64_to_f64(int64_t i)
     return fpu_wrap_f64((actual_double_t)i);
 }
 
-static forceinline fpu_f64_t fpu_round_i64_to_f64(int64_t i, uint32_t rm)
+static forceinline fpu_f64_t fpu_round_mag_to_f64(uint64_t mag, bool sign, uint32_t rm)
 {
-    bool sign = i < 0;
-    uint64_t mag = sign ? (0 - (uint64_t)i) : (uint64_t)i;
-
     if (unlikely(!mag)) {
-        return fpu_bit_u64_to_f64(0);
+        return fpu_bit_u64_to_f64(sign ? FPU_LIB_FP64_SIGNEDFP_MASK : 0);
     }
-
     if (unlikely(rm > FPU_LIB_ROUND_MM)) {
         rm = fpu_get_rounding_mode();
     }
-
     uint32_t exp = 0;
     uint64_t tmp = mag;
     while (tmp >>= 1) {
         ++exp;
     }
-
-    uint64_t sig = 0;
-
+    uint64_t sig;
     if (likely(exp <= 52)) {
         sig = mag << (52 - exp);
     } else {
-        uint32_t shift = exp - 52;
-        uint64_t mask = (1ULL << shift) - 1;
-        uint64_t rem = mag & mask;
-        uint64_t half = 1ULL << (shift - 1);
-
+        const uint32_t shift = exp - 52;
+        const uint64_t rem   = mag & ((1ULL << shift) - 1);
+        const uint64_t half  = 1ULL << (shift - 1);
         sig = mag >> shift;
-
-        bool increment = false;
+        bool increment;
         switch (rm) {
-            case FPU_LIB_ROUND_NE:
-                increment = (rem > half) || ((rem == half) && (sig & 1));
-                break;
-            case FPU_LIB_ROUND_TZ:
-                increment = false;
-                break;
-            case FPU_LIB_ROUND_DN:
-                increment = sign && rem;
-                break;
-            case FPU_LIB_ROUND_UP:
-                increment = !sign && rem;
-                break;
-            case FPU_LIB_ROUND_MM:
-                increment = rem >= half;
-                break;
+            case FPU_LIB_ROUND_NE: increment = (rem > half) || ((rem == half) && (sig & 1)); break;
+            case FPU_LIB_ROUND_TZ: increment = false; break;
+            case FPU_LIB_ROUND_DN: increment = sign && rem; break;
+            case FPU_LIB_ROUND_UP: increment = !sign && rem; break;
+            default: increment = rem >= half; break;
         }
-
         if (unlikely(rem)) {
             fpu_raise_inexact();
         }
-
-        if (increment) {
-            ++sig;
-            if (unlikely(sig == (1ULL << 53))) {
-                sig >>= 1;
-                ++exp;
-            }
+        if (increment && unlikely(++sig == (1ULL << 53))) {
+            sig >>= 1;
+            ++exp;
         }
     }
-
-    uint64_t bits = (sign ? FPU_LIB_FP64_SIGNEDFP_MASK : 0) | (((uint64_t)exp + 0x3FF) << 52) | (sig & FPU_LIB_FP64_MANTISSA_MASK);
-
+    uint64_t bits = (sign ? FPU_LIB_FP64_SIGNEDFP_MASK : 0) |
+                    (((uint64_t)exp + 0x3FF) << 52) |
+                    (sig & FPU_LIB_FP64_MANTISSA_MASK);
     return fpu_bit_u64_to_f64(bits);
+}
+
+static forceinline fpu_f64_t fpu_round_i64_to_f64(int64_t i, uint32_t rm)
+{
+    const bool sign = i < 0;
+    return fpu_round_mag_to_f64(sign ? 0 - (uint64_t)i : (uint64_t)i, sign, rm);
+}
+
+static forceinline fpu_f64_t fpu_round_u64_to_f64(uint64_t u, uint32_t rm)
+{
+    return fpu_round_mag_to_f64(u, false, rm);
+}
+
+static forceinline fpu_f32_t fpu_round_mag_to_f32(uint64_t mag, bool sign, uint32_t rm)
+{
+    if (unlikely(!mag)) {
+        return fpu_bit_u32_to_f32(sign ? FPU_LIB_FP32_SIGNEDFP_MASK : 0);
+    }
+    if (unlikely(rm > FPU_LIB_ROUND_MM)) {
+        rm = fpu_get_rounding_mode();
+    }
+    uint32_t exp = 0;
+    uint64_t tmp = mag;
+    while (tmp >>= 1) {
+        ++exp;
+    }
+    uint64_t sig;
+    if (likely(exp <= 23)) {
+        sig = mag << (23 - exp);
+    } else {
+        const uint32_t shift = exp - 23;
+        const uint64_t rem   = mag & ((1ULL << shift) - 1);
+        const uint64_t half  = 1ULL << (shift - 1);
+        sig = mag >> shift;
+        bool increment;
+        switch (rm) {
+            case FPU_LIB_ROUND_NE: increment = (rem > half) || ((rem == half) && (sig & 1)); break;
+            case FPU_LIB_ROUND_TZ: increment = false; break;
+            case FPU_LIB_ROUND_DN: increment = sign && rem; break;
+            case FPU_LIB_ROUND_UP: increment = !sign && rem; break;
+            default: increment = rem >= half; break;
+        }
+        if (unlikely(rem)) {
+            fpu_raise_inexact();
+        }
+        if (increment && unlikely(++sig == (1ULL << 24))) {
+            sig >>= 1;
+            ++exp;
+        }
+    }
+    uint32_t bits = (sign ? FPU_LIB_FP32_SIGNEDFP_MASK : 0) |
+                    ((exp + 127U) << 23) |
+                    (sig & FPU_LIB_FP32_MANTISSA_MASK);
+    return fpu_bit_u32_to_f32(bits);
+}
+
+static forceinline fpu_f32_t fpu_round_i64_to_f32(int64_t i, uint32_t rm)
+{
+    const bool sign = i < 0;
+    return fpu_round_mag_to_f32(sign ? 0 - (uint64_t)i : (uint64_t)i, sign, rm);
+}
+
+static forceinline fpu_f32_t fpu_round_u64_to_f32(uint64_t u, uint32_t rm)
+{
+    return fpu_round_mag_to_f32(u, false, rm);
 }
 
 /*
