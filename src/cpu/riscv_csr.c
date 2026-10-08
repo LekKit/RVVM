@@ -53,11 +53,6 @@ static uint64_t riscv_mkmisa(const char* str)
     return ret;
 }
 
-static inline bool riscv_is_csr_write(rvvm_uxlen_t* dest, uint8_t op)
-{
-    return (*dest != 0) || (op == CSR_SWAP);
-}
-
 static inline bool riscv_csr_helper_masked(rvvm_hart_t* vm, rvvm_uxlen_t* csr, //
                                            rvvm_uxlen_t* dest, rvvm_uxlen_t mask, uint8_t op)
 {
@@ -328,11 +323,11 @@ static inline bool riscv_csr_topi(rvvm_hart_t* vm, rvvm_uxlen_t* dest, rvvm_uxle
     return false;
 }
 
-static inline bool riscv_csr_topei(rvvm_hart_t* vm, uint8_t priv_mode, rvvm_uxlen_t* dest, uint8_t op)
+static inline bool riscv_csr_topei(rvvm_hart_t* vm, uint8_t priv_mode, rvvm_uxlen_t* dest, bool is_write)
 {
     if (vm->aia) {
         bool     smode = priv_mode == RISCV_PRIV_SUPERVISOR;
-        uint32_t irq   = riscv_get_aia_irq(vm, smode, riscv_is_csr_write(dest, op));
+        uint32_t irq   = riscv_get_aia_irq(vm, smode, is_write);
         // Report IRQ as both pending and highest prio
         *dest = irq | (irq << 16);
         return true;
@@ -571,7 +566,7 @@ static bool riscv_csr_indirect(rvvm_hart_t* vm, uint8_t priv_mode, uint32_t csri
     return false;
 }
 
-static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op)
+static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op, bool is_write)
 {
     switch (csr_id) {
 #ifdef USE_FPU
@@ -638,7 +633,7 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
         case CSR_SIPH:
             return riscv_csr_zero_h(vm, dest);
         case CSR_STOPEI:
-            return riscv_csr_topei(vm, RISCV_PRIV_SUPERVISOR, dest, op);
+            return riscv_csr_topei(vm, RISCV_PRIV_SUPERVISOR, dest, is_write);
         case CSR_STOPI:
             return riscv_csr_topi(vm, dest, CSR_SEIP_MASK, op);
         case CSR_STIMECMP:
@@ -697,7 +692,7 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
         case CSR_MIPH:
             return riscv_csr_zero_h(vm, dest);
         case CSR_MTOPEI:
-            return riscv_csr_topei(vm, RISCV_PRIV_MACHINE, dest, op);
+            return riscv_csr_topei(vm, RISCV_PRIV_MACHINE, dest, is_write);
         case CSR_MTOPI:
             return riscv_csr_topi(vm, dest, CSR_MEIP_MASK, op);
 
@@ -815,11 +810,11 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
     return false;
 }
 
-bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op)
+bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t op, bool is_write)
 {
     if (riscv_csr_readonly(csr_id)) {
-        // This is a readonly CSR, only set/clear zero bits is allowed
-        if (unlikely(op == CSR_SWAP || *dest != 0)) {
+        // CSRRS/CSRRC with rs1/zimm = x0/0 are reads, not writes
+        if (unlikely(is_write)) {
             return false;
         }
     }
@@ -829,7 +824,7 @@ bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t 
         return false;
     }
 
-    bool ret = riscv_csr_op_internal(vm, csr_id, dest, op);
+    bool ret = riscv_csr_op_internal(vm, csr_id, dest, op, is_write);
     if (!vm->rv64) {
         // Sign-extend the result into the register
         *dest = (int32_t)*dest;
