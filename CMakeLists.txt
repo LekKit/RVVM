@@ -79,8 +79,8 @@ endif()
 # Set up source & binary dirs, compiler & target specific build options
 #
 
-set(RVVM_INC_DIR "${CMAKE_SOURCE_DIR}/include")
-set(RVVM_SRC_DIR "${CMAKE_SOURCE_DIR}/src")
+set(RVVM_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(RVVM_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # Fancy coloring
 if (NOT WIN32)
@@ -94,7 +94,7 @@ if (NOT WIN32)
 endif()
 
 # Check for in-source build
-if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
 endif()
 
@@ -113,7 +113,7 @@ endif()
 find_package(Git)
 execute_process(COMMAND
 	"${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh_TaG --always --dirty
-	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	RESULT_VARIABLE RESULT
 	OUTPUT_VARIABLE RVVM_COMMIT
 	ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
