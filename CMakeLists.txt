@@ -81,7 +81,6 @@ endif()
 
 set(RVVM_INC_DIR "${CMAKE_SOURCE_DIR}/include")
 set(RVVM_SRC_DIR "${CMAKE_SOURCE_DIR}/src")
-set(RVVM_SRC_DIR "${CMAKE_SOURCE_DIR}/src/util")
 
 # Fancy coloring
 if (NOT WIN32)
@@ -124,7 +123,7 @@ endif()
 
 # Common pseudo-library to pass parameters to other targets
 add_library(rvvm_common INTERFACE)
-target_include_directories(rvvm_common INTERFACE "${RVVM_INC_DIR}" "${RVVM_SRC_DIR}")
+target_include_directories(rvvm_common INTERFACE "${RVVM_INC_DIR}" "${RVVM_SRC_DIR}" "${RVVM_SRC_DIR}/util")
 target_compile_definitions(rvvm_common INTERFACE "RVVM_VERSION=\"${RVVM_VERSION}\"")
 
 # Check and enable LTO
@@ -213,8 +212,9 @@ endif()
 
 # General sources
 file(GLOB_RECURSE RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_INC_DIR}/*.h"
+	"${RVVM_INC_DIR}/rvvm/*.h"
 	"${RVVM_SRC_DIR}/*.h"
+	"${RVVM_SRC_DIR}/util/*.h"
 	"${RVVM_SRC_DIR}/*.c"
 )
 
@@ -304,6 +304,9 @@ endforeach()
 set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
 list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
 
+set(RVVM_USER_MAIN_SRC "${RVVM_SRC_DIR}/rvvm_user_main.c")
+list(REMOVE_ITEM RVVM_SRC ${RVVM_USER_MAIN_SRC})
+
 #
 # Set up binaries to compile
 #
@@ -353,3 +356,7 @@ endif()
 add_executable(rvvm_cli ${RVVM_MAIN_SRC} $<TARGET_OBJECTS:rvvm_objlib>)
 target_link_libraries(rvvm_cli PRIVATE rvvm_common)
 set_target_properties(rvvm_cli PROPERTIES OUTPUT_NAME rvvm)
+
+# Main executable
+add_executable(rvvm_user ${RVVM_USER_MAIN_SRC} $<TARGET_OBJECTS:rvvm_objlib>)
+target_link_libraries(rvvm_user PRIVATE rvvm_common)
