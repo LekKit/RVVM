@@ -172,7 +172,8 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Check JIT support for target
-if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|amd64|i386|aarch64|arm|riscv)")
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" cpu_lowercase)
+if (NOT cpu_lowercase MATCHES "^(x86|amd64|i386|aarch64|arm|riscv)")
 	message(WARNING "Unsupported RVJIT target! RVJIT won't be built")
 	set(USE_JIT OFF)
 endif()
@@ -194,7 +195,7 @@ if (UNIX)
 		target_link_libraries(rvvm_common INTERFACE dl)
 	endif()
 	# Linking to libatomic on x86_64 is redundant and may cause issues
-	if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+	if (NOT cpu_lowercase MATCHES "x86_64")
 		find_library(RVVM_ATOMIC_LIB atomic)
 		if (RVVM_ATOMIC_LIB)
 			target_link_libraries(rvvm_common INTERFACE atomic)
