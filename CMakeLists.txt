@@ -79,9 +79,8 @@ endif()
 # Set up source & binary dirs, compiler & target specific build options
 #
 
-set(RVVM_INC_DIR "${CMAKE_SOURCE_DIR}/include")
-set(RVVM_SRC_DIR "${CMAKE_SOURCE_DIR}/src")
-set(RVVM_SRC_DIR "${CMAKE_SOURCE_DIR}/src/util")
+set(RVVM_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(RVVM_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # Fancy coloring
 if (NOT WIN32)
@@ -95,7 +94,7 @@ if (NOT WIN32)
 endif()
 
 # Check for in-source build
-if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 	message(FATAL_ERROR "CMake in-source build is not allowed, see README")
 endif()
 
@@ -114,7 +113,7 @@ endif()
 find_package(Git)
 execute_process(COMMAND
 	"${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh_TaG --always --dirty
-	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	RESULT_VARIABLE RESULT
 	OUTPUT_VARIABLE RVVM_COMMIT
 	ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -124,7 +123,7 @@ endif()
 
 # Common pseudo-library to pass parameters to other targets
 add_library(rvvm_common INTERFACE)
-target_include_directories(rvvm_common INTERFACE "${RVVM_INC_DIR}" "${RVVM_SRC_DIR}")
+target_include_directories(rvvm_common INTERFACE "${RVVM_INC_DIR}" "${RVVM_SRC_DIR}" "${RVVM_SRC_DIR}/util")
 target_compile_definitions(rvvm_common INTERFACE "RVVM_VERSION=\"${RVVM_VERSION}\"")
 
 # Check and enable LTO
@@ -172,7 +171,8 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Check JIT support for target
-if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|amd64|i386|aarch64|arm|riscv)")
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" cpu_lowercase)
+if (NOT cpu_lowercase MATCHES "^(x86|amd64|i386|aarch64|arm|riscv)")
 	message(WARNING "Unsupported RVJIT target! RVJIT won't be built")
 	set(USE_JIT OFF)
 endif()
@@ -194,7 +194,7 @@ if (UNIX)
 		target_link_libraries(rvvm_common INTERFACE dl)
 	endif()
 	# Linking to libatomic on x86_64 is redundant and may cause issues
-	if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+	if (NOT cpu_lowercase MATCHES "x86_64")
 		find_library(RVVM_ATOMIC_LIB atomic)
 		if (RVVM_ATOMIC_LIB)
 			target_link_libraries(rvvm_common INTERFACE atomic)
@@ -212,8 +212,9 @@ endif()
 
 # General sources
 file(GLOB_RECURSE RVVM_SRC LIST_DIRECTORIES FALSE CONFIGURE_DEPENDS
-	"${RVVM_INC_DIR}/*.h"
+	"${RVVM_INC_DIR}/rvvm/*.h"
 	"${RVVM_SRC_DIR}/*.h"
+	"${RVVM_SRC_DIR}/util/*.h"
 	"${RVVM_SRC_DIR}/*.c"
 )
 
@@ -303,6 +304,9 @@ endforeach()
 set(RVVM_MAIN_SRC "${RVVM_SRC_DIR}/main.c")
 list(REMOVE_ITEM RVVM_SRC ${RVVM_MAIN_SRC})
 
+set(RVVM_USER_MAIN_SRC "${RVVM_SRC_DIR}/rvvm_user_main.c")
+list(REMOVE_ITEM RVVM_SRC ${RVVM_USER_MAIN_SRC})
+
 #
 # Set up binaries to compile
 #
@@ -352,3 +356,7 @@ endif()
 add_executable(rvvm_cli ${RVVM_MAIN_SRC} $<TARGET_OBJECTS:rvvm_objlib>)
 target_link_libraries(rvvm_cli PRIVATE rvvm_common)
 set_target_properties(rvvm_cli PROPERTIES OUTPUT_NAME rvvm)
+
+# Main executable
+add_executable(rvvm_user ${RVVM_USER_MAIN_SRC} $<TARGET_OBJECTS:rvvm_objlib>)
+target_link_libraries(rvvm_user PRIVATE rvvm_common)
