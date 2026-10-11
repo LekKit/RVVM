@@ -134,6 +134,11 @@ RVVM_PUBLIC bool rvvm_pause_machine(rvvm_machine_t* machine);
 RVVM_PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset);
 
 /**
+ * Halt machine without powering it off
+ */
+PUBLIC void rvvm_machine_halt(rvvm_machine_t* machine);
+
+/**
  * Check whether machine is currently running
  */
 RVVM_PUBLIC bool rvvm_machine_running(rvvm_machine_t* machine);

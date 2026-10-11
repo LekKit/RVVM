@@ -72,7 +72,7 @@ static void rvvm_gui_on_close(gui_window_t* win)
         hid_keyboard_press(rvvm->keyboard, HID_KEY_POWER);
         hid_keyboard_release(rvvm->keyboard, HID_KEY_POWER);
     } else {
-        rvvm_pause_machine(rvvm->machine);
+        rvvm_machine_halt(rvvm->machine);
     }
 }
 

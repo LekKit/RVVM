@@ -33,7 +33,8 @@ PUSH_OPTIMIZATION_SIZE
 
 #define RVVM_POWER_OFF       0
 #define RVVM_POWER_ON        1
-#define RVVM_POWER_RESET     2
+#define RVVM_POWER_HALT      2
+#define RVVM_POWER_RESET     3
 
 // Default memory base address
 #define RVVM_DEFAULT_MEMBASE 0x80000000U
@@ -758,6 +759,15 @@ PUBLIC void rvvm_reset_machine(rvvm_machine_t* machine, bool reset)
     if (machine) {
         // Handled by eventloop
         atomic_store_uint32_relax(&machine->power_state, reset ? RVVM_POWER_RESET : RVVM_POWER_OFF);
+        rvvm_wake_eventloop();
+    }
+}
+
+PUBLIC void rvvm_machine_halt(rvvm_machine_t* machine)
+{
+    if (machine) {
+        // Handled by eventloop
+        atomic_store_uint32_relax(&machine->power_state, RVVM_POWER_HALT);
         rvvm_wake_eventloop();
     }
 }
