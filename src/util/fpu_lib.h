@@ -1063,6 +1063,13 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
 {
     uint32_t old_exceptions = fpu_get_exceptions();
     bool invalid = fpu_fma32_invalid_soft(a, b, c);
+    const uint32_t mode = fpu_get_rounding_mode();
+    const bool directed = mode == FPU_LIB_ROUND_TZ || mode == FPU_LIB_ROUND_DN || mode == FPU_LIB_ROUND_UP;
+
+    if (directed) {
+        // Exception flags are sticky; isolate this operation's NX from old guest flags.
+        fpu_clear_exceptions(FPU_LIB_FLAG_NX);
+    }
 
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     fpu_f32_t ret = fpu_wrap_f32(__builtin_fmaf(fpu_raw_f32(a), fpu_raw_f32(b), fpu_raw_f32(c)));
@@ -1070,11 +1077,10 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
     fpu_f64_t mul = fpu_mul64(fpu_fcvt_f32_to_f64(a), fpu_fcvt_f32_to_f64(b));
     fpu_f64_t add = fpu_fcvt_f32_to_f64(c);
     fpu_f64_t sum = fpu_add64(mul, add);
-    const uint32_t mode = fpu_get_rounding_mode();
     fpu_f32_t ret;
-    if (mode == FPU_LIB_ROUND_TZ || mode == FPU_LIB_ROUND_DN || mode == FPU_LIB_ROUND_UP) {
+    if (directed) {
         ret = fpu_fcvt_f64_to_f32(sum);
-        if ((fpu_get_exceptions() & ~old_exceptions & FPU_LIB_FLAG_NX) &&
+        if ((fpu_get_exceptions() & FPU_LIB_FLAG_NX) &&
             (fpu_bit_f32_to_u32(ret) & FPU_LIB_FP32_NOSIGNED_MASK) < FPU_LIB_FP32_MINIMUM_NORM) {
             fpu_raise_exceptions(FPU_LIB_FLAG_UF);
         }
@@ -1086,6 +1092,10 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
 #endif
     }
 #endif
+
+    if (directed) {
+        fpu_raise_exceptions(old_exceptions & FPU_LIB_FLAG_NX);
+    }
 
     if (unlikely((fpu_bit_f32_to_u32(ret) & FPU_LIB_FP32_NOSIGNED_MASK) == FPU_LIB_FP32_MINIMUM_NORM)) {
         fpu_fma32_fixup_uf(a, b, c, old_exceptions);
