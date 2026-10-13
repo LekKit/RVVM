@@ -160,7 +160,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #define RTL8169_DESC_RSV1     0x00800000UL // Reserved (Always 1)
 #define RTL8169_DESC_UDP      0x00040000UL // UDP/IP Received
 #define RTL8169_DESC_TCP      0x00020000UL // TCP/IP Received
-#define RTL8169_DESC_RXSTA    0x34820000UL // FS | LS | PAM | TCP
+#define RTL8169_DESC_RXSTA    0x34800000UL // FS | LS | PAM | RSV1; checksums are verified by the guest
 
 /*
  * PHY registers
