@@ -201,180 +201,86 @@ static spinlock_t    wl_lock    = ZERO_INIT;
 static thread_ctx_t* wl_thread  = NULL;
 
 /*
- * XKB to HID key mapping
- */
+ * Linux evdev keycode → HID usage
+ *
+ * Wayland's wl_keyboard.key event delivers `key` as a Linux input
+ * event keycode (evdev). That's a STABLE physical-key identifier —
+ * it doesn't depend on which keyboard layout the user has loaded.
+ * Going via xkb_state_key_get_one_sym() instead would apply the user's
+ * current layout (Workman, Dvorak, Colemak, AZERTY, ...) and the
+ * emulator would receive layout-translated letters rather than
+ * physical key positions. For a hardware emulator that wants its own
+ * keyboard layout (or, like the ZX Spectrum, no layout — just key
+ * positions) that's the wrong behaviour.
+ *
+ * Indexed by evdev keycode, valued in HID usage codes. */
+static const hid_key_t evdev_to_hid[256] = {
+    [1]   = HID_KEY_ESC,
+    [2]   = HID_KEY_1,         [3]  = HID_KEY_2,         [4]  = HID_KEY_3,
+    [5]   = HID_KEY_4,         [6]  = HID_KEY_5,         [7]  = HID_KEY_6,
+    [8]   = HID_KEY_7,         [9]  = HID_KEY_8,         [10] = HID_KEY_9,
+    [11]  = HID_KEY_0,
+    [12]  = HID_KEY_MINUS,     [13] = HID_KEY_EQUAL,
+    [14]  = HID_KEY_BACKSPACE, [15] = HID_KEY_TAB,
+    [16]  = HID_KEY_Q,         [17] = HID_KEY_W,         [18] = HID_KEY_E,
+    [19]  = HID_KEY_R,         [20] = HID_KEY_T,         [21] = HID_KEY_Y,
+    [22]  = HID_KEY_U,         [23] = HID_KEY_I,         [24] = HID_KEY_O,
+    [25]  = HID_KEY_P,
+    [26]  = HID_KEY_LEFTBRACE, [27] = HID_KEY_RIGHTBRACE,
+    [28]  = HID_KEY_ENTER,
+    [29]  = HID_KEY_LEFTCTRL,
+    [30]  = HID_KEY_A,         [31] = HID_KEY_S,         [32] = HID_KEY_D,
+    [33]  = HID_KEY_F,         [34] = HID_KEY_G,         [35] = HID_KEY_H,
+    [36]  = HID_KEY_J,         [37] = HID_KEY_K,         [38] = HID_KEY_L,
+    [39]  = HID_KEY_SEMICOLON, [40] = HID_KEY_APOSTROPHE,
+    [41]  = HID_KEY_GRAVE,     [42] = HID_KEY_LEFTSHIFT,
+    [43]  = HID_KEY_BACKSLASH,
+    [44]  = HID_KEY_Z,         [45] = HID_KEY_X,         [46] = HID_KEY_C,
+    [47]  = HID_KEY_V,         [48] = HID_KEY_B,         [49] = HID_KEY_N,
+    [50]  = HID_KEY_M,
+    [51]  = HID_KEY_COMMA,     [52] = HID_KEY_DOT,       [53] = HID_KEY_SLASH,
+    [54]  = HID_KEY_RIGHTSHIFT,
+    [55]  = HID_KEY_KPASTERISK,
+    [56]  = HID_KEY_LEFTALT,
+    [57]  = HID_KEY_SPACE,
+    [58]  = HID_KEY_CAPSLOCK,
+    [59]  = HID_KEY_F1,        [60] = HID_KEY_F2,        [61] = HID_KEY_F3,
+    [62]  = HID_KEY_F4,        [63] = HID_KEY_F5,        [64] = HID_KEY_F6,
+    [65]  = HID_KEY_F7,        [66] = HID_KEY_F8,        [67] = HID_KEY_F9,
+    [68]  = HID_KEY_F10,
+    [69]  = HID_KEY_NUMLOCK,   [70] = HID_KEY_SCROLLLOCK,
+    [71]  = HID_KEY_KP7,       [72] = HID_KEY_KP8,       [73] = HID_KEY_KP9,
+    [74]  = HID_KEY_KPMINUS,
+    [75]  = HID_KEY_KP4,       [76] = HID_KEY_KP5,       [77] = HID_KEY_KP6,
+    [78]  = HID_KEY_KPPLUS,
+    [79]  = HID_KEY_KP1,       [80] = HID_KEY_KP2,       [81] = HID_KEY_KP3,
+    [82]  = HID_KEY_KP0,       [83] = HID_KEY_KPDOT,
+    [86]  = HID_KEY_102ND,
+    [87]  = HID_KEY_F11,       [88] = HID_KEY_F12,
+    [96]  = HID_KEY_KPENTER,
+    [97]  = HID_KEY_RIGHTCTRL,
+    [98]  = HID_KEY_KPSLASH,
+    [99]  = HID_KEY_SYSRQ,
+    [100] = HID_KEY_RIGHTALT,
+    [102] = HID_KEY_HOME,      [103] = HID_KEY_UP,
+    [104] = HID_KEY_PAGEUP,
+    [105] = HID_KEY_LEFT,      [106] = HID_KEY_RIGHT,
+    [107] = HID_KEY_END,       [108] = HID_KEY_DOWN,
+    [109] = HID_KEY_PAGEDOWN,
+    [110] = HID_KEY_INSERT,    [111] = HID_KEY_DELETE,
+    [117] = HID_KEY_KPEQUAL,
+    [119] = HID_KEY_PAUSE,
+    [125] = HID_KEY_LEFTMETA,  [126] = HID_KEY_RIGHTMETA,
+    [127] = HID_KEY_COMPOSE,
+};
 
-static hid_key_t wayland_keysym_to_hid(int32_t keysym)
+static hid_key_t wayland_evdev_keycode_to_hid(uint32_t key)
 {
-    // clang-format off
-    switch (keysym) {
-        case XKB_KEY_a:                    return HID_KEY_A;
-        case XKB_KEY_b:                    return HID_KEY_B;
-        case XKB_KEY_c:                    return HID_KEY_C;
-        case XKB_KEY_d:                    return HID_KEY_D;
-        case XKB_KEY_e:                    return HID_KEY_E;
-        case XKB_KEY_f:                    return HID_KEY_F;
-        case XKB_KEY_g:                    return HID_KEY_G;
-        case XKB_KEY_h:                    return HID_KEY_H;
-        case XKB_KEY_i:                    return HID_KEY_I;
-        case XKB_KEY_j:                    return HID_KEY_J;
-        case XKB_KEY_k:                    return HID_KEY_K;
-        case XKB_KEY_l:                    return HID_KEY_L;
-        case XKB_KEY_m:                    return HID_KEY_M;
-        case XKB_KEY_n:                    return HID_KEY_N;
-        case XKB_KEY_o:                    return HID_KEY_O;
-        case XKB_KEY_p:                    return HID_KEY_P;
-        case XKB_KEY_q:                    return HID_KEY_Q;
-        case XKB_KEY_r:                    return HID_KEY_R;
-        case XKB_KEY_s:                    return HID_KEY_S;
-        case XKB_KEY_t:                    return HID_KEY_T;
-        case XKB_KEY_u:                    return HID_KEY_U;
-        case XKB_KEY_v:                    return HID_KEY_V;
-        case XKB_KEY_w:                    return HID_KEY_W;
-        case XKB_KEY_x:                    return HID_KEY_X;
-        case XKB_KEY_y:                    return HID_KEY_Y;
-        case XKB_KEY_z:                    return HID_KEY_Z;
-        case XKB_KEY_0:                    return HID_KEY_0;
-        case XKB_KEY_1:                    return HID_KEY_1;
-        case XKB_KEY_2:                    return HID_KEY_2;
-        case XKB_KEY_3:                    return HID_KEY_3;
-        case XKB_KEY_4:                    return HID_KEY_4;
-        case XKB_KEY_5:                    return HID_KEY_5;
-        case XKB_KEY_6:                    return HID_KEY_6;
-        case XKB_KEY_7:                    return HID_KEY_7;
-        case XKB_KEY_8:                    return HID_KEY_8;
-        case XKB_KEY_9:                    return HID_KEY_9;
-        case XKB_KEY_Return:               return HID_KEY_ENTER;
-        case XKB_KEY_Escape:               return HID_KEY_ESC;
-        case XKB_KEY_BackSpace:            return HID_KEY_BACKSPACE;
-        case XKB_KEY_Tab:                  return HID_KEY_TAB;
-        case XKB_KEY_space:                return HID_KEY_SPACE;
-        case XKB_KEY_minus:                return HID_KEY_MINUS;
-        case XKB_KEY_equal:                return HID_KEY_EQUAL;
-        case XKB_KEY_bracketleft:          return HID_KEY_LEFTBRACE;
-        case XKB_KEY_bracketright:         return HID_KEY_RIGHTBRACE;
-        case XKB_KEY_backslash:            return HID_KEY_BACKSLASH;
-        case XKB_KEY_semicolon:            return HID_KEY_SEMICOLON;
-        case XKB_KEY_apostrophe:           return HID_KEY_APOSTROPHE;
-        case XKB_KEY_grave:                return HID_KEY_GRAVE;
-        case XKB_KEY_comma:                return HID_KEY_COMMA;
-        case XKB_KEY_period:               return HID_KEY_DOT;
-        case XKB_KEY_slash:                return HID_KEY_SLASH;
-        case XKB_KEY_Caps_Lock:            return HID_KEY_CAPSLOCK;
-        case XKB_KEY_F1:                   return HID_KEY_F1;
-        case XKB_KEY_F2:                   return HID_KEY_F2;
-        case XKB_KEY_F3:                   return HID_KEY_F3;
-        case XKB_KEY_F4:                   return HID_KEY_F4;
-        case XKB_KEY_F5:                   return HID_KEY_F5;
-        case XKB_KEY_F6:                   return HID_KEY_F6;
-        case XKB_KEY_F7:                   return HID_KEY_F7;
-        case XKB_KEY_F8:                   return HID_KEY_F8;
-        case XKB_KEY_F9:                   return HID_KEY_F9;
-        case XKB_KEY_F10:                  return HID_KEY_F10;
-        case XKB_KEY_F11:                  return HID_KEY_F11;
-        case XKB_KEY_F12:                  return HID_KEY_F12;
-        case XKB_KEY_Print:
-        case XKB_KEY_Sys_Req:              return HID_KEY_SYSRQ;
-        case XKB_KEY_Scroll_Lock:          return HID_KEY_SCROLLLOCK;
-        case XKB_KEY_Pause:                return HID_KEY_PAUSE;
-        case XKB_KEY_Insert:               return HID_KEY_INSERT;
-        case XKB_KEY_Home:                 return HID_KEY_HOME;
-        case XKB_KEY_Page_Up:              return HID_KEY_PAGEUP;
-        case XKB_KEY_Delete:               return HID_KEY_DELETE;
-        case XKB_KEY_End:                  return HID_KEY_END;
-        case XKB_KEY_Page_Down:            return HID_KEY_PAGEDOWN;
-        case XKB_KEY_Right:                return HID_KEY_RIGHT;
-        case XKB_KEY_Left:                 return HID_KEY_LEFT;
-        case XKB_KEY_Down:                 return HID_KEY_DOWN;
-        case XKB_KEY_Up:                   return HID_KEY_UP;
-        case XKB_KEY_Num_Lock:             return HID_KEY_NUMLOCK;
-        case XKB_KEY_KP_Divide:            return HID_KEY_KPSLASH;
-        case XKB_KEY_asterisk:
-        case XKB_KEY_KP_Multiply:          return HID_KEY_KPASTERISK;
-        case XKB_KEY_KP_Subtract:          return HID_KEY_KPMINUS;
-        case XKB_KEY_plus:
-        case XKB_KEY_KP_Add:               return HID_KEY_KPPLUS;
-        case XKB_KEY_KP_Enter:             return HID_KEY_KPENTER;
-        case XKB_KEY_KP_End:
-        case XKB_KEY_KP_1:                 return HID_KEY_KP1;
-        case XKB_KEY_KP_Down:
-        case XKB_KEY_KP_2:                 return HID_KEY_KP2;
-        case XKB_KEY_KP_Next:
-        case XKB_KEY_KP_3:                 return HID_KEY_KP3;
-        case XKB_KEY_KP_Left:
-        case XKB_KEY_KP_4:                 return HID_KEY_KP4;
-        case XKB_KEY_KP_Begin:
-        case XKB_KEY_KP_5:                 return HID_KEY_KP5;
-        case XKB_KEY_KP_Right:
-        case XKB_KEY_KP_6:                 return HID_KEY_KP6;
-        case XKB_KEY_KP_Home:
-        case XKB_KEY_KP_7:                 return HID_KEY_KP7;
-        case XKB_KEY_KP_Up:
-        case XKB_KEY_KP_8:                 return HID_KEY_KP8;
-        case XKB_KEY_KP_Prior:
-        case XKB_KEY_KP_9:                 return HID_KEY_KP9;
-        case XKB_KEY_KP_Insert:
-        case XKB_KEY_KP_0:                 return HID_KEY_KP0;
-        case XKB_KEY_KP_Delete:
-        case XKB_KEY_KP_Decimal:           return HID_KEY_KPDOT;
-        case XKB_KEY_less:                 return HID_KEY_102ND;
-        case XKB_KEY_Multi_key:            return HID_KEY_COMPOSE;
-        case XKB_KEY_KP_Equal:             return HID_KEY_KPEQUAL;
-        case XKB_KEY_F13:                  return HID_KEY_F13;
-        case XKB_KEY_F14:                  return HID_KEY_F14;
-        case XKB_KEY_F15:                  return HID_KEY_F15;
-        case XKB_KEY_F16:                  return HID_KEY_F16;
-        case XKB_KEY_F17:                  return HID_KEY_F17;
-        case XKB_KEY_F18:                  return HID_KEY_F18;
-        case XKB_KEY_F19:                  return HID_KEY_F19;
-        case XKB_KEY_F20:                  return HID_KEY_F20;
-        case XKB_KEY_F21:                  return HID_KEY_F21;
-        case XKB_KEY_F22:                  return HID_KEY_F22;
-        case XKB_KEY_F23:                  return HID_KEY_F23;
-        case XKB_KEY_F24:                  return HID_KEY_F24;
-        case XKB_KEY_Execute:              return HID_KEY_OPEN;
-        case XKB_KEY_Help:                 return HID_KEY_HELP;
-        case XKB_KEY_XF86ContextMenu:      return HID_KEY_PROPS;
-        case XKB_KEY_Menu:                 return HID_KEY_MENU;
-        case XKB_KEY_Select:               return HID_KEY_FRONT;
-        case XKB_KEY_Cancel:               return HID_KEY_STOP;
-        case XKB_KEY_Redo:                 return HID_KEY_AGAIN;
-        case XKB_KEY_Undo:                 return HID_KEY_UNDO;
-        case XKB_KEY_XF86Cut:              return HID_KEY_CUT;
-        case XKB_KEY_XF86Copy:             return HID_KEY_COPY;
-        case XKB_KEY_XF86Paste:            return HID_KEY_PASTE;
-        case XKB_KEY_Find:                 return HID_KEY_FIND;
-        case XKB_KEY_XF86AudioMute:        return HID_KEY_MUTE;
-        case XKB_KEY_XF86AudioRaiseVolume: return HID_KEY_VOLUMEUP;
-        case XKB_KEY_XF86AudioLowerVolume: return HID_KEY_VOLUMEDOWN;
-        case XKB_KEY_KP_Separator:         return HID_KEY_KPCOMMA;
-        case XKB_KEY_kana_RO:              return HID_KEY_RO;
-        case XKB_KEY_Hiragana_Katakana:    return HID_KEY_KATAKANAHIRAGANA;
-        case XKB_KEY_yen:                  return HID_KEY_YEN;
-        case XKB_KEY_Henkan:               return HID_KEY_HENKAN;
-        case XKB_KEY_Muhenkan:             return HID_KEY_MUHENKAN;
-        // HID_KEY_KPJPCOMMA ?
-        case XKB_KEY_Hangul:               return HID_KEY_HANGEUL;
-        case XKB_KEY_Hangul_Hanja:         return HID_KEY_HANJA;
-        case XKB_KEY_Katakana:             return HID_KEY_KATAKANA;
-        case XKB_KEY_Hiragana:             return HID_KEY_HIRAGANA;
-        case XKB_KEY_Zenkaku_Hankaku:      return HID_KEY_ZENKAKUHANKAKU;
-        case XKB_KEY_Control_L:            return HID_KEY_LEFTCTRL;
-        case XKB_KEY_Shift_L:              return HID_KEY_LEFTSHIFT;
-        case XKB_KEY_Alt_L:                return HID_KEY_LEFTALT;
-        case XKB_KEY_Super_L:              return HID_KEY_LEFTMETA;
-        case XKB_KEY_Control_R:            return HID_KEY_RIGHTCTRL;
-        case XKB_KEY_Shift_R:              return HID_KEY_RIGHTSHIFT;
-        case XKB_KEY_Alt_R:                return HID_KEY_RIGHTALT;
-        case XKB_KEY_Super_R:              return HID_KEY_RIGHTMETA;
-
-        // Reported by Fn key on T480s, maps to XF86WakeUp
-        case 0x1008ff2b:                   return HID_KEY_NONE;
+    if (key < sizeof(evdev_to_hid) / sizeof(evdev_to_hid[0])) {
+        hid_key_t hid = evdev_to_hid[key];
+        if (hid != HID_KEY_NONE) return hid;
     }
-    // clang-format on
-    if (keysym) {
-        rvvm_warn("Unmapped Wayland XKB keycode %x", keysym);
-    }
+    rvvm_warn("Unmapped evdev keycode %u", (uint32_t)key);
     return HID_KEY_NONE;
 }
 
@@ -432,10 +338,15 @@ static void wl_keyboard_on_key(void* data, struct wl_keyboard* keyboard, uint32_
 {
     wl_kb_data_t* kb_data = data;
     UNUSED(keyboard && serial && time);
-    if (kb_data && kb_data->surface && kb_data->xkb_state) {
+    if (kb_data && kb_data->surface) {
+        /* Map evdev keycode → HID directly. Bypassing xkb here makes
+         * the emulator see physical key positions (USB-HID convention)
+         * regardless of which keyboard layout the user has loaded on
+         * the host — Workman / Dvorak / Colemak / AZERTY all behave
+         * the same and the emulated machine sees a US-QWERTY-style
+         * physical keyboard. */
         gui_window_t* win     = wl_surface_get_user_data(kb_data->surface);
-        int32_t       keysym  = xkb_state_key_get_one_sym(kb_data->xkb_state, key + 8);
-        hid_key_t     hid_key = wayland_keysym_to_hid(keysym);
+        hid_key_t     hid_key = wayland_evdev_keycode_to_hid(key);
         if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
             gui_backend_on_key_press(win, hid_key);
         } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
