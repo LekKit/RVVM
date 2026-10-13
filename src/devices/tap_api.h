@@ -20,6 +20,7 @@ typedef struct {
     void* net_dev;
     // Feed received Ethernet frame to the NIC (Without CRC)
     bool (*feed_rx)(void* net_dev, const void* data, size_t size);
+    void (*link_changed)(void* net_dev, bool connected);
 } tap_net_dev_t;
 
 typedef struct tap_dev tap_dev_t;
