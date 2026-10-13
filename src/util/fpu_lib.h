@@ -1063,8 +1063,10 @@ static forceinline func_opt_size fpu_f32_t fpu_fma32(fpu_f32_t a, fpu_f32_t b, f
 {
     uint32_t old_exceptions = fpu_get_exceptions();
     bool invalid = fpu_fma32_invalid_soft(a, b, c);
+#if !defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     const uint32_t mode = fpu_get_rounding_mode();
     const bool directed = mode == FPU_LIB_ROUND_TZ || mode == FPU_LIB_ROUND_DN || mode == FPU_LIB_ROUND_UP;
+#endif
 
 #if defined(FPU_LIB_OPTIMAL_BUILTIN_FMA)
     fpu_f32_t ret = fpu_wrap_f32(__builtin_fmaf(fpu_raw_f32(a), fpu_raw_f32(b), fpu_raw_f32(c)));
