@@ -1753,6 +1753,36 @@ static forceinline int64_t fpu_round_f64_to_i64(fpu_f64_t d, uint32_t mode)
     return ret;
 }
 
+static forceinline fpu_f32_t fpu_round_to_integral32(fpu_f32_t f, uint32_t mode, bool set_inexact)
+{
+    if (fpu_is_nan32_soft(f)) {
+        if (fpu_is_snan32_soft(f)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u32_to_f32(FPU_LIB_FP32_CANONICAL_NAN);
+    }
+    fpu_f32_t ret = fpu_round_f32_internal(f, mode);
+    if (set_inexact && !fpu_is_bit_equal32(f, ret)) {
+        fpu_raise_inexact();
+    }
+    return ret;
+}
+
+static forceinline fpu_f64_t fpu_round_to_integral64(fpu_f64_t d, uint32_t mode, bool set_inexact)
+{
+    if (fpu_is_nan64_soft(d)) {
+        if (fpu_is_snan64_soft(d)) {
+            fpu_raise_invalid();
+        }
+        return fpu_bit_u64_to_f64(FPU_LIB_FP64_CANONICAL_NAN);
+    }
+    fpu_f64_t ret = fpu_round_f64_internal(d, mode);
+    if (set_inexact && !fpu_is_bit_equal64(d, ret)) {
+        fpu_raise_inexact();
+    }
+    return ret;
+}
+
 /*
  * IEEE 754 Signaling Comparisons
  *
