@@ -1,5 +1,5 @@
 /*
-framebuffer.c - Simple Framebuffer
+simple-fb.c - Simple Framebuffer
 Copyright (C) 2021  LekKit <github.com/LekKit>
 
 This Source Code Form is subject to the terms of the Mozilla Public

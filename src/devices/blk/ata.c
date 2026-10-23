@@ -179,9 +179,9 @@ static inline uint64_t ata_get_seek(ata_dev_t* ata)
 static void ata_copy_id_string(uint8_t* buf, const char* str, size_t size)
 {
     // Reverse each byte pair since they are little-endian words, pad with spaces
-    size_t len = rvvm_strnlen(str, size);
-    memset(buf, ' ', size);
-    for (size_t i = 0; i < len; ++i) {
+    size_t cap = size & ~1ULL;
+    memset(buf, ' ', cap);
+    for (size_t i = 0; i < cap && str[i]; ++i) {
         buf[i ^ 1ULL] = str[i];
     }
 }
