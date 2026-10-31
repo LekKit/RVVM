@@ -17,12 +17,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #include <rvvm/rvvm.h>
 
 #include <util/atomics.h>
-#include <util/fpu_types.h>
 #include <util/blk_io.h>
+#include <util/fpu_types.h>
 #include <util/rvtimer.h>
+#include <util/rvvm_types.h>
 #include <util/threading.h>
-#include <util/vector.h>
 #include <util/utils.h>
+#include <util/vector.h>
 
 #include <util/fdtlib.h> // TODO: Replace with rvvm_fdt
 
