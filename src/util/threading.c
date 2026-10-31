@@ -24,7 +24,7 @@ PUSH_OPTIMIZATION_SIZE
 #endif
 
 /*
- * Determine threading implementation
+ * Probe threading implementation
  */
 
 #if defined(USE_THREAD_EMU)
@@ -36,7 +36,6 @@ PUSH_OPTIMIZATION_SIZE
 #elif defined(HOST_TARGET_POSIX) && HOST_TARGET_POSIX >= 199506L
 // Use pthreads
 #include <pthread.h>
-#include <signal.h>
 #include <time.h>
 #define POSIX_THREADS_IMPL 1
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112LL && !defined(__STDC_NO_THREADS__) /**/                  \
@@ -60,22 +59,28 @@ PUSH_OPTIMIZATION_SIZE
 #endif
 
 /*
- * Probe for native futex support
+ * Probe futex implementation
  */
 
-#if !defined(USE_FUTEX_EMU) && !defined(USE_THREAD_EMU)
-#if defined(HOST_TARGET_LINUX) && CHECK_INCLUDE(sys/syscall.h, 1)
+#if defined(USE_FUTEX_EMU) || defined(USE_THREAD_EMU)
 
-// Use Linux futexes (Linux 2.6.22+)
-#include <sys/syscall.h> // For __NR_futex, __NR_futex_time64
-#if !defined(__NR_futex_time64) && defined(__NR_futex)
-#define __NR_futex_time64 __NR_futex
+// Use futex emulation
+
+#elif defined(HOST_TARGET_LINUX) && CHECK_INCLUDE(sys/syscall.h, 1)
+
+// Use Linux futex (Linux 2.6.22+)
+#include <sys/syscall.h> // For __NR_futex, __NR_futex_time64, __NR_epoll_create
+#if defined(__NR_futex)
+#define LINUX_FUTEX_SYSCALL __NR_futex
+#elif defined(__NR_futex_time64)
+#define LINUX_FUTEX_SYSCALL __NR_futex_time64
 #endif
+// Missing __NR_epoll_create implies missing <linux/futex.h> on ancient systems
 #if defined(__NR_epoll_create) && CHECK_INCLUDE(linux/futex.h, 1)
 #include <linux/futex.h> // For FUTEX_WAIT_PRIVATE, FUTEX_WAKE_PRIVATE
 #endif
-#if defined(__NR_futex_time64) && defined(FUTEX_WAIT_PRIVATE) && defined(FUTEX_WAKE_PRIVATE)
-#include <errno.h>
+#if defined(LINUX_FUTEX_SYSCALL) && defined(FUTEX_WAIT_PRIVATE) && defined(FUTEX_WAKE_PRIVATE)
+#include <errno.h>  // For errno
 #include <unistd.h> // For syscall()
 #define LINUX_FUTEX_IMPL  1
 #define NATIVE_FUTEX_IMPL 1
@@ -83,8 +88,8 @@ PUSH_OPTIMIZATION_SIZE
 
 #elif defined(HOST_TARGET_FREEBSD) && HOST_TARGET_FREEBSD >= 11 && CHECK_INCLUDE(sys/umtx.h, 0)
 
-// Use FreeBSD futexes (_umtx_op(), FreeBSD 11.0+)
-#include <errno.h>
+// Use FreeBSD futex (_umtx_op(), FreeBSD 11.0+)
+#include <errno.h> // For errno
 #include <sys/types.h>
 #include <sys/umtx.h>
 #if defined(UMTX_OP_WAIT_UINT) && defined(UMTX_OP_WAKE)
@@ -94,8 +99,8 @@ PUSH_OPTIMIZATION_SIZE
 
 #elif defined(HOST_TARGET_OPENBSD) && CHECK_INCLUDE(sys/futex.h, 0)
 
-// Use OpenBSD futexes (OpenBSD 6.2+)
-#include <errno.h>
+// Use OpenBSD futex (OpenBSD 6.2+)
+#include <errno.h> // For errno
 #include <sys/futex.h>
 #include <sys/time.h>
 #if defined(FUTEX_WAIT) && defined(FUTEX_WAKE)
@@ -105,16 +110,15 @@ PUSH_OPTIMIZATION_SIZE
 
 #elif defined(HOST_TARGET_DRAGONFLYBSD)
 
-// Use DragonFlyBSD futexes (DragonFlyBSD 1.1+)
+// Use DragonFlyBSD futex (DragonFlyBSD 1.1+)
 #include <unistd.h>
 #define DRAGONFLY_FUTEX_IMPL 1
 #define NATIVE_FUTEX_IMPL    1
 
 #elif defined(HOST_TARGET_DARWIN)
 
-// Probe Mac OS futexes (__ulock_wait(), OS X 10.12+)
-// Use pthread_cond_timedwait_relative_np()
-#include <errno.h>
+// Probe MacOS futex (__ulock_wait(), OS X 10.12+)
+#include <errno.h>               // For errno
 #define ULOCK_CMP_WAIT    0x0001 // Compare and wait on a 32-bit value
 #define ULOCK_WAKE_ONE    0x0001 // Wake one thread
 #define ULOCK_WAKE_ALL    0x0101 // Wake all threads
@@ -125,28 +129,46 @@ static int (*ulock_wake)(uint32_t op, void* ptr, uint64_t unused)           = NU
 
 #elif defined(__wasm__) && GNU_BUILTIN(__builtin_wasm_memory_atomic_wait32)
 
-// Use WASM futexes (__builtin_wasm_memory_atomic_wait32)
+// Use WASM futex (__builtin_wasm_memory_atomic_wait32)
 #define WASM_FUTEX_IMPL   1
 #define NATIVE_FUTEX_IMPL 1
 
 #endif
+
+/*
+ * Provide futex_timespec_t
+ */
+
+#if defined(LINUX_FUTEX_IMPL)
+// Use proper timespec layout for __NR_futex or __NR_futex_time64
+typedef struct {
+#if defined(__NR_futex)
+    long tv_sec;
+    long tv_nsec;
+#else
+    long long tv_sec;
+    long long tv_nsec;
+#endif
+} futex_timespec_t;
+#elif defined(NATIVE_FUTEX_IMPL)
+typedef struct timespec futex_timespec_t;
 #endif
 
 /*
- * Probe for futex emulation helpers
+ * Probe futex emulation helpers
  */
 
 #if !defined(NATIVE_FUTEX_IMPL) && defined(HOST_TARGET_POSIX)
-#if defined(USE_FUTEX_OVER_PIPE)
-// Use pipe(), select(), close() for futex emulation
-#include <sys/select.h>
-#include <unistd.h>
+#if defined(USE_FUTEX_EMU_PIPE)
+#include <sys/select.h> // For select()
+#include <unistd.h>     // For pipe(), close()
 #elif defined(CLOCK_MONOTONIC) && defined(HOST_TARGET_POSIX) && HOST_TARGET_POSIX >= 200809L
 // Use clock_gettime() for pthread_cond time reference
 #define CLOCK_GETTIME_IMPL 1
+// Use pthread_cond_timedwait_relative_np() on Darwin
 #elif !defined(HOST_TARGET_DARWIN)
 // Use gettimeofday() for pthread_cond time reference
-#include <sys/time.h>
+#include <sys/time.h> // For gettimeofday()
 #endif
 #endif
 
@@ -290,42 +312,6 @@ void rvvm_thread_detach(rvvm_thread_t* thread)
 #endif
         safe_free(thread);
     }
-}
-
-#if defined(WIN32_THREADS_IMPL) && defined(HOST_TARGET_WINNT)
-// Probe CancelSynchronousIo() (NT 6.0+)
-static BOOL (*__stdcall cancel_sync_io)(HANDLE) = NULL;
-#elif defined(POSIX_THREADS_IMPL) && defined(SIGCONT) && defined(SA_RESTART) && defined(SIG_DFL)
-// Install signal handler for SIGCONT without SA_RESTART
-static struct sigaction sa_old = ZERO_INIT;
-
-static void sigcont_handler(int sig)
-{
-    struct sigaction tmp = ZERO_INIT;
-    sigaction(SIGCONT, &sa_old, &tmp);
-    UNUSED(sig);
-}
-#endif
-
-void rvvm_interrupt_syscall(rvvm_thread_t* thread)
-{
-#if defined(WIN32_THREADS_IMPL) && defined(HOST_TARGET_WINNT)
-    if (!cancel_sync_io) {
-        DO_ONCE_SCOPED {
-            cancel_sync_io = dlib_get_symbol("kernel32.dll", "CancelSynchronousIo");
-        }
-    }
-    if (cancel_sync_io) {
-        cancel_sync_io(thread->handle);
-    }
-#elif defined(POSIX_THREADS_IMPL) && defined(SIGCONT) && defined(SA_RESTART) && defined(SIG_DFL)
-    struct sigaction sa_new = {
-        .sa_handler = sigcont_handler,
-    };
-    sigaction(SIGCONT, &sa_new, &sa_old);
-    pthread_kill(thread->pthread, SIGCONT);
-#endif
-    UNUSED(thread);
 }
 
 /*
@@ -527,7 +513,7 @@ HANDLE thread_local_waitable_timer(uint64_t ns)
     return NULL;
 }
 
-#elif defined(POSIX_THREADS_IMPL) && !defined(USE_FUTEX_OVER_PIPE)
+#elif defined(POSIX_THREADS_IMPL) && !defined(USE_FUTEX_EMU_PIPE)
 
 static void* pcond_attr_monotonic(void)
 {
@@ -597,7 +583,7 @@ struct futex_emu_waiter {
     // Platform-dependent waiting primitive
 #if defined(WIN32_THREADS_IMPL)
     HANDLE event;
-#elif defined(USE_FUTEX_OVER_PIPE)
+#elif defined(USE_FUTEX_EMU_PIPE)
     int pipe[2];
 #elif defined(POSIX_THREADS_IMPL)
     pthread_cond_t cond;
@@ -681,7 +667,7 @@ static inline futex_emu_waiter_t* futex_emu_waiter_prepare(void* ptr)
     futex_emu_waiter_t* waiter = safe_new_obj(futex_emu_waiter_t);
 #if defined(WIN32_THREADS_IMPL)
     waiter->event = thread_local_event();
-#elif defined(USE_FUTEX_OVER_PIPE)
+#elif defined(USE_FUTEX_EMU_PIPE)
     pipe(waiter->pipe);
 #elif defined(POSIX_THREADS_IMPL)
     pthread_cond_init(&waiter->cond, pcond_attr_monotonic());
@@ -715,7 +701,7 @@ static inline void futex_emu_waiter_wait(futex_emu_queue_t* queue, futex_emu_wai
         }
     }
     futex_emu_lock(queue);
-#elif defined(USE_FUTEX_OVER_PIPE)
+#elif defined(USE_FUTEX_EMU_PIPE)
     futex_emu_unlock(queue);
     if (waiter->pipe[0]) {
         struct timeval* tp = NULL;
@@ -759,7 +745,7 @@ static inline void futex_emu_waiter_wake(futex_emu_waiter_t* waiter)
     if (waiter->event) {
         SetEvent(waiter->event);
     }
-#elif defined(USE_FUTEX_OVER_PIPE)
+#elif defined(USE_FUTEX_EMU_PIPE)
     if (waiter->pipe[1]) {
         close(waiter->pipe[1]);
         waiter->pipe[1] = 0;
@@ -777,7 +763,7 @@ static inline void futex_emu_waiter_free(futex_emu_waiter_t* waiter)
 {
 #if defined(WIN32_THREADS_IMPL)
     thread_local_event_dispose(waiter->event);
-#elif defined(USE_FUTEX_OVER_PIPE)
+#elif defined(USE_FUTEX_EMU_PIPE)
     if (waiter->pipe[0]) {
         close(waiter->pipe[0]);
     }
@@ -889,8 +875,8 @@ static uint32_t futex_native_wait(void* ptr, uint32_t val, uint64_t ns)
 {
 #if defined(LINUX_FUTEX_IMPL) || defined(FREEBSD_FUTEX_IMPL) || defined(OPENBSD_FUTEX_IMPL)
     // Prepare timespec structure
-    struct timespec  ts = ZERO_INIT;
-    struct timespec* tp = NULL;
+    futex_timespec_t  ts = ZERO_INIT;
+    futex_timespec_t* tp = NULL;
     if (ns != ((uint64_t)-1)) {
         ts.tv_sec  = ns / 1000000000ULL;
         ts.tv_nsec = ns % 1000000000ULL;
@@ -908,7 +894,7 @@ static uint32_t futex_native_wait(void* ptr, uint32_t val, uint64_t ns)
 
 #if defined(LINUX_FUTEX_IMPL)
     sleep_low_latency(true);
-    FUTEX_RET(syscall(__NR_futex_time64, ptr, FUTEX_WAIT_PRIVATE, val, tp, NULL, 0), EAGAIN)
+    FUTEX_RET(syscall(LINUX_FUTEX_SYSCALL, ptr, FUTEX_WAIT_PRIVATE, val, tp, NULL, 0), EAGAIN)
 #elif defined(FREEBSD_FUTEX_IMPL)
     void* ts_size = tp ? ((void*)(size_t)sizeof(ts)) : NULL;
     FUTEX_RET(_umtx_op(ptr, UMTX_OP_WAIT_UINT, val, ts_size, tp), EAGAIN)
@@ -935,7 +921,7 @@ static uint32_t futex_native_wait(void* ptr, uint32_t val, uint64_t ns)
 static bool futex_native_wake(void* ptr, uint32_t num)
 {
 #if defined(LINUX_FUTEX_IMPL)
-    return syscall(__NR_futex_time64, ptr, FUTEX_WAKE_PRIVATE, num, NULL, NULL, 0) >= 0;
+    return syscall(LINUX_FUTEX_SYSCALL, ptr, FUTEX_WAKE_PRIVATE, num, NULL, NULL, 0) >= 0;
 #elif defined(FREEBSD_FUTEX_IMPL)
     return _umtx_op(ptr, UMTX_OP_WAKE, num, NULL, NULL) >= 0;
 #elif defined(OPENBSD_FUTEX_IMPL)
