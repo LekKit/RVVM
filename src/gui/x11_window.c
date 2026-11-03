@@ -362,14 +362,92 @@ static hid_key_t x11_keysym_to_hid(KeySym keysym)
     return HID_KEY_NONE;
 }
 
+/* Map an X11 keycode to a HID usage code WITHOUT going through the
+ * keyboard-layout-translated keysym table. On Linux X11, keycodes are
+ * Linux evdev keycodes + 8 (the X11 protocol's historical offset), so
+ * subtracting 8 recovers the layout-independent physical key id. The
+ * emulator wants physical positions, not "what letter the user's
+ * Workman/Dvorak/AZERTY layout assigns to that physical key" — those
+ * are the wrong abstraction for emulating actual hardware. The
+ * x11_keycodemap-based path below is kept as a fallback for any
+ * keycode outside the standard evdev range. */
+extern const hid_key_t x11_evdev_to_hid[256];
+
 static hid_key_t x11_keycode_to_hid(int keycode)
 {
+    int evdev = keycode - 8;
+    if (evdev >= 0 && evdev < (int)(sizeof(x11_evdev_to_hid) / sizeof(x11_evdev_to_hid[0]))) {
+        hid_key_t hid = x11_evdev_to_hid[evdev];
+        if (hid != HID_KEY_NONE) return hid;
+    }
+    /* Fallback: layout-translated keysym lookup. */
     if (x11_keycodemap && keycode >= x11_min_keycode && keycode <= x11_max_keycode) {
         uint32_t entry = (keycode - x11_min_keycode) * x11_keysyms_per_keycode;
         return x11_keysym_to_hid(x11_keycodemap[entry]);
     }
     return HID_KEY_NONE;
 }
+
+/* Linux evdev keycode → HID usage. Indexed by evdev keycode (0..255). */
+const hid_key_t x11_evdev_to_hid[256] = {
+    [1]   = HID_KEY_ESC,
+    [2]   = HID_KEY_1,         [3]  = HID_KEY_2,         [4]  = HID_KEY_3,
+    [5]   = HID_KEY_4,         [6]  = HID_KEY_5,         [7]  = HID_KEY_6,
+    [8]   = HID_KEY_7,         [9]  = HID_KEY_8,         [10] = HID_KEY_9,
+    [11]  = HID_KEY_0,
+    [12]  = HID_KEY_MINUS,     [13] = HID_KEY_EQUAL,
+    [14]  = HID_KEY_BACKSPACE, [15] = HID_KEY_TAB,
+    [16]  = HID_KEY_Q,         [17] = HID_KEY_W,         [18] = HID_KEY_E,
+    [19]  = HID_KEY_R,         [20] = HID_KEY_T,         [21] = HID_KEY_Y,
+    [22]  = HID_KEY_U,         [23] = HID_KEY_I,         [24] = HID_KEY_O,
+    [25]  = HID_KEY_P,
+    [26]  = HID_KEY_LEFTBRACE, [27] = HID_KEY_RIGHTBRACE,
+    [28]  = HID_KEY_ENTER,
+    [29]  = HID_KEY_LEFTCTRL,
+    [30]  = HID_KEY_A,         [31] = HID_KEY_S,         [32] = HID_KEY_D,
+    [33]  = HID_KEY_F,         [34] = HID_KEY_G,         [35] = HID_KEY_H,
+    [36]  = HID_KEY_J,         [37] = HID_KEY_K,         [38] = HID_KEY_L,
+    [39]  = HID_KEY_SEMICOLON, [40] = HID_KEY_APOSTROPHE,
+    [41]  = HID_KEY_GRAVE,     [42] = HID_KEY_LEFTSHIFT,
+    [43]  = HID_KEY_BACKSLASH,
+    [44]  = HID_KEY_Z,         [45] = HID_KEY_X,         [46] = HID_KEY_C,
+    [47]  = HID_KEY_V,         [48] = HID_KEY_B,         [49] = HID_KEY_N,
+    [50]  = HID_KEY_M,
+    [51]  = HID_KEY_COMMA,     [52] = HID_KEY_DOT,       [53] = HID_KEY_SLASH,
+    [54]  = HID_KEY_RIGHTSHIFT,
+    [55]  = HID_KEY_KPASTERISK,
+    [56]  = HID_KEY_LEFTALT,
+    [57]  = HID_KEY_SPACE,
+    [58]  = HID_KEY_CAPSLOCK,
+    [59]  = HID_KEY_F1,        [60] = HID_KEY_F2,        [61] = HID_KEY_F3,
+    [62]  = HID_KEY_F4,        [63] = HID_KEY_F5,        [64] = HID_KEY_F6,
+    [65]  = HID_KEY_F7,        [66] = HID_KEY_F8,        [67] = HID_KEY_F9,
+    [68]  = HID_KEY_F10,
+    [69]  = HID_KEY_NUMLOCK,   [70] = HID_KEY_SCROLLLOCK,
+    [71]  = HID_KEY_KP7,       [72] = HID_KEY_KP8,       [73] = HID_KEY_KP9,
+    [74]  = HID_KEY_KPMINUS,
+    [75]  = HID_KEY_KP4,       [76] = HID_KEY_KP5,       [77] = HID_KEY_KP6,
+    [78]  = HID_KEY_KPPLUS,
+    [79]  = HID_KEY_KP1,       [80] = HID_KEY_KP2,       [81] = HID_KEY_KP3,
+    [82]  = HID_KEY_KP0,       [83] = HID_KEY_KPDOT,
+    [86]  = HID_KEY_102ND,
+    [87]  = HID_KEY_F11,       [88] = HID_KEY_F12,
+    [96]  = HID_KEY_KPENTER,
+    [97]  = HID_KEY_RIGHTCTRL,
+    [98]  = HID_KEY_KPSLASH,
+    [99]  = HID_KEY_SYSRQ,
+    [100] = HID_KEY_RIGHTALT,
+    [102] = HID_KEY_HOME,      [103] = HID_KEY_UP,
+    [104] = HID_KEY_PAGEUP,
+    [105] = HID_KEY_LEFT,      [106] = HID_KEY_RIGHT,
+    [107] = HID_KEY_END,       [108] = HID_KEY_DOWN,
+    [109] = HID_KEY_PAGEDOWN,
+    [110] = HID_KEY_INSERT,    [111] = HID_KEY_DELETE,
+    [117] = HID_KEY_KPEQUAL,
+    [119] = HID_KEY_PAUSE,
+    [125] = HID_KEY_LEFTMETA,  [126] = HID_KEY_RIGHTMETA,
+    [127] = HID_KEY_COMPOSE,
+};
 
 /*
  * Xlib error handling, try-catch via setjmp
