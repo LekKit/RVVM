@@ -41,8 +41,7 @@ static forceinline uint32_t riscv_fpu_host_rm(uint32_t rm)
 static forceinline uint32_t riscv_fpu_static_rm_enter(uint32_t rm)
 {
     if (unlikely(rm != 0x07)) {
-        // Always report a mode to restore: the op itself may change it further
-        // (the RMM preparation), and leave must undo that too
+        // Always report a mode to restore, even when it equals the one being set
         const uint32_t prev = fpu_get_rounding_mode();
         fpu_set_rounding_mode(riscv_fpu_host_rm(rm));
         return prev;
@@ -157,6 +156,22 @@ static forceinline void riscv_emulate_f_opc_store(rvvm_hart_t* vm, const uint32_
     riscv_illegal_insn(vm, insn);
 }
 
+// FMA in the effective rounding mode: the host runs RNE for RMM (static or frm),
+// so an exact halfway tie is stepped away from zero afterwards
+static forceinline fpu_f32_t riscv_fma_s(rvvm_hart_t* vm, uint32_t rm, fpu_f32_t a, fpu_f32_t b, fpu_f32_t c)
+{
+    const uint32_t  eff = (rm == RM_DYN) ? bit_cut(vm->csr.fcsr, 5, 3) : rm;
+    const fpu_f32_t n   = fpu_fma32(a, b, c);
+    return unlikely(eff == RM_RMM) ? fpu_rmm_fma32(n, a, b, c) : n;
+}
+
+static forceinline fpu_f64_t riscv_fma_d(rvvm_hart_t* vm, uint32_t rm, fpu_f64_t a, fpu_f64_t b, fpu_f64_t c)
+{
+    const uint32_t  eff = (rm == RM_DYN) ? bit_cut(vm->csr.fcsr, 5, 3) : rm;
+    const fpu_f64_t n   = fpu_fma64(a, b, c);
+    return unlikely(eff == RM_RMM) ? fpu_rmm_fma64(n, a, b, c) : n;
+}
+
 static forceinline void riscv_emulate_f_fmadd(rvvm_hart_t* vm, const uint32_t insn)
 {
     const size_t   rds = bit_ext_u32(insn, 7, 5);
@@ -171,14 +186,14 @@ static forceinline void riscv_emulate_f_fmadd(rvvm_hart_t* vm, const uint32_t in
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fmadd.s
                 riscv_write_s(vm, rds,
-                             fpu_fma32(riscv_read_s(vm, rs1), //
+                             riscv_fma_s(vm, rm, riscv_read_s(vm, rs1), //
                                        riscv_read_s(vm, rs2), //
                                        riscv_read_s(vm, rs3)));
                 riscv_fpu_static_rm_leave(prev_rm);
                 return;
             case 0x1: // fmadd.d
                 riscv_write_d(vm, rds,
-                             fpu_fma64(riscv_view_d(vm, rs1), //
+                             riscv_fma_d(vm, rm, riscv_view_d(vm, rs1), //
                                        riscv_view_d(vm, rs2), //
                                        riscv_view_d(vm, rs3)));
                 riscv_fpu_static_rm_leave(prev_rm);
@@ -204,14 +219,14 @@ static forceinline void riscv_emulate_f_fmsub(rvvm_hart_t* vm, const uint32_t in
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fmsub.s
                 riscv_write_s(vm, rds,
-                             fpu_fma32(riscv_read_s(vm, rs1), //
+                             riscv_fma_s(vm, rm, riscv_read_s(vm, rs1), //
                                        riscv_read_s(vm, rs2), //
                                        fpu_neg32(riscv_read_s(vm, rs3))));
                 riscv_fpu_static_rm_leave(prev_rm);
                 return;
             case 0x1: // fmsub.d
                 riscv_write_d(vm, rds,
-                             fpu_fma64(riscv_view_d(vm, rs1), //
+                             riscv_fma_d(vm, rm, riscv_view_d(vm, rs1), //
                                        riscv_view_d(vm, rs2), //
                                        fpu_neg64(riscv_view_d(vm, rs3))));
                 riscv_fpu_static_rm_leave(prev_rm);
@@ -237,14 +252,14 @@ static forceinline void riscv_emulate_f_fnmsub(rvvm_hart_t* vm, const uint32_t i
         switch (bit_ext_u32(insn, 25, 2)) {
             case 0x0: // fnmsub.s
                 riscv_write_s(vm, rds,
-                             fpu_fma32(fpu_neg32(riscv_read_s(vm, rs1)), //
+                             riscv_fma_s(vm, rm, fpu_neg32(riscv_read_s(vm, rs1)), //
                                        riscv_read_s(vm, rs2),            //
                                        riscv_read_s(vm, rs3)));
                 riscv_fpu_static_rm_leave(prev_rm);
                 return;
             case 0x1: // fnmsub.d
                 riscv_write_d(vm, rds,
-                             fpu_fma64(fpu_neg64(riscv_view_d(vm, rs1)), //
+                             riscv_fma_d(vm, rm, fpu_neg64(riscv_view_d(vm, rs1)), //
                                        riscv_view_d(vm, rs2),            //
                                        riscv_view_d(vm, rs3)));
                 riscv_fpu_static_rm_leave(prev_rm);
@@ -271,14 +286,14 @@ static forceinline void riscv_emulate_f_fnmadd(rvvm_hart_t* vm, const uint32_t i
             case 0x0: // fnmadd.s = -(rs1*rs2) - rs3; negate operands so the single
                        // rounding sees the correctly-signed result (directed modes)
                 riscv_write_s(vm, rds,
-                             fpu_fma32(fpu_neg32(riscv_read_s(vm, rs1)), //
+                             riscv_fma_s(vm, rm, fpu_neg32(riscv_read_s(vm, rs1)), //
                                        riscv_read_s(vm, rs2),            //
                                        fpu_neg32(riscv_read_s(vm, rs3))));
                 riscv_fpu_static_rm_leave(prev_rm);
                 return;
             case 0x1: // fnmadd.d
                 riscv_write_d(vm, rds,
-                             fpu_fma64(fpu_neg64(riscv_view_d(vm, rs1)), //
+                             riscv_fma_d(vm, rm, fpu_neg64(riscv_view_d(vm, rs1)), //
                                        riscv_view_d(vm, rs2),            //
                                        fpu_neg64(riscv_view_d(vm, rs3))));
                 riscv_fpu_static_rm_leave(prev_rm);
