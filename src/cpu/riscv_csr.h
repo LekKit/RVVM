@@ -276,6 +276,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #define CSR_STATUS_TW      (1ULL << 21)
 #define CSR_STATUS_TSR     (1ULL << 22)
 
+#define CSR_ENVCFG_FIOM    (1ULL << 0)
 #define CSR_ENVCFG_CBIE    (1ULL << 4)
 #define CSR_ENVCFG_CBCFE   (1ULL << 6)
 #define CSR_ENVCFG_CBZE    (1ULL << 7)
@@ -319,8 +320,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #define CSR_COUNTEREN_MASK 0x00000007U
 
-#define CSR_MENVCFG_MASK   0x80000000000000D0ULL
-#define CSR_SENVCFG_MASK   0x00000000000000D0ULL
+#define CSR_MENVCFG_MASK   0x80000000000000D1ULL
+#define CSR_SENVCFG_MASK   0x00000000000000D1ULL
 
 #define CSR_MSECCFG_MASK   0x0000000000000300ULL
 
