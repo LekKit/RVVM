@@ -169,7 +169,7 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
         fdt_node_add_prop_str(cpu, "device_type", "cpu");
         fdt_node_add_prop_u32(cpu, "reg", i);
         fdt_node_add_prop(cpu, "compatible", "lekkit,rvvm\0riscv\0", 18);
-        fdt_node_add_prop_u32(cpu, "clock-frequency", 3000000000);
+        fdt_node_add_prop_u32(cpu, "clock-frequency", RVVM_CPU_FREQ);
         fdt_node_add_prop_u32(cpu, "riscv,cbop-block-size", 64);
         fdt_node_add_prop_u32(cpu, "riscv,cboz-block-size", 64);
         fdt_node_add_prop_u32(cpu, "riscv,cbom-block-size", 64);
@@ -305,6 +305,7 @@ static void rvvm_reset_machine_state(rvvm_machine_t* machine)
         vm->csr.status = 0;
         // Set mcause to 0
         vm->csr.cause[RISCV_PRIV_MACHINE] = 0;
+        vm->csr.mcycle_offset             = 0;
         // Invalidate reservation
         vm->lrsc = false;
         // Pass hartid in register a0 & hartid CSR

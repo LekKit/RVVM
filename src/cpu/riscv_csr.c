@@ -163,9 +163,50 @@ static inline bool riscv_csr_zero_h(rvvm_hart_t* vm, rvvm_uxlen_t* dest)
     return false;
 }
 
+static inline uint64_t riscv_mcycle_time(rvvm_hart_t* vm)
+{
+    rvtimer_t* timer = &vm->machine->timer;
+    // Scale the monotonic virtual timebase to the fixed CPU clock advertised in the FDT.
+    return rvtimer_convert_freq(rvtimer_get(timer), rvtimer_freq(timer), RVVM_CPU_FREQ);
+}
+
+static inline uint64_t riscv_mcycle_get(rvvm_hart_t* vm)
+{
+    return riscv_mcycle_time(vm) + vm->csr.mcycle_offset;
+}
+
+static inline bool riscv_csr_mcycle(rvvm_hart_t* vm, rvvm_uxlen_t* dest, uint8_t op)
+{
+    uint64_t counter = riscv_mcycle_get(vm);
+    bool     write   = ((*dest != 0) || (op == CSR_SWAP));
+    riscv_csr_helper_l(vm, &counter, dest, UINT64_MAX, op);
+    if (write) {
+        vm->csr.mcycle_offset = counter - riscv_mcycle_time(vm);
+    }
+    return true;
+}
+
+static inline bool riscv_csr_mcycle_h(rvvm_hart_t* vm, rvvm_uxlen_t* dest, uint8_t op)
+{
+    if (vm->rv64) {
+        return false;
+    }
+
+    uint64_t counter = riscv_mcycle_get(vm);
+    bool     write   = ((*dest != 0) || (op == CSR_SWAP));
+    riscv_csr_helper_h(vm, &counter, dest, UINT64_MAX, op);
+    if (write) {
+        vm->csr.mcycle_offset = counter - riscv_mcycle_time(vm);
+    }
+    return true;
+}
+
 static inline bool riscv_csr_counter(rvvm_hart_t* vm, rvvm_uxlen_t* dest, uint32_t counter)
 {
     if (riscv_csr_counter_enabled(vm, counter)) {
+        if (counter == 0 && !vm->userland) {
+            return riscv_csr_const(dest, riscv_mcycle_get(vm));
+        }
         return riscv_csr_const(dest, rvtimer_get(&vm->machine->timer));
     }
     return false;
@@ -174,6 +215,9 @@ static inline bool riscv_csr_counter(rvvm_hart_t* vm, rvvm_uxlen_t* dest, uint32
 static inline bool riscv_csr_counter_h(rvvm_hart_t* vm, rvvm_uxlen_t* dest, uint32_t counter)
 {
     if (!vm->rv64 && riscv_csr_counter_enabled(vm, counter)) {
+        if (counter == 0 && !vm->userland) {
+            return riscv_csr_const(dest, riscv_mcycle_get(vm) >> 32);
+        }
         return riscv_csr_const(dest, rvtimer_get(&vm->machine->timer) >> 32);
     }
     return false;
@@ -732,6 +776,7 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
 
         // Machine Counters/Timers
         case CSR_MCYCLE:
+            return riscv_csr_mcycle(vm, dest, op);
         case CSR_MINSTRET:
         case 0xB03: // mhpmcounter3
         case 0xB04: // mhpmcounter4
@@ -764,6 +809,7 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
         case 0xB1F: // mhpmcounter31
             return riscv_csr_zero(dest);
         case CSR_MCYCLEH:
+            return riscv_csr_mcycle_h(vm, dest, op);
         case CSR_MINSTRETH:
         case 0xB83: // mhpmcounter3h
         case 0xB84: // mhpmcounter4h
@@ -834,6 +880,8 @@ bool riscv_csr_op(rvvm_hart_t* vm, uint32_t csr_id, rvvm_uxlen_t* dest, uint8_t 
 
 void riscv_csr_init(rvvm_hart_t* vm)
 {
+    vm->csr.mcycle_offset = 0;
+
     // Delegate exceptions from M to S
     vm->csr.edeleg[RISCV_PRIV_HYPERVISOR] = 0xFFFFFFFF;
     vm->csr.ideleg[RISCV_PRIV_HYPERVISOR] = 0xFFFFFFFF;
