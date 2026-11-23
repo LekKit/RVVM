@@ -177,7 +177,8 @@ static void rvvm_init_fdt(rvvm_machine_t* machine)
             fdt_node_add_prop_str(cpu, "riscv,isa", "rv64ima");
             fdt_node_add_prop_str(cpu, "riscv,isa-base", "rv64i");
             fdt_node_add_prop(cpu, "riscv,isa-extensions", NULL, 0);
-            fdt_node_add_prop_str(cpu, "mmu-type", "riscv,sv39");
+            fdt_node_add_prop_str(cpu, "mmu-type",
+                                  rvvm_has_arg("sv57") ? "riscv,sv57" : "riscv,sv48");
         } else {
             fdt_node_add_prop_str(cpu, "riscv,isa", "rv32ima");
             fdt_node_add_prop_str(cpu, "riscv,isa-base", "rv32i");
