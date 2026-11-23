@@ -40,6 +40,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #define RVVM_RVV_SIZE      (RVVM_RVV_VLEN >> 3)
 
 #define RVVM_OPTS_ARR_SIZE 0x09
+#define RVVM_CPU_FREQ      3000000000ULL // Fixed virtual CPU clock exposed in the generated FDT, in Hz
 
 BUILD_ASSERT(RVVM_TLB_SIZE);
 BUILD_ASSERT(!(RVVM_TLB_SIZE & RVVM_TLB_MASK));
@@ -260,6 +261,7 @@ struct align_cacheline rvvm_hart_t {
         uint32_t vcsr;
         uint32_t vtype;
         uint32_t hartid;
+        uint64_t mcycle_offset;
     } csr;
 
 #if defined(USE_JIT)
