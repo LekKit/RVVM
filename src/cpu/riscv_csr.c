@@ -659,7 +659,7 @@ static forceinline bool riscv_csr_op_internal(rvvm_hart_t* vm, uint32_t csr_id, 
         case CSR_MSTATUS:
             return riscv_csr_status(vm, dest, CSR_MSTATUS_MASK, op);
         case CSR_MSTATUSH:
-            return riscv_csr_zero(dest); // We don't need upper half on rv32 for now
+            return riscv_csr_zero_h(vm, dest); // mstatush is RV32-only; unimplemented fields read as zero
         case CSR_MISA:
             return riscv_csr_misa(vm, dest, op);
         case CSR_MEDELEG:
