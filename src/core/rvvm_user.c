@@ -848,6 +848,7 @@ static void* rvvm_user_thread_wrap(void* arg)
     rvvm_user_thread_t* thread = arg;
     rvvm_hart_t* cpu = thread->cpu;
     bool running = true;
+    rvvm_addr_t         exit_status = 0;
 
     current_user_hart = cpu;
 
@@ -1115,6 +1116,8 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = 0;
                     break;
                 case 93: // exit
+                    // Linux exit status is limited to the low 8 bits.
+                    exit_status = a0 & 0xFF;
                     running = false;
                     break;
                 case 94: // exit_group
@@ -1655,11 +1658,11 @@ static void* rvvm_user_thread_wrap(void* arg)
 
     rvvm_free_user_thread(cpu);
     free(thread);
-    return NULL;
+    return (void*)(uintptr_t)exit_status;
 }
 
 // Jump into _start after setting up the context
-static void jump_start(void* entry, void* stack_top)
+static int jump_start(void* entry, void* stack_top)
 {
 #ifdef RVVM_USER_TEST_RISCV
     register size_t a0 __asm__("a0") = (size_t) entry;
@@ -1671,6 +1674,7 @@ static void jump_start(void* entry, void* stack_top)
         : "r" (a0), "r" (sp)
         :
     );
+    return 0;
 #elif defined(RVVM_USER_TEST_X86)
     register size_t rax __asm__("rax") = (size_t) entry;
     register size_t rsp __asm__("rsp") = (size_t) stack_top;
@@ -1682,6 +1686,7 @@ static void jump_start(void* entry, void* stack_top)
         : "r" (rax), "r" (rsp), "r" (rdx)
         :
     );
+    return 0;
 #else
     userland = rvvm_create_userland("rv64");
     rvvm_user_thread_t* thread = safe_new_obj(rvvm_user_thread_t);
@@ -1690,9 +1695,10 @@ static void jump_start(void* entry, void* stack_top)
     rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_X0 + 2, (size_t)stack_top);
     rvvm_write_cpu_reg(thread->cpu, RVVM_REGID_PC,     (size_t)entry);
 
-    rvvm_user_thread_wrap(thread);
+    int exit_status = (int)(uintptr_t)rvvm_user_thread_wrap(thread);
 
     rvvm_free_machine(userland);
+    return exit_status;
 #endif
 }
 
@@ -1943,14 +1949,15 @@ RVVM_PUBLIC int rvvm_user_linux(int argc, char** argv, char** envp)
 
     rvvm_info("Stack top at %p", stack_top);
 
+    int exit_status;
     if (elf.interp_path) {
-        jump_start((void*)interp.entry, stack_top);
+        exit_status = jump_start((void*)interp.entry, stack_top);
     } else {
-        jump_start((void*)elf.entry, stack_top);
+        exit_status = jump_start((void*)elf.entry, stack_top);
     }
 
     free(stack_buffer);
-    return 0;
+    return exit_status;
 }
 
 #else
