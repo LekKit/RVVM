@@ -142,19 +142,20 @@ typedef int32_t  uapi_long_t;
 
 #define UAPI_PATH_MAX 4096
 
-#define UAPI_EPERM   1
-#define UAPI_ENOENT  2
-#define UAPI_EINTR   4
-#define UAPI_EIO     5
-#define UAPI_EBADF   9
-#define UAPI_EAGAIN  11
-#define UAPI_ENOMEM  12
-#define UAPI_EACCESS 13
-#define UAPI_EFAULT  14
-#define UAPI_EBUSY   16
-#define UAPI_EEXIST  17
-#define UAPI_EINVAL  22
-#define UAPI_ENOSYS  38
+#define UAPI_EPERM    1
+#define UAPI_ENOENT   2
+#define UAPI_EINTR    4
+#define UAPI_EIO      5
+#define UAPI_EBADF    9
+#define UAPI_EAGAIN   11
+#define UAPI_ENOMEM   12
+#define UAPI_EACCESS  13
+#define UAPI_EFAULT   14
+#define UAPI_EBUSY    16
+#define UAPI_EEXIST   17
+#define UAPI_EINVAL   22
+#define UAPI_ERANGE   34
+#define UAPI_ENOSYS   38
 
 // RISC-V UAPI struct definitions & conversions
 struct uapi_new_utsname {
@@ -824,6 +825,17 @@ static int rvvm_sys_getresgid(int* rgid, int* egid, int* sgid)
 static rvvm_addr_t rvvm_sys_getcwd(char* buffer, size_t size)
 {
     char tmp[UAPI_PATH_MAX] = {0};
+    if (!buffer) {
+        char guest_path[UAPI_PATH_MAX] = {0};
+        if (!getcwd(tmp, sizeof(tmp))) {
+            return last_errno();
+        }
+        size_t len = unwrap_path(guest_path, tmp, sizeof(guest_path));
+        if (len + 1 > size) {
+            return -UAPI_ERANGE;
+        }
+        return -UAPI_EFAULT;
+    }
     if (!getcwd(tmp, size)) {
         return last_errno();
     }
