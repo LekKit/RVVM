@@ -857,10 +857,9 @@ static bool rvjit_arm64_logic_gen_immr_imms(int64_t imm, bool wide, uint32_t* im
         } else {
             rot  = bits - bit_ctz64(imm);
             cnt  = rot - (bit_clz64(imm) + bits - 64);
-            rot &= bits - 1;
         }
         if (rvjit_arm64_is_pow2((imm >> (bits - rot)) + 1)) {
-            *immr = rot;
+            *immr = neg ? rot : (rot & (bits - 1));
             *imms = cnt - 1;
             return true;
         }
