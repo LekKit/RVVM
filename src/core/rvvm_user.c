@@ -486,12 +486,84 @@ static void user_fault_handler_install(void)
     sigaction(SIGBUS, &sa, NULL);
 }
 
-typedef struct {
+typedef struct rvvm_user_thread {
     rvvm_hart_t* cpu;
     uint32_t* child_settid;
     uint32_t* child_cleartid;
     uint32_t tid;
+    struct rvvm_user_thread* next;
 } rvvm_user_thread_t;
+
+static spinlock_t user_task_lock = {0};
+static rvvm_user_thread_t* user_tasks = NULL;
+static int rvvm_sys_gettid(void);
+
+static bool rvvm_user_task_owned(int32_t pid)
+{
+    if (!pid || pid == getpid()) {
+        return true;
+    }
+    for (rvvm_user_thread_t* task = user_tasks; task; task = task->next) {
+        if (task->tid == (uint32_t)pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void rvvm_user_task_remove(rvvm_user_thread_t* thread)
+{
+    spin_lock(&user_task_lock);
+    rvvm_user_thread_t** task = &user_tasks;
+    while (*task && *task != thread) {
+        task = &(*task)->next;
+    }
+    if (*task) {
+        *task = thread->next;
+    }
+    spin_unlock(&user_task_lock);
+}
+
+static void rvvm_user_task_after_fork(rvvm_hart_t* cpu)
+{
+    rvvm_lock_init(&user_task_lock);
+    rvvm_user_thread_t* current = user_tasks;
+    while (current && current->cpu != cpu) {
+        current = current->next;
+    }
+    user_tasks = current;
+    if (current) {
+        current->next = NULL;
+        atomic_store_uint32(&current->tid, rvvm_sys_gettid());
+    }
+}
+
+static rvvm_addr_t rvvm_sys_sched_getscheduler(rvvm_addr_t guest_pid)
+{
+    int32_t pid = (int32_t)guest_pid;
+    if (pid < 0) {
+        return (rvvm_addr_t)(int64_t)-EINVAL;
+    }
+    spin_lock(&user_task_lock);
+    bool owned = rvvm_user_task_owned(pid);
+    spin_unlock(&user_task_lock);
+    return owned ? 0 : (rvvm_addr_t)(int64_t)-ESRCH;
+}
+
+static rvvm_addr_t rvvm_sys_sched_getparam(rvvm_addr_t guest_pid, struct uapi_sched_param* param)
+{
+    int32_t pid = (int32_t)guest_pid;
+    if (pid < 0) {
+        return (rvvm_addr_t)(int64_t)-EINVAL;
+    }
+    spin_lock(&user_task_lock);
+    bool owned = rvvm_user_task_owned(pid);
+    spin_unlock(&user_task_lock);
+    if (owned && param) {
+        memset(param, 0, sizeof(*param));
+    }
+    return owned ? 0 : (rvvm_addr_t)(int64_t)-ESRCH;
+}
 
 // Main execution loop (Run the user CPU, handle syscalls)
 static void* rvvm_user_thread_wrap(void* arg);
@@ -594,7 +666,15 @@ static int rvvm_sys_clone(rvvm_hart_t* cpu, uint32_t flags, size_t stack, uint32
         return tid;
     } else {
         // Emulate vfork via fork too
-        return fork();
+        // Keep the copied task list stable until the child prunes its siblings.
+        spin_lock(&user_task_lock);
+        pid_t pid = fork();
+        if (!pid) {
+            rvvm_user_task_after_fork(cpu);
+        } else {
+            spin_unlock(&user_task_lock);
+        }
+        return pid;
     }
 }
 
@@ -855,7 +935,11 @@ static void* rvvm_user_thread_wrap(void* arg)
     char path_buf1[UAPI_PATH_MAX] = {0};
 
     // Set up thread tid, child_tid
+    spin_lock(&user_task_lock);
+    thread->next = user_tasks;
+    user_tasks = thread;
     atomic_store_uint32(&thread->tid, rvvm_sys_gettid());
+    spin_unlock(&user_task_lock);
     if (thread->child_settid) {
         atomic_store_uint32(thread->child_settid, atomic_load_uint32(&thread->tid));
     }
@@ -1158,15 +1242,13 @@ static void* rvvm_user_thread_wrap(void* arg)
 #endif
                 case 118: // sched_setparam - ignore
                 case 119: // sched_setscheduler - ignore
-                case 120: // sched_getscheduler - ignore
                     a0 = 0;
                     break;
-                case 121: // sched_getparam - stub
-                    if (a1) {
-                        struct uapi_sched_param* param = to_ptr(a1);
-                        memset(param, 0, sizeof(*param));
-                    }
-                    a0 = 0;
+                case 120: // sched_getscheduler
+                    a0 = rvvm_sys_sched_getscheduler(a0);
+                    break;
+                case 121: // sched_getparam
+                    a0 = rvvm_sys_sched_getparam(a0, to_ptr(a1));
                     break;
                 case 122: // sched_setaffinity - ignore
                     a0 = 0;
@@ -1653,6 +1735,7 @@ static void* rvvm_user_thread_wrap(void* arg)
         rvvm_sys_futex(thread->child_cleartid, UAPI_FUTEX_WAKE, 1, 0, NULL, 0);
     }
 
+    rvvm_user_task_remove(thread);
     rvvm_free_user_thread(cpu);
     free(thread);
     return NULL;
