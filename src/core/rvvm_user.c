@@ -545,59 +545,24 @@ static rvvm_addr_t rvvm_sys_sched_getscheduler(rvvm_addr_t guest_pid)
         return (rvvm_addr_t)(int64_t)-EINVAL;
     }
     spin_lock(&user_task_lock);
-    rvvm_addr_t ret = rvvm_user_task_owned(pid) ? errno_ret(sched_getscheduler(pid)) : (rvvm_addr_t)(int64_t)-ESRCH;
+    bool owned = rvvm_user_task_owned(pid);
     spin_unlock(&user_task_lock);
-    return ret;
+    return owned ? 0 : (rvvm_addr_t)(int64_t)-ESRCH;
 }
 
 static rvvm_addr_t rvvm_sys_sched_getparam(rvvm_addr_t guest_pid, struct uapi_sched_param* param)
 {
     int32_t pid = (int32_t)guest_pid;
-    if (pid < 0 || !param) {
+    if (pid < 0) {
         return (rvvm_addr_t)(int64_t)-EINVAL;
     }
-    struct sched_param host_param = {0};
     spin_lock(&user_task_lock);
     bool owned = rvvm_user_task_owned(pid);
-    rvvm_addr_t result = owned ? errno_ret(sched_getparam(pid, &host_param)) : (rvvm_addr_t)(int64_t)-ESRCH;
-    if (!result) {
-        param->sched_priority = host_param.sched_priority;
-    }
     spin_unlock(&user_task_lock);
-    return result;
-}
-
-static rvvm_addr_t rvvm_sys_sched_setparam(rvvm_addr_t guest_pid, const struct uapi_sched_param* param)
-{
-    int32_t pid = (int32_t)guest_pid;
-    if (pid < 0 || !param) {
-        return (rvvm_addr_t)(int64_t)-EINVAL;
+    if (owned && param) {
+        memset(param, 0, sizeof(*param));
     }
-    struct sched_param host_param = {.sched_priority = param->sched_priority};
-    spin_lock(&user_task_lock);
-    rvvm_addr_t ret = (rvvm_addr_t)(int64_t)-ESRCH;
-    if (rvvm_user_task_owned(pid)) {
-        ret = errno_ret(sched_setparam(pid, &host_param));
-    }
-    spin_unlock(&user_task_lock);
-    return ret;
-}
-
-static rvvm_addr_t rvvm_sys_sched_setscheduler(rvvm_addr_t guest_pid, int policy,
-                                               const struct uapi_sched_param* param)
-{
-    int32_t pid = (int32_t)guest_pid;
-    if (policy < 0 || pid < 0 || !param) {
-        return (rvvm_addr_t)(int64_t)-EINVAL;
-    }
-    struct sched_param host_param = {.sched_priority = param->sched_priority};
-    spin_lock(&user_task_lock);
-    rvvm_addr_t ret = (rvvm_addr_t)(int64_t)-ESRCH;
-    if (rvvm_user_task_owned(pid)) {
-        ret = errno_ret(sched_setscheduler(pid, policy, &host_param));
-    }
-    spin_unlock(&user_task_lock);
-    return ret;
+    return owned ? 0 : (rvvm_addr_t)(int64_t)-ESRCH;
 }
 
 // Main execution loop (Run the user CPU, handle syscalls)
@@ -701,9 +666,13 @@ static int rvvm_sys_clone(rvvm_hart_t* cpu, uint32_t flags, size_t stack, uint32
         return tid;
     } else {
         // Emulate vfork via fork too
+        // Keep the copied task list stable until the child prunes its siblings.
+        spin_lock(&user_task_lock);
         pid_t pid = fork();
         if (!pid) {
             rvvm_user_task_after_fork(cpu);
+        } else {
+            spin_unlock(&user_task_lock);
         }
         return pid;
     }
@@ -1271,11 +1240,9 @@ static void* rvvm_user_thread_wrap(void* arg)
                     a0 = errno_ret(clock_nanosleep(a0, a1, to_ptr(a2), to_ptr(a3)));
                     break;
 #endif
-                case 118: // sched_setparam
-                    a0 = rvvm_sys_sched_setparam(a0, to_ptr(a1));
-                    break;
-                case 119: // sched_setscheduler
-                    a0 = rvvm_sys_sched_setscheduler(a0, a1, to_ptr(a2));
+                case 118: // sched_setparam - ignore
+                case 119: // sched_setscheduler - ignore
+                    a0 = 0;
                     break;
                 case 120: // sched_getscheduler
                     a0 = rvvm_sys_sched_getscheduler(a0);
