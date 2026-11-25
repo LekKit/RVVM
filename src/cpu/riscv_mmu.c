@@ -258,6 +258,10 @@ static inline bool riscv_mmu_translate_rv64(rvvm_hart_t* vm, rvvm_addr_t vaddr, 
         while (true) {
             uint64_t pte = read_uint64_le(pte_ptr);
             if (likely(pte & RISCV_PTE_VALID)) {
+                if (unlikely(pte & (1ULL << 54))) {
+                    // PTE bit 54 is reserved in the exposed RV64 modes.
+                    return false;
+                }
                 if (pte & RISCV_PTE_LEAF) {
                     // PGT entry is a leaf, check permissions
                     // Check that PTE U-bit matches U-mode, otherwise do extended check
