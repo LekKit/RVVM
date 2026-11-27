@@ -54,6 +54,7 @@ ifneq (,$(filter dos,$(OS)))
 USE_JIT        ?= 0
 USE_NET        ?= 0
 USE_SOUND      ?= 0
+USE_GPU        ?= 0
 USE_ATOMIC_EMU ?= 1
 USE_THREAD_EMU ?= 1
 endif
@@ -156,6 +157,7 @@ override DEPS_USE_WIN32_GUI := USE_GUI
 override DEPS_USE_HAIKU_GUI := USE_GUI
 override DEPS_USE_COCOA_GUI := USE_GUI
 override DEPS_USE_ALSA      := USE_SOUND
+override DEPS_USE_VULKAN    := USE_GPU
 override DEPS_USE_GDBSTUB   := USE_NET
 override DEPS_USE_JNI       := USE_LIB USE_NET
 override DEPS_USE_LIBRETRO  := USE_LIB USE_NET
