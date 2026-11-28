@@ -253,9 +253,9 @@ static bool rvvm_cli_configure(rvvm_machine_t* machine, const char* bios, tap_de
             } else if (rvvm_strcmp(arg_name, "res")) {
                 size_t    len = 0;
                 rvvm_fb_t fb  = {
-                    .width  = str_to_uint_base(arg_val, &len, 10),
-                    .height = str_to_uint_base(arg_val + len + 1, NULL, 10),
-                    .format = RVVM_RGB_XRGB8888,
+                     .width  = str_to_uint_base(arg_val, &len, 10),
+                     .height = str_to_uint_base(arg_val + len + 1, NULL, 10),
+                     .format = RVVM_RGB_XRGB8888,
                 };
                 if (arg_val[len] == 'x' && rvvm_fb_size(&fb)) {
                     rvvm_simplefb_init_auto(machine, gui_window_get_fbdev(gui_rvvm_init(0, &fb, machine)));
@@ -345,6 +345,7 @@ static int rvvm_cli_main(int argc, char** argv)
 
     if (!rvvm_has_arg("nogui") && !rvvm_has_arg("res")) {
         if (rvvm_has_arg("xe2_test")) {
+#ifdef USE_GPU
             // The Battlemage GPU drives the display: open a window sized to the
             // panel's native mode and hand its fbdev to the device to scan out.
             rvvm_fb_t hint = {
@@ -355,6 +356,7 @@ static int rvvm_cli_main(int argc, char** argv)
             gui_window_t* win       = gui_rvvm_init(rvvm_fb_size(&hint), &hint, machine);
             rvvm_fbdev_t* gpu_fbdev = gui_window_get_fbdev(win);
             rvvm_gpu_xe2_init_auto(machine, gpu_fbdev);
+#endif /* USE_GPU */
         } else if (rvvm_has_arg("bochs_display")) {
             gui_window_t* win = gui_rvvm_init(0x1000000UL, NULL, machine);
             rvvm_bochs_display_init_auto(machine, gui_window_get_fbdev(win));
